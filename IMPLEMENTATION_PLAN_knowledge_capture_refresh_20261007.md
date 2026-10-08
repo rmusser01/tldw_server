@@ -12,7 +12,7 @@
 
 **Baseline:** `origin/dev` at `2c5f19d0328360d45bce99b8bae75ce252cc312f`, isolated branch `codex/knowledge-capture-refresh-20261007`.
 
-**ADR check:** ADR required: yes; `Docs/ADR/066-explicit-web-capture-and-refresh-snapshots.md` governs the approved durable fetch/accept/security/version behavior and remains Proposed until implementation evidence is recorded. Governing ADR007/018/026/031/034/036/042/065 remain unchanged.
+**ADR check:** ADR required: yes; `Docs/ADR/066-explicit-web-capture-and-refresh-snapshots.md` governs the approved durable fetch/accept/security/version behavior and is Accepted after approved implementation and local verification. Governing ADR007/018/026/031/034/036/042/065 remain unchanged.
 
 ## Global Constraints
 
@@ -142,7 +142,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
 **Success Criteria:** Explicit UI actions, honest extraction/version labels, no accidental save, retained original evidence and safe retirement/recovery.
 **Tests:** SourcesPane and capture workflow, prefill/provenance/import/export/restore tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Integrate capture and refresh in Research
 
@@ -175,7 +175,7 @@ assertCurrent()
 
 - [x] Task4 fix2: repair live single-user public-owner/request-scope identity mismatch without changing recovery namespace or verified authority; cover real identity builders and owner/credential retirement, then independent scoped review and real CDP capture verification. Task6 found same-owner Capture account changed before HTTP at6210798ef5.
 
-- [x] Task4 fix3: publish proven captured-head refusal before synchronous real-store deselection, retain the refusal through generic readiness and verified matching-pin canonical rehydrate from available display state; transient errors remain retryable and tombstoned state is not revived. Final88 affected tests/both types/scoped checks and independent three-finding re-review pass at9234163cf3; Task6 affected CDP proof remains.
+- [x] Task4 fix3: publish proven captured-head refusal before synchronous real-store deselection, retain the refusal through generic readiness and verified matching-pin canonical rehydrate from available display state; transient errors remain retryable and tombstoned state is not revived. Final88 affected tests/both types/scoped checks and independent three-finding re-review pass at9234163cf3; Task6 affected CDP proof is recorded in the canonical closeout, with matching migrated-browser restore explicitly unverified.
 
 ### Task 5: Clarify Notes editing-state wording and qualify panel analysis
 
@@ -211,12 +211,12 @@ Task5 verification: qualified native-resolution407/407; default383passed24failed
 
 **Interfaces:** Existing selected-source persistence/quota feedback, exact selected provider identity, workspace chat ownership/hydration and accessible saved-view keyboard/dialog lifecycle. No new feature, store, dependency, persistence authority or durable policy.
 
-- [ ] Diagnose the ten exact failures reproduced on canonical dev2c5f19d (233 cases,223 passed10 failed) and feature621. Distinguish obsolete fixtures/expectations from actual defects through current contracts and real behavior; retain exact baseline receipts.
-- [ ] Use behavioral RED/GREEN and the existing minimal primitives; preserve meaningful keyboard, focus, busy state, server confirmation, owner/retirement and stale-submit assertions. Correct obsolete structural expectations only with explicit contract evidence; never skip, weaken security checks, blanket mock UI or enlarge timeouts without a diagnosed cause.
-- [ ] Run focused and four owning suites, current client typechecks, scoped lint/format/hooks and applicable security/browser checks. Record qualified/default environment outcomes; independent task review before Task6 final reconciliation. No inaccurate TASK12116 assignment or broad-green claim.
-- [ ] Record final evidence and status via backlog-py; Task6 includes this scoped unit in final report and current reviewed validation.
+- [x] Diagnose the ten exact failures reproduced on canonical dev2c5f19d (233 cases,223 passed10 failed) and feature621. Distinguish obsolete fixtures/expectations from actual defects through current contracts and real behavior; retain exact baseline receipts.
+- [x] Use behavioral RED/GREEN and the existing minimal primitives; preserve meaningful keyboard, focus, busy state, server confirmation, owner/retirement and stale-submit assertions. Correct obsolete structural expectations only with explicit contract evidence; never skip, weaken security checks, blanket mock UI or enlarge timeouts without a diagnosed cause.
+- [x] Run focused and four owning suites, current client typechecks, scoped lint/format/hooks and applicable security/browser checks. Record qualified/default environment outcomes; independent task review before Task6 final reconciliation. No inaccurate TASK12116 assignment or broad-green claim.
+- [x] Record final evidence and status via backlog-py; Task6 includes this scoped unit in final report and current reviewed validation.
 
-Task7 fix2: shared saved-view dialog focus now restores from existing native close-completion callback with pending token/generation retirement. Final51 owning/default6 focused/both types/scopedlint/hooks pass; independent scoped review approved3f610227de. Original successful acknowledgments and outside/new-dialog/removed-invoker guards retained. Actual rebuilt both-client normal CSS acceptance and tracking remain Task6; Stage4 stays In Progress until that proof.
+Task7 fix2: shared saved-view dialog focus now restores from existing native close-completion callback with pending token/generation retirement. Final51 owning/default6 focused/both types/scopedlint/hooks pass; independent scoped review approved3f610227de. Original successful acknowledgments and outside/new-dialog/removed-invoker guards retained. Historical checkpoint: rebuilt both-client normal CSS acceptance was pending. Current Resume7 acceptance now passes; see the canonical closeout.
 
 ## Stage 5: Integrated verification and accurate tracking
 **Goal:** Reviewable feature evidence and honest remaining followups.
@@ -233,10 +233,13 @@ Task7 fix2: shared saved-view dialog focus now restores from existing native clo
 
 **Interfaces:** All Tasks1–4 shared API and UI contracts; no new product behavior belongs in this verification task. Route defects to the owning implementer with scoped tests/review.
 
-- [ ] Run once against final reviewed tree: owning pytest/Vitest suites, both client types/builds, checked OpenAPI drift, lint/format, Bandit touched scope and manual pre-commit hooks. Record commands/counts/skips and actual dependency setup qualifications.
-- [ ] Launch isolated backend/WebUI/test Chromium with dedicated ports/profile and synthetic owner/data only. Drive via `chromium.connectOverCDP`; capture actual preview→cancel→save→readback→pinned preview→scoped Ask; refresh changed and unchanged content; retain original excerpt/old capture; retry partial promotion/retirement, reopen/export. Verify shared extension UI in built Chrome extension too. Sanitize receipts; never commit keys/raw profiles.
-- [ ] Reconcile prior PR3211 hosted evidence: seven required checks, optional Watchlists success and PG tenancy/schema evidence; classify queued/infra-failed broader CI separately. Native menu/spoken/Safari/iOS/real participant checks remain unverified until actual evidence exists.
-- [ ] Update Backlog completion only for verified criteria; public capture parent closes only when acceptance criteria satisfied. ADR066 can become Accepted after approved implemented policy verified; update canonical and Published entries together. Final summary includes current-version RAG boundary.
-- [ ] Self-review, scoped hooks and commit docs/tracking. Package branch for independent whole-branch review, fix findings via owning agent and re-review. Create PR against dev within existing authorization, attach it, present final reviewed implementation for a new requester-written Change summary before merge.
+- [x] Run once against final reviewed tree: owning pytest/Vitest suites, both client types/builds, checked OpenAPI drift, lint/format, Bandit touched scope and manual pre-commit hooks. Record commands/counts/skips and actual dependency setup qualifications.
+- [x] Launch isolated backend/WebUI/test Chromium with dedicated ports/profile and synthetic owner/data only. Drive via `chromium.connectOverCDP`; capture actual preview→cancel→save→readback→pinned preview→scoped Ask; refresh changed and unchanged content; retain original excerpt/old capture; retry partial promotion/retirement, reopen/export. Verify shared extension UI in built Chrome extension too. Sanitize receipts; never commit keys/raw profiles.
+- [x] Reconcile prior PR3211 hosted evidence: seven required checks, optional Watchlists success and PG tenancy/schema evidence; classify queued/infra-failed broader CI separately. Native menu/spoken/Safari/iOS/real participant checks remain unverified until actual evidence exists.
+- [x] Update Backlog completion only for verified criteria; public capture parent closes only when acceptance criteria satisfied. ADR066 can become Accepted after approved implemented policy verified; update canonical and Published entries together. Final summary includes current-version RAG boundary.
+- [x] Self-review, scoped hooks and normal docs/tracking commit; exact exits and changes recorded in Task6 report.
+- [ ] Controller: independent Task6 and whole-branch review, owning repairs/re-review, PR against dev and attachment, new requester-written Change summary, seven updated-head required CI checks, merge and owned cleanup.
 
-Task7 fix3 f12bb3e743: verified account-scoped saved-view reads/writes reuse the existing snapshot lease, account watcher and generation/retry lifecycle; typed scope loss retires, ordinary transient resolution can explicitly retry, rejected-request teardown cannot focus after unmount. Independent scoped review approves these three findings with383owning/default4/finalworker-root38/both types0 and inherited style qualifications. Rapid real WebUI pointer Cancel remains open despite native three-path characterization; Stage4/AC3/4 cannot close until actual rebuilt CDP diagnoses and verifies it plus both-client native authority retirement.
+Task7 fix3 f12bb3e743: verified account-scoped saved-view reads/writes reuse the existing snapshot lease, account watcher and generation/retry lifecycle; typed scope loss retires, ordinary transient resolution can explicitly retry, rejected-request teardown cannot focus after unmount. Independent scoped review approves these three findings with383owning/default4/finalworker-root38/both types0 and inherited style qualifications. Historical checkpoint: rapid WebUI pointer Cancel was open at fix3. Independently reviewed fix4 stabilizes validation geometry; current Resume7 built WebUI and extension pass trusted pointer/native CSS closure at desktop, narrow and measured wrapped feedback layouts, rapid current Cancel/Close/Escape, account retirement and eight real acknowledgments. TASK13531 can close; Stage5 controller review/publication gates remain.
+
+Task6 local verification at63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec is DONE_WITH_CONCERNS; [canonical evidence](Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md) distinguishes historical failed runs, exact unchanged scopes, real persistence/FTS/citation from the deterministic extraction-response fixture and exhausted three429 public probes. Stage4 complete; Stage5 remains In Progress until controller gates.

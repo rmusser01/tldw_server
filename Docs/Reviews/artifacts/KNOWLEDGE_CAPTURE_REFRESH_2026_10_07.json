@@ -1,0 +1,1808 @@
+{
+  "recorded_at": "2026-10-08T07:07:54.389Z",
+  "task6_base": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+  "canonical_dev_baseline": "2c5f19d0328360d45bce99b8bae75ce252cc312f",
+  "status": "DONE_WITH_CONCERNS",
+  "qualification": "Local implementation acceptance; independent Task6/whole-branch review, publication, human Change summary and updated-head CI/merge remain controller gates.",
+  "receipts": [
+    {
+      "name": "backend",
+      "head": "6210798ef524d4dfaa8e8229558358352a73f5eb",
+      "command": [
+        "python",
+        "-c",
+        "import onnxruntime,pytest,sys; onnxruntime.disable_telemetry_events(); sys.exit(pytest.main(sys.argv[1:]))",
+        "tldw_Server_API/tests/http_client/test_http_client_simple_response_limits.py",
+        "tldw_Server_API/tests/http_client/test_http_client_pinning.py",
+        "tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py",
+        "tldw_Server_API/tests/http_client/test_http_client_downloads.py",
+        "tldw_Server_API/tests/http_client/test_redirect_header_hardening.py",
+        "tldw_Server_API/tests/Security/test_egress.py",
+        "tldw_Server_API/tests/Security/test_egress_global_env.py",
+        "tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py",
+        "tldw_Server_API/tests/Web_Scraping/test_http_client_fetch.py",
+        "tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase4_article_orchestration.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py",
+        "tldw_Server_API/tests/Web_Scraping/test_outbound_policy.py",
+        "tldw_Server_API/tests/Web_Scraping/test_robots_enforcement.py",
+        "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase3_article_preflight_facade.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_characterization.py",
+        "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py",
+        "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_endpoint_error_mapping.py",
+        "tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_api.py",
+        "tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_sync_contract.py",
+        "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py",
+        "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py",
+        "tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py",
+        "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
+        "tldw_Server_API/tests/Workspaces/test_workspace_source_preview_context_api.py",
+        "tldw_Server_API/tests/Media/test_media_versions_read_error_mapping.py",
+        "tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py::TestMediaVersionEndpoints",
+        "tldw_Server_API/tests/Sharing/test_clone_service.py",
+        "tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py",
+        "--override-ini",
+        "addopts=",
+        "-q",
+        "-rs"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "seconds": 145.36,
+      "log_bytes": 34894,
+      "log_sha256": "c6b581bfc2f47e5691ed2c8ad930e3bf62a3b361a74cb9524e74848f7ab2ef0c",
+      "receipt_sha256": "9fbbccef836e92ab0e80261621ee8216c56cfc4163b4ecdc03021100ed3f0140",
+      "summaries": [
+        "    warnings.warn(",
+        "    warnings.warn(",
+        "    warnings.warn(",
+        "    warnings.warn(",
+        "    warnings.warn(",
+        "    warnings.warn(",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "860 passed, 1 skipped, 40 warnings in 140.76s (0:02:20)"
+      ]
+    },
+    {
+      "name": "ui",
+      "head": "6210798ef524d4dfaa8e8229558358352a73f5eb",
+      "command": [
+        "apps/packages/ui/node_modules/.bin/vitest",
+        "run",
+        "--root",
+        "apps/packages/ui",
+        "--config",
+        "/private/tmp/capture-refresh-task5-dedupe-vitest.mts",
+        "src/utils/__tests__/research-web-capture.test.ts",
+        "src/services/tldw/__tests__/TldwMedia.public-article.test.ts",
+        "src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+        "src/services/__tests__/web-clipper-client.test.ts",
+        "src/services/__tests__/tldw-api-client.workspace-api.test.ts",
+        "src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts",
+        "src/hooks/chat/__tests__/useChatActions.history-selection.test.tsx",
+        "src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+        "src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+        "src/components/Notes/__tests__/useNotesEditorState.saved-monitoring.test.tsx",
+        "src/components/Notes/__tests__/NotesManagerPage.stage10.ai-content-assist.test.tsx",
+        "src/components/Notes/__tests__/NotesManagerPage.stage12.recent-notes.test.tsx",
+        "src/components/Notes/__tests__/KnowledgeNoteHistory.test.tsx",
+        "src/utils/__tests__/knowledge-note-provenance.test.ts",
+        "src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+        "src/services/__tests__/background-proxy.test.ts",
+        "src/services/web-clipper/__tests__/analyze-handoff.test.ts",
+        "src/components/Sidepanel/Clipper/__tests__/WebClipperPanel.save-flow.test.tsx",
+        "src/routes/__tests__/sidepanel-chat.ownership.test.tsx",
+        "src/components/Option/ResearchWorkspace/__tests__",
+        "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+        "src/utils/__tests__/research-workspace-prefill.test.ts",
+        "src/utils/__tests__/research-workspace-import.test.tsx",
+        "src/store/__tests__/workspace-bundle.test.ts",
+        "src/store/__tests__/workspace.test.ts",
+        "src/store/__tests__/workspace-scope.test.ts",
+        "src/store/__tests__/workspace.split-storage.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism"
+      ],
+      "cwd": ".",
+      "exit_code": 1,
+      "seconds": 347.3,
+      "log_bytes": 241710,
+      "log_sha256": "5ab9347339a314fe9d5e802ce4cf00929a10a6574f73c817c6fc1194aece2b1f",
+      "receipt_sha256": "806d9c92ed05724be982ccef7446e850da1291c21efc0c13c06ada8f09d656c4",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯",
+        "        data-menu-id=\"rc-menu-uuid-preset:failedIngest\"",
+        " Test Files  6 failed | 87 passed (93)",
+        "      Tests  12 failed | 1818 passed (1830)"
+      ]
+    },
+    {
+      "name": "owning-cwd-action-check",
+      "head": "656064a99fa98c6f7b69ef1d88c66ce170d0cb62",
+      "command": [
+        "apps/packages/ui/node_modules/.bin/vitest",
+        "run",
+        "--config",
+        "/private/tmp/capture-refresh-task5-dedupe-vitest.mts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "src/components/Option/ResearchWorkspace/__tests__/SharedWorkspaceSafeMarkdown.test.tsx",
+        "src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx",
+        "src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts"
+      ],
+      "cwd": "apps/packages/ui",
+      "exit_code": 0,
+      "seconds": 3.91,
+      "log_bytes": 1115,
+      "log_sha256": "d6105f3e54afa0773771492665be2009944bb70b4025f517234018552a77265c",
+      "receipt_sha256": "1fab4dd75d9bb8be5117ddd0e1180756ee6a189ac70cd61d0673721d08c912e5",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        " Test Files  3 passed (3)",
+        "      Tests  46 passed (46)"
+      ]
+    },
+    {
+      "name": "ui-final",
+      "head": "be4b0d45b7b0eca6dcacb10f62dd3aee537fa428",
+      "command": [
+        "apps/packages/ui/node_modules/.bin/vitest",
+        "run",
+        "--config",
+        "/private/tmp/capture-refresh-task5-dedupe-vitest.mts",
+        "src/utils/__tests__/research-web-capture.test.ts",
+        "src/services/tldw/__tests__/TldwMedia.public-article.test.ts",
+        "src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+        "src/services/__tests__/web-clipper-client.test.ts",
+        "src/services/__tests__/tldw-api-client.workspace-api.test.ts",
+        "src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts",
+        "src/hooks/chat/__tests__/useChatActions.history-selection.test.tsx",
+        "src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+        "src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+        "src/components/Notes/__tests__/useNotesEditorState.saved-monitoring.test.tsx",
+        "src/components/Notes/__tests__/NotesManagerPage.stage10.ai-content-assist.test.tsx",
+        "src/components/Notes/__tests__/NotesManagerPage.stage12.recent-notes.test.tsx",
+        "src/components/Notes/__tests__/KnowledgeNoteHistory.test.tsx",
+        "src/utils/__tests__/knowledge-note-provenance.test.ts",
+        "src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+        "src/services/__tests__/background-proxy.test.ts",
+        "src/services/web-clipper/__tests__/analyze-handoff.test.ts",
+        "src/components/Sidepanel/Clipper/__tests__/WebClipperPanel.save-flow.test.tsx",
+        "src/routes/__tests__/sidepanel-chat.ownership.test.tsx",
+        "src/components/Option/ResearchWorkspace/__tests__",
+        "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+        "src/utils/__tests__/research-workspace-prefill.test.ts",
+        "src/utils/__tests__/research-workspace-import.test.tsx",
+        "src/store/__tests__/workspace-bundle.test.ts",
+        "src/store/__tests__/workspace.test.ts",
+        "src/store/__tests__/workspace-scope.test.ts",
+        "src/store/__tests__/workspace.split-storage.test.ts",
+        "src/utils/__tests__/research-web-capture-owner.test.tsx",
+        "src/services/__tests__/background-proxy.web-clipper-scope.test.ts",
+        "src/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+        "src/entries/__tests__/background.effective-auth.test.ts",
+        "src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx",
+        "src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+        "--maxWorkers=1",
+        "--no-file-parallelism"
+      ],
+      "cwd": "apps/packages/ui",
+      "exit_code": 1,
+      "seconds": 334.98,
+      "log_bytes": 129727,
+      "log_sha256": "1e30c474b6761bae63f66ef305f42217b9909598d66f2ac5e6726f97886c90e7",
+      "receipt_sha256": "a41c069994b14887591ce32bfe1789447527f8f0471ba8ee723db73d34445b36",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+        " Test Files  1 failed | 98 passed (99)",
+        "      Tests  1 failed | 2155 passed (2156)"
+      ]
+    },
+    {
+      "name": "literature-final-named-recheck",
+      "head": "be4b0d45b7b0eca6dcacb10f62dd3aee537fa428",
+      "command": [
+        "apps/packages/ui/node_modules/.bin/vitest",
+        "run",
+        "--config",
+        "/private/tmp/capture-refresh-task5-dedupe-vitest.mts",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx",
+        "-t",
+        "exports structured literature tables as CSV and JSON without advertising XLSX"
+      ],
+      "cwd": "apps/packages/ui",
+      "exit_code": 0,
+      "seconds": 4.11,
+      "log_bytes": 710,
+      "log_sha256": "9ff6a2b6739b3bded04252fbe15a7341b3ecbe2dca65678c04cc487398e7c9d4",
+      "receipt_sha256": "1a00f27ed052b7a53e891da94e7f3c092ed2165db8911544d244d22f34cb95fc",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        " ✓ src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx (33 tests | 32 skipped) 2229ms",
+        " Test Files  1 passed (1)",
+        "      Tests  1 passed | 32 skipped (33)"
+      ]
+    },
+    {
+      "name": "resume7-web-webpack",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--bundler=webpack"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 0,
+      "seconds": 31.09,
+      "log_bytes": 5143,
+      "log_sha256": "e6de01db4dcf69c4984cada7f83681e02e949296d696c8a50d7c48c4013d97dc",
+      "receipt_sha256": "9ba7e689f28895759580f9ec75f95517cdd7548f444c1b3f160604c76004c03d",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)"
+      ]
+    },
+    {
+      "name": "resume7-web-tokens",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": [
+        "node",
+        "scripts/verify-shared-token-sync.mjs",
+        "--dir",
+        ".next"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 0,
+      "seconds": 0.07,
+      "log_bytes": 77,
+      "log_sha256": "68098f7581f425393c92a558b68cea09a15f981ea03e0a2b56af6933178cc570",
+      "receipt_sha256": "2f42ab43ed7e28433648cfba2b8f429a7a84474eb7cb4a98a5cc802c5ddd74c5",
+      "summaries": []
+    },
+    {
+      "name": "resume7-web-budget",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": ["node", "scripts/check-bundle-budget.mjs", "--dir", ".next"],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 0,
+      "seconds": 0.13,
+      "log_bytes": 165,
+      "log_sha256": "515d2e9bf7af7dbe76a2b0ac967e1d9a98ac9be37fc7ece9e4676d3f73fddc81",
+      "receipt_sha256": "883fe5bd23ef13374c7aafae411ac4bdfb0754605668b8b4ec3c97e9803d74bd",
+      "summaries": []
+    },
+    {
+      "name": "resume7-extension",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": ["node", "scripts/build-with-profile.mjs", "--browser=chrome"],
+      "cwd": "apps/extension",
+      "exit_code": 0,
+      "seconds": 35.36,
+      "log_bytes": 225409,
+      "log_sha256": "7dff7b39c576115b2988ebacd4d427b9f598c5fb77353c67ebe18d177a03a298",
+      "receipt_sha256": "fb5e953b4651e669000c4176d22331d86083b09b4c67d00607be97145157fddb",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "Σ Total size: 49.42 MB                                                             "
+      ]
+    },
+    {
+      "name": "resume7-web-advanced",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--bundler=webpack"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 0,
+      "seconds": 61.68,
+      "log_bytes": 5081,
+      "log_sha256": "66aebe2b09d276a39f95e2f55355cd8ea4bbdfb1befc3909d88d8fd412a094b8",
+      "receipt_sha256": "3c03719caecb74d61852cb32f3ee113b9903d335b2dcba12fe6e03aa176c03d1",
+      "summaries": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "(Use `node --trace-warnings ...` to show where the warning was created)"
+      ]
+    },
+    {
+      "name": "resume7-bandit",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": [
+        "python",
+        "-m",
+        "bandit",
+        "tldw_Server_API/app/api/v1/endpoints/media/ingest_web_content.py",
+        "tldw_Server_API/app/api/v1/endpoints/workspaces.py",
+        "tldw_Server_API/app/api/v1/schemas/media_request_models.py",
+        "tldw_Server_API/app/api/v1/schemas/workspace_schemas.py",
+        "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+        "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py",
+        "tldw_Server_API/app/core/Security/egress.py",
+        "tldw_Server_API/app/core/WebClipper/schemas.py",
+        "tldw_Server_API/app/core/WebClipper/service.py",
+        "tldw_Server_API/app/core/Web_Scraping/browser_transport.py",
+        "tldw_Server_API/app/core/Web_Scraping/filters.py",
+        "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+        "tldw_Server_API/app/core/Web_Scraping/orchestration/article_models.py",
+        "tldw_Server_API/app/core/Web_Scraping/outbound_policy.py",
+        "tldw_Server_API/app/core/Web_Scraping/policy/adapters.py",
+        "tldw_Server_API/app/core/Web_Scraping/preflight/adapters/http.py",
+        "tldw_Server_API/app/core/Web_Scraping/runtime/fetch.py",
+        "tldw_Server_API/app/core/Workspaces/source_preview.py",
+        "tldw_Server_API/app/core/http_client.py",
+        "tldw_Server_API/app/services/web_scraping_service.py",
+        "-f",
+        "json",
+        "-o",
+        "/private/tmp/knowledge-capture-task6-resume7-bandit.json"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "seconds": 2.32,
+      "log_bytes": 118857,
+      "log_sha256": "13e2ee7b916cfecffc1adad61b28ce216e9885a41eb7bcfadac1178a4c22eb6a",
+      "receipt_sha256": "990c3d013048e02517132f9648c563dcb930d9c912dfb5896db96f18dd527f5c",
+      "summaries": [
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:374",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:399",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:406",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:407",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:491",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:491",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:544",
+        "[tester]\tWARNING\tnosec encountered (B608), but no failed test on file ./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py:544"
+      ]
+    },
+    {
+      "name": "resume7-openapi",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": [
+        "python",
+        "Helper_Scripts/export_openapi_schema.py",
+        "--check",
+        "apps/tldw-frontend/lib/api/openapi.fingerprint.json"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "seconds": 15.06,
+      "log_bytes": 53239,
+      "log_sha256": "9adcc2caa7b66ec2ebeab2ae46bc8fdf03f665882907bcdc89b1e8eec16aef30",
+      "receipt_sha256": "16317c4d7bb3f5092f1bd413580ee24007321738f27dafcd8c9e98f9dfd56153",
+      "summaries": []
+    },
+    {
+      "name": "web-build",
+      "head": "6210798ef524d4dfaa8e8229558358352a73f5eb",
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--bundler=turbopack"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 1,
+      "seconds": 0.09,
+      "log_bytes": 111,
+      "log_sha256": "37de6f0e3dabe65acca4e3b8c5ae915f432efb72cdb83dcce6d58fbb211229e5",
+      "receipt_sha256": "0f7cdaf45031012b9ef9e7fea91b5c6a40012ae5fe2587490695956e0986ab1c",
+      "qualification": "Historical failed attempts/reassessment preserved; not the current Resume7 artifact."
+    },
+    {
+      "name": "web-build-final",
+      "head": "6210798ef524d4dfaa8e8229558358352a73f5eb",
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--bundler=turbopack"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 1,
+      "seconds": 1.25,
+      "log_bytes": 944,
+      "log_sha256": "a4bf2ac4f26150680d642d0a7c735919c278d113b90f83213958162c75ac4715",
+      "receipt_sha256": "0954445a52fca72f1e723ddd6a634fec51bb745d8156d216f20d974d19bf9358",
+      "qualification": "Historical failed attempts/reassessment preserved; not the current Resume7 artifact."
+    },
+    {
+      "name": "web-webpack-final",
+      "head": "6210798ef524d4dfaa8e8229558358352a73f5eb",
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--bundler=webpack"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 1,
+      "seconds": 61.93,
+      "log_bytes": 7435,
+      "log_sha256": "7f2485b2bd100d3c57f3377aab0723a0c7d36bd8bbdf454715d3fadb19b377c4",
+      "receipt_sha256": "b0a22dc938ea2866070f3f79ec014878cbf4ad3800173b658d4fadb24bdcae3a",
+      "qualification": "Historical failed attempts/reassessment preserved; not the current Resume7 artifact."
+    },
+    {
+      "name": "web-webpack-8gb",
+      "head": "79ec2d0a241dcc53f3877cd1a95c575c1edd1fe1",
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--bundler=webpack"
+      ],
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 0,
+      "seconds": 37.47,
+      "log_bytes": 5143,
+      "log_sha256": "f3a6f2f4436391b1341e0b5f33577e5a866f4313ed8036191e6a7d5f6a1bbf43",
+      "receipt_sha256": "821b60f254064557bf74eb595dd8242603356dafbb6c28189a599e92ac49b112",
+      "qualification": "Historical failed attempts/reassessment preserved; not the current Resume7 artifact."
+    }
+  ],
+  "geometry": [
+    {
+      "name": "web-layout-desktop",
+      "exit_code": 0,
+      "bytes": 328,
+      "sha256": "14c33a6a375fa3b631c8871148b1ccac53cb932397a11befaf116ae7bcc7bc1b"
+    },
+    {
+      "name": "extension-layout-desktop",
+      "exit_code": 0,
+      "bytes": 324,
+      "sha256": "195305fea62806ec60f8f5037e96d0fa20485d60520a0e11c0b4ff82b150c06b"
+    },
+    {
+      "name": "web-layout-narrow",
+      "exit_code": 0,
+      "bytes": 328,
+      "sha256": "5ddab6c7071a6a3049d02821bc3822369772b12365fc4b6e53da17a51a67cee9"
+    },
+    {
+      "name": "extension-layout-narrow",
+      "exit_code": 0,
+      "bytes": 324,
+      "sha256": "e58269ded0bd61c8c36529bd0ac888dc319c93dcb530c02828786efc24bca0f8"
+    }
+  ],
+  "typeEvidence": [
+    {
+      "client": "web",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": ["node", "node_modules/typescript/bin/tsc", "--noEmit"],
+      "cwd": "apps/tldw-frontend",
+      "environment": {
+        "NODE_OPTIONS": "--max-old-space-size=8192"
+      },
+      "exit_code": 0,
+      "log_bytes": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "provenance": "Reviewed Task7 fix4 actual exit receipt and independently verified log; current same production tree, not inferred from empty output."
+    },
+    {
+      "client": "extension",
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit",
+        "-p",
+        "tsconfig.compile.json"
+      ],
+      "cwd": "apps/extension",
+      "environment": {
+        "NODE_OPTIONS": "--max-old-space-size=8192"
+      },
+      "exit_code": 0,
+      "log_bytes": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "provenance": "Reviewed Task7 fix4 actual exit receipt and independently verified log; current same production tree, not inferred from empty output."
+    }
+  ],
+  "inputFingerprints": [
+    {
+      "path": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceViewControls.tsx",
+      "sha256": "4b92bfb6389bff454fc61af11706d4b73b594a74b4e91b51c5cff2944b9aaf68"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts",
+      "sha256": "ae7934ba583197b757647096d1f0f5dc41e86dd81f1653ffdb5e5e38f3dbe89f"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/workspace-api.ts",
+      "sha256": "9c3a7c43abfdadab4e09105b625ada698f84d2b562737d1304aa8f2886971dc6"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "sha256": "56906869be8473a4171e293cc248fe8cedbc87ada3ebddd4eebbd51d53f636e4"
+    }
+  ],
+  "evidence": [
+    {
+      "name": "resume7-web-executed",
+      "bytes": 20190,
+      "sha256": "290e53cb2f9b54042872be6db552cff6f89a62aeeac8837f73bbf21bccccd762"
+    },
+    {
+      "name": "resume7-extension-artifacts",
+      "bytes": 33082,
+      "sha256": "8280b17f11c669b904d6a2721d92de409dbe182aa5a00978781db253bae56b66"
+    },
+    {
+      "name": "resume7-web-owner",
+      "bytes": 1346,
+      "sha256": "9bfba226057824d8ff3167a2581810b63f01134a978aa644fe4b9fa4ee91c686"
+    },
+    {
+      "name": "resume7-extension-owner",
+      "bytes": 1352,
+      "sha256": "25c86f22a6b1d3cee97a83b1efe7cffc4d07543dc86e6eccc56a07602ab4261c"
+    },
+    {
+      "name": "resume7-web-dismissals",
+      "bytes": 1102,
+      "sha256": "241429b8b6408ba2846bf089da53f24e9b5bdfa15c5298631a6c03dba1c47210"
+    },
+    {
+      "name": "resume7-extension-dismissals",
+      "bytes": 1108,
+      "sha256": "67e40cfc3a8f52bd77b2249b53d08f08ffce8545dfa120c283ae3290ad15d033"
+    },
+    {
+      "name": "resume7-web-dialogs",
+      "bytes": 1739,
+      "sha256": "cb6a3848d7571b3a907069b1932f39d2554727b62b74e62d390a2fba4bfc7382"
+    },
+    {
+      "name": "resume7-extension-dialogs",
+      "bytes": 1745,
+      "sha256": "c2a9a5ffdce24574a40b5f1084b50ee13edf3b88e2e04978cc6803e954ef09f1"
+    },
+    {
+      "name": "resume7-view-workspace-retirement",
+      "bytes": 830,
+      "sha256": "2fd070b0cd8aaf2226c1354774a2c3194baf461bd63f67d8a07bf0dce259ceb8"
+    },
+    {
+      "name": "resume7-wrapped-metrics",
+      "bytes": 1602,
+      "sha256": "655d73077043eb204ab8e7a5dabe04cf069ecf85d9ba3ea98a46fbf14e4f0955"
+    },
+    {
+      "name": "resume7-final-browser-state",
+      "bytes": 443,
+      "sha256": "4d6a1cfda6b6c0fa7cca1d370fc900c642ed3e016a82dd34de350b8eeec8a0e9"
+    },
+    {
+      "name": "resume7-qualified-scope",
+      "bytes": 12991,
+      "sha256": "15a7fb137d15c72e1d58bcd4dd54cb76e7ef0f6f454cba90c452ea2e3b1b9cba"
+    },
+    {
+      "name": "resume7-python-lint",
+      "bytes": 32924,
+      "sha256": "ea056278243df85fdce7013c2ff97a89b4c2efd5447123579101eda5423e5811"
+    },
+    {
+      "name": "resume7-ts-lint",
+      "bytes": 550815,
+      "sha256": "521241535f7a1430560d134fe87391cd2d2de7b555929cb1f17c0c1a467d6d62"
+    },
+    {
+      "name": "resume7-ts-lint-classification",
+      "bytes": 4956,
+      "sha256": "eccbd43e26278bb8faf881707048f90d48f905e0975805a67f4dfa65ea118308"
+    },
+    {
+      "name": "resume5-web-recapture",
+      "bytes": 1817,
+      "sha256": "2cb6e4c8083d7a045997e4b33b95c4b1df4acca89438b57668b697ec0e81e64c"
+    },
+    {
+      "name": "resume5-extension-recapture",
+      "bytes": 1794,
+      "sha256": "7978b617a848f4529125d4c78351fd037172d9a2d3696926f0a67e9175d3148b"
+    },
+    {
+      "name": "resume5-valid-ask",
+      "bytes": 1119,
+      "sha256": "d42eff679287dd732fe0a6275b41108745a1dfe6b7652237428f8217503888ae"
+    },
+    {
+      "name": "resume5-citation-activation",
+      "bytes": 756,
+      "sha256": "f875568eea2ac55c4adb9868c09048ed729693bad232f4ff9e4097cba0c31870"
+    },
+    {
+      "name": "resume5-web-stale",
+      "bytes": 1557,
+      "sha256": "22f046f7ef5c95f40ca015692f53a6ab0924fe03fdc9cd6e098d82b126dbfd0b"
+    },
+    {
+      "name": "resume5-extension-stale",
+      "bytes": 1605,
+      "sha256": "c8c857eb08ceb0d7d9c224d00fec385c1e19f29ab2019f9052029040211965b9"
+    },
+    {
+      "name": "resume5-owner-retirement",
+      "bytes": 1412,
+      "sha256": "343517e96ac8a5f311f24a66c573102de1c45a40e5d08f19444a8427279506e6"
+    },
+    {
+      "name": "resume4-real-chain",
+      "bytes": 10522,
+      "sha256": "fecd7eb8a562eb555f06cd8a692a0146ef42f44a48b0e769a21f6a8dd50cad8d"
+    },
+    {
+      "name": "actual-export-readback",
+      "bytes": 301,
+      "sha256": "46169388ad38b17e0677331655e51a93d0ea8c03e32b0afcb2255f591ee5039e"
+    },
+    {
+      "name": "public-probe3",
+      "bytes": 439,
+      "sha256": "432bbe1d3cbd65ffadd8244e4e5a6a15ea8e8703562997e3c56e8a35fddb8a3f"
+    }
+  ],
+  "backendRepair": {
+    "head": "4e050361a5c48a300a3fde7a782862691b9f21ee",
+    "command": {
+      "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+      "argv": [
+        "python",
+        "-c",
+        "import onnxruntime,pytest,sys; onnxruntime.disable_telemetry_events(); sys.exit(pytest.main(sys.argv[1:]))",
+        "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py",
+        "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_endpoint_error_mapping.py",
+        "tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_api.py",
+        "tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_sync_contract.py",
+        "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py",
+        "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py",
+        "tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py",
+        "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
+        "tldw_Server_API/tests/Workspaces/test_workspace_source_preview_context_api.py",
+        "tldw_Server_API/tests/Media/test_media_versions_read_error_mapping.py",
+        "tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py::TestMediaVersionEndpoints",
+        "tldw_Server_API/tests/Sharing/test_clone_service.py",
+        "tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_core_repositories.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_entrypoint_ops.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_legacy_document_artifacts.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_legacy_transcripts.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_legacy_content_queries.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_legacy_maintenance.py",
+        "tldw_Server_API/tests/DB_Management/test_email_identity_dedupe.py",
+        "tldw_Server_API/tests/DB_Management/test_email_persisted_content.py",
+        "tldw_Server_API/tests/DB_Management/test_media_ingest_owner_backfill.py",
+        "tldw_Server_API/tests/DB_Management/test_media_ingest_worker_content_scope.py",
+        "tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_metadata_contract.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_collections_dual_write.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_url_dedupe_normalization.py",
+        "--override-ini",
+        "addopts=",
+        "-q",
+        "-rs"
+      ],
+      "module_count": 29,
+      "environment": "primary .venv-uat-fixall-py312-20261007"
+    },
+    "owning": {
+      "exit_code": 0,
+      "passed": 587,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 40,
+      "seconds": 131.23,
+      "module_count": 29
+    },
+    "verifiedFiles": {
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "919b08d8c735fbc1c48352229a7471aaf49ccb86d7e687ef99f78028f582c118",
+      "tldw_Server_API/app/core/WebClipper/service.py": "bb30ad6dac32869f1c1b12fafbc804d7c8314bd928495ae392a98290eccae7b8",
+      "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py": "791fc48bb3a956145cea4bbe2870dc89ed78a56d46fda7c1a4bfea60f9c82443",
+      "tldw_Server_API/tests/DB_Management/test_media_db_core_repositories.py": "47fa28f925148d3f180aedf91f45a64b4611f33fe01aee7d3490d72581c6ea26",
+      "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py": "7073aa63afdff750b6a816b95c73f4d4654f979561f7b81a84e325f1cedb5e89"
+    },
+    "log_sha256": "ca92b87fa6d8d3156aa2f0cc943c510f1bafa6b80cf3645e4ed048e4c5286b47"
+  },
+  "scopeProof": {
+    "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+    "backend621": [
+      {
+        "path": "tldw_Server_API/app/api/v1/endpoints/media/ingest_web_content.py",
+        "sha256": "6821cf5c15e8009db18fbd6ed616b412226ee1f3f7e889e23bab412c1487a532",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/api/v1/endpoints/workspaces.py",
+        "sha256": "ef9aeafde97c10f853b158ae63ccae5fe615d661112be25dfc178a342149ac52",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/api/v1/schemas/media_request_models.py",
+        "sha256": "07ab51eb8b724a64e446ece4f917fcfb721ca13d11bb45e86fc04e43017dd795",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/api/v1/schemas/workspace_schemas.py",
+        "sha256": "198139c79adb09391b6ccb06dedb1b724358e7175457136457e34b57cfed28bc",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+        "sha256": "57581e2d6b8249ec80bcfb80be6449eff6e94f12fb6cdf6382b0d1e6404a656f",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Security/egress.py",
+        "sha256": "a9b1d09373ce0fc8b04afd07d9c36171e940bf2520d27f0fbf3fe8f54e6825fc",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/WebClipper/schemas.py",
+        "sha256": "927d58fc1b789f4c6b232beb0ec85caa00a0ec07afc49e9b2e9da550ab15911f",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/WebClipper/service.py",
+        "sha256": "bb30ad6dac32869f1c1b12fafbc804d7c8314bd928495ae392a98290eccae7b8",
+        "unchangedFrom621": false
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/browser_transport.py",
+        "sha256": "818fb215cef2faf9501fa99f3861928b2c1eea31e74974bb6b93bb97351bf052",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/filters.py",
+        "sha256": "4c1aeef0ef8986e3d07bd7b764bd70587b81acdbac5ddead4e499bde6276db52",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+        "sha256": "fab33018b643d9c3cbfb92538ddd66da542982964e18cffb80c0c72d67a6517a",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article_models.py",
+        "sha256": "b00f165256225b3e256fd3cd0b1ed4790bf81fc795df2d94378b735fdab1fb45",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/outbound_policy.py",
+        "sha256": "b1fb288fb99c77bf8ffee8dfeddac92edcace8735f897504505280970e9d81cf",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/policy/adapters.py",
+        "sha256": "2b3161163b7cbede6758bd0558209ac23787fd7d7f72a9f13d0503b87a20e532",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/preflight/adapters/http.py",
+        "sha256": "45ecbcf2a9c3af4c54302d0be0e1952f268b544d292955147173da1c999e85ae",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Web_Scraping/runtime/fetch.py",
+        "sha256": "d06860706d12cbe3a46dc8c2a952085874093775b36a8f09be03ad9cd5471f8a",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/Workspaces/source_preview.py",
+        "sha256": "6e347c6b4f08ec9c3d1e26b4f5a7fc2de955015ce22e974dec58b758b752b1ad",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/http_client.py",
+        "sha256": "57ab6e069b600095644e7957b21530d5f60802a0b10d76bac71bd4a7b92abb0d",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/app/services/web_scraping_service.py",
+        "sha256": "676e8a48f631ea8eca63e8357cbead98a7b49f729a624a71e1e7833335c98414",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py",
+        "sha256": "eee835b2daa75c74da840524230ed3ae1b9fc6a344f62a92c2a806f347bd4c09",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py",
+        "sha256": "791fc48bb3a956145cea4bbe2870dc89ed78a56d46fda7c1a4bfea60f9c82443",
+        "unchangedFrom621": false
+      },
+      {
+        "path": "tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py",
+        "sha256": "03668ebb5c9e6092519e07e9b62ac52ed33d2c4994836e202fd4db85fd3226c1",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
+        "sha256": "7fccf5a9627bad60da009a3ac7f7c2dd4818b7049c51dc15655ec694504542d5",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Media/test_media_versions_read_error_mapping.py",
+        "sha256": "e3bb4c10987e2cffb3b76cb9e40a536330db0f056b6837223a9655729a129423",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py",
+        "sha256": "f369e44f942a237ccb6c4cff04c2fda1fcc44a62378cd53ea3f2d4373177b0a2",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_api.py",
+        "sha256": "8ad6d36da3bf238317f13c6ec9b5b7b11601c98d6cc6ba50f3be9849879ebb7a",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_sync_contract.py",
+        "sha256": "a49800bc0daa9ae0862e71fed3cfeef0513057f29efb759656379244d5612897",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_endpoint_error_mapping.py",
+        "sha256": "a3c097e53c4c2664933f1876941e542d929f5681381e7611b91e8042a71a4eeb",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py",
+        "sha256": "7073aa63afdff750b6a816b95c73f4d4654f979561f7b81a84e325f1cedb5e89",
+        "unchangedFrom621": false
+      },
+      {
+        "path": "tldw_Server_API/tests/Security/test_egress.py",
+        "sha256": "93bb7a4f0137093d82b76c6a56718d950b186f2cb611a3ae9610fc419f70556f",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py",
+        "sha256": "49dfe33d78ebbc9b466f30061e2edfd7fcbe096470fe4d43aa5d9523ed8b3091",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Security/test_egress_global_env.py",
+        "sha256": "11d5e28c25dbd314ae88be756d812a43c3b52be5858c0e2eba55c9d225eba43c",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Sharing/test_clone_service.py",
+        "sha256": "2ed1f43bc9f144e0824c1231666d63ac4b2d2f5921ccd0cb0aa06c36e6cf63ca",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py",
+        "sha256": "106d6c96f33e5e58d14b94680a66811dfa7fed52585199ebde406bbbaf10c032",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py",
+        "sha256": "c8ad13548b173c87836bcac9612d3239d98fae3db40b8282368e08646d6bf0c7",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_http_client_fetch.py",
+        "sha256": "73bfc8b492ad312814f94d5b47465c1e9c497b04774c4ce2e75aeaf14a7a2b3b",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_outbound_policy.py",
+        "sha256": "11647e4182512cb222208658ced2edb22d28057d524a9817da1dcd92eb6d221a",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py",
+        "sha256": "53ea895d8b027828a74405640fa4182cdc28e317f5ae6774580a1ce1f41af33b",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py",
+        "sha256": "54c715bba3fa8bb72eb604198abd6bf1db95c3a9aa2f3bfe6fcca7e333a699e0",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_article_preflight_facade.py",
+        "sha256": "baf0f14839adc92ad569223f32e80366ddd5de11e7a7a76a05787ab61df48e02",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_characterization.py",
+        "sha256": "4b822288482242431dffc4df25cce0dff5d339d4343add57ba5afc469621b874",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py",
+        "sha256": "6766874f4f7a0dc3d22a580f0212ab1bea143e91f15543c2e0d5d831038a0a2e",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_article_orchestration.py",
+        "sha256": "f38aede5d219e102cc13f9173e0b2a320100583312ce37d5fc5d9fba31d16c37",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Web_Scraping/test_robots_enforcement.py",
+        "sha256": "40a892d85d7200587198e46118da61fdbe59706cffd327cb94b3250c72ba8d29",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
+        "sha256": "74bbe7ed10aef5b97d83b3164910af0de8b59ef751cea931c26c88827d89a2ba",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Workspaces/test_workspace_source_preview_context_api.py",
+        "sha256": "953c856491dfd31c8ee653f2f61618bfd2683270b14833b0c7baf1cb2311de94",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/http_client/test_http_client_downloads.py",
+        "sha256": "05a16014152d1422b54ae451b4f9a15f08cb9f2942d2edfa718284b8d5fe0188",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/http_client/test_http_client_egress_metrics.py",
+        "sha256": "20ecb574c8a88feb205653ef2f4c899d3c441c20af3929325c27435ca52931b6",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/http_client/test_http_client_pinning.py",
+        "sha256": "3d8f2e0d40ff2d5fca56303f82cfb4abd36d13865b2f4599b7c9673f1f50e0c0",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/http_client/test_http_client_simple_response_limits.py",
+        "sha256": "fef49d841a8b5fe42aa7533f82fdbce4a427f5d2b1a65023f0657a636466232f",
+        "unchangedFrom621": true
+      },
+      {
+        "path": "tldw_Server_API/tests/http_client/test_redirect_header_hardening.py",
+        "sha256": "12d0be47489eb576eaa59916f7ac976a7e88e9eef61ddcb010fd71465f06db6b",
+        "unchangedFrom621": true
+      }
+    ],
+    "reviewedRepair": [
+      {
+        "path": "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py",
+        "sha256": "919b08d8c735fbc1c48352229a7471aaf49ccb86d7e687ef99f78028f582c118",
+        "matchesReviewed4e": true
+      },
+      {
+        "path": "tldw_Server_API/app/core/WebClipper/service.py",
+        "sha256": "bb30ad6dac32869f1c1b12fafbc804d7c8314bd928495ae392a98290eccae7b8",
+        "matchesReviewed4e": true
+      },
+      {
+        "path": "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py",
+        "sha256": "791fc48bb3a956145cea4bbe2870dc89ed78a56d46fda7c1a4bfea60f9c82443",
+        "matchesReviewed4e": true
+      },
+      {
+        "path": "tldw_Server_API/tests/DB_Management/test_media_db_core_repositories.py",
+        "sha256": "47fa28f925148d3f180aedf91f45a64b4611f33fe01aee7d3490d72581c6ea26",
+        "matchesReviewed4e": true
+      },
+      {
+        "path": "tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py",
+        "sha256": "7073aa63afdff750b6a816b95c73f4d4654f979561f7b81a84e325f1cedb5e89",
+        "matchesReviewed4e": true
+      }
+    ],
+    "deltaSinceResume5": [
+      "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceViewControls.tsx",
+      "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts",
+      "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx",
+      "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+      "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx",
+      "apps/packages/ui/src/entries/__tests__/background.auth-target.test.ts",
+      "apps/packages/ui/src/services/__tests__/background-proxy.web-clipper-scope.test.ts",
+      "apps/packages/ui/src/services/tldw/domains/workspace-api.ts",
+      "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "apps/tldw-frontend/e2e/workflows/source-view-cancel-layout.cdp.mjs"
+    ],
+    "backendSince4e": [],
+    "qualification": "Historical receipts retained without broad replay. The listed changed621 backend roots/tests are covered by reviewed4e repair; complete backend unchanged after4e. Resume5 capture/Ask/citation behavior is retained with exact changed saved-view and shared request-authority roots listed, newer owning tests and actual native authority acceptance."
+  },
+  "lint": {
+    "python": {
+      "files": [
+        {
+          "file": "tldw_Server_API/app/api/v1/endpoints/media/ingest_web_content.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "6821cf5c15e8009db18fbd6ed616b412226ee1f3f7e889e23bab412c1487a532",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/api/v1/endpoints/workspaces.py",
+          "currentExit": 1,
+          "baselineExit": 1,
+          "currentCount": 4,
+          "baselineCount": 4,
+          "currentSourceSha256": "ef9aeafde97c10f853b158ae63ccae5fe615d661112be25dfc178a342149ac52",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/api/v1/schemas/media_request_models.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "07ab51eb8b724a64e446ece4f917fcfb721ca13d11bb45e86fc04e43017dd795",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/api/v1/schemas/workspace_schemas.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "198139c79adb09391b6ccb06dedb1b724358e7175457136457e34b57cfed28bc",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "57581e2d6b8249ec80bcfb80be6449eff6e94f12fb6cdf6382b0d1e6404a656f",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "919b08d8c735fbc1c48352229a7471aaf49ccb86d7e687ef99f78028f582c118",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Security/egress.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "a9b1d09373ce0fc8b04afd07d9c36171e940bf2520d27f0fbf3fe8f54e6825fc",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/WebClipper/schemas.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "927d58fc1b789f4c6b232beb0ec85caa00a0ec07afc49e9b2e9da550ab15911f",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/WebClipper/service.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "bb30ad6dac32869f1c1b12fafbc804d7c8314bd928495ae392a98290eccae7b8",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/browser_transport.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "818fb215cef2faf9501fa99f3861928b2c1eea31e74974bb6b93bb97351bf052",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/filters.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "4c1aeef0ef8986e3d07bd7b764bd70587b81acdbac5ddead4e499bde6276db52",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "fab33018b643d9c3cbfb92538ddd66da542982964e18cffb80c0c72d67a6517a",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/orchestration/article_models.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "b00f165256225b3e256fd3cd0b1ed4790bf81fc795df2d94378b735fdab1fb45",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/outbound_policy.py",
+          "currentExit": 0,
+          "baselineExit": 1,
+          "currentCount": 0,
+          "baselineCount": 2,
+          "currentSourceSha256": "b1fb288fb99c77bf8ffee8dfeddac92edcace8735f897504505280970e9d81cf",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/policy/adapters.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "2b3161163b7cbede6758bd0558209ac23787fd7d7f72a9f13d0503b87a20e532",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/preflight/adapters/http.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "45ecbcf2a9c3af4c54302d0be0e1952f268b544d292955147173da1c999e85ae",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Web_Scraping/runtime/fetch.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "d06860706d12cbe3a46dc8c2a952085874093775b36a8f09be03ad9cd5471f8a",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/Workspaces/source_preview.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "6e347c6b4f08ec9c3d1e26b4f5a7fc2de955015ce22e974dec58b758b752b1ad",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/core/http_client.py",
+          "currentExit": 1,
+          "baselineExit": 1,
+          "currentCount": 7,
+          "baselineCount": 7,
+          "currentSourceSha256": "57ab6e069b600095644e7957b21530d5f60802a0b10d76bac71bd4a7b92abb0d",
+          "introduced": []
+        },
+        {
+          "file": "tldw_Server_API/app/services/web_scraping_service.py",
+          "currentExit": 0,
+          "baselineExit": 0,
+          "currentCount": 0,
+          "baselineCount": 0,
+          "currentSourceSha256": "676e8a48f631ea8eca63e8357cbead98a7b49f729a624a71e1e7833335c98414",
+          "introduced": []
+        }
+      ],
+      "current": 11,
+      "baseline": 13,
+      "introduced": 0,
+      "comparator_exit": 0
+    },
+    "typescript": {
+      "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+      "base": "2c5f19d0328360d45bce99b8bae75ce252cc312f",
+      "rawComparatorExit": 1,
+      "rawIntroduced": 15,
+      "currentErrors": 2,
+      "currentWarnings": 258,
+      "baselineErrors": 2,
+      "baselineWarnings": 258,
+      "rawReceiptSha256": "521241535f7a1430560d134fe87391cd2d2de7b555929cb1f17c0c1a467d6d62",
+      "normalization": "Only embedded (at line N) location text replaced; exact file/rule/severity/remaining message/multiplicity retained. No lint rerun or suppression.",
+      "normalizedIntroduced": 0,
+      "files": [
+        {
+          "file": "apps/packages/ui/src/components/Notes/hooks/useNotesEditorState.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/ChatPane/index.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 3
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceViewControls.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/WebArticleCaptureModal.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/index.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 12
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/QuickNotesSection.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/workspace-server-restore.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/components/Sidepanel/Clipper/WebClipperPanel.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/routes/sidepanel-chat.tsx",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/application.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/tldw/TldwMedia.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/tldw/domains/media.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/tldw/domains/web-clipper.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/tldw/domains/workspace-api.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/web-clipper/enrichment.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/services/web-clipper/types.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/store/workspace-slices/sources-slice.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/store/workspace-slices/studio-slice.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/store/workspace.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/types/workspace.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/utils/knowledge-note-provenance.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/utils/research-web-capture.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/utils/research-workspace-prefill.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        },
+        {
+          "file": "apps/packages/ui/src/utils/use-research-web-capture.ts",
+          "normalizedIntroduced": 0,
+          "rawIntroduced": 0
+        }
+      ],
+      "exitCode": 0
+    }
+  },
+  "fix4": {
+    "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
+    "owning": {
+      "passed": 128,
+      "failed": 0,
+      "skipped": 0,
+      "exit_code": 0
+    },
+    "defaultFocused": {
+      "passed": 1,
+      "nonselected": 43,
+      "exit_code": 0
+    },
+    "receiptManifest": [
+      {
+        "name": "task7-fix4-layout-red.log",
+        "bytes": 868,
+        "sha256": "1fe56b9d38148c1e1f64fcd0b65bebb8ea2e2da4ebf6298e72f9f436f9c58612"
+      },
+      {
+        "name": "task7-fix4-unit-red.log",
+        "bytes": 10174,
+        "sha256": "b56eeb33465af84d8321d2b21a82ce604a2958144cd629272677ec50fd25008e"
+      },
+      {
+        "name": "task7-fix4-unit-green.log",
+        "bytes": 4956,
+        "sha256": "2d8b8c79d991240ba6df518fc760b6d579b534bfd93cd5df69eba2831993fdaf"
+      },
+      {
+        "name": "task7-fix4-unit-green2.log",
+        "bytes": 692,
+        "sha256": "6ee7d854fe7a3a9009b7f8bb7f41c96c7b829f78c988d00af5906054075b0684"
+      },
+      {
+        "name": "task7-fix4-owning.log",
+        "bytes": 3678,
+        "sha256": "2d695fadce6927ed0f5a44f6d8df09ff40d42794763ae9f7c3cbafa2bd6a9165"
+      },
+      {
+        "name": "task7-fix4-default.log",
+        "bytes": 692,
+        "sha256": "145d7d726d93a55efdf38fe92c12cd15c5b6bbdfc5a010b91dc700d021e2c8f6"
+      },
+      {
+        "name": "task7-fix4-web-types.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "task7-fix4-extension-types.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "task7-fix4-attestation-initial-stale.json",
+        "bytes": 205,
+        "sha256": "a2fa0503c7e3fb239acf01f5da955671a552765abe3ce1f1b4459472778052d5"
+      },
+      {
+        "name": "task7-fix4-attestation.json",
+        "bytes": 205,
+        "sha256": "a2fa0503c7e3fb239acf01f5da955671a552765abe3ce1f1b4459472778052d5"
+      },
+      {
+        "name": "task7-fix4-style.log",
+        "bytes": 1110,
+        "sha256": "7327a4c66ea84e89dc457ec617cd254456cdcd02fddc6c1ec24e9cc38d24a6e8"
+      },
+      {
+        "name": "task7-fix4-backlog.log",
+        "bytes": 98,
+        "sha256": "6e310adce5575f8f338ca9f7a41e08ad5f4c7aaf31f4db2fb5342fa081222d5d"
+      },
+      {
+        "name": "task7-fix4-hooks.log",
+        "bytes": 1288,
+        "sha256": "3901a38bf379d0a01891fe4ccca12714bc91d1f047e338c098fa206a946464c3"
+      },
+      {
+        "name": "capture-refresh-task7-fix4-style-comparison.json",
+        "bytes": 1109,
+        "sha256": "382e3abdff5f4f51093adbbcb76a27a387ac4f631373a0080dc43c81e4058658"
+      },
+      {
+        "name": "SourceViewControls.tsx",
+        "bytes": 27417,
+        "sha256": "4b92bfb6389bff454fc61af11706d4b73b594a74b4e91b51c5cff2944b9aaf68"
+      },
+      {
+        "name": "SourceViewControls.test.tsx",
+        "bytes": 54747,
+        "sha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "name": "source-view-cancel-layout.cdp.mjs",
+        "bytes": 4262,
+        "sha256": "8e814e7b48aa5a5a2b02b4fbdf14be274226f35e7d335c573e7b11ca094c4756"
+      }
+    ]
+  },
+  "literatureTiming": {
+    "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx",
+    "currentSha256": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+    "priorSha256": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+    "unchanged": true,
+    "priorHead": "be4b0d45b7b0eca6dcacb10f62dd3aee537fa428",
+    "fullRunExit": 1,
+    "namedRerunExit": 0,
+    "activeExactOwner": null,
+    "qualification": "No canonical-dev inheritance assertion; historical Done TASK562/TASK12450 not reopened."
+  },
+  "tenAssertionBaseline": {
+    "head": "2c5f19d0328360d45bce99b8bae75ce252cc312f",
+    "exit_code": 1,
+    "passed": 223,
+    "failed": 10,
+    "total": 233,
+    "log_sha256": "06a0e1ea5f9f31e92fcdcce1ee7f56426197859765b228ef0cf262852a1e5de2",
+    "receipt_sha256": "fdb30dd37c0c6dfc4e80c4571ba42f5ddb1b4ecdcc76ccd75efabbf5ff9ab5e8",
+    "command": [
+      "<isolated-canonical-dev-export>/apps/packages/ui/node_modules/.bin/vitest",
+      "run",
+      "--root",
+      "<isolated-canonical-dev-export>/apps/packages/ui",
+      "--config",
+      "/private/tmp/knowledge-capture-dev-baseline-vitest.mts",
+      "src/store/__tests__/workspace.test.ts",
+      "src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage1.test.tsx",
+      "src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--reporter=json",
+      "--outputFile",
+      "/private/tmp/knowledge-capture-dev-baseline-four-suites.json"
+    ],
+    "failures": [
+      {
+        "file": "apps/packages/ui/src/store/__tests__/workspace.test.ts",
+        "name": "workspace store snapshot persistence dispatches a quota warning event when localStorage is full",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "0fb0451c745828a0e787cdc9003abb174f55a33bb6d1b1f3b5d28193499a1f4b",
+        "feature621Sha256": "0fb0451c745828a0e787cdc9003abb174f55a33bb6d1b1f3b5d28193499a1f4b",
+        "currentSha256": "60c51b2f0a350ed9ca537c2b3619f14c9e0663aeae442149028ca64073ea5cde"
+      },
+      {
+        "file": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+        "name": "saved normal Chat pipeline with autosave preserves the selected provider in source-grounded generation options",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "4850c41479af2584565eb2db4cde0011945a5ba2b3b0a194a00fd0dce105d899",
+        "feature621Sha256": "4850c41479af2584565eb2db4cde0011945a5ba2b3b0a194a00fd0dce105d899",
+        "currentSha256": "8828d44dde88c45174c5fd808326cd8d3e0fb37a2fbaed5f8a16699509cb072f"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage1.test.tsx",
+        "name": "ChatPane Stage 1 reliability and controls passes workspace scope into the shared chat hook",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "405d71d45317fcaa05bacf0b83a9bfd120e7e12f2cbefab757adf1f0e5b5c1a7",
+        "feature621Sha256": "405d71d45317fcaa05bacf0b83a9bfd120e7e12f2cbefab757adf1f0e5b5c1a7",
+        "currentSha256": "2bf47794fe9e8a3ae40d8cab1912c89ab4a1180a93b44c71a255140bb0874f80"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls renders fixed-order grouped built-ins and saved views and applies them by keyboard",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls validates save fields, confirms replacement, exposes busy state, and returns focus",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls closes a 'Replace' dialog after PATCH reports the row missing",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls closes a 'Reset' dialog after PATCH reports the row missing",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls invalidates overlays for 'another workspace' and refuses stale submit",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls invalidates overlays for 'no workspace' and refuses stale submit",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      },
+      {
+        "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "name": "SourceViewControls closes after a repeated success announcement completes a new mutation cycle",
+        "owner": "TASK-13531",
+        "disposition": "Resolved by independently reviewed owning repairs and current affected both-client native acceptance.",
+        "canonicalDevSha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "feature621Sha256": "60df871831ba89599da3d77df58d7e54b3511f440e0696f82a95bc2965f2ac1c",
+        "currentSha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      }
+    ]
+  },
+  "canonicalIdentityProof": {
+    "head": "424115b0e517820f4bf59d6f9650a15c540de6cf",
+    "workspaceId": "908e7763-9924-43d0-b26f-63f9cf3a8868",
+    "extractionBoundary": "Only extraction response mocked; canonical save/status/source/version response real",
+    "captures": [
+      {
+        "clipId": "2cc307ee-691e-42c9-9f7d-4e2b4186cc72",
+        "sourceId": "web-clipper:2cc307ee-691e-42c9-9f7d-4e2b4186cc72",
+        "canonicalSourceMediaId": 4,
+        "noteId": "48e8b8fc-b44c-4603-8b1f-05fcd7abc3c0",
+        "noteVersion": 1,
+        "statusHttp": 200,
+        "versionsHttp": 200,
+        "versionCount": 1,
+        "versionHttp": 200,
+        "versionNumber": 1,
+        "versionUuid": "905c60dc-35a3-4b10-95f8-fbffbdb7d055",
+        "mediaId": 4,
+        "pinnedClipId": "2cc307ee-691e-42c9-9f7d-4e2b4186cc72",
+        "canonicalMetadataClipId": "2cc307ee-691e-42c9-9f7d-4e2b4186cc72",
+        "canonicalDescriptor": {
+          "mode": "server_article",
+          "requested_url": "https://example.org/task6-public-synthetic",
+          "captured_at": "2026-10-08T02:59:39.388Z",
+          "content_sha256": "64e3bae3c915d5b995b6cf6f221dd592238815995e18d56b9f50d0ca93a75651",
+          "refresh_of": null
+        },
+        "contentDigest": "64e3bae3c915d5b995b6cf6f221dd592238815995e18d56b9f50d0ca93a75651",
+        "pinMatchesCanonicalClip": true
+      },
+      {
+        "clipId": "e6248b64-48b3-4554-9b9c-8855c3a658ff",
+        "sourceId": "web-clipper:e6248b64-48b3-4554-9b9c-8855c3a658ff",
+        "canonicalSourceMediaId": 5,
+        "noteId": "b5ab4429-7096-4bd6-82c0-d69bf81c3d69",
+        "noteVersion": 1,
+        "statusHttp": 200,
+        "versionsHttp": 200,
+        "versionCount": 1,
+        "versionHttp": 200,
+        "versionNumber": 1,
+        "versionUuid": "bf08ce4c-c4ae-475a-ab1a-b385a4f0bb1f",
+        "mediaId": 5,
+        "pinnedClipId": "e6248b64-48b3-4554-9b9c-8855c3a658ff",
+        "canonicalMetadataClipId": "e6248b64-48b3-4554-9b9c-8855c3a658ff",
+        "canonicalDescriptor": {
+          "mode": "server_article",
+          "requested_url": "https://example.org/task6-public-synthetic",
+          "captured_at": "2026-10-08T03:00:41.019Z",
+          "content_sha256": "64e3bae3c915d5b995b6cf6f221dd592238815995e18d56b9f50d0ca93a75651",
+          "refresh_of": "2cc307ee-691e-42c9-9f7d-4e2b4186cc72"
+        },
+        "contentDigest": "64e3bae3c915d5b995b6cf6f221dd592238815995e18d56b9f50d0ca93a75651",
+        "pinMatchesCanonicalClip": true
+      },
+      {
+        "clipId": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+        "sourceId": "web-clipper:260df582-7939-4f42-baa9-0a85e00bd0d8",
+        "canonicalSourceMediaId": 7,
+        "noteId": "4985ffb4-5ec6-496a-90ae-3fc3f569d4aa",
+        "noteVersion": 1,
+        "statusHttp": 200,
+        "versionsHttp": 200,
+        "versionCount": 1,
+        "versionHttp": 200,
+        "versionNumber": 1,
+        "versionUuid": "e634adf3-6905-4371-bc5a-017ff8088dcb",
+        "mediaId": 7,
+        "pinnedClipId": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+        "canonicalMetadataClipId": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+        "canonicalDescriptor": {
+          "mode": "server_article",
+          "requested_url": "https://example.org/task6-public-synthetic",
+          "captured_at": "2026-10-08T03:01:51.437Z",
+          "content_sha256": "317af226a936b3a25205fb95cf85468cbeefbd36fe58d9ecad1a00c5a399a2bd",
+          "refresh_of": "e6248b64-48b3-4554-9b9c-8855c3a658ff"
+        },
+        "contentDigest": "317af226a936b3a25205fb95cf85468cbeefbd36fe58d9ecad1a00c5a399a2bd",
+        "pinMatchesCanonicalClip": true
+      }
+    ],
+    "frozenAcceptanceHashes": [
+      {
+        "clipId": "915bfe1d-fc8d-4a0a-8cee-b2d61eab3c3b",
+        "sha256": "9988f366841655123a651010baf92a285350720bb5c9255347c37e623809f77b",
+        "digest": "9bc3fea979bfc03723f12f98c4df1c214589d7e55d73dbbf5e4b95a1f1c80c8d",
+        "capturedAt": "2026-10-08T02:02:09.796Z"
+      },
+      {
+        "clipId": "989b78d2-f8a0-475b-aa3c-6f16f925c2b9",
+        "sha256": "3a142615cdfcb9fee98e5d0603a27e5d17edfc83937fe3dd4875060151019320",
+        "digest": "9bc3fea979bfc03723f12f98c4df1c214589d7e55d73dbbf5e4b95a1f1c80c8d",
+        "capturedAt": "2026-10-08T02:28:50.118Z"
+      },
+      {
+        "clipId": "4a1c736a-70a2-41e0-ac50-67d6aadd6171",
+        "sha256": "43f61fbdf9d8f9482ea48c802e17031270eff7a1c45e711edca1ccff09b15e07",
+        "digest": "317af226a936b3a25205fb95cf85468cbeefbd36fe58d9ecad1a00c5a399a2bd",
+        "capturedAt": "2026-10-08T02:28:51.019Z"
+      },
+      {
+        "clipId": "2cc307ee-691e-42c9-9f7d-4e2b4186cc72",
+        "sha256": "bfd64d93d50824e9a085a875aee23f7907403312287885408454d7c4224bca34",
+        "digest": "64e3bae3c915d5b995b6cf6f221dd592238815995e18d56b9f50d0ca93a75651",
+        "capturedAt": "2026-10-08T02:59:39.388Z"
+      },
+      {
+        "clipId": "e6248b64-48b3-4554-9b9c-8855c3a658ff",
+        "sha256": "262c5c66fe4c3b9d7557b8fb7b050cfda8e1eb3da7c776f147019256bea211c4",
+        "digest": "64e3bae3c915d5b995b6cf6f221dd592238815995e18d56b9f50d0ca93a75651",
+        "capturedAt": "2026-10-08T03:00:41.019Z"
+      },
+      {
+        "clipId": "74eadb13-097c-4851-8643-3b064098bb64",
+        "sha256": "74eaba395ace3753e8ef052e79590f7672747efc46e295d615debea8d718b87b",
+        "digest": "317af226a936b3a25205fb95cf85468cbeefbd36fe58d9ecad1a00c5a399a2bd",
+        "capturedAt": "2026-10-08T03:00:42.084Z"
+      },
+      {
+        "clipId": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+        "sha256": "55ab0077d10ed0791e0b6a3c4f0bdd7e7cc156e10fb793c6839c5ce3f9e998bb",
+        "digest": "317af226a936b3a25205fb95cf85468cbeefbd36fe58d9ecad1a00c5a399a2bd",
+        "capturedAt": "2026-10-08T03:01:51.437Z"
+      }
+    ],
+    "originalSourceRetained": true,
+    "recaptures": [
+      {
+        "client": "web",
+        "head": "976dff578bf1f1b0a290dfccb6b0a67f35ccf6e6",
+        "canonical": {
+          "http": 200,
+          "clipId": "ab5f7c58-db82-4d4a-a000-e0ce0f4a0e29",
+          "noteId": "bc5df95b-bd81-4965-8873-d1bdbdc6d1e8",
+          "noteVersion": 1
+        },
+        "version": {
+          "http": 200,
+          "uuid": "9281af2e-d915-4856-bc7b-cd55e30f418b",
+          "mediaId": 9,
+          "version": 1,
+          "contentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+        },
+        "identity": {
+          "distinctClip": true,
+          "distinctMedia": true,
+          "refreshOf": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+          "matchedCanonical": true,
+          "oldPinRetained": true,
+          "oldEvidenceRetained": true,
+          "oldRefusalRetained": true
+        },
+        "acceptedSourceId": "web-clipper:ab5f7c58-db82-4d4a-a000-e0ce0f4a0e29",
+        "acceptedPin": {
+          "clipId": "ab5f7c58-db82-4d4a-a000-e0ce0f4a0e29",
+          "requestedUrl": "https://example.org/task6-public-synthetic",
+          "capturedAt": "2026-10-08T04:57:09.009Z",
+          "contentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd",
+          "refreshOf": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+          "mediaId": 9,
+          "versionNumber": 1,
+          "versionUuid": "9281af2e-d915-4856-bc7b-cd55e30f418b"
+        }
+      },
+      {
+        "client": "extension",
+        "head": "976dff578bf1f1b0a290dfccb6b0a67f35ccf6e6",
+        "canonical": {
+          "http": 200,
+          "clipId": "d0de1cf5-46e2-473a-8c59-1e51d0c8ab29",
+          "noteId": "d3863a0a-c566-4263-aaf9-2fe05c94f7f7",
+          "noteVersion": 1
+        },
+        "version": {
+          "http": 200,
+          "uuid": "b76c6983-461b-45aa-bb68-9a96cab4f0aa",
+          "mediaId": 10,
+          "version": 1,
+          "contentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+        },
+        "identity": {
+          "distinctClip": true,
+          "distinctMedia": true,
+          "refreshOf": "90acc688-be33-4317-8b06-2ac3cd32f84a",
+          "matchedCanonical": true,
+          "oldPinRetained": true,
+          "oldEvidenceRetained": true,
+          "oldRefusalRetained": true
+        },
+        "acceptedSourceId": "web-clipper:d0de1cf5-46e2-473a-8c59-1e51d0c8ab29",
+        "acceptedPin": {
+          "clipId": "d0de1cf5-46e2-473a-8c59-1e51d0c8ab29",
+          "requestedUrl": "https://example.org/task6-public-synthetic",
+          "capturedAt": "2026-10-08T04:58:54.659Z",
+          "contentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd",
+          "refreshOf": "90acc688-be33-4317-8b06-2ac3cd32f84a",
+          "mediaId": 10,
+          "versionNumber": 1,
+          "versionUuid": "b76c6983-461b-45aa-bb68-9a96cab4f0aa"
+        }
+      }
+    ]
+  }
+}

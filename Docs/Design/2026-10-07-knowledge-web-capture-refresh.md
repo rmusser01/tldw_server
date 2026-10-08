@@ -1,6 +1,6 @@
 # Explicit web capture and refresh in Research
 
-**Status:** Proposed; requester design approval required before implementation.
+**Status:** Approved by requester on 2026-10-07; implemented and locally verified. Controller review/publication gates remain.
 
 **Date:** 2026-10-07
 
@@ -8,7 +8,7 @@
 
 **Investigated baseline:** `dev` at `26ae4fd679`
 
-**Decision record:** [Proposed ADR-066](../ADR/066-explicit-web-capture-and-refresh-snapshots.md)
+**Decision record:** [Accepted ADR-066](../ADR/066-explicit-web-capture-and-refresh-snapshots.md)
 
 ## Outcome and scope
 
@@ -107,7 +107,7 @@ Expected shared UI scope:
 | Exact old version preview after newer head; deleted/missing pin unavailable; latest chunk evidence excluded; source membership and per-owner reads enforced | `tests/Workspaces/test_workspace_source_preview.py`, `test_workspace_source_preview_context_api.py`, existing Media version read tests |
 | No network until explicit action; preview cancel no save; unchanged/changed refresh preserves evidence; frozen partial retry; owner/workspace/manual-selection retirement; readback distinguishes Note revision from Media version; stale capture Ask fence; reopen/export retains references | `ResearchWorkspace/__tests__/SourcesPane.stage2.test.tsx`, shared `utils/__tests__/research-workspace-import.test.tsx`, `research-workspace-prefill.test.ts`, `knowledge-note-provenance.test.ts`, plus a narrow capture workflow test |
 
-Use real SQLite and the existing PostgreSQL tenancy fixtures for persistence boundaries; mock outbound sites. Run relevant backend/UI tests, TypeScript checks, both client builds, OpenAPI drift checks, touched-scope lint and Bandit. No implementation tests have run for this proposed design.
+Use real SQLite and the existing PostgreSQL tenancy fixtures for persistence boundaries; mock outbound sites. Run relevant backend/UI tests, TypeScript checks, both client builds, OpenAPI drift checks, touched-scope lint and Bandit. Implementation and local verification are recorded in [the canonical closeout](../Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md), including mocked acquisition versus real persistence and remaining external qualifications.
 
 ## Alternatives and ADR assessment
 
@@ -118,6 +118,6 @@ Use real SQLite and the existing PostgreSQL tenancy fixtures for persistence bou
 | Add a capture/version database, endpoint, or authenticated-browser session bridge | Could model richer capture lineage but adds authority, migration, retention, transport, and lifecycle rules unnecessary for readable text. |
 | Keep excerpts and direct users to extension capture only | Lowest change cost but leaves explicit in-Research public capture/refresh incomplete. |
 
-**ADR required: yes. ADR path:** [proposed ADR-066](../ADR/066-explicit-web-capture-and-refresh-snapshots.md). Explicit fetch/accept boundaries, credential-free acquisition, and refresh identity/version semantics are durable public API, security, and persistence rules. This proposal composes [ADR-007](../ADR/007-research-workspace-canonical-first-slice-shell.md), [ADR-018](../ADR/018-resource-governance-endpoint-policy-and-route-map.md), [ADR-026](../ADR/026-security-outbound-egress-and-ssrf-policy.md), [ADR-031](../ADR/031-notes-capability-sync-domains.md), [ADR-034](../ADR/034-durable-server-origin-sync-mutation-batches.md), [ADR-036](../ADR/036-web-clipper-external-identity-mapping.md), [ADR-042](../ADR/042-browser-transport-admission-and-attestation.md), and [ADR-065](../ADR/065-independent-notes-knowledge-provenance.md); no accepted rationale is rewritten or superseded.
+**ADR required: yes. ADR path:** [accepted ADR-066](../ADR/066-explicit-web-capture-and-refresh-snapshots.md). Explicit fetch/accept boundaries, credential-free acquisition, and refresh identity/version semantics are durable public API, security, and persistence rules. This decision composes [ADR-007](../ADR/007-research-workspace-canonical-first-slice-shell.md), [ADR-018](../ADR/018-resource-governance-endpoint-policy-and-route-map.md), [ADR-026](../ADR/026-security-outbound-egress-and-ssrf-policy.md), [ADR-031](../ADR/031-notes-capability-sync-domains.md), [ADR-034](../ADR/034-durable-server-origin-sync-mutation-batches.md), [ADR-036](../ADR/036-web-clipper-external-identity-mapping.md), [ADR-042](../ADR/042-browser-transport-admission-and-attestation.md), and [ADR-065](../ADR/065-independent-notes-knowledge-provenance.md); no accepted rationale is rewritten or superseded.
 
-The requester must approve this concrete behavior and proposed ADR before implementation: readable public text only, an extra capture Note, a new source identity on every accepted refresh, preservation of old evidence, and the stated boundary around historical-version RAG. Parent task tracking and implementation planning follow approval.
+The requester approved this behavior and ADR on 2026-10-07: readable public text only, an extra capture Note, a new source identity on every accepted refresh, preservation of old evidence, and the boundary around historical-version RAG. Local implementation acceptance is recorded in the canonical closeout; independent branch review, publication, a new human Change summary, updated-head CI and merge remain controller gates.

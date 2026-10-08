@@ -1,7 +1,7 @@
 ---
 id: TASK-13531
 title: Repair inherited Research Workspace test contract and overlay failures
-status: In Progress
+status: Done
 labels:
 - knowledge
 - research
@@ -19,8 +19,8 @@ Burn down the ten named Research/Chat/storage assertions found during TASK-13530
 <!-- AC:BEGIN -->
 - [x] #1 All ten canonical-dev failures have diagnosed causes and preserve or strengthen their intended behavior checks without skips or weakened security assertions.
 - [x] #2 Four owning suites pass under the documented native-resolution environment; focused default behavior and any inherited environment qualification are recorded accurately.
-- [ ] #3 Any actual product defect is fixed at its existing shared root with meaningful RED/GREEN and independent review; types, touched lint/hooks and browser checks where applicable pass.
-- [ ] #4 Tracking links canonical comparison receipts, exact final commits/checks, original related tasks and remaining native/device limits.
+- [x] #3 Any actual product defect is fixed at its existing shared root with meaningful RED/GREEN and independent review; types, touched lint/hooks and browser checks where applicable pass.
+- [x] #4 Tracking links canonical comparison receipts, exact final commits/checks, original related tasks and remaining native/device limits.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -46,20 +46,21 @@ Fix3 BASE976dff578bf1f1b0a290dfccb6b0a67f35ccf6e6, initial sole tracked change c
 Fix3 implementation on exact BASE 976dff578bf1f1b0a290dfccb6b0a67f35ccf6e6: actual native account withdrawal, typed API scope invalidation, rejected-never-open host teardown, transient authority Retry and late lease retirement now have meaningful RED/GREEN proof. Shared hook reuses verified service-prompt snapshot lease, native account watcher and existing generation/lifecycle/operation guards; four source-view API methods forward optional captured scope, narrow shared direct/worker admission preserves ordinary envelopes. Final owning 7 files 383/383 pass, both client type checks exit0; exact BASE/current scoped ESLint 1 inherited error/51 warnings, no introduced findings; inherited whole-file Prettier debt remains. Native rapid Cancel/Close/Escape characterization3/3 passes but actual WebUI pointer Cancel symptom remains unresolved pending controller rebuilt CDP. No runtimes/build/browser/dependency/primary mutations. Report .superpowers/sdd/IMPLEMENTATION_PLAN_knowledge_capture_refresh_20261007/task-7-fix3-report.md; ADR007/042/065 reused, no new durable decision. Keep In Progress, AC3/4 and Stage4 open for independent review plus Task6 native two-client acceptance.
 Task7 fix3 f12bb3e743 independently reviewed in /private/tmp/knowledge-capture-task7-fix3-rereview.md: account withdrawal, typed API scope retirement, temporary authority Retry and rejected-request teardown addressed, no new breakage. Saved evidence383 owning/default4/final worker-root38/both types0; exact BASE lint1error51warnings and nine whole-file Prettier failures remain inherited, no introduced diagnostics. Real rapid WebUI pointer Cancel remains OPEN: unchanged native characterization passes3 paths and no real event/root diagnosis is claimed. AC3/4 and Stage4 remain open for one bounded current rebuilt CDP diagnostic and both-client native authority acceptance; no Task6 canonical closure yet.
 Fix4 scoped repair (BASE 7ff4e897fa469e4072319a786683b2f90065d4e7): actual native empty-draft keyboard blur moves Cancel y228 to y256 (+28px), a meaningful layout RED with zero SourceView writes and no fourth unchanged Cancel click. SourceViewOverlayHost now retains the exact error paragraph with visibility hidden until touched/invalid, preserving natural wrapped height and existing alert/aria-invalid/description, validation and native close/server-ack/authority guards. Added runnable existing-CDP layout plus down/up delivery check and an accessibility regression. Focused unit RED then GREEN; affected controls44/root12/hook72 = 128 passed; default focused1 passed; both 8GiB client type checks exit0. Scoped ESLint BASE/current0 errors0 warnings; two inherited whole-file Prettier failures unchanged, new CDP runner formatted/lint/syntax clean. No Python changed; Bandit N/A. ADR required: no, local layout repair under existing canonical shared-shell ADR007; existing ADR042/065 admission/provenance untouched. Initial and one authorized cache-disabled reload actual loaded module hashes still match BASE, so native GREEN/current two-client acceptance remains pending controller artifact resolution and independent review. No runtime/build/profile restart or capture acquisition; TASK13531 stays In Progress, AC3/4 open. Full appended fix4 report: .superpowers/sdd/IMPLEMENTATION_PLAN_knowledge_capture_refresh_20261007/task-7-fix3-report.md.
+Task6 current reconciliation (2026-10-08): All ten exact canonical-dev2c failures diagnosed and repaired with meaningful owning assertions; four owning suites233/233 qualified pass. Reviewed rounds1–4 retain selected provider/source identity, quota/hydration contracts, normal CSS close focus, same-workspace account authority, retry/teardown and stable validation layout. Current128 controls/root/hook pass and both types0; default focused1 passes separately from native-resolution qualification. Current built WebUI94/94 and Chrome171/171 scripts match; trusted pointer/native CSS Cancel desktop/narrow plus actual two-line feedback, rapid current Cancel/Close/Escape, no old focus steal, non-authority setting preservation/account withdrawal retirement, onePOST+threePATCH perclient with actual201/200/200/404 acknowledgments and busyEscape/double-submit all pass. Controller confirmed native finding4 resolved. No newPython; final unionBandit0 is integration evidence. Inherited lint/whole-file formatting/defaultReact qualifications retained. Locally Done; branch publication pending. Canonical evidence: Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md and sanitized artifacts/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.json. Local product head63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec; Task6 base same head. Independent Task6/whole-branch review, publication, new requester-written Change summary, seven updated-head required CI checks and merge remain controller gates. ADR required: yes; accepted Docs/ADR/066-explicit-web-capture-and-refresh-snapshots.md governs explicit capture/fresh refresh/current-head RAG, composing existing007/018/026/031/034/036/042/065 without rationale changes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented nine current-contract/jsdom/storage fixture corrections and one owning keyboard close/focus repair, including separately proved selection-close focus sibling. All233owning cases passed before final sibling adjustment; affected33overlay cases and both client types passed after it. Selected provider is checked through real factory and grounded ChatTldw transport with retrieved evidence and source provenance. Existing workspace/owner/server-confirmation guards remain. Controller independent review and exact both-client Task6 CDP keyboard/focus checks remain pending.
+All ten exact canonical-dev2c failures diagnosed and repaired with meaningful owning assertions; four owning suites233/233 qualified pass. Reviewed rounds1–4 retain selected provider/source identity, quota/hydration contracts, normal CSS close focus, same-workspace account authority, retry/teardown and stable validation layout. Current128 controls/root/hook pass and both types0; default focused1 passes separately from native-resolution qualification. Current built WebUI94/94 and Chrome171/171 scripts match; trusted pointer/native CSS Cancel desktop/narrow plus actual two-line feedback, rapid current Cancel/Close/Escape, no old focus steal, non-authority setting preservation/account withdrawal retirement, onePOST+threePATCH perclient with actual201/200/200/404 acknowledgments and busyEscape/double-submit all pass. Controller confirmed native finding4 resolved. No newPython; final unionBandit0 is integration evidence. Inherited lint/whole-file formatting/defaultReact qualifications retained. Locally Done; branch publication pending. Canonical evidence: Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md and sanitized artifacts/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.json. Local product head63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec; Task6 base same head. Independent Task6/whole-branch review, publication, new requester-written Change summary, seven updated-head required CI checks and merge remain controller gates. ADR required: yes; accepted Docs/ADR/066-explicit-web-capture-and-refresh-snapshots.md governs explicit capture/fresh refresh/current-head RAG, composing existing007/018/026/031/034/036/042/065 without rationale changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
