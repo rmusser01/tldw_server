@@ -140,7 +140,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
 **Success Criteria:** Explicit UI actions, honest extraction/version labels, no accidental save, retained original evidence and safe retirement/recovery.
 **Tests:** SourcesPane and capture workflow, prefill/provenance/import/export/restore tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Integrate capture and refresh in Research
 
@@ -171,7 +171,7 @@ assertCurrent()
 - [x] Wire exact version preview and source provenance using existing Notes v1 fields when a later sourced Note explicitly references capture; keep original references alongside and do not restore removed provenance implicitly.
 - [x] Run focused and owning suites, both client typechecks, scoped lint/locales/hooks/self-review and commit. Record baseline/timing failures without a broad-green claim; report every actual Ask call site covered, unsupported edited-send behavior, and qualified historical-RAG limitations. Focused fix1 tests116/116; owning broad1182/1193 with qualified failures; independent six-finding re-review passed.
 
-- [ ] Task4 fix2: repair live single-user public-owner/request-scope identity mismatch without changing recovery namespace or verified authority; cover real identity builders and owner/credential retirement, then independent scoped review and real CDP capture verification. Task6 found same-owner Capture account changed before HTTP at6210798ef5.
+- [x] Task4 fix2: repair live single-user public-owner/request-scope identity mismatch without changing recovery namespace or verified authority; cover real identity builders and owner/credential retirement, then independent scoped review and real CDP capture verification. Task6 found same-owner Capture account changed before HTTP at6210798ef5.
 
 ### Task 5: Clarify Notes editing-state wording and qualify panel analysis
 
