@@ -575,11 +575,92 @@ it.each(["missing", "uuid", "body", "404"])(
       kind === "missing" ? [newer] : [newer, old]
     )
     mocks.version.mockImplementation(async (_id, number) => {
-      if (number === 9 && kind === "404") throw Error("404")
+      if (number === 9 && ["missing", "404"].includes(kind)) throw Error("404")
       return number === 9 ? old : newer
     })
     await expect(
       confirmWebCaptureAcceptance(body, options, () => {}, pin)
     ).rejects.toThrow()
+  }
+)
+
+// The native history endpoint returns ten active rows per page by default.
+it("recovers an exact checkpoint beyond ten newer active versions without listing", async () => {
+  const { body, version } = await fixture()
+  const { pin } = await confirmWebCaptureAcceptance(body, options, () => {})
+  mocks.versions.mockClear()
+  mocks.versions.mockResolvedValue(
+    Array.from({ length: 10 }, (_, index) => ({
+      ...version,
+      version_number: 19 - index,
+      uuid: canonicalNoteId
+    }))
+  )
+  expect(
+    (await confirmWebCaptureAcceptance(body, options, () => {}, pin)).pin
+  ).toEqual(pin)
+  expect(mocks.versions).not.toHaveBeenCalled()
+  expect(mocks.version).toHaveBeenLastCalledWith(71, 9, options)
+})
+
+it.each(["match", "exhausted", "deleted", "abort", "retired"])(
+  "searches native active history pages and handles %s on page two",
+  async (outcome) => {
+    const { body, version } = await fixture()
+    const controller = new AbortController()
+    const captured = { ...options, signal: controller.signal }
+    let retired = false
+    const current = () => {
+      if (retired) throw Error("retired")
+    }
+    const newer = Array.from({ length: 10 }, (_, index) => ({
+      ...version,
+      version_number: 19 - index,
+      content: "Changed article"
+    }))
+    mocks.versions.mockImplementation(async (_id, _options, pagination) => {
+      if (!pagination || pagination.page === 1) return newer
+      if (outcome === "abort") controller.abort()
+      if (outcome === "retired") retired = true
+      return outcome === "exhausted" ? [] : [version]
+    })
+    if (outcome === "deleted") mocks.version.mockRejectedValue(Error("404"))
+    const pending = confirmWebCaptureAcceptance(body, captured, current)
+    if (outcome === "match") expect((await pending).pin.versionNumber).toBe(9)
+    else await expect(pending).rejects.toThrow()
+    expect(mocks.versions.mock.calls).toEqual([
+      [71, captured, { limit: 10, page: 1 }],
+      [71, captured, { limit: 10, page: 2 }]
+    ])
+    if (["exhausted", "abort", "retired"].includes(outcome))
+      expect(mocks.version).not.toHaveBeenCalled()
+    else expect(mocks.version).toHaveBeenCalledWith(71, 9, captured)
+  }
+)
+
+it.each(["abort", "retired"])(
+  "rejects %s during direct checkpoint read",
+  async (outcome) => {
+    const { body, version } = await fixture()
+    const { pin } = await confirmWebCaptureAcceptance(body, options, () => {})
+    const controller = new AbortController()
+    let retired = false
+    mocks.versions.mockClear()
+    mocks.version.mockImplementation(async () => {
+      if (outcome === "abort") controller.abort()
+      else retired = true
+      return version
+    })
+    await expect(
+      confirmWebCaptureAcceptance(
+        body,
+        { ...options, signal: controller.signal },
+        () => {
+          if (retired) throw Error("retired")
+        },
+        pin
+      )
+    ).rejects.toThrow()
+    expect(mocks.versions).not.toHaveBeenCalled()
   }
 )

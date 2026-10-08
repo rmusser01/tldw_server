@@ -474,3 +474,27 @@ describe("article capture scoped reads", () => {
       })
   })
 })
+
+it("preserves default version URLs and forwards native page parameters and rows", async () => {
+  const client = new TldwApiClient()
+  const signal = new AbortController().signal
+  const options = { requestScope, signal }
+  const rows = [
+    { media_id: 71, version_number: 9, uuid: "accepted", content: "full text" }
+  ]
+  mocks.bgRequest.mockResolvedValue(rows)
+  expect(await client.listMediaDocumentVersions(71, options)).toBe(rows)
+  expect(mocks.bgRequest.mock.lastCall?.[0].path).toBe(
+    "/api/v1/media/71/versions?include_content=true"
+  )
+  expect(
+    await client.listMediaDocumentVersions(71, options, { limit: 10, page: 2 })
+  ).toBe(rows)
+  expect(mocks.bgRequest.mock.lastCall?.[0]).toMatchObject({
+    path: "/api/v1/media/71/versions?include_content=true&limit=10&page=2",
+    method: "GET",
+    abortSignal: signal,
+    servicePromptConfig: expectedScopeFields.servicePromptConfig,
+    headers: { "X-TLDW-Expected-User-ID": "42" }
+  })
+})

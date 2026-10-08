@@ -303,12 +303,7 @@ export async function confirmWebCaptureAcceptance(
   check()
   const source = sources.find((row) => row.id === `web-clipper:${clipId}`)
   verifySource(source, clipId, workspaceId, descriptor.requested_url)
-  const versions = await tldwClient.listMediaDocumentVersions(
-    source.media_id,
-    options
-  )
-  check()
-  // Recovery preserves its checkpoint; initial confirmation searches active history.
+  // A durable checkpoint addresses its exact active version, independent of pages.
   if (
     pin &&
     (pin.mediaId !== source.media_id ||
@@ -316,35 +311,52 @@ export async function confirmWebCaptureAcceptance(
       pin.requestedUrl !== descriptor.requested_url ||
       pin.capturedAt !== descriptor.captured_at ||
       pin.contentSha256 !== descriptor.content_sha256 ||
-      pin.refreshOf !== descriptor.refresh_of)
+      pin.refreshOf !== descriptor.refresh_of ||
+      !Number.isSafeInteger(pin.versionNumber) ||
+      pin.versionNumber <= 0 ||
+      !uuidPattern.test(pin.versionUuid))
   )
     fail()
-  let accepted: MediaDocumentVersion | undefined
-  for (const version of versions) {
-    if (
-      pin &&
-      (version.version_number !== pin.versionNumber ||
-        version.uuid !== pin.versionUuid)
-    )
-      continue
-    try {
-      await verifyVersion(
-        version,
+  let accepted:
+    | Pick<MediaDocumentVersion, "version_number" | "uuid">
+    | undefined = pin
+    ? { version_number: pin.versionNumber, uuid: pin.versionUuid }
+    : undefined
+  if (!pin) {
+    const limit = 10
+    for (let page = 1; !accepted; page++) {
+      check()
+      const versions = await tldwClient.listMediaDocumentVersions(
         source.media_id,
-        clipId,
-        workspaceId,
-        descriptor,
-        text
+        options,
+        { limit, page }
       )
-    } catch (reason) {
-      if (!(reason instanceof WebCaptureNotCurrentError) || pin) throw reason
-      continue
+      check()
+      for (const version of versions) {
+        check()
+        try {
+          await verifyVersion(
+            version,
+            source.media_id,
+            clipId,
+            workspaceId,
+            descriptor,
+            text
+          )
+        } catch (reason) {
+          check()
+          if (!(reason instanceof WebCaptureNotCurrentError)) throw reason
+          continue
+        }
+        check()
+        accepted = version
+        break
+      }
+      if (versions.length < limit) break
     }
-    check()
-    accepted = version
-    break
   }
   if (!accepted) fail()
+  check()
   const exact = await tldwClient.getMediaDocumentVersion(
     source.media_id,
     accepted.version_number,

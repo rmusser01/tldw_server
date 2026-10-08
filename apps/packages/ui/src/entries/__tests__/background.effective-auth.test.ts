@@ -1799,6 +1799,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/web-clipper/925871f6-30fa-470b-a2c4-2272051f2373", "GET"],
     ["/api/v1/web-clipper/clip%20with%20spaces/", "GET"],
     ["/api/v1/media/71/versions?include_content=true", "GET"],
+    ["/api/v1/media/71/versions?include_content=true&limit=10&page=2", "GET"],
     ["/api/v1/media/71/versions/7?include_content=true", "GET"],
     ["/api/v1/workspaces/workspace%20with%20spaces/sources", "GET"],
     [
@@ -1904,9 +1905,13 @@ describe("background effective extension auth", () => {
     }
   )
 
-  it.each(["principal", "origin", "refresh", "key"])(
-    "rejects changed capture %s in worker before HTTP",
-    async (change) => {
+  it.each(
+    ["principal", "origin", "refresh", "key"].flatMap((change) =>
+      ["extract", "paged versions"].map((operation) => ({ change, operation }))
+    )
+  )(
+    "rejects changed capture $change in worker before $operation HTTP",
+    async ({ change, operation }) => {
       const fetchSpy = vi.fn()
       vi.stubGlobal("fetch", fetchSpy)
       if (change !== "key") {
@@ -1927,9 +1932,15 @@ describe("background effective extension auth", () => {
         sendRuntimeMessage({
           type: "tldw:request",
           payload: {
-            path: "/api/v1/media/ingest-web-content",
-            method: "POST",
-            body: { urls: ["https://example.com"] },
+            path:
+              operation === "extract"
+                ? "/api/v1/media/ingest-web-content"
+                : "/api/v1/media/71/versions?include_content=true&limit=10&page=2",
+            method: operation === "extract" ? "POST" : "GET",
+            body:
+              operation === "extract"
+                ? { urls: ["https://example.com"] }
+                : undefined,
             servicePromptConfig:
               change === "key"
                 ? {

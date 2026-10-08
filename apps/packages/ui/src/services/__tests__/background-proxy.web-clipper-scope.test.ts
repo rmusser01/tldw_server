@@ -231,6 +231,11 @@ describe("public article capture through actual scoped direct transport", () => 
     ["status", `/api/v1/web-clipper/${clipId}`, "GET"],
     ["status slash", `/api/v1/web-clipper/${clipId}/`, "GET"],
     ["versions", "/api/v1/media/71/versions?include_content=true", "GET"],
+    [
+      "paged versions",
+      "/api/v1/media/71/versions?include_content=true&limit=10&page=2",
+      "GET"
+    ],
     ["version", "/api/v1/media/71/versions/7?include_content=true", "GET"],
     ["sources", "/api/v1/workspaces/workspace%20with%20spaces/sources", "GET"],
     [
@@ -269,6 +274,11 @@ describe("public article capture through actual scoped direct transport", () => 
         await client.getWebClipStatus(clipId, captured)
       else if (operation === "versions")
         await client.listMediaDocumentVersions(71, captured)
+      else if (operation === "paged versions")
+        await client.listMediaDocumentVersions(71, captured, {
+          limit: 10,
+          page: 2
+        })
       else if (operation === "version")
         await client.getMediaDocumentVersion(71, 7, captured)
       else if (operation === "sources")
@@ -310,9 +320,13 @@ describe("public article capture through actual scoped direct transport", () => 
     }
   )
 
-  it.each(["principal", "origin", "refresh"])(
-    "rejects changed capture %s before HTTP",
-    async (change) => {
+  it.each(
+    ["principal", "origin", "refresh"].flatMap((change) =>
+      ["extract", "paged versions"].map((operation) => ({ change, operation }))
+    )
+  )(
+    "rejects changed capture $change before $operation HTTP",
+    async ({ change, operation }) => {
       boundary.get.mockImplementation(async (key: string) =>
         key === "tldwConfig"
           ? {
@@ -328,7 +342,15 @@ describe("public article capture through actual scoped direct transport", () => 
           : null
       )
       await expect(
-        tldwMedia.extractPublicArticle("https://example.com/story", options())
+        operation === "extract"
+          ? tldwMedia.extractPublicArticle(
+              "https://example.com/story",
+              options()
+            )
+          : new TldwApiClient().listMediaDocumentVersions(71, options(), {
+              limit: 10,
+              page: 2
+            })
       ).rejects.toMatchObject({ status: 412 })
       expect(boundary.fetch).not.toHaveBeenCalled()
     }

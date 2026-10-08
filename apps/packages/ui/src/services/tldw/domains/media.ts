@@ -116,10 +116,16 @@ export interface MediaDocumentVersion {
 export const mediaMethods = {
   async listMediaDocumentVersions(
     mediaId: number,
-    options?: ScopedRequestOptions
+    options?: ScopedRequestOptions,
+    pagination?: { limit?: number; page?: number }
   ): Promise<MediaDocumentVersion[]> {
+    const query = buildQuery({
+      include_content: true,
+      limit: pagination?.limit,
+      page: pagination?.page
+    })
     return await bgRequest<MediaDocumentVersion[]>({
-      path: `/api/v1/media/${encodeURIComponent(String(mediaId))}/versions?include_content=true`,
+      path: `/api/v1/media/${encodeURIComponent(String(mediaId))}/versions${query}`,
       method: "GET",
       ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
