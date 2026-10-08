@@ -129,6 +129,19 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
     }
   }, [loadMatrix])
 
+  // `permissions` must be derived before the loading early-return below so
+  // filteredPermissions can be memoized without breaking the rules of hooks.
+  const permissions: Permission[] = matrix?.permissions ?? []
+  // Recompute the category filter only when the matrix or the filter changes
+  // (admin perf C-S3 / F16); the grid cells themselves are already O(1).
+  const filteredPermissions = React.useMemo(
+    () =>
+      selectedCategory
+        ? permissions.filter((p) => p.category === selectedCategory)
+        : permissions,
+    [permissions, selectedCategory]
+  )
+
   if (!matrix) {
     if (matrixError && !loading) {
       return (
@@ -147,12 +160,7 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 
   // matrix shape: { roles: [{id, name}], permissions: [{id, name, category}], grid: {[permId]: {[roleId]: bool}} }
   const roles: Array<{ id: number; name: string }> = matrix.roles ?? []
-  const permissions: Permission[] = matrix.permissions ?? []
   const grid: Record<number, Record<number, boolean>> = matrix.grid ?? {}
-
-  const filteredPermissions = selectedCategory
-    ? permissions.filter(p => p.category === selectedCategory)
-    : permissions
 
   const columns = [
     {
@@ -473,12 +481,35 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
   // inside the stale window. Failures stay non-critical here, as before.
   const rolesQuery = useAdminRoles()
   const permissionsQuery = useAdminPermissions()
-  const allRoles: Role[] = Array.isArray(rolesQuery.data)
-    ? rolesQuery.data
-    : ((rolesQuery.data as any)?.data ?? [])
-  const allPermissions: Permission[] = Array.isArray(permissionsQuery.data)
-    ? permissionsQuery.data
-    : ((permissionsQuery.data as any)?.data ?? [])
+  // Memoize the normalized arrays so downstream Map/Set memos keep a stable
+  // dependency when react-query serves the cached array instance (the `??`
+  // fallbacks would otherwise mint a fresh empty array every render).
+  const allRoles: Role[] = React.useMemo(
+    () =>
+      Array.isArray(rolesQuery.data)
+        ? rolesQuery.data
+        : ((rolesQuery.data as any)?.data ?? []),
+    [rolesQuery.data]
+  )
+  const allPermissions: Permission[] = React.useMemo(
+    () =>
+      Array.isArray(permissionsQuery.data)
+        ? permissionsQuery.data
+        : ((permissionsQuery.data as any)?.data ?? []),
+    [permissionsQuery.data]
+  )
+  // O(1) keyed lookups for per-row rendering (admin perf C-S3 / F16): the
+  // override table resolves names through the Map instead of scanning the
+  // catalog with `.find` per row, and role options test membership in a Set
+  // instead of `userRoles.some(...)` per option.
+  const permissionById = React.useMemo(
+    () => new Map(allPermissions.map((p) => [p.id, p])),
+    [allPermissions]
+  )
+  const assignedRoleIds = React.useMemo(
+    () => new Set(userRoles.map((ur: any) => ur.id ?? ur.role_id)),
+    [userRoles]
+  )
 
   const handleUserSelect = useCallback((userId: number) => {
     setSelectedUserId(userId)
@@ -574,7 +605,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
       title: t("settings:adminRbac.colPermission", "Permission"),
       key: "permission_name",
       render: (_: any, record: UserOverride) =>
-        record.permission_name ?? allPermissions.find(p => p.id === record.permission_id)?.name ?? `#${record.permission_id}`
+        record.permission_name ?? permissionById.get(record.permission_id)?.name ?? `#${record.permission_id}`
     },
     {
       title: t("settings:adminRbac.colEffect", "Effect"),
@@ -726,7 +757,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
           options={allRoles.map(r => ({
             label: r.name,
             value: r.id,
-            disabled: userRoles.some((ur: any) => (ur.id ?? ur.role_id) === r.id)
+            disabled: assignedRoleIds.has(r.id)
           }))}
         />
       </Modal>

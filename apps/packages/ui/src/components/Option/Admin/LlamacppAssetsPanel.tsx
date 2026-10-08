@@ -164,7 +164,10 @@ const LlamacppAssetsPanelImpl: React.FC<LlamacppAssetsPanelProps> = ({
   const [downloadDestinationDir, setDownloadDestinationDir] = React.useState("")
   const [downloadFilename, setDownloadFilename] = React.useState("")
   const assetList = assets?.assets || []
-  const assetGroups = toAssetGroups(assetList)
+  // Group the catalog (4 kind-filter passes) only when the list reference
+  // changes (admin perf C-S3 / F18): typing in this panel's own inputs
+  // re-renders it without rebuilding the groups.
+  const assetGroups = React.useMemo(() => toAssetGroups(assetList), [assetList])
   const downloadJobs = downloads?.jobs || []
   const showDownloadWorkflow = Boolean(onStartDownload) || downloadJobs.length > 0
   const importUsesPreview = Boolean(onPreviewImportFolder)

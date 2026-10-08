@@ -393,4 +393,41 @@ describe("LlamacppAssetsPanel", () => {
       expect(onCancelDownload).toHaveBeenCalledWith("42")
     })
   })
+
+  it("test_asset_groups_rebuilt_only_on_list_change", async () => {
+    // A dedicated list instance so the spy only observes this render's grouping.
+    const assetList = [...mockAssets.assets]
+    const filterSpy = vi.spyOn(assetList, "filter")
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ ...mockAssets, assets: assetList }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        error={null}
+        onRegisterPath={vi.fn()}
+        onImportFolder={vi.fn()}
+        onReload={vi.fn()}
+      />
+    )
+
+    // Grouping the catalog runs the four kind-filter passes exactly once.
+    expect(filterSpy).toHaveBeenCalledTimes(4)
+    expect(screen.getByText("GGUF models")).toBeTruthy()
+    expect(screen.getByText("mmproj projectors")).toBeTruthy()
+    expect(screen.getByText("Imported folders")).toBeTruthy()
+
+    // A keystroke in an asset input re-renders the panel...
+    const assetInput = screen.getByLabelText("Register local asset path") as HTMLInputElement
+    fireEvent.change(assetInput, { target: { value: "/external/other.gguf" } })
+    await waitFor(() => {
+      expect(assetInput.value).toBe("/external/other.gguf")
+    })
+
+    // ...without rebuilding the groups.
+    expect(filterSpy).toHaveBeenCalledTimes(4)
+
+    filterSpy.mockRestore()
+  })
 })

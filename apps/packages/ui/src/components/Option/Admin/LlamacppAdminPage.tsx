@@ -758,6 +758,25 @@ export const LlamacppAdminPage: React.FC = () => {
     () => hardware?.warnings || [],
     [hardware]
   )
+  // O(1) runtime joins (admin perf C-S3 / F16): the snapshot section looks its
+  // profile up once per snapshotProfileId/runtimeInstances change instead of
+  // filter+map+find scanning both lists on every page render.
+  const runtimeByProfileId = React.useMemo(
+    () =>
+      new Map(runtimeInstances.map((runtime) => [runtime.profile_id, runtime])),
+    [runtimeInstances]
+  )
+  const snapshotProfile = React.useMemo(
+    () => ({
+      profile: runtimeProfiles.find(
+        (profile) => profile.profile_id === snapshotProfileId
+      ),
+      runtime: snapshotProfileId
+        ? runtimeByProfileId.get(snapshotProfileId)
+        : undefined
+    }),
+    [runtimeProfiles, snapshotProfileId, runtimeByProfileId]
+  )
   const inventoryUnavailable =
     Boolean(inventoryError) || (!loadingInventory && !inventory)
   const inventoryLoadedOrUnavailable =
@@ -1410,26 +1429,24 @@ export const LlamacppAdminPage: React.FC = () => {
                   onResume={handleResumeProfile}
                   onUseInChat={handleRuntimeUseInChat}
                 />
-                {runtimeProfiles
-                  .filter((profile) => profile.profile_id === snapshotProfileId)
-                  .map((profile) => {
-                    const runtime = runtimeInstances.find(
-                      (item) => item.profile_id === profile.profile_id
-                    )
-                    return (
-                      <div key={profile.profile_id} className="space-y-2">
-                        <h3 className="font-semibold">{profile.name}</h3>
-                        <LlamacppSnapshotsAdmin
-                          profile={profile}
-                          generation={runtime?.launch_generation}
-                          runtimeState={runtime?.state}
-                          onProfileChanged={() => {
-                            void loadRuntimePlane()
-                          }}
-                        />
-                      </div>
-                    )
-                  })}
+                {snapshotProfile.profile && (
+                  <div
+                    key={snapshotProfile.profile.profile_id}
+                    className="space-y-2"
+                  >
+                    <h3 className="font-semibold">
+                      {snapshotProfile.profile.name}
+                    </h3>
+                    <LlamacppSnapshotsAdmin
+                      profile={snapshotProfile.profile}
+                      generation={snapshotProfile.runtime?.launch_generation}
+                      runtimeState={snapshotProfile.runtime?.state}
+                      onProfileChanged={() => {
+                        void loadRuntimePlane()
+                      }}
+                    />
+                  </div>
+                )}
               </>
             )}
 
