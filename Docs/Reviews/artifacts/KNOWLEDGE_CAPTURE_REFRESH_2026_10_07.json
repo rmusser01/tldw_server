@@ -278,7 +278,12 @@
     {
       "name": "resume7-web-budget",
       "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
-      "command": ["node", "scripts/check-bundle-budget.mjs", "--dir", ".next"],
+      "command": [
+        "node",
+        "scripts/check-bundle-budget.mjs",
+        "--dir",
+        ".next"
+      ],
       "cwd": "apps/tldw-frontend",
       "exit_code": 0,
       "seconds": 0.13,
@@ -290,7 +295,11 @@
     {
       "name": "resume7-extension",
       "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
-      "command": ["node", "scripts/build-with-profile.mjs", "--browser=chrome"],
+      "command": [
+        "node",
+        "scripts/build-with-profile.mjs",
+        "--browser=chrome"
+      ],
       "cwd": "apps/extension",
       "exit_code": 0,
       "seconds": 35.36,
@@ -482,7 +491,11 @@
     {
       "client": "web",
       "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
-      "command": ["node", "node_modules/typescript/bin/tsc", "--noEmit"],
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
       "cwd": "apps/tldw-frontend",
       "environment": {
         "NODE_OPTIONS": "--max-old-space-size=8192"
@@ -2181,7 +2194,9 @@
         "input_sha256": "0a2eec260f76991505d031db57890778d24e541138f891b49af74acdc42059cb",
         "log": "/private/tmp/knowledge-final-wave-backend-current-green.log",
         "log_sha256": "a63eb4c84e21fad5dacd4916a1246d6713d7eb2c4f7d7cc1aad7b6dc8b1bc364",
-        "summaries": ["1 passed, 41 warnings in 1.25s"]
+        "summaries": [
+          "1 passed, 41 warnings in 1.25s"
+        ]
       },
       {
         "name": "m1-owning",
@@ -2280,7 +2295,10 @@
       {
         "name": "style",
         "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
-        "command": ["node", "/private/tmp/knowledge-final-wave-style.mjs"],
+        "command": [
+          "node",
+          "/private/tmp/knowledge-final-wave-style.mjs"
+        ],
         "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
         "exit_code": 0,
         "signal": null,
@@ -2327,7 +2345,9 @@
         "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
         "log": "/private/tmp/knowledge-final-wave-python-style.log",
         "log_sha256": "371c42a95fe1155a79f2dbba142ba2169fe61595b417255c3ee2764b7655ef30",
-        "summaries": ["ruff failed"]
+        "summaries": [
+          "ruff failed"
+        ]
       },
       {
         "name": "python-style-green",
@@ -2357,7 +2377,9 @@
         "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
         "log": "/private/tmp/knowledge-final-wave-python-style-green.log",
         "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
-        "summaries": ["All checks passed!"]
+        "summaries": [
+          "All checks passed!"
+        ]
       },
       {
         "name": "black",
@@ -2615,7 +2637,10 @@
         "input_sha256": "db86b3c6cc50399ffa9f26e7b4d48d383713db57fb2ee7ec007ef2ad214ac3c4",
         "log": "/private/tmp/knowledge-final-wave-restore-diagnosis.log",
         "log_sha256": "befa1f6d995f38e0491f6e6b996bb21fa632702f0e806768576a93187b0249f2",
-        "summaries": [" Test Files  1 failed (1)", "      Tests  no tests"]
+        "summaries": [
+          " Test Files  1 failed (1)",
+          "      Tests  no tests"
+        ]
       },
       {
         "name": "restore-diagnosis-corrected",
@@ -2695,7 +2720,10 @@
       {
         "name": "style-with-restore-fixture",
         "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
-        "command": ["node", "/private/tmp/knowledge-final-wave-style.mjs"],
+        "command": [
+          "node",
+          "/private/tmp/knowledge-final-wave-style.mjs"
+        ],
         "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
         "exit_code": 0,
         "signal": null,
@@ -4985,7 +5013,18 @@
           "uuid": "f1d81f0e-2286-4b7e-aaa9-547c43dcd30f",
           "contentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a"
         },
-        "realPutStatuses": [200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+        "realPutStatuses": [
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200
+        ],
         "firstPageVersions": [
           {
             "number": 11,
@@ -5083,7 +5122,18 @@
           "uuid": "f91b9b20-620c-45b4-97bb-646e1c7fa478",
           "contentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a"
         },
-        "realPutStatuses": [200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+        "realPutStatuses": [
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200
+        ],
         "firstPageVersions": [
           {
             "number": 11,
@@ -5879,6 +5929,124 @@
       "path": "/private/tmp/knowledge-pr3213-hooks.log",
       "sha256": "3901a38bf379d0a01891fe4ccca12714bc91d1f047e338c098fa206a946464c3",
       "normal_commit": "pending controller-independent review; commit receipt is in private report, no hook bypass"
+    }
+  },
+  "pr3213_ci_inventory_completion": {
+    "task": "TASK-13530.1",
+    "base": "4173799cb8627f888e5834121989048fa8a63c83",
+    "change": "Added tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py after test_cache_index.py in five existing media-core-api matrices and the exact workflow contract inventory.",
+    "hosted_failure": {
+      "run": "37758265620",
+      "job": "113249747524",
+      "shard": "Full Suite UbuntuPy3.12 gap-verified-12",
+      "reason": "New current-media deletion test absent from media shard inventory",
+      "log": "/private/tmp/knowledge-pr3213-backend-gap12.log",
+      "bytes": 220214,
+      "sha256": "ec0ae521a531a58c20e1e94cd222720fbf2179532b70da5e7a911dd01876a1aa"
+    },
+    "red": {
+      "command": "python -m pytest -q tldw_Server_API/tests/CI/test_required_workflow_contracts.py::test_full_suite_splits_slow_chat_and_retrieval_shards",
+      "exit_code": 1,
+      "result": "Expected assertion failure: current media regression path missing from media-core-api inventory",
+      "log": "/private/tmp/knowledge-pr3213-shard-inventory-red.log",
+      "bytes": 15754,
+      "sha256": "942b18d63b38a14e2fe14d055537e420529d48fc37eceecbc5e614bc8482113e"
+    },
+    "green": {
+      "command": "python -m pytest -q tldw_Server_API/tests/CI/test_required_workflow_contracts.py::test_full_suite_splits_slow_chat_and_retrieval_shards",
+      "exit_code": 0,
+      "result": "1 passed across all five existing matrix inventories",
+      "log": "/private/tmp/knowledge-pr3213-shard-inventory-green.log",
+      "bytes": 9429,
+      "sha256": "21ad9e3795779894476cefbf65a9725043cb2dc77e6968dd2cfdabdccb29056e"
+    },
+    "inputs_after_change": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "bytes": 450162,
+        "sha256": "f06e840b76275a20f80e3a3e55fe7b021f75cc7088e2b3c364332fd34c1b6dee"
+      },
+      {
+        "path": "tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+        "bytes": 102648,
+        "sha256": "d439164a15aa83a8d13976d0a1b4678f86d85c3ebfacf659da835ab8f0a21a2f"
+      }
+    ],
+    "independent_fixture_review_reconciliation": {
+      "review": "/private/tmp/knowledge-pr3213-ci-fixtures-review.md",
+      "result": "Approved; 0 Critical, 0 Important; Minor evidence qualification",
+      "report_sha256": "ff8f1df9d282b04109972f86d81a163b44c3bc34c5c2936a7b931311051fe797",
+      "original_format_receipt": {
+        "path": "/private/tmp/knowledge-pr3213-scoped-format.log",
+        "bytes": 107,
+        "sha256": "1be9f70e9aa41e84f5ff2994cf1d8dce3fa9ddf39578becd6232780906b9c4e0",
+        "comparison": false
+      },
+      "later_note_same_path": {
+        "bytes": 191,
+        "sha256": "3a8c723f90fb789aca7e6701ae9b71a9aae35c90bc1c280c9d7a98b5ee50eba6"
+      },
+      "qualification": "Original manifest claim is preserved; no fresh formatter pass is claimed."
+    },
+    "qualifications": "Local targeted contract only; pytest emitted environment permission/cache warnings. No current-head hosted CI success inferred; no change to historical broad-suite qualifications. Existing CI contract governs; no ADR required.",
+    "verification": {
+      "ruff": {
+        "command": "python -m ruff check tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+        "exit_code": 0,
+        "log": "/private/tmp/knowledge-pr3213-ruff.log",
+        "bytes": 19,
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      "black_changed_range": {
+        "command": "python -m black --check --line-ranges 1040-1046 tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+        "exit_code": 0,
+        "log": "/private/tmp/knowledge-pr3213-black-changed-range.log",
+        "bytes": 55,
+        "sha256": "1a56c7cd8457fd05d978cfbd139d7bfd86e86acaa9b57668e718ef8bccc0cf48"
+      },
+      "black_whole_file": {
+        "current_exit": 1,
+        "base_exit": 1,
+        "current_log_sha256": "2f272bbd86978f200f565194d5bf0a019227c5118fb5d9b9fd47015e86cd6f90",
+        "base_log_sha256": "2f23d28e72e8d69c55c2a6f7484cd51cce99c2873443b2cb4c8556fc919136ce",
+        "qualification": "Pre-existing whole-file formatting failure reproduced at BASE; changed line range passes."
+      },
+      "bandit": {
+        "command": "<repo>/.venv/bin/bandit -r tldw_Server_API/tests/CI/test_required_workflow_contracts.py -s B101 -f json -o /private/tmp/knowledge-pr3213-bandit.json",
+        "base_exit": 1,
+        "current_exit": 1,
+        "base_json": {
+          "path": "/private/tmp/knowledge-pr3213-bandit-base.json",
+          "bytes": 1535,
+          "sha256": "6b183994639a5416a9bf031f86ebe70462123c185b26343d0e9f0b1ed5722588"
+        },
+        "current_json": {
+          "path": "/private/tmp/knowledge-pr3213-bandit.json",
+          "bytes": 1565,
+          "sha256": "42dae8afcec7d59cb7a574c8a939fcc8919e715e3bcc854447341bae401c8ae3"
+        },
+        "medium_plus_excluding_b101_exit": 0,
+        "medium_json": {
+          "path": "/private/tmp/knowledge-pr3213-bandit-medium.json",
+          "bytes": 779,
+          "sha256": "3157d525982e33787bfb0d2dcf7178cd6258241b617e96f3d1421e7748014e0f"
+        },
+        "qualification": "B101 assertions excluded; the same inherited LOW/MEDIUM-confidence B105 --cov at line 202 is present at BASE/current, no errors; no MEDIUM/HIGH issues. Designated venv lacks Bandit, so used the repository sibling .venv executable; no installation."
+      },
+      "normal_pre_commit": {
+        "command": "python -m pre_commit run --files <six owned files>",
+        "exit_code": 0,
+        "log": "/private/tmp/knowledge-pr3213-hooks-final.log",
+        "bytes": 1288,
+        "sha256": "0df7099f9a8b4a45386a58e7a418da4adf3c050b2e32efd044a75694172496d9"
+      },
+      "git_diff_check": {
+        "command": "git diff --check",
+        "exit_code": 0,
+        "log": "/private/tmp/knowledge-pr3213-diffcheck-final.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
     }
   }
 }

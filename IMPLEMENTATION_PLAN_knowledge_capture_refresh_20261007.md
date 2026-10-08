@@ -224,6 +224,16 @@ Task7 fix2: shared saved-view dialog focus now restores from existing native clo
 **Tests:** Integrated backend/sharedUI tests, builds, OpenAPI drift, lint, Bandit, pre-commit, CDP workflows.
 **Status:** In Progress
 
+### TASK-13530.1: PR3213 media shard inventory completion
+**Goal:** Keep the new current-media deletion regression in every existing media-core-api shard and its exact inventory contract.
+**Success Criteria:** All five workflow matrices and the exact-once contract agree on the regression path.
+**Tests:** `test_full_suite_splits_slow_chat_and_retrieval_shards`; scoped YAML/Python checks, Bandit and hooks.
+**Status:** Complete locally; publication and updated-head CI remain controller gates.
+
+The original hosted Ubuntu Python 3.12 shard failed because `test_capture_version_deletion_current_material.py` was absent from its inventory. Adding the path after `test_cache_index.py` in all five existing shard path sets and the exact contract made the targeted five-matrix test pass. See the canonical review and sanitized artifact for RED/GREEN receipts and hashes. No current-head hosted CI success is inferred; no ADR is required because the existing CI contract governs.
+
+Evidence lineage qualification retained from the independent frozen fixture review: `/private/tmp/knowledge-pr3213-scoped-format.log` originally hashed to `1be9f70e9aa41e84f5ff2994cf1d8dce3fa9ddf39578becd6232780906b9c4e0` (107 bytes; comparison `False`); the same path later held a 191-byte explanatory note hashing to `3a8c723f90fb789aca7e6701ae9b71a9aae35c90bc1c280c9d7a98b5ee50eba6`. No fresh formatter pass is claimed.
+
 ### Task 6: Verify and reconcile workstream
 
 **Files:**
