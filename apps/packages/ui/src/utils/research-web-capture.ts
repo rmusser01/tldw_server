@@ -281,8 +281,11 @@ export async function confirmWebCaptureAcceptance(
   if (
     status.clip_id !== clipId ||
     !["saved", "saved_with_warnings"].includes(status.status) ||
+    typeof status.note?.id !== "string" ||
+    !status.note.id.trim() ||
     !status.workspace_placements.some(
-      (p) => p.workspace_id === workspaceId && p.source_note_id === clipId
+      (p) =>
+        p.workspace_id === workspaceId && p.source_note_id === status.note.id
     )
   )
     fail()

@@ -6,6 +6,7 @@ import {
   assertWebCaptureHeadCurrent
 } from "../research-web-capture"
 import type { WorkspaceSource } from "@/types/workspace"
+import type { WebClipperStatusResponse } from "@/services/web-clipper/types"
 const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   sources: vi.fn(),
@@ -39,6 +40,7 @@ const options = {
   signal: new AbortController().signal
 }
 const versionUuid = "b4f6a910-1edb-4df4-a5fd-cd4c46532e58"
+const canonicalNoteId = "166b2a30-6e51-45e0-9a04-dcc695dff248"
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubGlobal("crypto", webcrypto)
@@ -49,12 +51,20 @@ async function fixture() {
     id: `web-clipper:${body.clip_id}`,
     workspace_id: input.workspaceId,
     media_id: 71,
-    url: input.url
+    url: input.url,
+    title: input.title,
+    source_type: "web_clip",
+    position: 0,
+    selected: true,
+    added_at: input.capturedAt,
+    review_state: "needs_review",
+    version: 1
   }
   const version = {
     uuid: versionUuid,
     media_id: 71,
     version_number: 9,
+    created_at: input.capturedAt,
     content: "Café 🐎",
     safe_metadata: {
       source: "web_clipper",
@@ -65,18 +75,27 @@ async function fixture() {
       capture_metadata: body.capture_metadata
     }
   }
-  mocks.status.mockResolvedValue({
+  const status: WebClipperStatusResponse = {
     clip_id: body.clip_id,
     status: "saved",
-    note: { id: body.clip_id, version: 200 },
+    note: { id: canonicalNoteId, title: input.title, version: 200 },
     workspace_placements: [
-      { workspace_id: input.workspaceId, source_note_id: body.clip_id }
-    ]
-  })
+      {
+        workspace_id: input.workspaceId,
+        workspace_note_id: 2,
+        source_note_id: canonicalNoteId,
+        source_note_version: 1
+      }
+    ],
+    attachments: [],
+    analysis: {},
+    content_budget: {}
+  }
+  mocks.status.mockResolvedValue(status)
   mocks.sources.mockResolvedValue([source])
   mocks.versions.mockResolvedValue([version])
   mocks.version.mockResolvedValue(version)
-  return { body, source, version }
+  return { body, source, version, status }
 }
 describe("public article acceptance", () => {
   it("freezes exact URL, Python-trimmed full body and fresh identity without fetching", async () => {
@@ -140,8 +159,9 @@ describe("public article acceptance", () => {
       ).content.full_extract.length
     ).toBe(1_000_000)
   })
-  it("confirms exact Media version, ignores Note revision, recovers same body", async () => {
-    const { body, source } = await fixture()
+  it("confirms a distinct canonical Note identity and exact Media version, recovering the same body", async () => {
+    const { body, source, status } = await fixture()
+    expect(status.note.id).not.toBe(body.clip_id)
     const current = vi.fn()
     const confirmed = await confirmWebCaptureAcceptance(body, options, current)
     expect(confirmed.source).toEqual(source)
@@ -155,6 +175,11 @@ describe("public article acceptance", () => {
     expect(mocks.version).toHaveBeenCalledWith(71, 9, options)
     expect(mocks.status).toHaveBeenCalledWith(body.clip_id, options)
     expect(current).toHaveBeenCalled()
+    // An independent Note edit leaves the immutable Media capture unchanged.
+    mocks.status.mockResolvedValue({
+      ...status,
+      note: { ...status.note, title: "Edited Note", version: 201 }
+    })
     expect(await confirmWebCaptureAcceptance(body, options, current)).toEqual(
       confirmed
     )
@@ -164,9 +189,9 @@ describe("public article acceptance", () => {
     ])
   })
   it("fails on partial placement and owner invalidation", async () => {
-    const { body } = await fixture()
+    const { body, status } = await fixture()
     mocks.status.mockResolvedValue({
-      clip_id: body.clip_id,
+      ...status,
       status: "partially_saved",
       workspace_placements: []
     })
@@ -179,6 +204,95 @@ describe("public article acceptance", () => {
         throw new Error("owner changed")
       })
     ).rejects.toThrow("owner changed")
+  })
+  it.each([
+    ["missing canonical Note", { note: undefined }],
+    ["null canonical Note", { note: null }],
+    ["missing canonical Note ID", { note: { title: "Article", version: 200 } }],
+    [
+      "empty canonical Note ID",
+      { note: { id: "", title: "Article", version: 200 } }
+    ],
+    [
+      "blank canonical Note ID",
+      { note: { id: " ", title: "Article", version: 200 } }
+    ],
+    [
+      "wrong canonical Note identity",
+      { note: { id: versionUuid, title: "Article", version: 200 } }
+    ],
+    ["wrong capture identity", { clip_id: versionUuid }],
+    ["missing placement", { workspace_placements: [] }]
+  ])("rejects %s before reading sources or versions", async (_name, change) => {
+    const { body, status } = await fixture()
+    mocks.status.mockResolvedValue({ ...status, ...change })
+    await expect(
+      confirmWebCaptureAcceptance(body, options, () => {})
+    ).rejects.toThrow()
+    expect(mocks.sources).not.toHaveBeenCalled()
+    expect(mocks.versions).not.toHaveBeenCalled()
+  })
+  it("rejects a capture UUID masquerading as the placement's canonical Note ID", async () => {
+    const { body, status } = await fixture()
+    mocks.status.mockResolvedValue({
+      ...status,
+      workspace_placements: [
+        { ...status.workspace_placements[0], source_note_id: body.clip_id }
+      ]
+    })
+    await expect(
+      confirmWebCaptureAcceptance(body, options, () => {})
+    ).rejects.toThrow()
+    expect(mocks.sources).not.toHaveBeenCalled()
+  })
+  it.each(["", " "])(
+    "rejects matching but empty canonical identities %j",
+    async (id) => {
+      const { body, status } = await fixture()
+      mocks.status.mockResolvedValue({
+        ...status,
+        note: { ...status.note, id },
+        workspace_placements: [
+          { ...status.workspace_placements[0], source_note_id: id }
+        ]
+      })
+      await expect(
+        confirmWebCaptureAcceptance(body, options, () => {})
+      ).rejects.toThrow()
+      expect(mocks.sources).not.toHaveBeenCalled()
+    }
+  )
+  it("uses the canonical string identity contract without requiring a new UUID admission rule", async () => {
+    const { body, status } = await fixture()
+    mocks.status.mockResolvedValue({
+      ...status,
+      note: { ...status.note, id: "canonical-note-legacy" },
+      workspace_placements: [
+        {
+          ...status.workspace_placements[0],
+          source_note_id: "canonical-note-legacy"
+        }
+      ]
+    })
+    const { pin } = await confirmWebCaptureAcceptance(body, options, () => {})
+    expect(pin.versionNumber).toBe(9)
+    expect(pin.versionUuid).toBe(versionUuid)
+  })
+  it.each([
+    ["missing placement Note ID", { source_note_id: undefined }],
+    ["empty placement Note ID", { source_note_id: "" }],
+    ["wrong placement Note identity", { source_note_id: versionUuid }],
+    ["wrong placement workspace", { workspace_id: "other-workspace" }]
+  ])("rejects %s before reading sources", async (_name, change) => {
+    const { body, status } = await fixture()
+    mocks.status.mockResolvedValue({
+      ...status,
+      workspace_placements: [{ ...status.workspace_placements[0], ...change }]
+    })
+    await expect(
+      confirmWebCaptureAcceptance(body, options, () => {})
+    ).rejects.toThrow()
+    expect(mocks.sources).not.toHaveBeenCalled()
   })
   it.each(["workspace_id", "url", "id", "media_id"])(
     "rejects source mismatch %s",
