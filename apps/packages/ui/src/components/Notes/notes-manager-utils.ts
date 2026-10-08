@@ -483,20 +483,27 @@ export type KeywordMergeDraft = {
 export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'link' | 'code'
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
-  pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
-  key: string
-  noteId: string | null
-  baseVersion: number | null
-  title: string
-  content: string
-  keywords: string[]
-  metadata: Record<string, any> | null
-  backlinkConversationId: string | null
-  backlinkMessageId: string | null
-  updatedAt: string
-  syncState: OfflineDraftSyncState
-  lastError: string | null
-}
+  pendingWrite?: {
+    authorityId?: string;
+    operation?: "restore";
+    key: string;
+    body: Record<string, unknown>;
+    expectedVersion: number | null;
+    previousTitle?: string | null;
+  };
+  key: string;
+  noteId: string | null;
+  baseVersion: number | null;
+  title: string;
+  content: string;
+  keywords: string[];
+  metadata: Record<string, any> | null;
+  backlinkConversationId: string | null;
+  backlinkMessageId: string | null;
+  updatedAt: string;
+  syncState: OfflineDraftSyncState;
+  lastError: string | null;
+};
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
@@ -582,10 +589,22 @@ export const writeOfflineDraftQueue = (storageKey: string, queue: Record<string,
     throw new Error('Could not retain the pending note operation on this device.')
 }
 
-export const writeNotesEditorOfflineDraftQueue = (storageKey: string, queue: Record<string, OfflineDraftEntry>): void => {
-  const surfaceEntries = Object.fromEntries(Object.entries(readOfflineDraftQueue(storageKey)).filter(([key]) => isSurfaceOfflineDraft(key)))
-  writeOfflineDraftQueue(storageKey, { ...queue, ...surfaceEntries })
-}
+export const writeNotesEditorOfflineDraftQueue = (
+  storageKey: string,
+  queue: Record<string, OfflineDraftEntry>,
+): void => {
+  let readableQueue: Record<string, OfflineDraftEntry> = {};
+  try {
+    readableQueue = readOfflineDraftQueue(storageKey);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    // Hydration already treats malformed JSON as an empty ordinary queue.
+  }
+  const surfaceEntries = Object.fromEntries(
+    Object.entries(readableQueue).filter(([key]) => isSurfaceOfflineDraft(key)),
+  );
+  writeOfflineDraftQueue(storageKey, { ...queue, ...surfaceEntries });
+};
 
 const surfaceOfflineDraftPrefix = (authorityScope: string): string => `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:${authorityScope}:`
 

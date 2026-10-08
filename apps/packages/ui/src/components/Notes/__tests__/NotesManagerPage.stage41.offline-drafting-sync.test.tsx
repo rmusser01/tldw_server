@@ -258,6 +258,52 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
     })
   })
 
+  it("recovers a malformed ordinary queue during offline save without touching legacy readable or per-record surface recovery", async () => {
+    const surface: OfflineDraftEntry = {
+      key: "surface:knowledge-export:malformed-neighbor",
+      noteId: null,
+      baseVersion: null,
+      title: "Retained export",
+      content: "Immutable answer",
+      keywords: [],
+      metadata: null,
+      backlinkConversationId: null,
+      backlinkMessageId: null,
+      updatedAt: "2026-02-18T11:00:00.000Z",
+      syncState: "queued",
+      lastError: null,
+      pendingWrite: {
+        key: "immutable-neighbor",
+        body: { content: "Immutable answer" },
+        expectedVersion: null,
+      },
+    };
+    await retainSurfaceOfflineDraft("alice", surface);
+    window.localStorage.setItem(OFFLINE_QUEUE_KEY, "{invalid JSON");
+    mockOnlineState.value = false;
+    renderPage();
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "Write your note here... (Markdown supported)",
+      ),
+      { target: { value: "Recovered offline draft" } },
+    );
+    fireEvent.click(screen.getByTestId("notes-save-button"));
+    await waitFor(() =>
+      expect(window.localStorage.getItem(OFFLINE_QUEUE_KEY)).toContain(
+        "Recovered offline draft",
+      ),
+    );
+    expect(
+      JSON.parse(window.localStorage.getItem(OFFLINE_QUEUE_KEY)!)["draft:new"]
+        .content,
+    ).toBe("Recovered offline draft");
+    expect((await readSurfaceOfflineDraftQueue("alice"))[surface.key]).toEqual(
+      surface,
+    );
+    expect(postCreateCalls()).toHaveLength(0);
+  });
+
   it('queues an offline save locally without hitting create/update endpoints', async () => {
     mockOnlineState.value = false
     renderPage()

@@ -1,3 +1,4 @@
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
 import {
   createNotesGraphAuthorityScope,
   useNotesGraphAuthorityScope,
@@ -1805,6 +1806,10 @@ function OwnedKnowledgeQAProvider({
   const notesAuthorityScope =
     verifiedNotesAuthorityScope === expectedNotesAuthorityScope
       ? verifiedNotesAuthorityScope
+      : null;
+  const notesAuthorityId =
+    notesAuthorityScope && authority.snapshot
+      ? deriveConnectionAuthorityId(authority.snapshot.requestScope.config)
       : null;
   const storageScopeKey = authority.snapshot
     ? getKnowledgeQaStorageScopeKey(authority.snapshot.requestScope) : null
@@ -4053,6 +4058,7 @@ function OwnedKnowledgeQAProvider({
       isAuthorityCurrent: isCurrent,
       storageScopeKey,
       notesAuthorityScope,
+      notesAuthorityId,
       historyHydrated,
       setQuery,
       search,
@@ -4094,6 +4100,7 @@ function OwnedKnowledgeQAProvider({
       historyHydrated,
       storageScopeKey,
       notesAuthorityScope,
+      notesAuthorityId,
       setQuery,
       search,
       cancelSearch,

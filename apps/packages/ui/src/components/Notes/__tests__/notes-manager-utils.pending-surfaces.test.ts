@@ -109,3 +109,25 @@ it("keeps a separately retained operation when another module writes a stale ord
     (await otherModule.readSurfaceOfflineDraftQueue("alice"))[pending.key],
   ).toEqual(pending);
 });
+
+it("preserves a readable normalized legacy surface row while replacing ordinary drafts", async () => {
+  const legacy = draft("surface:knowledge-export:legacy-thread", "legacy-key");
+  const separate = draft(
+    "surface:quick-notes:workspace-a:separate",
+    "separate-key",
+  );
+  await retainSurfaceOfflineDraft("alice", separate);
+  window.localStorage.setItem(
+    storageKey,
+    JSON.stringify({ [legacy.key]: legacy, invalid: null }),
+  );
+  const ordinary = draft("draft:new", "ordinary-key");
+  writeNotesEditorOfflineDraftQueue(storageKey, { [ordinary.key]: ordinary });
+  expect(JSON.parse(window.localStorage.getItem(storageKey)!)).toEqual({
+    [ordinary.key]: ordinary,
+    [legacy.key]: legacy,
+  });
+  expect(await readSurfaceOfflineDraftQueue("alice")).toEqual({
+    [separate.key]: separate,
+  });
+});

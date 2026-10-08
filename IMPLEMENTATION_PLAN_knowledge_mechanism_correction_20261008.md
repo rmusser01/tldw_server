@@ -19,6 +19,8 @@ Use existing mechanisms and minimum supported corrections. No assumption-based d
 **Tests**: QuickNotes save-ownership plus ExportDialog a11y/retry and existing Notes offline draft/lifecycle suites; red reproductions for conflicts and unmount.
 **Status**: Complete (conflict base and owner-scoped durable pending operations verified default/native; controlled cross-context/extension-adapter evidence and residual live-runtime limits in Task2 report)
 
+Task2 review fix round1: all three Important findings corrected through captured house service-authority identity, actual persisted Workspace pointer readback, narrow canonical update/explicit migrated-create recovery, and malformed ordinary-map recovery. Tombstones remain authoritative; no discarded Workspace snapshots recreated. Normal migrated pointerless Save refuses unresolved operations; explicit previous-save retry uses a fresh request scope and leaves unrelated live drafts unchanged. Focused RED→GREEN, affected/default/native/extension and quality evidence: `.superpowers/sdd/IMPLEMENTATION_PLAN_knowledge_mechanism_correction_20261008/task-2-fix1-report.md`. Scoped re-review pending; existing ADR031/034/065 govern.
+
 ## Stage 3: Restore capture evidence from canonical sources
 **Goal**: Repair migrated source restore when local capture checkpoints disappear using existing owned clip/version readbacks.
 **Success Criteria**: Accepted source retains exact validated pin; ambiguous/missing known capture evidence surfaces unavailable instead of current-source downgrade. Ordinary source handling remains compatible; latest active alone cannot identify accepted evidence.

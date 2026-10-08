@@ -99,6 +99,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     client: tldwClient,
     isAuthorityCurrent,
     notesAuthorityScope,
+    notesAuthorityId,
     messages,
     currentThreadId,
     results,
@@ -394,13 +395,13 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   }, [clearCopiedTimeout, dialogSessionKey, exportedContent, isAuthorityCurrent])
 
   const handleSaveToNotes = useCallback(async () => {
-    if (!isAuthorityCurrent() || !canSubmitExport || isSavingNote) return
-    const requestSessionKey = dialogSessionKey
+    if (!isAuthorityCurrent() || !canSubmitExport || isSavingNote) return;
+    const requestSessionKey = dialogSessionKey;
 
-    setIsSavingNote(true)
+    setIsSavingNote(true);
     let acknowledged = false;
     try {
-      if (!notesAuthorityScope)
+      if (!notesAuthorityScope || !notesAuthorityId)
         throw new Error("Verify your account before saving to Notes.");
       const queuePrefix = `surface:knowledge-export:${JSON.stringify(currentThreadId)}:`;
       const noteContent = generateMarkdown(
@@ -416,9 +417,9 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           searchDetails,
           trustState: answerTrustState,
           evidenceOrigin: answerEvidenceOrigin,
-        }
-      )
-      const trimmedQuery = query.trim()
+        },
+      );
+      const trimmedQuery = query.trim();
       const title =
         trimmedQuery.length > 0
           ? `Knowledge QA: ${
@@ -426,7 +427,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
                 ? `${trimmedQuery.slice(0, 69)}...`
                 : trimmedQuery
             }`
-          : "Knowledge QA export"
+          : "Knowledge QA export";
       const metadata: Record<string, unknown> = {
         origin: "knowledge_qa",
         source: "knowledge_export",
@@ -435,12 +436,12 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         include_settings_snapshot: options.includeSettingsSnapshot,
         trust_state: answerTrustState,
         evidence_origin: answerEvidenceOrigin,
-      }
+      };
       if (currentThreadId) {
-        metadata.thread_id = currentThreadId
+        metadata.thread_id = currentThreadId;
       }
 
-      let pending = pendingNoteRef.current
+      let pending = pendingNoteRef.current;
       if (
         pending?.session !== requestSessionKey ||
         pending.client !== tldwClient ||
@@ -476,21 +477,39 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       }
       if (!pending) {
         const provenance = validateKnowledgeNoteProvenance({
-          origin: "knowledge_qa", trust_state: answerTrustState,
-          evidence_origin: answerEvidenceOrigin, thread_id: currentThreadId,
-          question: query, trust_reason_codes: answerTrustReasonCodes,
-          scope: lastSearchScope ? {
-            sources: lastSearchScope.sources, include_media_ids: lastSearchScope.includeMediaIds,
-            include_note_ids: lastSearchScope.includeNoteIds, collection_id: lastSearchScope.collectionId,
-            enable_web_fallback: lastSearchScope.webFallback, keyword_filter: lastSearchScope.keywordFilter,
-          } : {
-            sources: settings.sources, include_media_ids: settings.include_media_ids,
-            include_note_ids: settings.include_note_ids, collection_id: settings.collection_id,
-            keyword_filter: settings.keyword_filter, enable_web_fallback: settings.enable_web_fallback,
-          },
-          sources: results.map((result, index) => toPrefillSource(result, index, new Set(citations.map(citation => citation.index)))),
-        })
-        if (!provenance) throw new Error("Source history is invalid or too large to save.")
+          origin: "knowledge_qa",
+          trust_state: answerTrustState,
+          evidence_origin: answerEvidenceOrigin,
+          thread_id: currentThreadId,
+          question: query,
+          trust_reason_codes: answerTrustReasonCodes,
+          scope: lastSearchScope
+            ? {
+                sources: lastSearchScope.sources,
+                include_media_ids: lastSearchScope.includeMediaIds,
+                include_note_ids: lastSearchScope.includeNoteIds,
+                collection_id: lastSearchScope.collectionId,
+                enable_web_fallback: lastSearchScope.webFallback,
+                keyword_filter: lastSearchScope.keywordFilter,
+              }
+            : {
+                sources: settings.sources,
+                include_media_ids: settings.include_media_ids,
+                include_note_ids: settings.include_note_ids,
+                collection_id: settings.collection_id,
+                keyword_filter: settings.keyword_filter,
+                enable_web_fallback: settings.enable_web_fallback,
+              },
+          sources: results.map((result, index) =>
+            toPrefillSource(
+              result,
+              index,
+              new Set(citations.map((citation) => citation.index)),
+            ),
+          ),
+        });
+        if (!provenance)
+          throw new Error("Source history is invalid or too large to save.");
         const idempotencyKey = crypto.randomUUID();
         const content = retainKnowledgeNoteProvenance(noteContent, provenance);
         const fields = {
@@ -517,6 +536,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           syncState: "queued",
           lastError: null,
           pendingWrite: {
+            authorityId: notesAuthorityId,
             key: idempotencyKey,
             body: { ...fields, content },
             expectedVersion: null,
@@ -532,6 +552,10 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           fields,
         };
       }
+      if (pending.entry.pendingWrite?.authorityId !== notesAuthorityId)
+        throw new Error(
+          "The retained export belongs to a different service authority. Restore that connection before retrying.",
+        );
       pendingNoteRef.current = pending;
       await retainSurfaceOfflineDraft(notesAuthorityScope, pending.entry);
       if (
@@ -539,13 +563,20 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         activeDialogSessionKeyRef.current !== requestSessionKey
       )
         return;
-      const savedNote = await tldwClient.createNote(pending.content, pending.fields, { idempotencyKey: pending.idempotencyKey })
-      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
-        return
+      const savedNote = await tldwClient.createNote(
+        pending.content,
+        pending.fields,
+        { idempotencyKey: pending.idempotencyKey },
+      );
+      if (
+        !isAuthorityCurrent() ||
+        activeDialogSessionKeyRef.current !== requestSessionKey
+      ) {
+        return;
       }
       if (savedNote?.id == null)
-        throw new Error("The saved note response did not include its ID.")
-      setSavedNoteId(String(savedNote.id))
+        throw new Error("The saved note response did not include its ID.");
+      setSavedNoteId(String(savedNote.id));
       acknowledged = true;
       message.open({
         type: "success",
@@ -564,18 +595,34 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         return;
       pendingNoteRef.current = null;
     } catch (error) {
-      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
-        return
+      if (
+        !isAuthorityCurrent() ||
+        activeDialogSessionKeyRef.current !== requestSessionKey
+      ) {
+        return;
       }
       if (isDefinitiveWriteRejection(error) && pendingNoteRef.current) {
-        const pending = pendingNoteRef.current
+        const pending = pendingNoteRef.current;
         try {
-          await retireSurfaceOfflineDraft(pending.authorityScope, pending.entry.key, pending.idempotencyKey)
-          if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) return
-          pendingNoteRef.current = null
+          await retireSurfaceOfflineDraft(
+            pending.authorityScope,
+            pending.entry.key,
+            pending.idempotencyKey,
+          );
+          if (
+            !isAuthorityCurrent() ||
+            activeDialogSessionKeyRef.current !== requestSessionKey
+          )
+            return;
+          pendingNoteRef.current = null;
         } catch {
-          message.open({ type: "error", content: "Could not retire the rejected note operation on this device. Retry before saving another export.", duration: 4 })
-          return
+          message.open({
+            type: "error",
+            content:
+              "Could not retire the rejected note operation on this device. Retry before saving another export.",
+            duration: 4,
+          });
+          return;
         }
       }
       const mappedError = isNotesProvenancePolicyUnavailable(error)
@@ -587,15 +634,19 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         type: "error",
         content: mappedError,
         duration: 4,
-      })
+      });
     } finally {
-      if (isAuthorityCurrent() && activeDialogSessionKeyRef.current === requestSessionKey) {
-        setIsSavingNote(false)
+      if (
+        isAuthorityCurrent() &&
+        activeDialogSessionKeyRef.current === requestSessionKey
+      ) {
+        setIsSavingNote(false);
       }
     }
   }, [
     isAuthorityCurrent,
     notesAuthorityScope,
+    notesAuthorityId,
     canSubmitExport,
     isSavingNote,
     answerTrustReasonCodes,
@@ -615,7 +666,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     currentThreadId,
     tldwClient,
     message,
-  ])
+  ]);
 
   const handleCopyThreadLink = useCallback(async () => {
     if (!canCopyThreadLink || !currentThreadId) return

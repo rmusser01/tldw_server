@@ -1,3 +1,5 @@
+import { canonicalWikilinkNoteId } from "@/components/Notes/wikilinks"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { createNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
 import {
@@ -35,7 +37,10 @@ import {
   PencilLine,
   Download
 } from "lucide-react"
-import { useWorkspaceStore } from "@/store/workspace"
+import {
+  hasResearchWorkspaceMigrationTombstone,
+  useWorkspaceStore,
+} from "@/store/workspace";
 import { bgRequest } from "@/services/background-proxy"
 import type { BgRequestInit } from "@/services/background-proxy"
 import {
@@ -707,7 +712,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   }, [currentNote, hideSavedIndicator, messageApi, serializeNoteForEditor, setCurrentNote, t])
 
   // Save one captured draft under one owner through version lookup and write.
-  const handleSave = async () => {
+  const handleSave = async (recovery?: { key: string; workspaceId: string | null; workspaceTag: string | null }) => {
     if (saveControllerRef.current && !saveControllerRef.current.signal.aborted)
       return
     const {
@@ -715,14 +720,24 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       workspaceId,
       workspaceTag: draftWorkspaceTag
     } = useWorkspaceStore.getState()
-    if (!draft.content.trim() && !draft.title.trim()) {
+    if (
+      recovery &&
+      (recovery.workspaceId !== workspaceId ||
+        recovery.workspaceTag !== draftWorkspaceTag)
+    ) {
+      messageApi.error(
+        "Restore the previous Workspace before retrying its save.",
+      );
+      return;
+    }
+    if (!recovery && !draft.content.trim() && !draft.title.trim()) {
       messageApi.warning(
         t(
           "playground:studio.emptyNoteWarning",
-          "Please add some content or a title"
-        )
-      )
-      return
+          "Please add some content or a title",
+        ),
+      );
+      return;
     }
 
     const controller = new AbortController()
@@ -739,8 +754,9 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       return (
         latest.workspaceId === workspaceId &&
         latest.workspaceTag === draftWorkspaceTag &&
-        latest.currentNote.id === noteId &&
-        (!operationKey ||
+        (!!recovery || latest.currentNote.id === noteId) &&
+        (!!recovery ||
+          !operationKey ||
           latest.currentNote.pendingNoteWriteKey === operationKey)
       );
     }
@@ -752,10 +768,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     // Latch replacement/clear events, including a switch away and back.
     const stopWatchingNote = useWorkspaceStore.subscribe((state) => {
       const clearedNewDraft =
+        !recovery &&
         noteId == null &&
         state.currentNote !== draft &&
         !state.currentNote.title &&
-        !state.currentNote.content
+        !state.currentNote.content;
       if (!hasCurrentIdentity() || clearedNewDraft) { controller.abort(); pendingSaveRef.current = null }
     })
     const stopWatchingOwner = watchChatAccountChanges((invalidated) => {
@@ -777,6 +794,9 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       const authorityScope = createNotesGraphAuthorityScope(
         scope.requestScope.config.serverUrl,
         ownerId,
+      );
+      const authorityId = deriveConnectionAuthorityId(
+        scope.requestScope.config,
       );
       const scopedFields = requestScopeFields(scope.requestScope)
       const request = { ...scopedFields, abortSignal: scope.scopeSignal }
@@ -807,16 +827,122 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         })
       if (draftWorkspaceTag) payload.workspace_tag = draftWorkspaceTag
 
-      let pending = pendingSaveRef.current
+      let pending = recovery ? null : pendingSaveRef.current;
       if (pending && (pending.scopeKey !== scope.scopeKey || pending.workspaceId !== workspaceId || pending.noteId !== draft.id)) pending = null
-      if (!pending && operationKey) {
-        const entry = (await readSurfaceOfflineDraftQueue(authorityScope))[
-          operationKey
-        ];
+      const canonicalNoteId = canonicalWikilinkNoteId(
+        typeof draft.id === "string" ? draft.id : null,
+      );
+      const migrationSuppressed =
+        !!workspaceId && hasResearchWorkspaceMigrationTombstone(workspaceId);
+      if (
+        !pending &&
+        (recovery || operationKey || canonicalNoteId || migrationSuppressed)
+      ) {
+        const queue = await readSurfaceOfflineDraftQueue(authorityScope);
         if (!isCurrent()) return;
+        const workspaceEntries = Object.values(queue).filter(
+          (entry) =>
+            entry.key.startsWith(operationPrefix) && entry.pendingWrite,
+        );
+        const candidates = operationKey
+          ? []
+          : workspaceEntries.filter(
+              (entry) =>
+                canonicalNoteId &&
+                canonicalWikilinkNoteId(entry.noteId) === canonicalNoteId,
+            );
+        if (
+          candidates.length > 1 ||
+          (recovery && workspaceEntries.length !== 1)
+        )
+          throw new Error(
+            "Multiple or missing unresolved operations prevent a safe retry; no save was sent.",
+          );
+        if (recovery && !migrationSuppressed)
+          throw new Error(
+            "The previous save requires its durable Workspace binding before retrying.",
+          );
+        if (
+          !recovery &&
+          !operationKey &&
+          !candidates.length &&
+          migrationSuppressed &&
+          workspaceEntries.length
+        ) {
+          if (workspaceEntries.length !== 1)
+            throw new Error(
+              "Multiple unresolved operations are retained for this Workspace; no save was sent.",
+            );
+          const retained = workspaceEntries[0];
+          if (retained.pendingWrite?.authorityId !== authorityId)
+            throw new Error(
+              "The retained note operation belongs to a different service authority. Restore that connection before retrying.",
+            );
+          messageApi.open({
+            type: "warning",
+            key: "workspace-note-previous-save",
+            duration: 0,
+            content: (
+              <div className="flex items-center gap-2">
+                <span>
+                  Previous save retained: {retained.title || "Untitled Note"}.
+                  Resolve it before saving this draft.
+                </span>
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() => {
+                    messageApi.destroy("workspace-note-previous-save");
+                    void handleSave({
+                      key: retained.key,
+                      workspaceId,
+                      workspaceTag: draftWorkspaceTag,
+                    });
+                  }}
+                >
+                  Retry previous save
+                </Button>
+              </div>
+            ),
+          });
+          return;
+        }
+        const entry = recovery
+          ? queue[recovery.key]
+          : operationKey
+            ? queue[operationKey]
+            : candidates[0];
+        if (
+          recovery &&
+          (!entry ||
+            !entry.key.startsWith(operationPrefix) ||
+            !entry.pendingWrite)
+        )
+          throw new Error(
+            "The previous save is no longer available in this Workspace; no save was sent.",
+          );
+        if (
+          !operationKey &&
+          !recovery &&
+          entry?.pendingWrite &&
+          entry.pendingWrite.body.id != null &&
+          canonicalWikilinkNoteId(String(entry.pendingWrite.body.id)) !==
+            canonicalNoteId
+        )
+          throw new Error(
+            "The retained update does not match this canonical Note; no save was sent.",
+          );
         if (
           entry?.pendingWrite &&
-          (entry.noteId === (draft.id == null ? null : String(draft.id)) ||
+          entry.pendingWrite.authorityId !== authorityId
+        )
+          throw new Error(
+            "The retained note operation belongs to a different service authority. Restore that connection before retrying.",
+          );
+        if (
+          entry?.pendingWrite &&
+          (recovery ||
+            entry.noteId === (draft.id == null ? null : String(draft.id)) ||
             (entry.noteId == null && entry.pendingWrite.body.id === draft.id))
         ) {
           pending = {
@@ -903,7 +1029,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           updatedAt: new Date().toISOString(),
           syncState: "queued",
           lastError: null,
-          pendingWrite: { key, body, expectedVersion: expectedVersion ?? null },
+          pendingWrite: {
+            authorityId,
+            key,
+            body,
+            expectedVersion: expectedVersion ?? null,
+          },
         };
         pending = {
           authorityScope,
@@ -924,25 +1055,83 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           },
         };
       }
-      pendingSaveRef.current = pending;
+      if (pending.entry.pendingWrite?.authorityId !== authorityId)
+        throw new Error(
+          "The retained note operation belongs to a different service authority. Restore that connection before retrying.",
+        );
+      if (!recovery) pendingSaveRef.current = pending;
       await retainSurfaceOfflineDraft(authorityScope, pending.entry);
       if (!isCurrent()) return;
-      operationKey = pending.entry.key;
+      if (!recovery) operationKey = pending.entry.key;
       if (
+        !recovery &&
         useWorkspaceStore.getState().currentNote.pendingNoteWriteKey !==
-        operationKey
+          operationKey
       )
         setCurrentNote({
           ...useWorkspaceStore.getState().currentNote,
           pendingNoteWriteKey: operationKey,
         });
-      if (!isCurrent()) return;
+      const canonicalUpdateBound =
+        canonicalNoteId &&
+        canonicalWikilinkNoteId(pending.entry.noteId) === canonicalNoteId &&
+        pending.method === "PUT" &&
+        pending.path ===
+          `/api/v1/notes/${encodeURIComponent(pending.entry.noteId!)}` &&
+        (pending.body.id == null ||
+          canonicalWikilinkNoteId(String(pending.body.id)) === canonicalNoteId);
+      // Migration intentionally removes local Workspace snapshots. The owned immutable
+      // operation remains recoverable only through the explicit previous-save action.
+      if (!canonicalUpdateBound && !migrationSuppressed) {
+        const persistence = useWorkspaceStore.persist.getOptions();
+        const persistedWorkspace = await persistence.storage?.getItem(
+          persistence.name,
+        );
+        if (!isCurrent()) return;
+        const persistedSnapshot = workspaceId
+          ? persistedWorkspace?.state?.workspaceSnapshots?.[workspaceId]
+          : undefined;
+        if (
+          persistedSnapshot?.workspaceTag !== draftWorkspaceTag ||
+          persistedSnapshot.currentNote?.pendingNoteWriteKey !== operationKey
+        )
+          throw new Error(
+            "Could not retain the note recovery pointer in this Workspace. Retry after storage is available.",
+          );
+      }
       const saved = await bgRequest<NoteListItem>({ ...request, path: pending.path, method: pending.method, headers: { ...request.headers, ...pending.headers }, body: pending.body })
       if (!isCurrent()) return
       const latest = useWorkspaceStore.getState().currentNote
       if (pending.draft.pendingKnowledgeProvenance && pending.body.knowledge_provenance &&
           !knowledgeNoteProvenanceMatches(resolveKnowledgeNoteProvenance(saved).provenance, pending.body.knowledge_provenance)) {
         throw new Error("Capture source history was not confirmed; retry the saved draft.")
+      }
+      if (recovery) {
+        acknowledged = true;
+        await retireSurfaceOfflineDraft(
+          authorityScope,
+          pending.entry.key,
+          pending.entry.pendingWrite!.key,
+        );
+        if (!isCurrent()) return;
+        pendingSaveRef.current = null;
+        messageApi.open({
+          type: "success",
+          duration: 8,
+          content: (
+            <div className="flex items-center gap-2">
+              <span>
+                Previous note saved:{" "}
+                {saved.title || pending.entry.title || "Untitled Note"}.
+              </span>
+              <Button size="small" type="link" onClick={handleOpenLoadModal}>
+                Load saved note
+              </Button>
+            </div>
+          ),
+        });
+        await loadWorkspaceNotes({ request, isCurrent });
+        return;
       }
       // The acknowledgment may assign the first canonical ID to this draft.
       noteId = saved.id
@@ -1447,7 +1636,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             size="small"
             type="primary"
             icon={<Save className="h-3.5 w-3.5" />}
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             loading={isSaving}
           >
             {currentNote.id
