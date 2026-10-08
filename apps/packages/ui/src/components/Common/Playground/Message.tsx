@@ -77,7 +77,8 @@ import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import { formatCost } from "@/utils/model-pricing"
 import {
   resolveMessageCostUsd,
-  resolveMessageUsage
+  resolveMessageUsage,
+  resolveSavedGenerationMetadata
 } from "./message-usage"
 import { resolvePlaygroundMessageShortcutAction } from "./playground-message-shortcuts"
 import {
@@ -106,6 +107,33 @@ import {
 } from "@/services/settings/chat-opacity-css-vars"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
+
+const savedPartialStatusCopy = {
+  interrupted: [
+    "interruptedLabel",
+    "Interrupted",
+    "savedInterruptedSummary",
+    "This reply ended early. The saved content is kept."
+  ],
+  stopped: [
+    "stoppedLabel",
+    "Stopped",
+    "savedStoppedSummary",
+    "This reply was stopped. The saved content is kept."
+  ],
+  length: [
+    "lengthLabel",
+    "Output limit reached",
+    "lengthSummary",
+    "This reply reached the model's output limit. The saved content is kept."
+  ],
+  error: [
+    "generationFailedLabel",
+    "Generation failed",
+    "generationFailedSummary",
+    "The saved record reports a generation failure. Any saved content is kept."
+  ]
+} as const
 
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload
@@ -458,7 +486,24 @@ export const PlaygroundMessage = (props: Props) => {
     .filter(Boolean)
     .join("\n")
   }, [errorPayload])
+  const savedGeneration = React.useMemo(
+    () =>
+      props.isBot &&
+      props.role !== "system" &&
+      !isImageGenerationMessageType(props.message_type)
+        ? resolveSavedGenerationMetadata(props.metadataExtra)
+        : null,
+    [props.isBot, props.role, props.message_type, props.metadataExtra]
+  )
+  const hasSavedGenerationStatus = Boolean(savedGeneration?.status)
+  const savedPartialStatus =
+    savedGeneration?.status !== "complete" ? savedGeneration?.status : undefined
+  const savedUsage = savedGeneration?.usage
+  const savedPartialCopy = savedPartialStatus
+    ? savedPartialStatusCopy[savedPartialStatus]
+    : null
   const resolvedResponseModel = React.useMemo(() => {
+    if (savedGeneration?.model) return savedGeneration.model
     const info = props.generationInfo as Record<string, unknown> | undefined
     if (!info) return null
     const raw =
@@ -469,26 +514,48 @@ export const PlaygroundMessage = (props: Props) => {
       (info.routing as Record<string, unknown> | undefined)?.resolved_model ??
       (info.routing as Record<string, unknown> | undefined)?.model
     if (typeof raw !== "string" || raw.trim().length === 0) return null
-    return removeModelSuffix(raw.trim().replace(/accounts\/[^/]+\/models\//g, ""))
-  }, [props.generationInfo])
+    return removeModelSuffix(
+      raw.trim().replace(/accounts\/[^/]+\/models\//g, "")
+    )
+  }, [props.generationInfo, savedGeneration])
   const messageUsage = React.useMemo(
     () => resolveMessageUsage(props.generationInfo),
     [props.generationInfo]
   )
   const messageCostUsd = React.useMemo(
-    () => resolveMessageCostUsd(props.generationInfo),
-    [props.generationInfo]
+    () =>
+      savedGeneration?.model ||
+      savedGeneration?.provider ||
+      savedGeneration?.usage
+        ? null
+        : resolveMessageCostUsd(props.generationInfo),
+    [props.generationInfo, savedGeneration]
   )
   const showUsageMetadata =
-    isProMode && props.isBot && messageUsage.totalTokens > 0
-  const missingFinalAnswer = props.isBot && props.role !== "system" &&
-    !props.isStreaming && !props.isProcessing &&
-    !props.toolCalls?.length && !props.images?.length &&
+    isProMode &&
+    props.isBot &&
+    (Boolean(savedUsage) ||
+      (!savedGeneration?.model &&
+        !savedGeneration?.provider &&
+        messageUsage.totalTokens > 0))
+  const missingFinalAnswer =
+    !hasSavedGenerationStatus &&
+    props.isBot &&
+    props.role !== "system" &&
+    !props.isStreaming &&
+    !props.isProcessing &&
+    !props.toolCalls?.length &&
+    !props.images?.length &&
     !isImageGenerationMessageType(props.message_type) &&
     isReasoningOnlyResponse(props.message || "")
-  const interruptedGeneration = missingFinalAnswer || Boolean(
-    (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
-  )
+  const interruptedGeneration =
+    !hasSavedGenerationStatus &&
+    (missingFinalAnswer ||
+      Boolean(
+        (props.generationInfo as Record<string, unknown> | undefined)
+          ?.interrupted
+      ))
+
   // The user stopped this reply on purpose; label it "Stopped", not
   // "Interrupted" (CS-04, #3104).
   const stoppedGeneration =
@@ -517,6 +584,7 @@ export const PlaygroundMessage = (props: Props) => {
     return raw.trim()
   }, [props.generationInfo])
   const showPartialSaveMarker =
+    !hasSavedGenerationStatus &&
     streamTransportInterrupted &&
     partialResponseSaved &&
     !interruptedGeneration &&
@@ -1730,6 +1798,7 @@ export const PlaygroundMessage = (props: Props) => {
     !errorPayload &&
     !interruptedGeneration &&
     !showPartialSaveMarker &&
+    !savedPartialCopy &&
     !isImageGenerationAssistantEvent &&
     !hasVisibleAssistantResponseContent
 
@@ -2146,8 +2215,11 @@ export const PlaygroundMessage = (props: Props) => {
                   <span
                     data-testid="message-model-badge"
                     className="inline-flex items-center rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
-                    title={resolvedResponseModel}
-                  >
+                    title={
+                      savedGeneration?.provider && savedGeneration?.model
+                        ? `${savedGeneration.provider} · ${resolvedResponseModel}`
+                        : resolvedResponseModel
+                    }>
                     {resolvedResponseModel}
                   </span>
                 )}
@@ -2255,18 +2327,30 @@ export const PlaygroundMessage = (props: Props) => {
           )}
           {showUsageMetadata && (
             <div className="text-xs text-text-muted tabular-nums">
-              {messageUsage.promptTokens}{" "}
-              {t("playground:tokens.prompt", "prompt")} +{" "}
-              {messageUsage.completionTokens}{" "}
-              {t("playground:tokens.completion", "completion")} ={" "}
-              {messageUsage.totalTokens}{" "}
-              {t("playground:tokens.total", "tokens")}
-              {messageCostUsd != null && (
+              {savedUsage ? (
+                [
+                  savedUsage.prompt_tokens === undefined
+                    ? null
+                    : `${savedUsage.prompt_tokens} ${t("playground:tokens.prompt", "prompt")}`,
+                  savedUsage.completion_tokens === undefined
+                    ? null
+                    : `${savedUsage.completion_tokens} ${t("playground:tokens.completion", "completion")}`,
+                  savedUsage.total_tokens === undefined
+                    ? null
+                    : `${savedUsage.total_tokens} ${t("playground:tokens.total", "tokens")}`
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              ) : (
                 <>
-                  {" "}
-                  • {formatCost(messageCostUsd)}
+                  {messageUsage.promptTokens}{" "}
+                  {t("playground:tokens.prompt", "prompt")} +{" "}
+                  {messageUsage.completionTokens}{" "}
+                  {t("playground:tokens.completion", "completion")} ={" "}
+                  {messageUsage.totalTokens} {t("playground:tokens.total", "tokens")}
                 </>
               )}
+              {messageCostUsd != null && <> • {formatCost(messageCostUsd)}</>}
             </div>
           )}
           {props.isBot && !isSystemMessage && fallbackAudit && (
@@ -2544,6 +2628,23 @@ export const PlaygroundMessage = (props: Props) => {
               )}
             </div>
           )}
+          {savedPartialCopy && !errorPayload && (
+            <EmptyAssistantResponseNotice
+              summary={
+                t(
+                  `playground:errorRecovery.${savedPartialCopy[0]}`,
+                  savedPartialCopy[1]
+                ) as string
+              }
+              detail={
+                t(
+                  `playground:errorRecovery.${savedPartialCopy[2]}`,
+                  savedPartialCopy[3]
+                ) as string
+              }
+              recoveryActions={[]}
+            />
+          )}
           {showPartialSaveMarker && (
             <div
               role="status"
@@ -2663,7 +2764,7 @@ export const PlaygroundMessage = (props: Props) => {
                         "The request completed, but the assistant did not return visible content."
                       ) as string
                     }
-                    recoveryActions={emptyResponseRecoveryActions}
+                    recoveryActions={hasSavedGenerationStatus ? [] : emptyResponseRecoveryActions}
                   />
                 ) : renderGreetingMarkdown ? (
                   <React.Suspense
@@ -3137,11 +3238,17 @@ export const PlaygroundMessage = (props: Props) => {
           initialNotes={detail?.notes ?? ""}
         />
       )}
-      {streamingComplete && !errorPayload && !props.isStreaming && !props.isProcessing && (
-        <span aria-live="polite" className="sr-only">
-          {t("playground:message.responseComplete", { defaultValue: "Response complete" })}
-        </span>
-      )}
+      {streamingComplete &&
+        !savedPartialCopy &&
+        !errorPayload &&
+        !props.isStreaming &&
+        !props.isProcessing && (
+          <span aria-live="polite" className="sr-only">
+            {t("playground:message.responseComplete", {
+              defaultValue: "Response complete"
+            })}
+          </span>
+        )}
     </article>
   )
 }

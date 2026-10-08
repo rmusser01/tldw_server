@@ -20,8 +20,8 @@ generation metadata the server writes or accepts:
       Server settlement never writes it, because a reply with no usable
       output is not saved.
 
-    The WebUI maps ``interrupted`` to ``generationInfo.interrupted`` and
-    ``stopped`` to ``generationInfo.interrupted`` plus ``generationInfo.stopped``.
+    The WebUI displays saved status passively. It must not create legacy
+    recovery flags, retry admission or history authority from these keys.
 ``model_id``
     The model the request resolved to.
 ``provider``

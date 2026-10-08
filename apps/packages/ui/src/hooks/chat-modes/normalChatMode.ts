@@ -1120,9 +1120,12 @@ export const normalChatMode = async (
       const selected = historyTurn.capture.rows.map((node, index) => {
         const content = historyTurn.capture.selected_content[index]
         const metadata = content.extra_metadata ?? {}
-        const local = metadata.local_history as
-          | Record<string, unknown>
-          | undefined
+        const local = (
+          historyTurn.owner.kind === "local"
+            ? metadata.local_history
+            : undefined
+        ) as Record<string, unknown> | undefined
+
         return {
           id: node.id,
           role: node.role,

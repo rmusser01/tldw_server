@@ -4288,5 +4288,29 @@
   },
   "header_newTemporaryChat": {
     "message": "Temporary chat (on this device)"
+  },
+  "errorRecovery_interruptedLabel": {
+    "message": "Interrupted"
+  },
+  "errorRecovery_savedInterruptedSummary": {
+    "message": "This reply ended early. The saved content is kept."
+  },
+  "errorRecovery_stoppedLabel": {
+    "message": "Stopped"
+  },
+  "errorRecovery_savedStoppedSummary": {
+    "message": "This reply was stopped. The saved content is kept."
+  },
+  "errorRecovery_lengthLabel": {
+    "message": "Output limit reached"
+  },
+  "errorRecovery_lengthSummary": {
+    "message": "This reply reached the model's output limit. The saved content is kept."
+  },
+  "errorRecovery_generationFailedLabel": {
+    "message": "Generation failed"
+  },
+  "errorRecovery_generationFailedSummary": {
+    "message": "The saved record reports a generation failure. Any saved content is kept."
   }
 }

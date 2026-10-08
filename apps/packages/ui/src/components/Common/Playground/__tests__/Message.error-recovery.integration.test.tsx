@@ -6,6 +6,11 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
 import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import ts from "typescript"
+import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 
 const storedPreferences = vi.hoisted(() => new Map<string, unknown>())
 
@@ -802,3 +807,412 @@ it.each([false, true])(
     storedPreferences.clear()
   }
 )
+
+
+describe("PlaygroundMessage recorded response presentation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+
+  it("shows the saved response model and usage instead of current or legacy values", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        generationInfo={{
+          model: "legacy-model",
+          usage: { total_tokens: 99 },
+          cost_usd: 99
+        }}
+        metadataExtra={{
+          model_id: "saved-model",
+          provider: "saved-provider",
+          generation_status: "complete",
+          finish_reason: "stop",
+          usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 }
+        }}
+      />
+    )
+    expect(screen.getByTestId("message-model-badge")).toHaveTextContent(
+      "saved-model"
+    )
+    expect(screen.getByTestId("message-model-badge")).toHaveAttribute(
+      "title",
+      "saved-provider · saved-model"
+    )
+    expect(screen.getByText(/13.*tok/)).toBeInTheDocument()
+    expect(screen.queryByText(/99.*tok/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$99/)).not.toBeInTheDocument()
+  })
+
+  it("does not pair a recorded provider with an unrecorded legacy model or cost", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        generationInfo={{
+          model: "legacy-model",
+          usage: { total_tokens: 99 },
+          cost_usd: 99
+        }}
+        metadataExtra={{
+          generation_status: "complete",
+          provider: "saved-provider"
+        }}
+      />
+    )
+    expect(screen.getByTestId("message-model-badge")).toHaveAttribute(
+      "title",
+      "legacy-model"
+    )
+    expect(
+      screen.queryByText(/saved-provider.*legacy-model|\$99/)
+    ).not.toBeInTheDocument()
+  })
+
+  it.each([{ model_id: "saved-model" }, { provider: "saved-provider" }])(
+    "does not attach unrecorded legacy usage to recorded provenance %o",
+    (metadata) => {
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          generationInfo={{
+            model: "legacy-model",
+            usage: { total_tokens: 99 }
+          }}
+          metadataExtra={{ generation_status: "complete", ...metadata }}
+        />
+      )
+      expect(screen.queryByText(/99.*tok/)).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    ["interrupted", "Interrupted"],
+    ["stopped", "Stopped"],
+    ["length", "Output limit reached"],
+    ["error", "Generation failed"]
+  ])(
+    "shows saved %s status without granting local recovery actions",
+    (status, label) => {
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          metadataExtra={{
+            generation_status: status,
+            model_id: "saved-model",
+            interrupted: true,
+            stopped: true,
+            canRetry: true,
+            local_history: { generationInfo: { interrupted: true } }
+          }}
+        />
+      )
+      expect(screen.getByRole("status")).toHaveTextContent(label)
+      expect(
+        screen.queryByRole("button", { name: "Retry same model" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Continue from partial" })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["", "<think>Unfinished reasoning</think>"])(
+    "keeps a recorded partial passive with content %s",
+    (message) => {
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          message={message}
+          metadataExtra={{ generation_status: "interrupted" }}
+        />
+      )
+      expect(screen.getByRole("status")).toHaveTextContent("Interrupted")
+      expect(
+        screen.queryByRole("button", { name: "Retry same model" })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it("does not announce successful completion when the saved stream ended partially", () => {
+    const view = render(<PlaygroundMessage {...baseProps} isStreaming />)
+    view.rerender(
+      <PlaygroundMessage
+        {...baseProps}
+        metadataExtra={{ generation_status: "stopped" }}
+      />
+    )
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped")
+  })
+
+  it("keeps recorded zero usage instead of falling back to old usage", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        generationInfo={{ usage: { total_tokens: 99 } }}
+        metadataExtra={{
+          generation_status: "complete",
+          usage: { total_tokens: 0 }
+        }}
+      />
+    )
+    expect(screen.getByText("0 tokens")).toBeInTheDocument()
+    expect(screen.queryByText(/99.*tok/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [{ total_tokens: 13 }, "13 tokens"],
+    [{ prompt_tokens: 11 }, "11 prompt"]
+  ])("shows only reported saved usage fields %o", (usage, label) => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        generationInfo={{
+          usage: { prompt_tokens: 99, completion_tokens: 99, total_tokens: 198 }
+        }}
+        metadataExtra={{ generation_status: "complete", usage }}
+      />
+    )
+    expect(screen.getByText(label as string)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/0 completion|99 prompt|198 tokens/)
+    ).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { isProcessing: true, isStreaming: false },
+    { isProcessing: false, isStreaming: true }
+  ])("keeps saved status passive while another turn is busy %o", (busy) => {
+    const savedProps = {
+      ...baseProps,
+      currentMessageIndex: 0,
+      totalMessages: 3,
+      generationInfo: { interrupted: true, stopped: true },
+      metadataExtra: { generation_status: "stopped" }
+    }
+    const view = render(<PlaygroundMessage {...savedProps} />)
+    view.rerender(<PlaygroundMessage {...savedProps} {...busy} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped")
+    expect(
+      screen.queryByRole("button", { name: "Retry same model" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Continue from partial" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not attribute a saved stop to the current user", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        metadataExtra={{ generation_status: "stopped" }}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This reply was stopped. The saved content is kept."
+    )
+    expect(
+      screen.queryByText(
+        "You stopped this reply. What it wrote so far is kept."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it.each(["Saved answer", "", "<think>Reasoning only</think>"])(
+    "keeps a recorded complete response from inheriting private recovery with content %s",
+    (message) => {
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          message={message}
+          generationInfo={{ interrupted: true, stopped: true }}
+          metadataExtra={{ generation_status: "complete" }}
+        />
+      )
+      expect(screen.queryByText("Interrupted")).not.toBeInTheDocument()
+      expect(screen.queryByText("Stopped")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Retry same model" })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it("keeps typed image-event presentation separate from text-generation metadata", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        message_type={IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE}
+        generationInfo={{ model: "image-model" }}
+        metadataExtra={{
+          model_id: "text-model",
+          generation_status: "interrupted"
+        }}
+      />
+    )
+    expect(screen.getByTestId("message-model-badge")).toHaveTextContent(
+      "image-model"
+    )
+    expect(screen.queryByText("Interrupted")).not.toBeInTheDocument()
+  })
+})
+
+it("reads recorded response provenance after the real server fallback mapper", async () => {
+  decodeChatErrorPayloadMock.mockReturnValue(null)
+  const { mapServerChatMessagesToPlaygroundMessages } = await vi.importActual<
+    typeof import("@/hooks/chat/useServerChatLoader")
+  >("@/hooks/chat/useServerChatLoader")
+  const [message] = mapServerChatMessagesToPlaygroundMessages({
+    assistantName: "Mira",
+    characterId: "4",
+    serverMessages: [
+      {
+        id: "recorded-reply",
+        role: "assistant",
+        content: "Saved partial response.",
+        created_at: "2026-10-07T12:00:00Z",
+        metadata_extra: {
+          generation_status: "length",
+          model_id: "saved-model",
+          provider: "openai"
+        }
+      }
+    ]
+  })
+  render(<PlaygroundMessage {...baseProps} {...message} />)
+  expect(screen.getByTestId("message-model-badge")).toHaveTextContent(
+    "saved-model"
+  )
+  expect(screen.getByRole("status")).toHaveTextContent("Output limit reached")
+  expect(
+    screen.queryByRole("button", { name: "Retry same model" })
+  ).not.toBeInTheDocument()
+})
+
+it("reads captured native metadata without importing private local recovery fields", async () => {
+  decodeChatErrorPayloadMock.mockReturnValue(null)
+  const { formatSelectedHistory } =
+    await vi.importActual<typeof import("@/db/dexie/helpers")>(
+      "@/db/dexie/helpers"
+    )
+  const nodes = [
+    { id: "u", revision: "1", role: "user", parent_id: null, settled: true },
+    { id: "a", revision: "1", role: "assistant", parent_id: "u", settled: true }
+  ]
+  const capture: import("@/types/history-selection").HistorySelectionCaptureV1 =
+    {
+      status: "captured",
+      purpose: "send",
+      storage_context_digest: "storage",
+      rows: nodes,
+      snapshot: {
+        version: 1,
+        owner_key: "native-owner",
+        conversation_id: "chat",
+        nodes,
+        fences: { conversation: "c", history: "h", settings: "s" },
+        source_digest: "source",
+        storage_context_digest: "storage",
+        interpretation_status: { kind: "parent_graph_v1" }
+      },
+      view: {
+        view_session_id: "view",
+        owner_key: "native-owner",
+        conversation_id: "chat",
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "after_message", message_id: "a" },
+        selection_revision: 1
+      },
+      selected_content: [
+        { id: "u", revision: "1", message: "Question", images: [] },
+        {
+          id: "a",
+          revision: "1",
+          message: "Saved partial.",
+          images: [],
+          extra_metadata: {
+            generation_status: "interrupted",
+            model_id: "saved-model",
+            provider: "openai",
+            local_history: {
+              generationInfo: { interrupted: true, stopped: true },
+              modelId: "private-model"
+            }
+          }
+        }
+      ]
+    }
+  const before = structuredClone(capture)
+  const message = formatSelectedHistory(capture).messages[1]
+  render(<PlaygroundMessage {...baseProps} {...message} />)
+  expect(screen.getByTestId("message-model-badge")).toHaveTextContent(
+    "saved-model"
+  )
+  expect(screen.getByRole("status")).toHaveTextContent("Interrupted")
+  expect(
+    screen.queryByRole("button", { name: "Retry same model" })
+  ).not.toBeInTheDocument()
+  expect(capture).toEqual(before)
+})
+
+it("reads recorded response metadata after the actual compact server mapper", () => {
+  decodeChatErrorPayloadMock.mockReturnValue(null)
+  // Execute the private mapper source, with its real normalization dependencies.
+  // Existing mounted compact suites qualify loading/tab ownership separately.
+  const route = ts.createSourceFile(
+    "sidepanel-chat.tsx",
+    readFileSync(
+      path.resolve(__dirname, "../../../../routes/sidepanel-chat.tsx"),
+      "utf8"
+    ),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  )
+  const names = ["normalizeServerChatMessageId", "mapServerChatMessages"]
+  const declarations = route.statements
+    .filter(ts.isVariableStatement)
+    .filter((statement) =>
+      statement.declarationList.declarations.some((declaration) =>
+        names.includes(declaration.name.getText(route))
+      )
+    )
+  expect(declarations).toHaveLength(2)
+  const compiled = ts.transpileModule(
+    declarations.map((declaration) => declaration.getText(route)).join("\n") +
+      "\nreturn mapServerChatMessages",
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+  ).outputText
+  const map = new Function(
+    "normalizeChatRole",
+    "normalizeMessageMetadataExtra",
+    compiled
+  )(normalizeChatRole, normalizeMessageMetadataExtra)
+  const source = [
+    {
+      id: "compact-reply",
+      role: "assistant",
+      content: "Saved compact partial.",
+      created_at: "2026-10-07T12:00:00Z",
+      metadata_extra: {
+        model_id: "compact-model",
+        provider: "openai",
+        generation_status: "stopped"
+      }
+    }
+  ]
+  const before = structuredClone(source)
+  const result = map(source)
+  render(<PlaygroundMessage {...baseProps} {...result.mappedMessages[0]} />)
+  expect(screen.getByTestId("message-model-badge")).toHaveTextContent(
+    "compact-model"
+  )
+  expect(screen.getByRole("status")).toHaveTextContent("Stopped")
+  expect(
+    screen.queryByRole("button", { name: "Retry same model" })
+  ).not.toBeInTheDocument()
+  expect(result.history).toEqual([
+    { role: "assistant", content: "Saved compact partial." }
+  ])
+  expect(source).toEqual(before)
+})

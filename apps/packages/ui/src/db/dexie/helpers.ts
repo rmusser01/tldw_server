@@ -386,7 +386,12 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
     const selected = content.get(node.id)
     if (!selected) throw new Error("selected_content_mismatch")
     const metadata = selected.extra_metadata || {}
-    const local = (metadata.local_history || {}) as Partial<Message>
+    const local = (
+      typeof ownerKey === "string" && isLocalHistoryOwnerKey(ownerKey)
+        ? metadata.local_history || {}
+        : {}
+    ) as Partial<Message>
+
     return {
       ...local,
       ...(serverOwned ? { serverMessageId: node.id } : {}),

@@ -1587,5 +1587,15 @@
     "settingsLoadFailedBody": "Could not load saved image settings. Your current settings were kept.",
     "referenceImagesFailed": "Could not load reference images. Retry, or clear the selection to continue without one.",
     "referenceImageSelectionUnavailable": "The selected reference image could not be verified. Retry loading reference images or clear the selection before generating."
+  },
+  "errorRecovery": {
+    "interruptedLabel": "Interrupted",
+    "savedInterruptedSummary": "This reply ended early. The saved content is kept.",
+    "stoppedLabel": "Stopped",
+    "savedStoppedSummary": "This reply was stopped. The saved content is kept.",
+    "lengthLabel": "Output limit reached",
+    "lengthSummary": "This reply reached the model's output limit. The saved content is kept.",
+    "generationFailedLabel": "Generation failed",
+    "generationFailedSummary": "The saved record reports a generation failure. Any saved content is kept."
   }
 }
