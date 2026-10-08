@@ -817,7 +817,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           input,
           {
             signal,
-            validate_lease: () => historyTurn.validateLease()
+            validate_lease: () => historyTurn.validateLease(),
+            ...(historyTurn.historyBranch !== undefined
+              ? { historyBranch: historyTurn.historyBranch }
+              : {})
           }
         )
       }

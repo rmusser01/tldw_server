@@ -4369,5 +4369,20 @@
   },
   "sources_captureCharacters": {
     "message": "Characters"
+  },
+  "historySelection_savedEditedReplyTitle": {
+    "message": "Edited reply saved"
+  },
+  "historySelection_savedEditedReplyMessage": {
+    "message": "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready."
+  },
+  "historySelection_openSavedReply": {
+    "message": "Open saved reply"
+  },
+  "historySelection_finishEditBeforeOpening": {
+    "message": "Finish or cancel your current message edit before opening the saved reply."
+  },
+  "historySelection_openSavedReplyFailed": {
+    "message": "Could not open the saved reply. Your current view and saved reply are retained."
   }
 }

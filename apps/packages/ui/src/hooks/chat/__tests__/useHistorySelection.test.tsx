@@ -15,6 +15,7 @@ import type {
 import { resolveHistorySelection } from "@/utils/history-selection"
 
 const mocks = vi.hoisted(() => ({
+  openButtons: [] as Array<() => void>,
   bookmarks: new Map<string, any>(),
   configChanged: null as null | (() => void),
   forkCandidate: vi.fn(async (..._args: any[]) => null as any),
@@ -30,6 +31,18 @@ const mocks = vi.hoisted(() => ({
   recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
   dismissRecovery: vi.fn<(...args: any[]) => Promise<void>>(async () => {})
 }))
+vi.mock("@/components/Common/Button", async (original) => {
+  const { Button } =
+    await original<typeof import("@/components/Common/Button")>()
+  const React = await import("react")
+  return {
+    Button: React.forwardRef<HTMLButtonElement, any>((props, ref) => {
+      if (props.children === "Open saved reply")
+        mocks.openButtons.push(props.onClick)
+      return React.createElement(Button, { ...props, ref })
+    })
+  }
+})
 vi.mock("@/db/dexie/fork-operations", () => ({
   findForkCandidate: (...args: any[]) => mocks.forkCandidate(...args),
   loadForkOperations: (...args: any[]) => mocks.forkRecords(...args),
@@ -1211,4 +1224,339 @@ it("does not re-commit consumers when a load starts with nothing to clear", () =
     result.current.beginLoad()
   })
   expect(commits).toBe(before)
+})
+
+
+it("following an edit result refuses a retired editor before capture", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner)
+  })
+  const origin = structuredClone(result.current.view!)
+  mocks.capture.mockClear()
+  await act(async () => {
+    const follow = result.current.followResult as (
+      view: HistoryViewSelectionV1,
+      id: string,
+      isCurrent: () => boolean
+    ) => Promise<boolean>
+    expect(await follow(origin, "a", () => false)).toBe(false)
+  })
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(result.current.view).toEqual(origin)
+})
+
+it("following an edit result keeps the original view when typing retires a held capture", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner)
+  })
+  const origin = structuredClone(result.current.view!)
+  const capture = mocks.capture.getMockImplementation()!
+  let release!: () => void
+  const held = new Promise<void>(done => {release = done})
+  mocks.capture.mockImplementationOnce(async (...args) => {
+    await held
+    return capture(...args)
+  })
+  let current = true
+  let attempt!: Promise<boolean>
+  act(() => {
+    const follow = result.current.followResult as (
+      view: HistoryViewSelectionV1,
+      id: string,
+      isCurrent: () => boolean
+    ) => Promise<boolean>
+    attempt = follow(origin, "a", () => current)
+  })
+  try {
+    expect(result.current.view).toEqual(origin)
+  } finally {
+    current = false
+    await act(async () => {
+      release()
+      await attempt
+    })
+  }
+  expect(await attempt).toBe(false)
+  expect(result.current.view).toEqual(origin)
+})
+
+it("a current edit result installs once and acknowledges its own editor retirement", async () => {
+  let current = true
+  const onCapture = vi.fn(() => {
+    current = false
+  })
+  const hook = renderHook(() => useHistorySelection({ onCapture }))
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  current = true
+  onCapture.mockClear()
+  const origin = hook.result.current.view!
+  await act(async () => {
+    expect(
+      await hook.result.current.followResult(origin, "a", () => current)
+    ).toBe(true)
+  })
+  expect(hook.result.current.view).toMatchObject({
+    cursor: {
+      kind: "after_message",
+      message_id: "a"
+    },
+    selection_revision: origin.selection_revision + 1
+  })
+  expect(onCapture).toHaveBeenCalledOnce()
+  expect(hook.result.current.status).toBe("ready")
+})
+
+it("an edit result that cannot be captured preserves the original selected view", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  const origin = hook.result.current.view!
+  mocks.capture.mockImplementationOnce(async (_owner, view) => ({
+    status: "invalid_history",
+    code: "missing_message",
+    snapshot,
+    view,
+    purpose: "send"
+  }))
+  await act(async () => {
+    expect(
+      await hook.result.current.followResult(origin, "a", () => true)
+    ).toBe(false)
+  })
+  expect(hook.result.current.view).toBe(origin)
+  expect(hook.result.current.status).toBe("ready")
+})
+
+it.each(["new-draft", "same-id-restore", "source-intent"])(
+  "actual %s retirement during edit result capture cannot install an obsolete branch",
+  async (boundary) => {
+    const { captureChatDraftSource } = await import("../chat-draft-transition")
+    const { useStoreMessageOption } = await import("@/store/option")
+    const { usePlaygroundSessionStore } = await import(
+      "@/store/playground-session"
+    )
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(owner)
+    })
+    const origin = hook.result.current.view!
+    const source = captureChatDraftSource()
+    const capture = mocks.capture.getMockImplementation()!
+    let release!: () => void
+    const held = new Promise<void>((done) => {
+      release = done
+    })
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return capture(...args)
+    })
+    let attempt!: Promise<boolean>
+    act(() => {
+      attempt = hook.result.current.followResult(origin, "a", source.isCurrent)
+    })
+    if (boundary === "new-draft")
+      useStoreMessageOption.getState().startNewChatDraft()
+    else if (boundary === "same-id-restore")
+      usePlaygroundSessionStore.setState({
+        restoreRevision:
+          usePlaygroundSessionStore.getState().restoreRevision + 1
+      })
+    else
+      usePlaygroundSessionStore.setState({
+        sourceSelectionRevision:
+          usePlaygroundSessionStore.getState().sourceSelectionRevision + 1
+      })
+    await act(async () => {
+      release()
+      expect(await attempt).toBe(false)
+    })
+    expect(hook.result.current.view).toBe(origin)
+    expect(hook.result.current.status).toBe("ready")
+  }
+)
+
+const savedEditedRecovery = (view: HistoryViewSelectionV1) => ({
+  scope: { profile_id: "profile", client_session_id: "originating-session" },
+  turn: {
+    operation_id: "edited-operation",
+    action: "edit_resend" as const,
+    origin_view: view,
+    owner_key: "owner",
+    conversation_id: "chat",
+    persistence: "server" as const,
+    input_id: "u",
+    assistant_id: "b",
+    settled_message_id: "b",
+    created_at: 1,
+    input_text: "Edited question",
+    input_images: [],
+    result_text: "Other answer",
+    state: "generated_unsaved" as const,
+    outcome: "complete" as const,
+    selection_digest: "selection",
+    request_context_digest: "request",
+    admission: {
+      version: 1 as const,
+      owner_key: "owner",
+      conversation_id: "chat",
+      input_message_id: "u",
+      input_message_revision: "u1",
+      selection_digest: "selection"
+    }
+  }
+})
+const editedRecoveryOwner = {
+  kind: "native" as const,
+  owner_key: "owner",
+  conversation_id: "chat",
+  request_scope: {} as never,
+  validate_lease: () => true
+}
+
+it("explicit recovery opens a freshly reread completed edit result and dismisses only after capture", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(editedRecoveryOwner)
+  })
+  const entry = savedEditedRecovery(hook.result.current.view!)
+  mocks.recoveries.mockResolvedValue([entry])
+  mocks.capture.mockClear()
+  await act(async () => {
+    expect(
+      await hook.result.current.openRecoveryResult(entry, () => true)
+    ).toBe(true)
+  })
+  expect(mocks.capture).toHaveBeenCalledOnce()
+  expect(hook.result.current.view?.cursor).toEqual({
+    kind: "after_message",
+    message_id: "b"
+  })
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(
+    entry.scope,
+    expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
+    "edited-operation",
+    "completed"
+  )
+})
+
+it.each([
+  "foreign profile",
+  "foreign owner",
+  "changed result",
+  "missing receipt",
+  "incomplete",
+  "ordinary",
+  "retired source"
+])("explicit recovery does not follow or dismiss after %s", async (reason) => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(editedRecoveryOwner)
+  })
+  const origin = hook.result.current.view!
+  const entry = savedEditedRecovery(origin)
+  mocks.recoveries.mockResolvedValue(
+    reason === "missing receipt"
+      ? []
+      : [
+          reason === "changed result"
+            ? { ...entry, turn: { ...entry.turn, settled_message_id: "a" } }
+            : reason === "incomplete"
+              ? { ...entry, turn: { ...entry.turn, outcome: "interrupted" } }
+              : reason === "ordinary"
+                ? { ...entry, turn: { ...entry.turn, action: undefined } }
+                : entry
+        ]
+  )
+  const offered =
+    reason === "foreign profile"
+      ? { ...entry, scope: { ...entry.scope, profile_id: "foreign" } }
+      : reason === "foreign owner"
+        ? { ...entry, turn: { ...entry.turn, owner_key: "foreign" } }
+        : entry
+  mocks.capture.mockClear()
+  await act(async () => {
+    expect(
+      await hook.result.current.openRecoveryResult(
+        offered,
+        () => reason !== "retired source"
+      )
+    ).toBe(false)
+  })
+  expect(hook.result.current.view).toBe(origin)
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("an editor opened during held recovery capture preserves the view and recovery receipt", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(editedRecoveryOwner)
+  })
+  const origin = hook.result.current.view!
+  const entry = savedEditedRecovery(origin)
+  mocks.recoveries.mockResolvedValue([entry])
+  const capture = mocks.capture.getMockImplementation()!
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>((done) => {
+    entered = done
+  })
+  const held = new Promise<void>(done => {release = done})
+  mocks.capture.mockImplementationOnce(async (...args) => { entered(); await held; return capture(...args) })
+  let current = true,
+    attempt!: Promise<boolean>
+  await act(async () => {
+    attempt = hook.result.current.openRecoveryResult(entry, () => current)
+    await ready
+  })
+  current = false
+  await act(async () => {
+    release()
+    expect(await attempt).toBe(false)
+  })
+  expect(hook.result.current.view).toBe(origin)
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("a retained rendered recovery callback refuses an actual same-ID H1 refresh before invocation", async () => {
+  const { HistorySelectionReview } = await import(
+    "@/components/Common/Playground/HistorySelectionReview"
+  )
+  let controller!: HistorySelectionController
+  function RecoveryView() {
+    controller = useHistorySelection()
+    return <HistorySelectionReview selection={controller} />
+  }
+  render(<RecoveryView />)
+  await act(async () => {
+    await controller.open(editedRecoveryOwner)
+  })
+  const entry = savedEditedRecovery(controller.view!)
+  mocks.recoveries.mockResolvedValue([entry])
+  await act(async () => {
+    await controller.refreshRecovery()
+  })
+  const retained = mocks.openButtons.at(-1)!
+  expect(retained).toBeTypeOf("function")
+  await act(async () => {
+    expect(await controller.refresh()).toBe(true)
+  })
+  const refreshed = controller.view
+  mocks.capture.mockClear()
+  await act(async () => {
+    retained()
+    await Promise.resolve()
+  })
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+  expect(controller.view).toBe(refreshed)
+  await act(async () => {
+    mocks.openButtons.at(-1)!()
+    await Promise.resolve()
+  })
+  await waitFor(() => expect(mocks.dismissRecovery).toHaveBeenCalledOnce())
 })

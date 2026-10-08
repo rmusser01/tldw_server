@@ -426,9 +426,13 @@ const captureFor = (view: any) => {
   const rows =
     view.cursor.kind === "empty"
       ? []
-      : nodes.filter(
-          (row) => row.id === "u-old" || row.id === view.cursor.message_id
-        )
+      : view.cursor.kind === "before_message"
+        ? nodes.filter(
+            (row) => row.id === "u-old" && view.cursor.message_id !== "u-old"
+          )
+        : nodes.filter(
+            (row) => row.id === "u-old" || row.id === view.cursor.message_id
+          )
   return {
     status: "captured",
     snapshot: {
@@ -4431,3 +4435,158 @@ it.each(["history-epoch", "new-draft", "same-id-restore"])(
     expect(options.setHistory).not.toHaveBeenCalled()
   }
 )
+
+
+it.each(["current", "newer edit", "Cancel", "interrupted"])(
+  "mounted native character edit-resend preserves originals through %s",
+  async (boundary) => {
+    const options = createHookOptions()
+    // The real native character capture includes backend structural role metadata.
+    const decorate = (capture: any) => ({
+      ...capture,
+      snapshot: {
+        ...capture.snapshot,
+        nodes: capture.snapshot.nodes.map((node: any) =>
+          node.id === "u-old"
+            ? {
+                ...node,
+                metadata: [
+                  { id: "u-old", revision: "m1", kind: "message_metadata" }
+                ]
+              }
+            : node
+        )
+      },
+      selected_content: capture.selected_content.map((row: any) =>
+        row.id === "u-old"
+          ? { ...row, extra_metadata: { sender_role: "user" } }
+          : row
+      )
+    })
+    h1.controller.getCurrent().capture = decorate(
+      h1.controller.getCurrent().capture
+    )
+    const capture = h1.capture.getMockImplementation()!
+    h1.capture.mockImplementation(async (...args) =>
+      decorate(await capture(...args))
+    )
+    options.messages = [
+      {
+        id: "u-old",
+        isBot: false,
+        message: "old question",
+        sources: [],
+        metadataExtra: { sender_role: "user" }
+      },
+      { id: "a1", isBot: true, message: "same answer", sources: [] }
+    ] as any
+    messageStoreState.editRows = () => options.messages
+    const original = structuredClone(options.messages)
+    const origin = h1.controller.getCurrent().view
+    let editorCurrent = true
+    const isCurrent = () => editorCurrent
+    h1.wire.mockImplementation(async function* (request) {
+      const selection = request.tldw_history_selection_v1
+      yield {
+        tldw_history_admission_v1: {
+          version: 1,
+          owner_key: origin.owner_key,
+          conversation_id: nativeChatId,
+          input_message_id: "edited-input",
+          input_message_revision: "input-r",
+          selection_digest: selection.selection_digest,
+          messages: selection.messages,
+          originating_selection_revision: selection.selection_revision
+        }
+      }
+      yield { choices: [{ delta: { content: "Edited answer" } }] }
+      if (boundary === "interrupted") throw new Error("disconnected")
+      if (boundary !== "current") editorCurrent = false
+      yield {
+        tldw_message_id: "edited-answer",
+        tldw_conversation_id: nativeChatId
+      }
+    })
+    const hook = renderHook(() => useChatActions(options as any))
+    options.setMessages.mockClear()
+    options.setHistory.mockClear()
+    let result: unknown
+    await act(async () => {
+      result = await hook.result.current.editMessage(
+        0,
+        "Edited question  \n",
+        true,
+        true,
+        isCurrent
+      )
+    })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const request = h1.wire.mock.calls[0][0]
+    expect(request).toMatchObject({
+      tldw_history_branch: true,
+      messages: [{ role: "user", content: "Edited question  \n" }],
+      tldw_history_selection_v1: {
+        cursor: { kind: "before_message", message_id: "u-old" },
+        messages: [],
+        selection_revision: origin.selection_revision + 1
+      }
+    })
+    expect(options.messages).toEqual(original)
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(options.setHistory).not.toHaveBeenCalled()
+    expect(h1.controller.getCurrent().view).toBe(origin)
+    if (boundary === "current") {
+      expect(result).toEqual({ status: "submitted" })
+      expect(h1.controller.followResult).toHaveBeenCalledExactlyOnceWith(
+        origin,
+        "edited-answer",
+        expect.any(Function)
+      )
+      expect(h1.controller.followResult.mock.calls[0][2]()).toBe(true)
+      expect(h1.dismiss).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        "completed"
+      )
+    } else {
+      expect(h1.controller.followResult).not.toHaveBeenCalled()
+      expect(h1.dismiss).not.toHaveBeenCalled()
+      expect(h1.recover).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({
+          input_text: "Edited question  \n",
+          input_id: "edited-input",
+          result_text: "Edited answer",
+          state: "generated_unsaved",
+          ...(boundary === "interrupted"
+            ? {}
+            : { outcome: "complete", settled_message_id: "edited-answer" })
+        })
+      )
+    }
+  }
+)
+
+it("native edit-resend refuses Compare without local or provider writes", async () => {
+  const options = ordinaryOptions()
+  options.compareModeActive = true
+  options.compareSelectedModels = ["deepseek-chat", "another-model"] as never
+  messageStoreState.editRows = () => options.messages
+  const original = structuredClone(options.messages)
+  const hook = renderHook(() => useChatActions(options as any))
+  options.setMessages.mockClear()
+  options.setHistory.mockClear()
+  await act(async () => {
+    expect(
+      await hook.result.current.editMessage(0, "edited", true, true, () => true)
+    ).toMatchObject({ status: "failed" })
+  })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  expect(h1.saveHistory).not.toHaveBeenCalled()
+  expect(options.setMessages).not.toHaveBeenCalled()
+  expect(options.setHistory).not.toHaveBeenCalled()
+  expect(options.messages).toEqual(original)
+})

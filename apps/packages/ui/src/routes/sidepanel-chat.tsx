@@ -484,16 +484,26 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
   // installed capture tells the check what the tab now shows.
   const sendGate = React.useRef<SidepanelSendGate | null>(null)
   const captureListener = React.useRef<CaptureListener | null>(null)
-  const selection: HistorySelectionController = useHistorySelection({ onCapture: capture => {
-    if (!owner.isCurrent()) return
-    const capturedOwner = selection.getCurrent().owner
-    if (capturedOwner?.kind === "native" &&
-      chatDraftOwnerKey(capturedOwner.request_scope) !== chatDraftOwnerKey(owner.snapshot.requestScope)) return
-    const display = formatSelectedHistory(capture)
-    useStoreMessageOption.getState().setHistory(display.history)
-    useStoreMessageOption.getState().setMessages(display.messages)
-    captureListener.current?.(capture)
-  } })
+  const selection: HistorySelectionController = useHistorySelection({
+    onCapture: (capture) => {
+      if (!owner.isCurrent()) return
+      const capturedOwner = selection.getCurrent().owner
+      if (
+        capturedOwner?.kind === "native" &&
+        chatDraftOwnerKey(capturedOwner.request_scope) !==
+          chatDraftOwnerKey(owner.snapshot.requestScope)
+      )
+        return
+      const source = captureChatDraftSource(selection.fence())
+      const display = formatSelectedHistory(capture)
+      useStoreMessageOption.setState({
+        history: display.history,
+        messages: display.messages
+      })
+      if (source.isCurrent() && owner.isCurrent())
+        captureListener.current?.(capture)
+    }
+  })
   return (
     <HistorySelectionContext.Provider value={{ ...selection, draftAccount: {
       requestScope: owner.snapshot.requestScope,

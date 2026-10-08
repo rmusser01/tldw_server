@@ -148,7 +148,7 @@ const sanitizeUserContent = (
 ): string | ChatCompletionContentPart[] | null => {
   if (typeof content === "string") {
     const trimmed = content.trim()
-    return trimmed.length > 0 ? trimmed : null
+    return trimmed.length > 0 ? content : null
   }
   if (!Array.isArray(content)) return null
 
@@ -156,8 +156,8 @@ const sanitizeUserContent = (
     .map((part) => {
       if (!part || typeof part !== "object") return null
       if (part.type === "text") {
-        const text = typeof part.text === "string" ? part.text.trim() : ""
-        return text.length > 0 ? { type: "text", text } : null
+        const text = typeof part.text === "string" ? part.text : ""
+        return text.trim().length > 0 ? { type: "text", text } : null
       }
       if (part.type === "image_url") {
         const candidate = part.image_url

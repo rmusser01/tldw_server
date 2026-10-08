@@ -58,7 +58,8 @@ it.each(["Save", "Save & Send"])(
       expect(view.editor).toHaveValue("Exact authored edit  \n")
       expect(submit).toHaveBeenCalledExactlyOnceWith(
         "Exact authored edit  \n",
-        action === "Save & Send"
+        action === "Save & Send",
+        expect.any(Function)
       )
     } finally {
       await act(async () => {
@@ -229,7 +230,11 @@ it("a matching canonical value arriving after acknowledgement keeps newer input 
   submit.mockResolvedValue({ status: "submitted" })
   fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
   await waitFor(() => expect(view.close).toHaveBeenCalledOnce())
-  expect(submit).toHaveBeenLastCalledWith("Newer authored edit", false)
+  expect(submit).toHaveBeenLastCalledWith(
+    "Newer authored edit",
+    false,
+    expect.any(Function)
+  )
 })
 
 it("canonical edit/undo cannot certify an old held acknowledgement", async () => {
@@ -270,3 +275,41 @@ it("an external canonical transition retires an expected delayed acknowledgement
   expect(view.close).not.toHaveBeenCalled()
   expect(view.editor).toHaveValue("Newer authored draft")
 })
+
+
+it.each(["typing", "undo", "cancel"])(
+  "current editor follow lease retires after %s",
+  async (change) => {
+    const held = deferred()
+    const submit = vi.fn((..._args: unknown[]) => held.promise)
+    const view = mount(submit)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save & Send", exact: true })
+    )
+    try {
+      const lease = submit.mock.calls[0]?.[2]
+      expect(typeof lease).toBe("function")
+      const isCurrent = lease as () => boolean
+      expect(isCurrent()).toBe(true)
+      if (change === "cancel")
+        fireEvent.click(
+          screen.getByRole("button", { name: "Cancel", exact: true })
+        )
+      else {
+        fireEvent.change(view.editor, {
+          target: { value: "Newer authored edit" }
+        })
+        if (change === "undo")
+          fireEvent.change(view.editor, {
+            target: { value: "Exact authored edit  \n" }
+          })
+      }
+      expect(isCurrent()).toBe(false)
+    } finally {
+      await act(async () => {
+        held.resolve({ status: "submitted" })
+        await held.promise
+      })
+    }
+  }
+)

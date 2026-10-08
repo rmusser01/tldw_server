@@ -364,11 +364,16 @@ const normalizeChatWorkflowMode = (
   value === "character" ? "character" : "standard";
 
 export const Playground = () => {
-  return <HistorySelectionProvider storageKey="tldw-h1-playground-reference" onCapture={capture => {
-    const display = formatSelectedHistory(capture);
-    useStoreMessageOption.getState().setHistory(display.history);
-    useStoreMessageOption.getState().setMessages(display.messages);
-  }}><PlaygroundContent /></HistorySelectionProvider>;
+  return (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture);
+        useStoreMessageOption.setState({ history: display.history, messages: display.messages });
+      }}>
+      <PlaygroundContent />
+    </HistorySelectionProvider>
+  );
 };
 
 const PlaygroundContent = () => {

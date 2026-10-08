@@ -522,9 +522,13 @@ const captureFor = (view: any) => {
   const rows =
     view.cursor.kind === "empty"
       ? []
-      : nodes.filter(
-          (row) => row.id === "u-old" || row.id === view.cursor.message_id
-        )
+      : view.cursor.kind === "before_message"
+        ? nodes.filter(
+            (row) => row.id === "u-old" && view.cursor.message_id !== "u-old"
+          )
+        : nodes.filter(
+            (row) => row.id === "u-old" || row.id === view.cursor.message_id
+          )
   return {
     status: "captured",
     snapshot: {
@@ -654,7 +658,8 @@ beforeEach(async () => {
             input_message_revision: "accepted-r",
             selection_digest: body.tldw_history_selection_v1.selection_digest,
             messages: body.tldw_history_selection_v1.messages,
-            originating_selection_revision: 1
+            originating_selection_revision:
+              body.tldw_history_selection_v1.selection_revision
           }
         }
       : { id: body.id }
@@ -2268,5 +2273,128 @@ it.each(["history-epoch", "new-draft", "same-id-restore"])(
     expect(helpers.updateMessageById).not.toHaveBeenCalled()
     expect(mocks.setMessages).not.toHaveBeenCalled()
     expect(mocks.setHistory).not.toHaveBeenCalled()
+  }
+)
+
+
+it.each(
+  ["normal", "character"].flatMap((mode) =>
+    ["current", "newer edit", "interrupted"].map((boundary) => ({
+      mode,
+      boundary
+    }))
+  )
+)(
+  "compact $mode edit-resend preserves originals through $boundary",
+  async ({ mode, boundary }) => {
+    h1.native = mode === "character"
+    mocks.storeState.messages = [
+      {
+        id: "u-old",
+        name: "You",
+        isBot: false,
+        message: "old question",
+        sources: []
+      },
+      {
+        id: "a1",
+        name: "Assistant",
+        isBot: true,
+        message: "same answer",
+        sources: []
+      }
+    ]
+    const original = structuredClone(mocks.storeState.messages)
+    const origin = h1.controller.getCurrent().view
+    let editorCurrent = true
+    const isCurrent = () => editorCurrent
+    h1.controller.followResult.mockImplementation(
+      async (_origin: unknown, _id: unknown, current?: () => boolean) =>
+        current?.() !== false
+    )
+    h1.wire.mockImplementation(async function* (request) {
+      if (mode === "character") {
+        const selection = request.tldw_history_selection_v1
+        yield {
+          tldw_history_admission_v1: {
+            version: 1,
+            owner_key: origin.owner_key,
+            conversation_id: nativeChatId,
+            input_message_id: "edited-input",
+            input_message_revision: "input-r",
+            selection_digest: selection.selection_digest,
+            messages: selection.messages,
+            originating_selection_revision: selection.selection_revision
+          }
+        }
+      }
+      yield { choices: [{ delta: { content: "Edited answer" } }] }
+      if (boundary === "interrupted") throw new Error("disconnected")
+      if (boundary !== "current") editorCurrent = false
+      if (mode === "character")
+        yield {
+          tldw_message_id: "edited-answer",
+          tldw_conversation_id: nativeChatId
+        }
+    })
+    const hook = renderHook(() => useMessage())
+    mocks.setMessages.mockClear()
+    mocks.setHistory.mockClear()
+    let outcome: unknown
+    await act(async () => {
+      outcome = await hook.result.current.editMessage(
+        0,
+        "Edited question  \n",
+        true,
+        true,
+        isCurrent
+      )
+    })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const branch =
+      mode === "character"
+        ? h1.wire.mock.calls[0][0]
+        : h1.append.mock.calls[0][1]
+    expect(branch).toMatchObject({
+      tldw_history_branch: true,
+      tldw_history_selection_v1: {
+        cursor: { kind: "before_message", message_id: "u-old" },
+        messages: [],
+        selection_revision: origin.selection_revision + 1
+      }
+    })
+    expect(mocks.storeState.messages).toEqual(original)
+    expect(mocks.setMessages).not.toHaveBeenCalled()
+    expect(mocks.setHistory).not.toHaveBeenCalled()
+    expect(h1.controller.getCurrent().view).toBe(origin)
+    if (boundary === "current") {
+      expect(outcome).toEqual({ status: "submitted" })
+      expect(h1.controller.followResult).toHaveBeenCalledWith(
+        origin,
+        expect.any(String),
+        expect.any(Function)
+      )
+      expect(h1.controller.followResult.mock.calls[0][2]()).toBe(true)
+      expect(h1.dismiss).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        "completed"
+      )
+    } else {
+      expect(h1.dismiss).not.toHaveBeenCalled()
+      expect(h1.recover).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({
+          input_text: "Edited question  \n",
+          result_text: "Edited answer",
+          state: "generated_unsaved",
+          ...(boundary === "interrupted"
+            ? {}
+            : { outcome: "complete", settled_message_id: expect.any(String) })
+        })
+      )
+    }
   }
 )

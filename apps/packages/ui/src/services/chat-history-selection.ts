@@ -1,5 +1,6 @@
 /** Owner selection is separate from workspace routing, view identity and inference connection. */
 import { z } from "zod"
+import type { NativeHistoryEditResend } from "@/types/chat-modes"
 import type { ChatScope } from "@/types/chat-scope"
 import type {
   HistoryAdmissionReferenceV1,
@@ -369,6 +370,83 @@ export const captureHistorySnapshot = async (
   return freeze(result)
 }
 
+/** Capture an explicit branch without replacing the mounted source/editor. */
+export const nativeEditResendView = (
+  owner: HistoryOwnerV1,
+  origin: HistoryViewSelectionV1,
+  capture: HistorySelectionCaptureV1,
+  intent: NativeHistoryEditResend,
+  sourceCapture: HistorySelectionCaptureV1 = capture
+): HistoryViewSelectionV1 => {
+  assertOwnerLease(owner)
+  if (owner.kind !== "native")
+    return fail("native_history_requires_server_owner")
+  if (
+    owner.conversation_id !== intent.conversation_id ||
+    origin.conversation_id !== intent.conversation_id ||
+    origin.owner_key !== intent.owner_key ||
+    capture.snapshot.conversation_id !== intent.conversation_id ||
+    capture.snapshot.owner_key !== intent.owner_key ||
+    (owner.owner_key && owner.owner_key !== intent.owner_key)
+  )
+    fail("owner_conversation_mismatch")
+  const targets = capture.snapshot.nodes.filter(
+    (node) => node.id === intent.message_id
+  )
+  if (
+    targets.length !== 1 ||
+    targets[0].role !== "user" ||
+    !targets[0].settled ||
+    targets[0].revision !== intent.message_revision
+  )
+    fail("message_changed")
+  if (targets[0].assets?.length || targets[0].comparison)
+    fail("unsupported_message_payload")
+  if (targets[0].metadata?.length) {
+    // Detached ancestry excludes the edited row; validate its metadata against the original capture.
+    const sourceNodes = sourceCapture.snapshot.nodes.filter(
+      (node) => node.id === intent.message_id
+    )
+    const sourceContent = sourceCapture.selected_content.filter(
+      (row) => row.id === intent.message_id
+    )
+    if (
+      sourceCapture.snapshot.owner_key !== intent.owner_key ||
+      sourceCapture.snapshot.conversation_id !== intent.conversation_id ||
+      sourceNodes.length !== 1 ||
+      sourceNodes[0].revision !== targets[0].revision ||
+      sourceContent.length !== 1 ||
+      sourceContent[0].revision !== targets[0].revision ||
+      targets[0].metadata.some(
+        (reference) => reference.kind !== "message_metadata"
+      ) ||
+      canonicalHistoryJson(sourceNodes[0].metadata ?? []) !==
+        canonicalHistoryJson(targets[0].metadata) ||
+      sourceContent[0].tool_calls?.length ||
+      sourceContent[0].extra_metadata?.sender_role !== "user"
+    )
+      fail("unsupported_message_payload")
+    nativeHistoryMessagePayload({
+      id: intent.message_id,
+      history_id: intent.conversation_id,
+      role: "user",
+      name: "You",
+      content: sourceContent[0].message,
+      createdAt: 0,
+      images: [...sourceContent[0].images],
+      metadataExtra: sourceContent[0].extra_metadata
+    })
+  }
+  if (!intent.isOriginCurrent() || !intent.isCurrent()) fail("stale_selection")
+  const selection_revision = origin.selection_revision + 1
+  if (!Number.isSafeInteger(selection_revision)) fail("invalid_selection")
+  return {
+    ...structuredClone(origin),
+    selection_revision,
+    cursor: { kind: "before_message", message_id: intent.message_id }
+  }
+}
+
 /** Consumers dispatch this exact detached payload; never dispatch the original mutable input. */
 export const prepareHistoryContext = (
   payload: unknown,
@@ -517,7 +595,10 @@ export const nativeHistoryMessagePayload = (
     message.modelName ||
     message.modelImage ||
     message.reasoning_time_taken != null ||
-    (message.metadataExtra && Object.keys(message.metadataExtra).length)
+    (message.metadataExtra &&
+      Object.entries(message.metadataExtra).some(
+        ([key, value]) => key !== "sender_role" || value !== message.role
+      ))
   )
     fail("unsupported_message_payload")
   const image = images[0]
@@ -596,12 +677,14 @@ export const appendSelectedUser = async (
   owner: HistoryOwnerV1,
   selection: HistorySelectionV1,
   input: Message,
-  opts?: HistoryOperationOptions
+  opts?: HistoryOperationOptions & { historyBranch?: boolean }
 ): Promise<HistoryAdmissionV1> => {
   selection = structuredClone(selection)
   input = structuredClone(input)
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
+  if (opts?.historyBranch !== undefined && owner.kind !== "native")
+    fail("native_history_requires_server_owner")
   if (owner.kind === "local")
     return appendLocalSelectedUser(owner, selection, input, localOptions(owner, opts))
   assertNativeBinding(owner, selection, true)
@@ -614,7 +697,10 @@ export const appendSelectedUser = async (
     fail("invalid_selection")
   const body = {
     ...nativeHistoryMessagePayload(input),
-    tldw_history_selection_v1: structuredClone(selection)
+    tldw_history_selection_v1: structuredClone(selection),
+    ...(opts?.historyBranch !== undefined
+      ? { tldw_history_branch: opts.historyBranch }
+      : {})
   }
   const response = await tldwClient.addChatMessage(
     owner.conversation_id,

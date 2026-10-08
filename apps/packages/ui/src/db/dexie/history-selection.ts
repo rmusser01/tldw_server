@@ -1021,9 +1021,11 @@ const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopp
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
 ): Promise<void> => {
+  if (turn.action !== undefined && turn.action !== "edit_resend") fail("unsupported_history_action")
   // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
   const detached: HistoryTurnRecovery = structuredClone({
     operation_id: turn.operation_id, origin_view: turn.origin_view,
+    ...(turn.action === "edit_resend" ? { action: turn.action } : {}),
     selection_digest: turn.selection_digest, request_context_digest: turn.request_context_digest,
     owner_key: turn.owner_key, conversation_id: turn.conversation_id,
     persistence: turn.persistence ?? "client",
@@ -1069,7 +1071,7 @@ export const saveHistoryTurnRecovery = async (
     if (prior) {
       const immutable = (value: HistoryTurnRecovery) => ({
         origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
-        operation_id: value.operation_id, owner_key: value.owner_key, conversation_id: value.conversation_id,
+        operation_id: value.operation_id, action: value.action, owner_key: value.owner_key, conversation_id: value.conversation_id,
         persistence: value.persistence ?? "client",
         ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
         input_text: value.input_text, input_images: value.input_images
@@ -1109,7 +1111,12 @@ export const loadHistoryTurnRecoveries = async (
     await assertBookmarkProfile(scope)
     const bookmarks = await db.historySelections.where("owner_key").equals(owner.owner_key).toArray()
     return bookmarks.filter(record => record.profile_id === scope.profile_id && record.conversation_id === owner.conversation_id)
-      .flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => ({scope: {profile_id: record.profile_id, client_session_id: record.client_session_id}, turn})))
+      .flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => {
+        const { action, ...ordinary } = turn
+        if (action !== undefined && action !== "edit_resend") fail("unsupported_history_action")
+        return { scope: { profile_id: record.profile_id, client_session_id: record.client_session_id },
+          turn: { ...ordinary, ...(action === "edit_resend" ? { action } : {}) } }
+      }))
   })
 
 export const dismissHistoryTurnRecovery = async (

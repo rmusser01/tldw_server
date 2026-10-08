@@ -18,6 +18,7 @@ import {
 } from "@/db/dexie/helpers"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import {
+  nativeHistoryMessagePayload,
   commitNativeFork,
   prepareNativeFork
 } from "@/services/chat-history-selection"
@@ -189,28 +190,81 @@ export const createRegenerateLastMessage = ({
 export const createEditMessage = (options: {
   messages: Message[]
   getMessages?: () => Message[]
+  historySelection?: HistorySelectionController | null
   history: ChatHistory
   setMessages: (messages: Message[]) => void
   setHistory: (history: ChatHistory) => void
   historyId: string | null
   validateBeforeSubmitFn: () => boolean
-  onSubmit: (params: any) => Promise<unknown>
+  onSubmit: (params: any) => Promise<ChatSubmitResult | void>
   captureViewFence?: () => () => boolean
+  captureSourceFence?: () => () => boolean
   mutate?: (target: Message, content: string) => Promise<void>
   notification?: NotificationInstance
 }) => {
   const current = options.captureViewFence?.() ?? (() => true)
+  const sourceCurrent = options.captureSourceFence?.() ?? (() => true)
   return async (
     index: number,
     message: string,
     isHuman: boolean,
-    isSend: boolean
+    isSend: boolean,
+    isEditorCurrent?: () => boolean
   ): Promise<ChatSubmitResult> => {
-    if (!current()) return chatSubmitSkipped("stale_selection")
+    if (!current() || !sourceCurrent())
+      return chatSubmitSkipped("stale_selection")
     const target = options.messages[index]
     if (!target?.id) throw new Error("missing_message")
     // Unsupported forms must not choose/truncate or mutate the captured stable target.
     if (isHuman && isSend) {
+      const origin = options.historySelection?.getCurrent()
+      if (
+        origin?.status === "ready" &&
+        origin.owner?.kind === "native" &&
+        origin.view &&
+        origin.capture?.status === "captured" &&
+        isEditorCurrent?.()
+      ) {
+        const before = options.getMessages?.() ?? options.messages
+        const candidates = before.filter((row) => row.id === target.id)
+        const messageId = target.serverMessageId ?? target.id
+        const node = origin.capture.snapshot.nodes.find(
+          (row) => row.id === messageId
+        )
+        if (
+          candidates.length !== 1 ||
+          candidates[0].message !== target.message ||
+          node?.role !== "user"
+        )
+          return chatSubmitSkipped("message_changed")
+        nativeHistoryMessagePayload({
+          ...target,
+          id: messageId,
+          history_id: origin.view.conversation_id,
+          role: "user",
+          content: message,
+          createdAt: target.createdAt ?? Date.now()
+        })
+        if (!options.validateBeforeSubmitFn())
+          return chatSubmitSkipped("validation_failed")
+        const result = await options.onSubmit({
+          message,
+          image: target.images?.[0] ?? "",
+          historyEditResend: {
+            owner_key: origin.view.owner_key,
+            conversation_id: origin.view.conversation_id,
+            message_id: messageId,
+            message_revision: node.revision,
+            isCurrent: () => sourceCurrent() && isEditorCurrent(),
+            isOriginCurrent: () => current() && sourceCurrent()
+          },
+          assertCurrent: () => {
+            if (!current()) throw new Error("stale_selection")
+          }
+        })
+        if (result) return result
+        return chatSubmitSkipped("submission_unacknowledged")
+      }
       const error = new Error(`unsupported_history_edit_and_send:${target.id}`)
       options.notification?.error({
         message: "Message action unavailable",

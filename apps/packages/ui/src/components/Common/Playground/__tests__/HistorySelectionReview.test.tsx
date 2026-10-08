@@ -1,6 +1,19 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+const reviewButtons = vi.hoisted(() => ({ open: [] as Array<() => void> }))
+vi.mock("@/components/Common/Button", async (original) => {
+  const { Button } =
+    await original<typeof import("@/components/Common/Button")>()
+  const React = await import("react")
+  return {
+    Button: React.forwardRef<HTMLButtonElement, any>((props, ref) => {
+      if (props.children === "Open saved reply")
+        reviewButtons.open.push(props.onClick)
+      return React.createElement(Button, { ...props, ref })
+    })
+  }
+})
 vi.mock("react-i18next", async () => {
   const { default: locale } = await import("@/assets/locale/en/playground.json")
   return {
@@ -450,4 +463,153 @@ describe("available history-path actions (TASK-13550)", () => {
     render(<HistorySelectionReview selection={selection} />)
     expect(screen.getByText(title)).toBeInTheDocument()
   })
+})
+
+
+const completedEditedSelection = () =>
+  ({
+    ...controller(),
+    status: "ready",
+    owner: { kind: "native" },
+    recoveries: [
+      {
+        scope: { profile_id: "profile", client_session_id: "origin" },
+        turn: {
+          operation_id: "edited",
+          action: "edit_resend",
+          outcome: "complete",
+          settled_message_id: "saved-answer",
+          persistence: "server",
+          state: "generated_unsaved",
+          admission: {},
+          input_text: "Edited question",
+          result_text: "Saved edited reply"
+        }
+      }
+    ],
+    openRecoveryResult: vi.fn(async () => true),
+    dismissRecovery: vi.fn()
+  }) as unknown as HistorySelectionController
+
+it("a saved edited reply has truthful copy and opens only on an explicit action", async () => {
+  const selection = completedEditedSelection()
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText("Edited reply saved")).toBeTruthy()
+  expect(screen.queryByText(/response outcome unknown/i)).toBeNull()
+  expect(selection.openRecoveryResult).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
+  await waitFor(() =>
+    expect(selection.openRecoveryResult).toHaveBeenCalledOnce()
+  )
+  expect(selection.openRecoveryResult).toHaveBeenCalledWith(
+    selection.recoveries[0],
+    expect.any(Function)
+  )
+})
+
+it("explicit recovery leaves an open message editor intact until it is finished", async () => {
+  const selection = completedEditedSelection()
+  const editor = document.createElement("form")
+  editor.setAttribute("data-chat-message-editor", "")
+  const text = document.createElement("textarea")
+  text.value = "Newer unsaved text"
+  editor.append(text)
+  document.body.append(editor)
+  try {
+    render(<HistorySelectionReview selection={selection} />)
+    fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
+    expect(selection.openRecoveryResult).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Finish or cancel your current message edit"
+    )
+    expect(text.value).toBe("Newer unsaved text")
+    editor.remove()
+    fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
+    await waitFor(() =>
+      expect(selection.openRecoveryResult).toHaveBeenCalledOnce()
+    )
+  } finally {
+    editor.remove()
+  }
+})
+
+it("a held recovery action cannot be duplicated and keeps a failed reply available", async () => {
+  const selection = completedEditedSelection()
+  let release!: (opened: boolean) => void
+  vi.mocked(selection.openRecoveryResult).mockImplementation(
+    () =>
+      new Promise((done) => {
+        release = done
+      })
+  )
+  render(<HistorySelectionReview selection={selection} />)
+  const button = screen.getByRole("button", { name: "Open saved reply" })
+  fireEvent.click(button)
+  fireEvent.click(button)
+  expect(selection.openRecoveryResult).toHaveBeenCalledOnce()
+  await act(async () => {
+    release(false)
+  })
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Could not open the saved reply"
+  )
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+  expect(
+    screen.getByRole("button", { name: "Open saved reply" })
+  ).not.toBeDisabled()
+})
+
+it("a retained Open callback cannot adopt a same-ID draft restore before React commits", async () => {
+  const { usePlaygroundSessionStore } = await import(
+    "@/store/playground-session"
+  )
+  const selection = completedEditedSelection()
+  render(<HistorySelectionReview selection={selection} />)
+  const retained = reviewButtons.open.at(-1)!
+  usePlaygroundSessionStore.setState({
+    restoreRevision: usePlaygroundSessionStore.getState().restoreRevision + 1
+  })
+  retained()
+  expect(selection.openRecoveryResult).not.toHaveBeenCalled()
+})
+
+it("replacement recovery opens without waiting for an old held read and late cleanup cannot unlock it", async () => {
+  const { useStoreMessageOption } = await import("@/store/option")
+  const first = completedEditedSelection(),
+    second = completedEditedSelection()
+  second.owner = {
+    kind: "native",
+    owner_key: "next-owner",
+    conversation_id: "next-chat"
+  } as never
+  let releaseFirst!: (value: boolean) => void,
+    releaseSecond!: (value: boolean) => void
+  vi.mocked(first.openRecoveryResult).mockImplementation(
+    () =>
+      new Promise((done) => {
+        releaseFirst = done
+      })
+  )
+  vi.mocked(second.openRecoveryResult).mockImplementation(
+    () =>
+      new Promise((done) => {
+        releaseSecond = done
+      })
+  )
+  const mounted = render(<HistorySelectionReview selection={first} />)
+  fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
+  useStoreMessageOption.getState().startNewChatDraft()
+  mounted.rerender(<HistorySelectionReview selection={second} />)
+  const next = screen.getByRole("button", { name: "Open saved reply" })
+  expect(next).not.toBeDisabled()
+  fireEvent.click(next)
+  expect(second.openRecoveryResult).toHaveBeenCalledOnce()
+  await act(async () => {
+    releaseFirst(false)
+  })
+  expect(next).toBeDisabled()
+  await act(async () => {
+    releaseSecond(false)
+  })
+  expect(next).not.toBeDisabled()
 })

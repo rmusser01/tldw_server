@@ -1431,3 +1431,93 @@ it.each(["missing", "replaced"])("verifies an expected profile without initializ
   await expect(history.ensureLocalProfileId("profile")).rejects.toMatchObject({ code: "owner_mismatch" })
   expect(JSON.stringify(await memory.userSettings.get("main"))).toBe(before)
 })
+
+
+it("explicit edited recovery policy round-trips and cannot become an ordinary checkpoint", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    action: "edit_resend",
+    operation_id: "edited",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    origin_view: origin,
+    selection_digest: "selection",
+    request_context_digest: "request",
+    input_id: "input",
+    assistant_id: "result",
+    created_at: 1,
+    input_text: "Exact  \n",
+    input_images: [],
+    result_text: "Reply",
+    state: "generated_unsaved",
+    outcome: "complete",
+    settled_message_id: "result"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+  ).toMatchObject(pending)
+  await expect(
+    history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending,
+      action: undefined
+    })
+  ).rejects.toThrow("history_operation_conflict")
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.action
+  ).toBe("edit_resend")
+})
+
+it("recovery reads refuse an unknown action without downgrading it into automatic ordinary work", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    operation_id: "old",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    origin_view: origin,
+    selection_digest: "selection",
+    request_context_digest: "request",
+    input_id: "u",
+    assistant_id: "a",
+    created_at: 1,
+    input_text: "Original",
+    input_images: [],
+    result_text: "Reply",
+    state: "generated_unsaved",
+    outcome: "complete",
+    settled_message_id: "a"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const row = await memory.historySelections.get([
+    bookmark.profile_id,
+    bookmark.client_session_id,
+    owner.owner_key,
+    "chat"
+  ])
+  await memory.historySelections.put({
+    ...row,
+    pending_turns: { old: { ...pending, action: "unrecognized" } }
+  })
+  await expect(
+    history.loadHistoryTurnRecoveries(bookmark, owner)
+  ).rejects.toThrow("unsupported_history_action")
+  expect(
+    (
+      await memory.historySelections.get([
+        bookmark.profile_id,
+        bookmark.client_session_id,
+        owner.owner_key,
+        "chat"
+      ])
+    ).pending_turns.old.action
+  ).toBe("unrecognized")
+  await memory.historySelections.put({
+    ...row,
+    pending_turns: { old: pending }
+  })
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.action
+  ).toBeUndefined()
+})

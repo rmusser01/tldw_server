@@ -323,7 +323,7 @@ export function useHistorySelection(
       try {
         // Unsupported temporary owners must not create even a profile/bookmark.
         if (owner.kind === "unavailable") throw new Error(owner.code)
-        const profile = qualifiedProfile ?? await ensureLocalProfileId()
+        const profile = qualifiedProfile ?? (await ensureLocalProfileId())
         if (operation.epoch !== epoch.current || !isCurrentLoad() || !ownerLeaseValid(owner)) return false
         const scope = {
           profile_id: profile,
@@ -667,11 +667,60 @@ export function useHistorySelection(
     [publish, refresh]
   )
   const followResult = useCallback(
-    async (origin: HistoryViewSelectionV1, messageId: string) => {
-      if (!sameView(live.current.view, origin)) return false
-      return choose({ kind: "after_message", message_id: messageId })
+    async (
+      origin: HistoryViewSelectionV1,
+      messageId: string,
+      isCurrent?: () => boolean
+    ) => {
+      if (!sameView(live.current.view, origin) || isCurrent?.() === false)
+        return false
+      if (!isCurrent)
+        return choose({ kind: "after_message", message_id: messageId })
+      const current = live.current
+      if (
+        !current.owner ||
+        !current.bookmarkScope ||
+        !ownerLeaseValid(current.owner)
+      )
+        return false
+      const operation = invalidate()
+      const view = {
+        ...structuredClone(origin),
+        cursor: { kind: "after_message" as const, message_id: messageId },
+        selection_revision: ++identity.current!.revision
+      }
+      // Keep the original editor mounted until the current result is ready to install.
+      publish({ ...current })
+      try {
+        const result = await captureHistorySnapshot(
+          current.owner,
+          view,
+          "send",
+          operation.signal
+        )
+        if (result.status !== "captured") throw new Error(result.code)
+        const canInstall = () =>
+          live.current.view === result.view ||
+          (sameView(live.current.view, origin) && isCurrent())
+        return await install(
+          result,
+          current.owner,
+          current.bookmarkScope,
+          operation.epoch,
+          current.pending,
+          canInstall
+        )
+      } catch (error) {
+        if (
+          operation.epoch === epoch.current &&
+          sameView(live.current.view, origin) &&
+          isCurrent()
+        )
+          publish({ ...live.current, error: errorCode(error) })
+        return false
+      }
     },
-    [choose]
+    [choose, install, invalidate, publish]
   )
   const activate = useCallback(
     (key: string) => {
@@ -698,7 +747,11 @@ export function useHistorySelection(
   )
   const canAutomaticallyLoad = useCallback(() => {
     const current = live.current
-    return current.error !== "request_config_scope_changed" && current.status !== "stale_selection" && ownerLeaseValid(current.owner)
+    return (
+      current.error !== "request_config_scope_changed" &&
+      current.status !== "stale_selection" &&
+      ownerLeaseValid(current.owner)
+    )
   }, [])
   const loadConversation = useCallback(
     async (
@@ -843,7 +896,7 @@ export function useHistorySelection(
             await import("@/db/dexie/history-selection")
           if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
           const owner = {
-            ...await getLocalHistoryOwner(target.historyId!, target.onDeviceScope),
+            ...(await getLocalHistoryOwner(target.historyId!, target.onDeviceScope)),
             validate_lease: () => valid && isCurrent()
           }
           if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
@@ -1055,7 +1108,7 @@ export function useHistorySelection(
         kind: owner.kind,
         scope:
           owner.kind === "native"
-            ? (owner.scope ?? { type: "global" })
+            ? owner.scope ?? { type: "global" }
             : { type: "global" }
       })
       if (stillCurrent()) {
@@ -1260,6 +1313,90 @@ export function useHistorySelection(
     },
     [refreshRecovery]
   )
+  const openRecoveryResult = useCallback(
+    async (
+      entry: { scope: HistoryBookmarkScope; turn: HistoryTurnRecovery },
+      isCurrent: () => boolean
+    ): Promise<boolean> => {
+      const current = live.current
+      const owner = current.owner
+      if (
+        !mounted.current ||
+        current.status !== "ready" ||
+        !current.settingsQualified ||
+        !current.view ||
+        !current.bookmarkScope ||
+        owner?.kind !== "native" ||
+        !ownerLeaseValid(owner) ||
+        !isCurrent() ||
+        current.bookmarkScope.profile_id !== entry.scope.profile_id ||
+        current.view.owner_key !== entry.turn.owner_key ||
+        current.view.conversation_id !== entry.turn.conversation_id
+      )
+        return false
+      const origin = current.view
+      const source = fence()
+      try {
+        const saved = (
+          await loadHistoryTurnRecoveries(current.bookmarkScope, origin)
+        ).find(
+          (candidate) =>
+            candidate.scope.profile_id === entry.scope.profile_id &&
+            candidate.scope.client_session_id ===
+              entry.scope.client_session_id &&
+            candidate.turn.operation_id === entry.turn.operation_id &&
+            candidate.turn.owner_key === origin.owner_key &&
+            candidate.turn.conversation_id === origin.conversation_id
+        )
+        if (
+          !source() ||
+          !isCurrent() ||
+          live.current.view !== origin ||
+          live.current.owner !== owner ||
+          !saved ||
+          saved.turn.action !== "edit_resend" ||
+          saved.turn.outcome !== "complete" ||
+          !saved.turn.settled_message_id?.trim() ||
+          saved.turn.settled_message_id !== entry.turn.settled_message_id
+        )
+          return false
+        const opened = await followResult(
+          origin,
+          saved.turn.settled_message_id,
+          isCurrent
+        )
+        const installed = live.current
+        if (
+          !opened ||
+          installed.owner !== owner ||
+          !ownerLeaseValid(owner) ||
+          installed.status !== "ready" ||
+          installed.view?.owner_key !== origin.owner_key ||
+          installed.view.conversation_id !== origin.conversation_id ||
+          installed.view.cursor.kind !== "after_message" ||
+          installed.view.cursor.message_id !== saved.turn.settled_message_id
+        )
+          return false
+        try {
+          await dismissHistoryTurnRecovery(
+            saved.scope,
+            origin,
+            saved.turn.operation_id,
+            "completed"
+          )
+          await refreshRecovery()
+        } catch (error) {
+          if (mounted.current && live.current.owner === owner)
+            setRecoveryError(errorCode(error))
+        }
+        return true
+      } catch (error) {
+        if (source() && isCurrent()) setRecoveryError(errorCode(error))
+        return false
+      }
+    },
+    [fence, followResult, refreshRecovery]
+  )
   const getCurrent = useCallback(() => live.current, [])
   const reference: HistorySelectionReference | null =
     state.view && state.bookmarkScope
@@ -1283,6 +1420,7 @@ export function useHistorySelection(
     recoveryError,
     refreshRecovery,
     dismissRecovery,
+    openRecoveryResult,
     reference,
     getReference,
     getStoredReference,

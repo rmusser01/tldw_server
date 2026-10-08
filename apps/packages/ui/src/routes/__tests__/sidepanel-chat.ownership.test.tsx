@@ -631,6 +631,61 @@ describe.each([
     useStoreChatModelSettings.getState().reset()
   })
 
+  if (_name === "shared")
+    it("final capture cannot overwrite a synchronous New/reset replacement", async () => {
+      io.data.set(storedKey("alice"), tabsState())
+      io.local.mockImplementation(async (id) => ({
+        historyInfo: { id, title: id, server_scope_key: ownerKey("alice") },
+        messages: [
+          { id: `${id}-message`, role: "user", content: `${id} TRANSCRIPT` }
+        ]
+      }))
+      render(<Route />)
+      await screen.findByRole("button", { name: "alice one" })
+      await act(async () => {
+        await io.controller!.loadConversation({ historyId: "A" }, null)
+      })
+      const origin = io.controller!.getCurrent().view!
+      const replacement = [
+        {
+          id: "new-user",
+          isBot: false,
+          name: "You",
+          message: "NEW COMPACT DRAFT"
+        }
+      ]
+      let replaced = false
+      const unsubscribe = useStoreMessageOption.subscribe((state, previous) => {
+        if (
+          !replaced &&
+          state.history !== previous.history &&
+          state.history.some((row) => row.content === "A TRANSCRIPT")
+        ) {
+          replaced = true
+          io.controller!.reset()
+          state.startNewChatDraft()
+          useStoreMessageOption.setState({
+            historyId: null,
+            serverChatId: null,
+            history: [{ role: "user", content: "NEW COMPACT DRAFT" }],
+            messages: replacement
+          })
+        }
+      })
+      try {
+        await act(async () => {
+          await io.controller!.followResult(origin, "A-message", () => true)
+        })
+        expect(replaced).toBe(true)
+        expect(useStoreMessageOption.getState().messages).toEqual(replacement)
+        expect(useStoreMessageOption.getState().history).toEqual([
+          { role: "user", content: "NEW COMPACT DRAFT" }
+        ])
+      } finally {
+        unsubscribe()
+      }
+    })
+
   it.each([
     ["active", false],
     ["active", true],
@@ -1068,22 +1123,51 @@ describe.each([
     expect(recoveryWrites()).toEqual([])
   })
 
-  if (_name === "shared") it.each(["extension", "webui"])("opens full server settings from the actual compact shell in %s", async surface => {
-    io.scope.mockRejectedValue(new Error("offline"))
-    if (surface === "extension") vi.stubGlobal("browser", { runtime: { id: "test-extension", getURL: (route: string) => `chrome-extension://test${route}` } })
-    else {
-      // The deployed WebUI installs the browser shim, including getURL without an extension id.
-      vi.stubGlobal("browser", { runtime: { id: undefined, getURL: (route: string) => `https://webui.test${route}` } })
-      vi.stubGlobal("chrome", undefined)
-    }
-    render(<MemoryRouter initialEntries={["/chat"]}><SidepanelRouteShell /></MemoryRouter>)
-    fireEvent.click(await screen.findByRole("button", { name: "Server settings" }))
-    expect(window.open).toHaveBeenCalledWith(surface === "extension" ? "chrome-extension://test/options.html#/settings/tldw" : "/settings/tldw", "_blank", "noopener,noreferrer")
-    expect(screen.queryByTestId("not-found-recovery-panel")).not.toBeInTheDocument()
-    expect(screen.getByRole("alert")).toBeInTheDocument()
-    // The real shell persists its header preference, never chat/draft content.
-    expect(recoveryWrites()).toEqual([["headerShortcutsExpanded", false]])
-  })
+  if (_name === "shared")
+    it.each(["extension", "webui"])(
+      "opens full server settings from the actual compact shell in %s",
+      async (surface) => {
+        io.scope.mockRejectedValue(new Error("offline"))
+        if (surface === "extension")
+          vi.stubGlobal("browser", {
+            runtime: {
+              id: "test-extension",
+              getURL: (route: string) => `chrome-extension://test${route}`
+            }
+          })
+        else {
+          // The deployed WebUI installs the browser shim, including getURL without an extension id.
+          vi.stubGlobal("browser", {
+            runtime: {
+              id: undefined,
+              getURL: (route: string) => `https://webui.test${route}`
+            }
+          })
+          vi.stubGlobal("chrome", undefined)
+        }
+        render(
+          <MemoryRouter initialEntries={["/chat"]}>
+            <SidepanelRouteShell />
+          </MemoryRouter>
+        )
+        fireEvent.click(
+          await screen.findByRole("button", { name: "Server settings" })
+        )
+        expect(window.open).toHaveBeenCalledWith(
+          surface === "extension"
+            ? "chrome-extension://test/options.html#/settings/tldw"
+            : "/settings/tldw",
+          "_blank",
+          "noopener,noreferrer"
+        )
+        expect(
+          screen.queryByTestId("not-found-recovery-panel")
+        ).not.toBeInTheDocument()
+        expect(screen.getByRole("alert")).toBeInTheDocument()
+        // The real shell persists its header preference, never chat/draft content.
+        expect(recoveryWrites()).toEqual([["headerShortcutsExpanded", false]])
+      }
+    )
 
   it.each(["account", "unmount"])("ignores a failed cold Retry after %s retirement", async ending => {
     io.scope.mockRejectedValueOnce(new Error("offline"))
@@ -1230,7 +1314,6 @@ describe.each([
     expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(recovered)
     expect(useStoreMessageOption.getState().temporaryChat).toBe(temporary)
   })
-
 
   it("allows a later local destination preparation to supersede a held recovery copy", async () => {
     io.useComposer = true; io.useRecovery = true

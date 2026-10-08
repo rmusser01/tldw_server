@@ -57,6 +57,7 @@ export function useKeepInterruptedHistoryTurns({
     const pending = recoveries
       .filter(
         (entry) =>
+          entry.turn.action !== "edit_resend" &&
           entry.turn.outcome &&
           !isHistoryTurnLive(entry.turn.operation_id) &&
           !keptRef.current.has(entry.turn.operation_id)
@@ -90,8 +91,10 @@ export function useKeepInterruptedHistoryTurns({
   const retainedReplies = React.useMemo(
     () =>
       ownerKind === "native"
-        ? (recoveries ?? []).filter((entry) =>
-            isRetainedPartialReply(entry.turn, ownerKind)
+        ? (recoveries ?? []).filter(
+            (entry) =>
+              entry.turn.action !== "edit_resend" &&
+              isRetainedPartialReply(entry.turn, ownerKind)
           )
         : [],
     [ownerKind, recoveries]
@@ -123,7 +126,8 @@ export function useKeepInterruptedHistoryTurns({
   return React.useCallback(
     (entry: HistoryTurnRecoveryEntry) =>
       isHistoryTurnLive(entry.turn.operation_id) ||
-      (Boolean(entry.turn.outcome) &&
+      (entry.turn.action !== "edit_resend" &&
+        Boolean(entry.turn.outcome) &&
         (!isRetainedPartialReply(entry.turn, ownerKind) ||
           messages.some((message) => message.id === entry.turn.assistant_id))),
     [messages, ownerKind]

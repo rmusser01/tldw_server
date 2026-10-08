@@ -1,3 +1,4 @@
+import type { NativeHistoryEditResend } from "@/types/chat-modes"
 import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import type { GreetingSeed } from "@/utils/character-greetings"
@@ -3301,6 +3302,7 @@ export const useChatActions = ({
     greetingSeed: requestedGreetingSeed,
     greetingIsCurrent,
     historyRetryAdmission,
+    historyEditResend,
     assertCurrent
   }: {
     message: string
@@ -3337,6 +3339,7 @@ export const useChatActions = ({
      * reply against it instead of admitting the question again.
      */
     historyRetryAdmission?: HistoryAdmissionReferenceV1
+    historyEditResend?: NativeHistoryEditResend
   }): Promise<ChatSubmitResult> => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     assertCurrent?.()
@@ -3545,7 +3548,8 @@ export const useChatActions = ({
       }
       if (
         selectedHistoryTurn &&
-        (isRegenerate ||
+        ((historyEditResend && compareModeActive) ||
+          isRegenerate ||
           isContinue ||
           turnUsesImageMode ||
           turnContextFiles.length ||
@@ -3959,7 +3963,10 @@ export const useChatActions = ({
                   effectiveSelectedAssistant
                 )
               : null
-          if (resolvedSendMode === "tracked_character" && resolvedSelectedCharacter?.id) {
+          if (
+            resolvedSendMode === "tracked_character" &&
+            resolvedSelectedCharacter?.id
+          ) {
             const resolvedModel = effectiveSelectedModel?.trim()
             if (!resolvedModel) {
               notification.error({
@@ -3973,7 +3980,7 @@ export const useChatActions = ({
             }
             if (historySelection) {
               const greeting = await sendNativeHistoryCharacter({
-                  surface: "playground",
+                surface: "playground",
                 t,
                 controller: historySelection,
                 originIsCurrent: historyOriginIsCurrent!,
@@ -3991,6 +3998,7 @@ export const useChatActions = ({
                 image,
                 greetingSeed,
                 greetingIsCurrent,
+                historyEditResend,
                 setServerChatId,
                 setMessages,
                 unsupportedContext: Boolean(
@@ -4120,6 +4128,7 @@ export const useChatActions = ({
                     controller: normalHistorySelection,
                     originIsCurrent: historyOriginIsCurrent!,
                     temporary: temporaryChat,
+                    editResend: historyEditResend,
                     createServerChat:
                       resolvedSendMode === "plain" &&
                       !image &&
@@ -5077,7 +5086,9 @@ export const useChatActions = ({
   const ordinaryLocalMutation =
     !serverChatId && historySelection?.getCurrent().status === "idle"
   const editMessage = createEditMessage({
+    historySelection,
     notification,
+    captureSourceFence: () => captureChatDraftSource().isCurrent,
     captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {

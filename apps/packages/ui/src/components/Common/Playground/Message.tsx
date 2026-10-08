@@ -243,7 +243,11 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
-  onEditFormSubmit: (value: string, isSend: boolean) => unknown
+  onEditFormSubmit: (
+    value: string,
+    isSend: boolean,
+    isCurrent?: () => boolean
+  ) => unknown
   isProcessing: boolean
   webSearch?: Record<string, unknown>
   isSearchingInternet?: boolean

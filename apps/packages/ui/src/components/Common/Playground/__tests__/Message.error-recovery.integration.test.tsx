@@ -674,27 +674,52 @@ it('opens a user editor from timeline navigation when portrait cards own renderi
 })
 
 for (const initialPortraits of [true, false]) {
-  it.each(["save", "cancel"])(`keeps the active editor and draft while portrait preference changes from ${initialPortraits} until %s`, async (action) => {
-    const user = userEvent.setup()
-    storedPreferences.set('chatShowCharacterPortraits', initialPortraits)
-    const submit = vi.fn()
-    const props = { ...baseProps, isBot: false, role: 'user' as const, messageId: 'stable-user', message: 'Original row', onEditFormSubmit: submit }
-    const view = render(<PlaygroundMessage {...props} />)
-    act(() => window.dispatchEvent(new CustomEvent('tldw:edit-message', { detail: { messageId: 'stable-user' } })))
-    const editor = screen.getByRole('textbox')
-    await user.clear(editor)
-    await user.type(editor, 'Retained authored draft')
-    storedPreferences.set('chatShowCharacterPortraits', !initialPortraits)
-    view.rerender(<PlaygroundMessage {...props} />)
-    expect(screen.getByRole('textbox')).toBe(editor)
-    expect(editor).toHaveValue('Retained authored draft')
-    await user.click(screen.getByRole('button', { name: action, exact: true }))
-    if (action === 'save') expect(submit).toHaveBeenCalledWith('Retained authored draft', false)
-    else expect(submit).not.toHaveBeenCalled()
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-    expect(screen.getByTestId('chat-message').tagName).toBe(initialPortraits ? 'DIV' : 'ARTICLE')
-    storedPreferences.clear()
-  })
+  it.each(["save", "cancel"])(
+    `keeps the active editor and draft while portrait preference changes from ${initialPortraits} until %s`,
+    async (action) => {
+      const user = userEvent.setup()
+      storedPreferences.set("chatShowCharacterPortraits", initialPortraits)
+      const submit = vi.fn()
+      const props = {
+        ...baseProps,
+        isBot: false,
+        role: "user" as const,
+        messageId: "stable-user",
+        message: "Original row",
+        onEditFormSubmit: submit
+      }
+      const view = render(<PlaygroundMessage {...props} />)
+      act(() =>
+        window.dispatchEvent(
+          new CustomEvent("tldw:edit-message", {
+            detail: { messageId: "stable-user" }
+          })
+        )
+      )
+      const editor = screen.getByRole("textbox")
+      await user.clear(editor)
+      await user.type(editor, "Retained authored draft")
+      storedPreferences.set("chatShowCharacterPortraits", !initialPortraits)
+      view.rerender(<PlaygroundMessage {...props} />)
+      expect(screen.getByRole("textbox")).toBe(editor)
+      expect(editor).toHaveValue("Retained authored draft")
+      await user.click(
+        screen.getByRole("button", { name: action, exact: true })
+      )
+      if (action === "save")
+        expect(submit).toHaveBeenCalledWith(
+          "Retained authored draft",
+          false,
+          expect.any(Function)
+        )
+      else expect(submit).not.toHaveBeenCalled()
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+      expect(screen.getByTestId("chat-message").tagName).toBe(
+        initialPortraits ? "DIV" : "ARTICLE"
+      )
+      storedPreferences.clear()
+    }
+  )
 }
 
 // Keep the real parent, timeline, message and edit form together for reconciliation.
@@ -867,7 +892,7 @@ it.each([false, true])(
         })
       )
     )
-    const editor = screen.getByRole("textbox")
+    const editor = screen.getByRole('textbox')
     fireEvent.change(editor, { target: { value: "Exact preserved edit  \n" } })
     fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
     try {
@@ -893,7 +918,8 @@ it.each([false, true])(
       0,
       "Exact preserved edit  \n",
       true,
-      false
+      false,
+      expect.any(Function)
     )
     storedPreferences.clear()
   }

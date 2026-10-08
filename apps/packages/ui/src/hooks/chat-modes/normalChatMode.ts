@@ -3,12 +3,16 @@ import type {
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
-import type { HistorySendTurn } from "@/types/chat-modes"
+import type {
+  HistorySendTurn,
+  NativeHistoryEditResend
+} from "@/types/chat-modes"
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
-  historyAdmissionReference
+  historyAdmissionReference,
+  nativeEditResendView
 } from "@/services/chat-history-selection"
 import {
   saveHistoryTurnRecovery,
@@ -183,6 +187,7 @@ type NormalChatModeParams = {
      * already has. The view must stand just before that question.
      */
     retryAdmission?: HistoryAdmissionReferenceV1
+    editResend?: NativeHistoryEditResend
   }
   historyTurn?: HistorySendTurn
 
@@ -841,7 +846,18 @@ const captureNormalHistoryTurn = async (
   await assertHistoryConversationTarget(current.owner, { historyId: targetHistoryId, serverChatId: targetServerChatId })
   if (!selectionCurrent() || controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view || current.owner.validate_lease?.() === false)
     throw new Error("stale_selection")
-  const view = structuredClone(current.view)
+  const originalOwner = current.owner
+  const originalCapture = current.capture
+  const originView = structuredClone(current.view)
+  const editResend = params.historySelection!.editResend
+  const view = editResend
+    ? nativeEditResendView(
+        current.owner,
+        originView,
+        current.capture,
+        editResend
+      )
+    : structuredClone(originView)
   const retryAdmission = params.historySelection!.retryAdmission
   if (retryAdmission &&
     (retryAdmission.owner_key !== view.owner_key || retryAdmission.conversation_id !== view.conversation_id ||
@@ -865,15 +881,29 @@ const captureNormalHistoryTurn = async (
     const now = controller.getCurrent().view
     return (
       !!now &&
-      now.owner_key === view.owner_key &&
-      now.conversation_id === view.conversation_id &&
-      now.view_session_id === view.view_session_id &&
-      now.selection_revision === view.selection_revision
+      now.owner_key === originView.owner_key &&
+      now.conversation_id === originView.conversation_id &&
+      now.view_session_id === originView.view_session_id &&
+      now.selection_revision === originView.selection_revision
     )
   }
+  const editOriginIsCurrent = () =>
+    selectionCurrent() &&
+    preparationIsCurrent() &&
+    controller.getCurrent().owner === current.owner &&
+    controller.getCurrent().view === current.view &&
+    originalOwner.validate_lease?.() !== false &&
+    canUpdateView() &&
+    editResend?.isOriginCurrent() !== false
+  const editPreparationIsCurrent = () =>
+    editOriginIsCurrent() && editResend?.isCurrent() !== false
   const capture = await captureHistorySnapshot(owner, view, "send", signal)
   if (capture.status !== "captured") throw new Error(capture.code)
   if (!canUpdateView()) throw new Error("stale_selection")
+  if (editResend) {
+    if (!editPreparationIsCurrent()) throw new Error("stale_selection")
+    nativeEditResendView(owner, originView, capture, editResend, originalCapture)
+  }
   const operationId = crypto.randomUUID()
   // Until this turn ends, no view may keep its record: the reply is still
   // being written (CS-04). Released by normalChatMode when the turn ends.
@@ -900,6 +930,7 @@ const captureNormalHistoryTurn = async (
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
+    ...(editResend ? { action: "edit_resend" as const } : {}),
     origin_view: view,
     // A retry's input was admitted under the selection of its first send.
     selection_digest:
@@ -951,11 +982,21 @@ const captureNormalHistoryTurn = async (
     owner,
     capture,
     ...(retryAdmission ? { retryAdmission } : {}),
-    currentView: () => controller.getCurrent().view,
+    ...(editResend ? { historyBranch: true } : {}),
+    currentView: () =>
+      editResend
+        ? canUpdateView()
+          ? view
+          : null
+        : controller.getCurrent().view,
     validateLease,
     canUpdateView,
     beforeDispatch: async () => {
+      if (editResend && !editPreparationIsCurrent())
+        throw new Error("stale_selection")
       await saveRecord(record(turn, "", "dispatching"))
+      if (editResend && !editPreparationIsCurrent())
+        throw new Error("stale_selection")
     },
     afterAdmission: async () => {
       if (turn.owner.kind === "native")
@@ -1011,15 +1052,30 @@ const captureNormalHistoryTurn = async (
       await recoveryWrites
       await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
     },
-    complete: async () => {
+    complete: async (content) => {
       // The reply is settled. Its record stays until the view follows it.
       stopCheckpoints()
       endReplyWrite?.("saved")
       await recoveryWrites
+      if (editResend)
+        await saveRecord(
+          record(
+            turn,
+            content ?? lastRecord?.result_text ?? "",
+            "generated_unsaved",
+            {
+              outcome: "complete",
+              settled_message_id: turn.resultId
+            }
+          )
+        )
       if (creationHandle && owner.kind === "native")
         await markChatCreationSettled(creationHandle, owner.conversation_id)
     },
-    followResult: async (id) => controller.followResult(view, id),
+    followResult: async (id) => {
+      if (editResend && !editOriginIsCurrent()) return false
+      return controller.followResult(originView, id, editResend?.isCurrent)
+    },
     finish: async (followed) => {
       await recoveryWrites
       if (followed || !turn.resultId) {
@@ -1039,6 +1095,8 @@ const captureNormalHistoryTurn = async (
           settled_message_id: turn.resultId
         })
       )
+      if (editResend && editOriginIsCurrent())
+        await controller.refreshRecovery?.()
     },
     keep: async () => {
       await recoveryWrites
@@ -1155,6 +1213,9 @@ export const normalChatMode = async (
       params = {
         ...params,
         historyTurn,
+        ...(params.historySelection?.editResend
+          ? { setMessages: () => {}, setHistory: () => {} }
+          : {}),
         // A retry shows and settles under the question it reasks.
         ...(historyTurn.retryAdmission
           ? { userMessageId: historyTurn.retryAdmission.input_message_id }
@@ -1201,7 +1262,7 @@ export const normalChatMode = async (
     if (result.status === "submitted" && historyTurn?.resultId) {
       const followed = await historyTurn.followResult(historyTurn.resultId)
       await historyTurn.finish?.(followed !== false)
-    } else if (historyTurn?.outcome) {
+    } else if (historyTurn?.outcome && !params.historySelection?.editResend) {
       // Partial replies stay in the transcript; unknown save receipts stay in review.
       await historyTurn.keep?.()
     }

@@ -833,3 +833,180 @@ it.each(["playground", "sidepanel"] as const)(
     mounted.unmount()
   }
 )
+
+
+it.each(["capture", "dispatch journal", "model"])(
+  "native edit refuses an actual same-ID H1 refresh during held %s before admitting input",
+  async (stage) => {
+    const graph = [
+      {
+        id: "original-user",
+        revision: "u1",
+        parent_id: null,
+        role: "user",
+        settled: true,
+        preview: "Original"
+      },
+      {
+        id: "original-answer",
+        revision: "a1",
+        parent_id: "original-user",
+        role: "assistant",
+        settled: true,
+        preview: "Original answer"
+      }
+    ]
+    const serverCapture = async (_id: unknown, request: any) => {
+      const view = { ...request.view, owner_key: "server-owner" }
+      const snapshot = {
+        version: 1 as const,
+        owner_key: "server-owner",
+        conversation_id: newServerId,
+        nodes: graph,
+        fences: { conversation: "1", history: "1", settings: "1" },
+        source_digest: "source",
+        storage_context_digest: "storage",
+        interpretation_status: { kind: "parent_graph_v1" as const }
+      }
+      const { resolveHistorySelection } = await import(
+        "@/utils/history-selection"
+      )
+      const selected = resolveHistorySelection(
+        snapshot,
+        view,
+        request.purpose,
+        ""
+      )
+      if (selected.status !== "ready") throw new Error(selected.code)
+      return {
+        status: "captured",
+        view,
+        snapshot,
+        rows: selected.rows,
+        purpose: request.purpose,
+        selected_content: selected.rows.map((row) => ({
+          id: row.id,
+          revision: row.revision,
+          message: graph.find((item) => item.id === row.id)!.preview,
+          images: []
+        })),
+        storage_context_digest: "storage"
+      } as never
+    }
+    const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(serverCapture)
+    const append = vi.spyOn(tldwClient, "addChatMessage")
+    const mounted = renderHook(() => useHistorySelection())
+    const native: NativeHistoryOwnerV1 = {
+      kind: "native",
+      conversation_id: newServerId,
+      request_scope: snapshot().requestScope,
+      validate_lease: () => true
+    }
+    await act(async () => {
+      expect(await mounted.result.current.open(native)).toBe(true)
+    })
+    expect(mounted.result.current.status).toBe("ready")
+    const origin = mounted.result.current.view!
+    const source = mounted.result.current.fence()
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((done) => {
+      entered = done
+    })
+    const held = new Promise<void>((done) => {
+      release = done
+    })
+    if (stage === "capture")
+      capture.mockImplementationOnce(async (...args) => {
+        entered()
+        await held
+        return serverCapture(...args)
+      })
+    if (stage === "model")
+      preparation.beforeModel.mockImplementationOnce(async () => {
+        entered()
+        await held
+      })
+    if (stage === "dispatch journal") {
+      const put = storage.tables.historySelections.put
+      vi.spyOn(storage.tables.historySelections, "put").mockImplementationOnce(
+        async (row) => {
+          entered()
+          await held
+          return put(row)
+        }
+      )
+    }
+    const params: Parameters<typeof normalChatMode>[6] = {
+      selectedModel: "test",
+      selectedSystemPrompt: "",
+      useOCR: false,
+      currentChatModelSettings: {},
+      toolChoice: "none",
+      servicePromptSnapshot: snapshot(),
+      historyId: null,
+      serverChatId: newServerId,
+      historySelection: {
+        controller: mounted.result.current,
+        originIsCurrent: source,
+        editResend: {
+          owner_key: origin.owner_key,
+          conversation_id: origin.conversation_id,
+          message_id: "original-user",
+          message_revision: "u1",
+          isCurrent: () => true,
+          isOriginCurrent: source
+        }
+      },
+      setHistoryId: () => {},
+      setMessages: vi.fn(),
+      setHistory: vi.fn(),
+      setIsProcessing: vi.fn(),
+      setStreaming: vi.fn(),
+      setAbortController: vi.fn(),
+      saveMessageOnSuccess,
+      saveMessageOnError
+    }
+    let attempt!: Promise<unknown>
+    await act(async () => {
+      attempt = normalChatMode(
+        "Edited",
+        "",
+        false,
+        [],
+        [],
+        new AbortController().signal,
+        params
+      )
+      void attempt.catch(() => {})
+      await Promise.race([
+        ready,
+        attempt.then(() => {
+          throw new Error("send finished before held stage")
+        })
+      ])
+    })
+    let refreshing!: Promise<boolean>
+    act(() => {
+      refreshing = mounted.result.current.refresh()
+    })
+    expect(source()).toBe(false)
+    await act(async () => {
+      release()
+      await Promise.allSettled([attempt, refreshing])
+    })
+    expect(mounted.result.current.view).toMatchObject({
+      conversation_id: origin.conversation_id,
+      view_session_id: origin.view_session_id,
+      selection_revision: origin.selection_revision
+    })
+    expect(append).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    expect(params.setMessages).not.toHaveBeenCalled()
+    expect(params.setHistory).not.toHaveBeenCalled()
+    expect(graph.map((row) => row.preview)).toEqual([
+      "Original",
+      "Original answer"
+    ])
+    mounted.unmount()
+  }
+)

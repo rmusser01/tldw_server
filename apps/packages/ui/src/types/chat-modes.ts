@@ -10,6 +10,16 @@ import type {
   Message as StoredMessage
 } from "@/db/dexie/types"
 
+/** Private explicit branch intent; its editor lease never enters a wire payload. */
+export type NativeHistoryEditResend = {
+  owner_key: string
+  conversation_id: string
+  message_id: string
+  message_revision: string
+  isCurrent: () => boolean
+  isOriginCurrent: () => boolean
+}
+
 /** One operation owns its adapter and immutable pending intent across display navigation. */
 export interface HistorySendTurn {
   owner: HistoryOwnerV1
@@ -24,6 +34,7 @@ export interface HistorySendTurn {
    * instead of admitting the question a second time.
    */
   retryAdmission?: HistoryAdmissionReferenceV1
+  historyBranch?: boolean
   selection?: HistorySelectionV1
   input?: StoredMessage
   resultId?: string
@@ -52,7 +63,7 @@ export interface HistorySendTurn {
   cancelPreparation?: () => Promise<void>
   beforeDispatch?: () => Promise<void>
   afterAdmission?: () => Promise<void>
-  complete?: () => Promise<void>
+  complete?: (content?: string) => Promise<void>
   /** Resolves false when the view had moved on and could not follow. */
   followResult: (id: string) => Promise<boolean | void>
   /** After a settled reply: clear its record, or keep it until a view follows. */

@@ -181,6 +181,7 @@ const keep = async (
     return skipped("not_ready")
   const listed = entry.turn
   if (
+    listed.action === "edit_resend" ||
     !listed.outcome ||
     !listed.admission ||
     listed.owner_key !== view.owner_key ||
@@ -197,6 +198,8 @@ const keep = async (
   )
   if (!isCurrent()) return skipped("view_changed")
   if (!fresh?.turn.outcome || !fresh.turn.admission) return skipped("gone")
+  if (fresh.turn.action === "edit_resend")
+    return skipped("explicit_action_requires_review")
   const turn = fresh.turn
   const admission = turn.admission!
   const native = owner.kind === "native"

@@ -3398,7 +3398,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       {/* Context indicator */}
       <ChatContextIndicator statusGuardrailsEnabled={statusGuardrailsEnabled} />
 
-      {/* Connection banner */}
+      {/* Context indicator */}
       {showConnectionBanner && (
         <div className="border-b border-error/30 bg-error/5 px-4 py-2">
           <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-between gap-3`}>
@@ -3431,7 +3431,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat controls */}
+      {/* Context indicator */}
       <div className="border-b border-border bg-surface px-4 py-2">
         <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-end gap-1.5`}>
           <Tooltip
@@ -3559,7 +3559,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat messages area */}
+      {/* Context indicator */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={containerRef}
@@ -3665,20 +3665,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         }
                         onDeleteMessage={() => handleDeleteMessageWithUndo(idx)}
                         suppressDeleteSuccessToast
-                        onEditFormSubmit={(value: string, isSend: boolean) => {
+                        onEditFormSubmit={(
+                          value: string,
+                          isSend: boolean,
+                          editIsCurrent?: () => boolean
+                        ) => {
                           if (isSend)
                             return withCurrentCaptureHeads(
                               async (_options, assertCurrent) => {
                                 assertCurrent?.()
-                                return isChatSubmitSuccess(await editMessage(
-                                  idx,
-                                  value,
-                                  !msg.isBot,
-                                  isSend
-                                ))
+                                return isChatSubmitSuccess(
+                                  await editMessage(
+                                    idx,
+                                    value,
+                                    !msg.isBot,
+                                    isSend,
+                                    editIsCurrent
+                                  )
+                                )
                               }
                             )
-                          return editMessage(idx, value, !msg.isBot, isSend)
+                          return editMessage(
+                            idx,
+                            value,
+                            !msg.isBot,
+                            isSend,
+                            editIsCurrent
+                          )
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}
@@ -3713,7 +3726,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </div>
         </div>
 
-        {/* Scroll to bottom button */}
+        {/* Horizontally scrollable source tags */}
         {!isAutoScrollToBottom && hasMessages && (
           <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
             <button
@@ -3736,7 +3749,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         )}
       </div>
 
-      {/* Chat input */}
+      {/* Context indicator */}
       <div
         data-testid="chat-drop-zone"
         data-drop-active={dropZoneActive ? "true" : "false"}

@@ -203,7 +203,7 @@ export const ModelPlaygroundChat: React.FC = () => {
         </div>
       )}
 
-      {/* Messages */}
+      {/* Empty state */}
       {blocks.map((block, blockIndex) => {
         if (block.kind === "single") {
           const msg = messages[block.index]
@@ -221,8 +221,14 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={msg.sources}
-              onEditFormSubmit={(value, isSend) => {
-                return editMessage(block.index, value, !msg.isBot, isSend)
+              onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                return editMessage(
+                  block.index,
+                  value,
+                  !msg.isBot,
+                  isSend,
+                  editIsCurrent
+                )
               }}
               onDeleteMessage={() => {
                 void deleteMessage(block.index)
@@ -274,8 +280,14 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={userMessage.sources}
-              onEditFormSubmit={(value, isSend) => {
-                return editMessage(block.userIndex, value, !userMessage.isBot, isSend)
+              onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                return editMessage(
+                  block.userIndex,
+                  value,
+                  !userMessage.isBot,
+                  isSend,
+                  editIsCurrent
+                )
               }}
               onDeleteMessage={() => {
                 void deleteMessage(block.userIndex)
@@ -296,12 +308,13 @@ export const ModelPlaygroundChat: React.FC = () => {
               conversationInstanceId={historyId || "workspace"}
             />
 
-            {/* Compare responses */}
+            {/* User message */}
             <div className="ml-10 space-y-2 border-l-2 border-dashed border-primary/30 pl-4">
               <div className="flex items-center gap-2 text-xs text-text-muted">
                 <GitCompare className="h-3.5 w-3.5 text-primary" />
                 <span className="font-medium">
-                  {t("playground:workspace.compareResponses", "Compare Responses")} ({replyItems.length})
+                  {t("playground:workspace.compareResponses", "Compare Responses")}{" "}
+                  ({replyItems.length})
                 </span>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -331,8 +344,14 @@ export const ModelPlaygroundChat: React.FC = () => {
                       isProcessing={isProcessing}
                       isSearchingInternet={false}
                       sources={replyMsg.sources}
-                      onEditFormSubmit={(value, isSend) => {
-                        return editMessage(index, value, !replyMsg.isBot, isSend)
+                      onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                        return editMessage(
+                          index,
+                          value,
+                          !replyMsg.isBot,
+                          isSend,
+                          editIsCurrent
+                        )
                       }}
                       onDeleteMessage={() => {
                         void deleteMessage(index)
@@ -360,7 +379,7 @@ export const ModelPlaygroundChat: React.FC = () => {
         )
       })}
 
-      {/* Input area */}
+      {/* Empty state */}
       <div className="sticky bottom-0 mt-4 border-t border-border bg-surface/95 px-4 py-4 backdrop-blur">
         {/* Compare mode controls */}
         <div className="mb-3 flex flex-wrap items-center gap-3">

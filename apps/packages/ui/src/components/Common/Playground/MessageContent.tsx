@@ -86,7 +86,11 @@ export interface MessageContentProps {
   isBot: boolean
   isStreaming: boolean
   editMode: boolean
-  onEditFormSubmit: (value: string, isSend: boolean) => unknown
+  onEditFormSubmit: (
+    value: string,
+    isSend: boolean,
+    isCurrent?: () => boolean
+  ) => unknown
   onCloseEdit: () => void
 
   // Display state (from useMessageState)

@@ -1,3 +1,4 @@
+import type { NativeHistoryEditResend } from "@/types/chat-modes";
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import type { GreetingSeed } from "@/utils/character-greetings";
 import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
@@ -2413,6 +2414,8 @@ export const useMessage = () => {
     assertQueuedDispatchCurrent,
     greetingSeed: requestedGreetingSeed,
     greetingIsCurrent,
+    historyEditResend,
+    assertCurrent,
   }: {
     message: string;
     image: string;
@@ -2440,13 +2443,15 @@ export const useMessage = () => {
     assertQueuedDispatchCurrent?: QueuedDispatchGuard;
     greetingSeed?: GreetingSeed;
     greetingIsCurrent?: () => boolean;
+    historyEditResend?: NativeHistoryEditResend;
+    assertCurrent?: () => void;
   }) => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
     // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
     // onto the chat's latest message (or the send is held) before a new turn,
     // so the turn never silently forks the conversation. This runs before the
     // history fence below because a refresh moves the history selection.
-    if (sendGate?.current && !isRegenerate && !chatHistory && !memory) {
+    if (sendGate?.current && !historyEditResend && !isRegenerate && !chatHistory && !memory) {
       const gate = await sendGate.current({ message });
       if (!gate.proceed) return { status: "skipped" as const, reason: "server_history_refresh_required" };
       if (gate.refreshed) {
@@ -2457,6 +2462,7 @@ export const useMessage = () => {
     }
     const historyOriginIsCurrent = historySelection?.fence();
     assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
     const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);
     const saveMessageOnSuccess = saveSuccessForQueuedTurn(assertQueuedDispatchCurrent);
     const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
@@ -2592,6 +2598,7 @@ export const useMessage = () => {
     let replyActive = false;
     try {
       assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
       resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
@@ -2646,6 +2653,7 @@ export const useMessage = () => {
         resolvedSelectedModel,
       );
       assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
       if (!modelAvailable) {
         return chatSubmitSkipped(t("playground:composer.validationModelUnavailableInline", "Selected model is not available on this server. Refresh models or choose a different model."));
       }
@@ -2850,6 +2858,7 @@ export const useMessage = () => {
                   image,
                   greetingSeed,
                   greetingIsCurrent,
+                  historyEditResend,
                   setServerChatId,
                   setMessages,
                   unsupportedContext: Boolean(
@@ -2896,6 +2905,7 @@ export const useMessage = () => {
                 (characterId) => tldwClient.getCharacter(characterId),
               );
             assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
             await characterChatMode(
               message,
               image,
@@ -2948,6 +2958,7 @@ export const useMessage = () => {
               setServerChatExternalRef,
             });
             assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
             return await normalChatMode(
               message,
               image,
@@ -3064,6 +3075,7 @@ export const useMessage = () => {
                       controller: normalHistorySelection,
                       originIsCurrent: historyOriginIsCurrent!,
                       temporary: temporaryChat,
+                      editResend: historyEditResend,
                       createServerChat:
                         !image &&
                         !(chatHistory || messages).length && !(memory || history).length &&
@@ -3171,6 +3183,7 @@ export const useMessage = () => {
   const ordinaryLocalMutation =
     !serverChatId && historySelection?.getCurrent().status === "idle";
   const editMessage = createEditMessage({
+    historySelection,
     notification,
     messages,
     history,
@@ -3179,6 +3192,7 @@ export const useMessage = () => {
     setHistory,
     onSubmit,
     validateBeforeSubmitFn: () => true,
+    captureSourceFence: () => captureChatDraftSource().isCurrent,
     captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {

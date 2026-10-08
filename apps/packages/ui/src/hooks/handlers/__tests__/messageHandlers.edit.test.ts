@@ -247,3 +247,225 @@ it("retirement during message publication prevents obsolete history publication"
   })
   expect(setHistory).not.toHaveBeenCalled()
 })
+
+it("native edit-resend submits a detached owned intent without editing or replacing originals", async () => {
+  let release!: () => void
+  const held = new Promise<void>((done) => {
+    release = done
+  })
+  const original = [
+    { id: "user", name: "You", isBot: false, message: "Original  \n" }
+  ]
+  const state = {
+    status: "ready",
+    owner: {
+      kind: "native",
+      owner_key: "owner",
+      conversation_id: "native-chat"
+    },
+    view: {
+      owner_key: "owner",
+      conversation_id: "native-chat",
+      selection_revision: 4
+    },
+    capture: {
+      status: "captured",
+      snapshot: {
+        nodes: [{ id: "user", role: "user", revision: "canonical-revision" }]
+      }
+    }
+  }
+  const setMessages = vi.fn()
+  const setHistory = vi.fn()
+  const mutate = vi.fn(async () => {})
+  const isEditorCurrent = () => true
+  const onSubmit = vi.fn(async (_input) => {
+    await held
+    return { status: "submitted" }
+  })
+  const edit = createEditMessage({
+    messages: original,
+    getMessages: () => original,
+    history: [],
+    historyId: "native-mirror",
+    setMessages,
+    setHistory,
+    mutate,
+    onSubmit,
+    validateBeforeSubmitFn: () => true,
+    historySelection: { getCurrent: () => state }
+  } as Parameters<typeof createEditMessage>[0])
+  const attempt = (edit as (...args: unknown[]) => Promise<unknown>)(
+    0,
+    "Edited  \n",
+    true,
+    true,
+    isEditorCurrent
+  )
+  void attempt.catch(() => {})
+  try {
+    expect(onSubmit).toHaveBeenCalledOnce()
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Edited  \n",
+        historyEditResend: expect.objectContaining({
+          owner_key: "owner",
+          conversation_id: "native-chat",
+          message_id: "user",
+          message_revision: "canonical-revision",
+          isCurrent: expect.any(Function),
+          isOriginCurrent: expect.any(Function)
+        })
+      })
+    )
+    expect(onSubmit.mock.calls[0][0].historyEditResend.isCurrent()).toBe(true)
+    expect(onSubmit.mock.calls[0][0].historyEditResend.isOriginCurrent()).toBe(
+      true
+    )
+    expect(mutate).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(original[0].message).toBe("Original  \n")
+  } finally {
+    release()
+    await attempt.catch(() => {})
+  }
+  expect(await attempt).toEqual({ status: "submitted" })
+})
+
+it.each(["images", "documents", "metadata"])(
+  "native edit rejects displayed %s before discarding payload or dispatching",
+  async (kind) => {
+    const target = {
+      id: "user",
+      name: "You",
+      isBot: false,
+      message: "Original",
+      ...(kind === "images"
+        ? { images: ["first", "second"] }
+        : kind === "documents"
+          ? { documents: [{}] }
+          : { metadataExtra: { tool_calls: [] } })
+    }
+    const state = {
+      status: "ready",
+      owner: { kind: "native" },
+      view: {
+        owner_key: "owner",
+        conversation_id: "chat",
+        selection_revision: 1
+      },
+      capture: {
+        status: "captured",
+        snapshot: { nodes: [{ id: "user", role: "user", revision: "u1" }] }
+      }
+    }
+    const onSubmit = vi.fn(),
+      mutate = vi.fn(),
+      setMessages = vi.fn(),
+      setHistory = vi.fn()
+    const edit = createEditMessage({
+      messages: [target],
+      history: [],
+      historyId: "mirror",
+      onSubmit,
+      mutate,
+      setMessages,
+      setHistory,
+      validateBeforeSubmitFn: () => true,
+      historySelection: { getCurrent: () => state }
+    } as Parameters<typeof createEditMessage>[0])
+    await expect(edit(0, "Edited", true, true, () => true)).rejects.toThrow(
+      "unsupported_message_payload"
+    )
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(mutate).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+  }
+)
+
+it("native edit intent retires its editor and origin when the draft source is replaced", async () => {
+  let sourceCurrent = true
+  const target = { id: "u", name: "You", isBot: false, message: "Original" }
+  const state = {
+    status: "ready",
+    owner: { kind: "native" },
+    view: {
+      owner_key: "owner",
+      conversation_id: "chat",
+      selection_revision: 1
+    },
+    capture: {
+      status: "captured",
+      snapshot: { nodes: [{ id: "u", role: "user", revision: "u1" }] }
+    }
+  }
+  const onSubmit = vi.fn(async () => ({ status: "submitted" as const }))
+  const edit = createEditMessage({
+    messages: [target],
+    history: [],
+    historyId: "mirror",
+    onSubmit,
+    setMessages: vi.fn(),
+    setHistory: vi.fn(),
+    validateBeforeSubmitFn: () => true,
+    captureSourceFence: () => () => sourceCurrent,
+    captureViewFence: () => () => true,
+    historySelection: { getCurrent: () => state }
+  } as Parameters<typeof createEditMessage>[0])
+  await edit(0, "Edited", true, true, () => true)
+  const intent = (onSubmit.mock.calls[0] as any)[0].historyEditResend
+  sourceCurrent = false
+  expect(intent.isCurrent()).toBe(false)
+  expect(intent.isOriginCurrent()).toBe(false)
+  expect(await edit(0, "Newer", true, true, () => true)).toMatchObject({
+    status: "skipped",
+    reason: "stale_selection"
+  })
+  expect(onSubmit).toHaveBeenCalledOnce()
+})
+
+
+it("native character edit admits matching backend sender-role metadata without replacing originals", async () => {
+  const target = {
+    id: "u",
+    name: "You",
+    isBot: false,
+    message: "Original",
+    metadataExtra: { sender_role: "user" }
+  }
+  const state = {
+    status: "ready",
+    owner: { kind: "native" },
+    view: {
+      owner_key: "owner",
+      conversation_id: "chat",
+      selection_revision: 1
+    },
+    capture: {
+      status: "captured",
+      snapshot: { nodes: [{ id: "u", role: "user", revision: "u1" }] }
+    }
+  }
+  const onSubmit = vi.fn(async () => ({ status: "submitted" as const })),
+    setMessages = vi.fn(),
+    setHistory = vi.fn()
+  const edit = createEditMessage({
+    messages: [target],
+    history: [],
+    historyId: "mirror",
+    onSubmit,
+    setMessages,
+    setHistory,
+    validateBeforeSubmitFn: () => true,
+    historySelection: { getCurrent: () => state }
+  } as Parameters<typeof createEditMessage>[0])
+  await expect(edit(0, "Edited", true, true, () => true)).resolves.toEqual({
+    status: "submitted"
+  })
+  expect(onSubmit).toHaveBeenCalledOnce()
+  expect(target.message).toBe("Original")
+  expect(setMessages).not.toHaveBeenCalled()
+  expect(setHistory).not.toHaveBeenCalled()
+})

@@ -7,7 +7,11 @@ import { Button } from "@/components/Common/Button"
 
 type Props = {
   value: string
-  onSumbit: (value: string, isSend: boolean) => unknown
+  onSumbit: (
+    value: string,
+    isSend: boolean,
+    isCurrent?: () => boolean
+  ) => unknown
   onClose: () => void
   isBot: boolean
 }
@@ -79,7 +83,14 @@ export const EditMessageForm = (props: Props) => {
     setPending(true)
     setFeedback(null)
     try {
-      const outcome = props.onSumbit(value, isSend)
+      const isCurrent = () =>
+        mounted.current &&
+        attempt.current === currentAttempt &&
+        form.getRevision() === revision &&
+        (source.current.revision === originalSource.revision ||
+          (source.current.revision === originalSource.revision + 1 &&
+            source.current.value === value))
+      const outcome = props.onSumbit(value, isSend, isCurrent)
       const asynchronous =
         outcome !== null &&
         (typeof outcome === "object" || typeof outcome === "function") &&

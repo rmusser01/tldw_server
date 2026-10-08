@@ -805,3 +805,293 @@ it("verified legacy ownership permits scoped settings without granting captured-
   expect(calls.create).not.toHaveBeenCalled()
   await expect(service.readNativeForkSettings(owner())).rejects.toThrow("unsupported_history_capability")
 })
+
+
+it.each([
+  { metadata: [{ id: "tool", revision: "1", kind: "tool" }] },
+  { assets: [{ id: "file", revision: "1", kind: "document" }] },
+  { comparison: { cluster_id: "compare", model_id: "m", common: false } }
+])("edit-resend refuses unsupported canonical target state %j", (extra) => {
+  const origin = {
+    ...view,
+    cursor: { kind: "after_message" as const, message_id: "answer" }
+  }
+  const captured = {
+    ...capture(),
+    snapshot: {
+      ...capture().snapshot,
+      nodes: [
+        {
+          id: "original",
+          revision: "target-revision",
+          parent_id: null,
+          role: "user",
+          settled: true,
+          ...extra
+        }
+      ]
+    }
+  } as HistorySelectionCaptureV1
+  expect(() =>
+    service.nativeEditResendView(owner(), origin, captured, {
+      owner_key: view.owner_key,
+      conversation_id: "chat",
+      message_id: "original",
+      message_revision: "target-revision",
+      isCurrent: () => true,
+      isOriginCurrent: () => true
+    })
+  ).toThrow("unsupported_message_payload")
+})
+
+it("native edit captures a detached before-user view while leaving the original view immutable", () => {
+  const origin = {...view, cursor: {kind: "after_message" as const, message_id: "a"}}
+  const captured = {
+    ...capture(),
+    snapshot: {
+      ...capture().snapshot,
+      nodes: [
+        {
+          id: "u",
+          revision: "u1",
+          role: "user",
+          parent_id: null,
+          settled: true
+        }
+      ]
+    }
+  } as HistorySelectionCaptureV1
+  const intent = {
+    owner_key: view.owner_key,
+    conversation_id: "chat",
+    message_id: "u",
+    message_revision: "u1",
+    isCurrent: () => true,
+    isOriginCurrent: () => true
+  }
+  const before = structuredClone(origin)
+  expect(
+    service.nativeEditResendView(owner(), origin, captured, intent)
+  ).toEqual({
+    ...origin,
+    cursor: { kind: "before_message", message_id: "u" },
+    selection_revision: 2
+  })
+  expect(origin).toEqual(before)
+})
+
+it.each([
+  "changed revision",
+  "duplicate target",
+  "unsettled",
+  "wrong role",
+  "owner",
+  "editor",
+  "origin",
+  "overflow"
+])("native edit refuses %s before branch admission", (reason) => {
+  const origin = {
+    ...view,
+    ...(reason === "overflow"
+      ? { selection_revision: Number.MAX_SAFE_INTEGER }
+      : {})
+  }
+  const target = {
+    id: "u",
+    revision: reason === "changed revision" ? "u2" : "u1",
+    parent_id: null,
+    role: reason === "wrong role" ? "assistant" : "user",
+    settled: reason !== "unsettled"
+  }
+  const captured = {
+    ...capture(),
+    snapshot: {
+      ...capture().snapshot,
+      nodes: reason === "duplicate target" ? [target, target] : [target]
+    }
+  } as HistorySelectionCaptureV1
+  const intent = {
+    owner_key: reason === "owner" ? "foreign" : view.owner_key,
+    conversation_id: "chat",
+    message_id: "u",
+    message_revision: "u1",
+    isCurrent: () => reason !== "editor",
+    isOriginCurrent: () => reason !== "origin"
+  }
+  expect(() =>
+    service.nativeEditResendView(owner(), origin, captured, intent)
+  ).toThrow()
+  expect(calls.append).not.toHaveBeenCalled()
+})
+
+it.each([false, true])(
+  "native append includes the explicit branch flag only for an action (explicit=%s)",
+  async (explicit) => {
+    const native = owner()
+    const captured = await service.captureHistorySnapshot(native, view, "send")
+    if (captured.status !== "captured") throw new Error(captured.code)
+    const selected = service.finalizeHistorySelection(
+      native,
+      captured,
+      service.prepareHistoryContext({ model: "test" }, () => true),
+      view
+    )
+    calls.append.mockResolvedValueOnce({
+      id: "u",
+      tldw_history_admission_v1: {
+        version: 1,
+        owner_key: view.owner_key,
+        conversation_id: "chat",
+        input_message_id: "u",
+        input_message_revision: "u1",
+        selection_digest: selected.selection_digest,
+        messages: selected.messages,
+        originating_selection_revision: 1
+      }
+    })
+    await service.appendSelectedUser(
+      native,
+      selected,
+      {
+        id: "u",
+        history_id: "chat",
+        role: "user",
+        name: "You",
+        content: "Edited",
+        createdAt: 1
+      },
+      explicit ? { historyBranch: true } : undefined
+    )
+    const body = calls.append.mock.calls[0][1]
+    if (explicit) expect(body.tldw_history_branch).toBe(true)
+    else expect(body).not.toHaveProperty("tldw_history_branch")
+  }
+)
+
+
+it("native user payload accepts only a matching structural sender role", () => {
+  expect(
+    service.nativeHistoryMessagePayload({
+      id: "u",
+      history_id: "chat",
+      role: "user",
+      name: "You",
+      content: "Original",
+      createdAt: 0,
+      metadataExtra: { sender_role: "user" }
+    })
+  ).toEqual({ id: "u", role: "user", content: "Original" })
+})
+
+it.each([
+  { sender_role: "assistant" },
+  { sender_role: "user", note: "must retain" },
+  { note: "must retain" }
+])(
+  "native user payload refuses substantive or inconsistent metadata %j",
+  (metadataExtra) => {
+    expect(() =>
+      service.nativeHistoryMessagePayload({
+        id: "u",
+        history_id: "chat",
+        role: "user",
+        name: "You",
+        content: "Original",
+        createdAt: 0,
+        metadataExtra
+      })
+    ).toThrow("unsupported_message_payload")
+  }
+)
+
+it("detached native edit rechecks structural metadata against the original canonical capture", () => {
+  const origin = {
+    ...view,
+    cursor: { kind: "after_message" as const, message_id: "a" }
+  }
+  const user = {
+    id: "u",
+    revision: "u1",
+    role: "user",
+    parent_id: null,
+    settled: true,
+    metadata: [{ id: "u", revision: "m1", kind: "message_metadata" }],
+    assets: [],
+    comparison: null
+  }
+  const source = {
+    ...capture(),
+    view: origin,
+    snapshot: { ...capture().snapshot, nodes: [user] },
+    rows: [user],
+    selected_content: [
+      {
+        id: "u",
+        revision: "u1",
+        message: "Original",
+        images: [],
+        tool_calls: null,
+        extra_metadata: { sender_role: "user" }
+      }
+    ]
+  } as HistorySelectionCaptureV1
+  const fresh = { ...source, rows: [], selected_content: [] }
+  const intent = {
+    owner_key: view.owner_key,
+    conversation_id: "chat",
+    message_id: "u",
+    message_revision: "u1",
+    isCurrent: () => true,
+    isOriginCurrent: () => true
+  }
+  expect(
+    service.nativeEditResendView(owner(), origin, source, intent)
+  ).toMatchObject({ cursor: { kind: "before_message", message_id: "u" } })
+  expect(
+    service.nativeEditResendView(owner(), origin, fresh, intent, source)
+  ).toMatchObject({ cursor: { kind: "before_message", message_id: "u" } })
+  for (const invalid of [
+    { ...source, selected_content: [] },
+    { ...source, snapshot: { ...source.snapshot, owner_key: "other" } },
+    {
+      ...source,
+      selected_content: [
+        {
+          ...source.selected_content[0],
+          extra_metadata: { sender_role: "user", note: "must retain" }
+        }
+      ]
+    },
+    {
+      ...source,
+      selected_content: [{ ...source.selected_content[0], revision: "changed" }]
+    },
+    {
+      ...source,
+      selected_content: [
+        { ...source.selected_content[0], tool_calls: [{ id: "tool" }] }
+      ]
+    },
+    {
+      ...source,
+      snapshot: {
+        ...source.snapshot,
+        nodes: [
+          {
+            ...user,
+            metadata: [{ id: "u", revision: "other", kind: "message_metadata" }]
+          }
+        ]
+      }
+    }
+  ])
+    expect(() =>
+      service.nativeEditResendView(
+        owner(),
+        origin,
+        fresh,
+        intent,
+        invalid as HistorySelectionCaptureV1
+      )
+    ).toThrow("unsupported_message_payload")
+})

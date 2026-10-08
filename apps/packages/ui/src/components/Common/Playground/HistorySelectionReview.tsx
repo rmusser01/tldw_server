@@ -1,3 +1,4 @@
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -51,6 +52,94 @@ export function HistorySelectionReview({
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
     t(`historySelection.${key}`, fallback)
+  const [openingRecovery, setOpeningRecovery] = React.useState<string | null>(null)
+  const [openRecoveryError, setOpenRecoveryError] = React.useState<string | null>(null)
+  const renderedSource = captureChatDraftSource()
+  const renderedSelectionIsCurrent = selection.fence?.() ?? (() => true)
+  const openingRecoveryRef = React.useRef<{
+    operationId: string
+    owner: HistorySelectionController["owner"]
+    view: HistorySelectionController["view"]
+    sourceIsCurrent: () => boolean
+  } | null>(null)
+  const mounted = React.useRef(true)
+  React.useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const openSavedReply = async (
+    entry: HistorySelectionController["recoveries"][number]
+  ) => {
+    if (
+      openingRecoveryRef.current ||
+      !renderedSource.isCurrent() ||
+      !renderedSelectionIsCurrent()
+    )
+      return
+    const editorOpen = () =>
+      !!document.querySelector("form[data-chat-message-editor]")
+    if (editorOpen()) {
+      setOpenRecoveryError(
+        text(
+          "finishEditBeforeOpening",
+          "Finish or cancel your current message edit before opening the saved reply."
+        )
+      )
+      return
+    }
+    const attempt = {
+      operationId: entry.turn.operation_id,
+      owner: selection.owner,
+      view: selection.view,
+      sourceIsCurrent: renderedSource.isCurrent
+    }
+    openingRecoveryRef.current = attempt
+    const current = () =>
+      mounted.current &&
+      openingRecoveryRef.current === attempt &&
+      attempt.sourceIsCurrent() &&
+      !editorOpen()
+    setOpeningRecovery(entry.turn.operation_id)
+    setOpenRecoveryError(null)
+    try {
+      if (!(await selection.openRecoveryResult(entry, current)) && current())
+        setOpenRecoveryError(
+          text(
+            "openSavedReplyFailed",
+            "Could not open the saved reply. Your current view and saved reply are retained."
+          )
+        )
+    } catch {
+      if (current())
+        setOpenRecoveryError(
+          text(
+            "openSavedReplyFailed",
+            "Could not open the saved reply. Your current view and saved reply are retained."
+          )
+        )
+    } finally {
+      if (openingRecoveryRef.current === attempt) {
+        openingRecoveryRef.current = null
+        if (mounted.current) setOpeningRecovery(null)
+      }
+    }
+  }
+  React.useEffect(() => {
+    const attempt = openingRecoveryRef.current
+    if (
+      attempt &&
+      (!attempt.sourceIsCurrent() ||
+        selection.owner !== attempt.owner ||
+        selection.view !== attempt.view ||
+        selection.status !== "ready")
+    ) {
+      openingRecoveryRef.current = null
+      setOpeningRecovery(null)
+      setOpenRecoveryError(null)
+    }
+  })
   const [expanded, setExpanded] = React.useState(false)
   const [included, setIncluded] = React.useState<string[]>([])
   const [cursor, setCursor] = React.useState<HistoryCursorV1>({ kind: "empty" })
@@ -81,6 +170,7 @@ export function HistorySelectionReview({
   React.useEffect(() => {
     if (previousReviewOwner.current === reviewOwner) return
     previousReviewOwner.current = reviewOwner
+    setOpenRecoveryError(null)
     setExpanded(false)
     setIncluded([])
     setCursor({ kind: "empty" })
@@ -200,6 +290,7 @@ export function HistorySelectionReview({
           )}
         </p>
       )}
+      {openRecoveryError && <p role="alert">{openRecoveryError}</p>}
       {selection.recoveries
         ?.filter((entry) => !hideRecovery?.(entry))
         .map((entry) => (
@@ -207,7 +298,21 @@ export function HistorySelectionReview({
             key={entry.turn.operation_id}
             className="mb-3 rounded border p-3"
             role="status">
-            {entry.turn.outcome === "stopped" ||
+            {entry.turn.action === "edit_resend" &&
+            entry.turn.outcome === "complete" &&
+            entry.turn.settled_message_id ? (
+              <>
+                <p className="font-medium">
+                  {text("savedEditedReplyTitle", "Edited reply saved")}
+                </p>
+                <p>
+                  {text(
+                    "savedEditedReplyMessage",
+                    "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready."
+                  )}
+                </p>
+              </>
+            ) : entry.turn.outcome === "stopped" ||
             entry.turn.outcome === "interrupted" ? (
               <>
                 {/* A partial reply kept on this device only (CS-04, #3104). */}
@@ -278,7 +383,21 @@ export function HistorySelectionReview({
               }>
               {text("copyRecovery", "Copy recovered text")}
             </Button>
-            <Button onClick={() => void selection.dismissRecovery(entry)}>
+            {entry.turn.action === "edit_resend" &&
+              entry.turn.outcome === "complete" &&
+              entry.turn.settled_message_id && (
+                <Button
+                  disabled={
+                    openingRecovery !== null || selection.status !== "ready"
+                  }
+                  loading={openingRecovery === entry.turn.operation_id}
+                  onClick={() => void openSavedReply(entry)}>
+                  {text("openSavedReply", "Open saved reply")}
+                </Button>
+              )}
+            <Button
+              disabled={openingRecovery !== null}
+              onClick={() => void selection.dismissRecovery(entry)}>
               {text("dismissRecovery", "Dismiss recovery")}
             </Button>
           </div>
