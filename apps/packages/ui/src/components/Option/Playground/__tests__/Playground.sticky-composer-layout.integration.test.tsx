@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -129,8 +130,11 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }));
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value,
-}));
+  useMessageOption: () => ({
+    ...messageOptionState.value,
+    effectiveAssistantState: resolveEffectiveAssistantState({})
+  })
+}))
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => sessionPersistenceState.value,
@@ -181,11 +185,16 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: [],
 }));
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
-    selector: (state: typeof storeOptionState.value) => unknown,
-  ) => selector(storeOptionState.value),
-}));
+vi.mock("@/store/option", () => {
+  const getState = () => ({
+    ...messageOptionState.value,
+    ...storeOptionState.value
+  })
+  const useOptions = (
+    selector?: (state: ReturnType<typeof getState>) => unknown
+  ) => (typeof selector === "function" ? selector(getState()) : getState())
+  return { useStoreMessageOption: Object.assign(useOptions, { getState }) }
+})
 
 vi.mock("@/store/artifacts", () => ({
   useArtifactsStore: (

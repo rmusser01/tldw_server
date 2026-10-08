@@ -521,6 +521,8 @@ describe.each([
       io.data.set(storedKey("alice"), saved)
       render(<Route />)
       await screen.findByText("alice first")
+      // The lazy sidebar actions mount independently of transcript hydration.
+      await waitFor(() => expect(io.closeTab).toBeTypeOf("function"))
       act(() => {
         const state = useStoreMessageOption.getState()
         state.setTemporaryChat(true)

@@ -202,7 +202,6 @@ export type SidepanelWebUiOpenSource = {
 type Props = {
   dropedFile: File | undefined
   inputRef?: React.RefObject<HTMLTextAreaElement>
-  onHeightChange?: (height: number) => void
   draftKey?: string
   onRecoverDraft?: RestoreChatDraft
   onFindConversations?: () => void
@@ -226,14 +225,12 @@ type SidepanelRequestOverrides = Record<string, unknown> | undefined
 export const SidepanelForm = ({
   dropedFile,
   inputRef,
-  onHeightChange,
   draftKey,
   onRecoverDraft,
   onFindConversations,
   onOpenChatInWebUi,
   onWebUiOpenReady
 }: Props) => {
-  const formContainerRef = React.useRef<HTMLDivElement>(null)
   const localTextareaRef = React.useRef<HTMLTextAreaElement>(null)
   const textareaRef = inputRef ?? localTextareaRef
   const contextFileInputRef = React.useRef<HTMLInputElement>(null)
@@ -584,28 +581,6 @@ export const SidepanelForm = ({
       duration: 6
     })
   }, [isFireFoxPrivateMode, notification, t])
-
-  React.useEffect(() => {
-    if (!onHeightChange) return
-    const node = formContainerRef.current
-    if (!node || typeof ResizeObserver === "undefined") return
-
-    const notifyHeight = (height: number) => {
-      onHeightChange(Math.max(0, Math.ceil(height)))
-    }
-
-    notifyHeight(node.getBoundingClientRect().height)
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-      notifyHeight(entry.contentRect.height)
-    })
-    observer.observe(node)
-
-    return () => {
-      observer.disconnect()
-    }
-  }, [onHeightChange])
 
   // tldw WS STT
   const {
@@ -3341,7 +3316,6 @@ export const SidepanelForm = ({
   return (
     <React.Profiler id="sidepanel-form-root" onRender={onComposerRenderProfile}>
       <div
-        ref={formContainerRef}
         className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
       <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>
       <QuickPromptInsertionReview form={form} ready={draftReady}
@@ -3512,7 +3486,7 @@ export const SidepanelForm = ({
                               "common:commandPalette.noResults",
                               "No results found"
                             )}
-                            className="absolute bottom-full left-3 right-3 mb-2"
+                            className="relative mx-3 mb-2"
                           />
                           <MentionsMenu
                             open={showMentionMenu}
@@ -3524,7 +3498,7 @@ export const SidepanelForm = ({
                               "sidepanel:composer.noMentions",
                               "No matches found"
                             )}
-                            className="absolute bottom-full left-3 right-3 mb-2"
+                            className="relative mx-3 mb-2"
                           />
                           <textarea
                             id="textarea-message"

@@ -20,15 +20,13 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
   mentionPosition,
   onSelectTab,
   onClose,
-  textareaRef,
   refetchTabs,
   onMentionsOpen
 }) => {
   const { t } = useTranslation(["common"])
+  const activeOptionRef = React.useRef<HTMLButtonElement>(null)
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const [isRefreshing, setIsRefreshing] = React.useState(false)
-  const dropdownRef = React.useRef<HTMLDivElement>(null)
-  const [position, setPosition] = React.useState({ top: 0, left: 0 })
   const toText = React.useCallback(
     (value: unknown): string =>
       typeof value === "string" ? value : String(value),
@@ -67,18 +65,6 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
   React.useEffect(() => {
     setSelectedIndex(0)
   }, [orderedTabs])
-
-  React.useEffect(() => {
-    if (show && textareaRef.current && dropdownRef.current) {
-      const textareaRect = textareaRef.current.getBoundingClientRect()
-      const dropdownHeight = dropdownRef.current.offsetHeight || 320 
-      
-      setPosition({
-        top: -dropdownHeight - 8, 
-        left: 0
-      })
-    }
-  }, [show, orderedTabs])
 
   React.useEffect(() => {
     if (show) {
@@ -122,6 +108,14 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
     }
   }, [show, orderedTabs, selectedIndex, onSelectTab, onClose])
 
+  React.useEffect(() => {
+    if (show)
+      activeOptionRef.current?.scrollIntoView?.({
+        block: "nearest",
+        inline: "nearest"
+      })
+  }, [show, selectedIndex, orderedTabs])
+
   const handleRefreshTabs = async () => {
     if (isRefreshing) return
     
@@ -139,8 +133,7 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
 
   return (
     <div
-      ref={dropdownRef}
-      className="absolute z-50 bg-surface border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto w-80"
+      className="relative z-50 my-2 min-w-0 w-full max-w-full bg-surface border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto"
       role="listbox"
       aria-label={
         t(
@@ -148,10 +141,6 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
           "Tab mention suggestions"
         ) as string
       }
-      style={{
-        top: position.top,
-        left: position.left,
-      }}
     >
       <div className="p-2 border-b border-border flex items-center justify-between">
         <span className="text-sm font-medium text-text">
@@ -194,6 +183,10 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
                 return (
                   <button
                     key={tab.id}
+                    ref={index === selectedIndex ? activeOptionRef : undefined}
+                    type="button"
+                    role="option"
+                    aria-selected={index === selectedIndex}
                     onClick={() => onSelectTab(tab)}
                     title={tab.title}
                     className={`w-full text-left p-3 hover:bg-surface2 flex items-center gap-3 transition-colors ${

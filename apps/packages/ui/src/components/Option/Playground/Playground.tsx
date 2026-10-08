@@ -73,6 +73,7 @@ import {
 import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
+import { useComposerDockHeight } from "@/hooks/useComposerDockHeight";
 import {
   ChevronDown,
   Keyboard,
@@ -387,7 +388,9 @@ const PlaygroundContent = () => {
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
   const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null);
-  const composerDockRef = React.useRef<HTMLDivElement>(null);
+  const { ref: composerDockRef, height: composerDockHeight } =
+    useComposerDockHeight()
+
   const [droppedFiles, setDroppedFiles] = React.useState<File[]>([]);
   const [attachedResearchContext, setAttachedResearchContext] =
     React.useState<AttachedResearchContext | null>(null);
@@ -415,8 +418,9 @@ const PlaygroundContent = () => {
     setApplyCharacterRoute(() => apply);
   }, []);
   const { data: readinessChatModels, isFetching: chatModelsFetching, isError: chatModelsError, refetch: refreshCharacterChatModels } = useChatModelCatalog();
-  const [composerDockMetrics, setComposerDockMetrics] =
-    React.useState<ComposerDockLayoutMetrics | null>(null);
+  const [composerKeyboardInsetPx, setComposerKeyboardInsetPx] =
+    React.useState(0)
+
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
   const { mode: themeMode, toggleDarkMode } = useDarkMode();
@@ -649,25 +653,18 @@ const PlaygroundContent = () => {
     };
   }, [selectedSystemPrompt]);
   const composerBottomOffsetPx = stickyChatInput
-    ? resolveComposerBottomOffsetPx(composerDockMetrics)
-    : 0;
+    ? resolveComposerBottomOffsetPx({
+        occupiedHeightPx: composerDockHeight,
+        keyboardInsetPx: composerKeyboardInsetPx
+      })
+    : 0
   const handleComposerLayoutChange = React.useCallback(
     (metrics: ComposerDockLayoutMetrics) => {
-      if (metrics.occupiedHeightPx === 0 && metrics.keyboardInsetPx === 0) {
-        setComposerDockMetrics(null);
-        return;
-      }
-
-      const dockEl = composerDockRef.current;
-      setComposerDockMetrics({
-        occupiedHeightPx: dockEl
-          ? Math.round(dockEl.getBoundingClientRect().height)
-          : metrics.occupiedHeightPx,
-        keyboardInsetPx: metrics.keyboardInsetPx,
-      });
+      setComposerKeyboardInsetPx(metrics.keyboardInsetPx)
     },
-    [],
-  );
+    []
+  )
+
   const handleComposerDraftPresenceChange = React.useCallback(
     (hasDraft: boolean) => {
       setComposerHasDraft(hasDraft);
@@ -4142,7 +4139,7 @@ const PlaygroundContent = () => {
               aria-live="polite"
               aria-relevant="additions"
               aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
+              className="custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
@@ -4177,11 +4174,7 @@ const PlaygroundContent = () => {
                   ? "playground-chat-composer-dock"
                   : "playground-chat-composer-region"
               }
-              className={`relative w-full ${
-                mobileCockpitComposerConstrained
-                  ? "min-h-0 shrink overflow-y-auto overscroll-contain"
-                  : "shrink-0"
-              } ${
+              className={`relative flex max-h-[60%] min-h-0 w-full shrink flex-col ${
                 stickyChatInput
                   ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                   : ""
@@ -4219,57 +4212,43 @@ const PlaygroundContent = () => {
                   </button>
                 </div>
               )}
-              <PlaygroundForm
-                onCharacterRouteApplyReady={onCharacterRouteApplyReady}
-                droppedFiles={droppedFiles}
-                stickyDockEnabled={stickyChatInput}
-                mobileCockpitModeActive={mobileCockpitComposerConstrained}
-                forceWideMode={cockpitRailCollapsedWideContent}
-                onComposerLayoutChange={
-                  stickyChatInput ? handleComposerLayoutChange : undefined
-                }
-                attachedResearchContext={attachedResearchContext}
-                attachedResearchContextBaseline={
-                  attachedResearchContextBaseline
-                }
-                attachedResearchContextPinned={attachedResearchContextPinned}
-                attachedResearchContextHistory={attachedResearchContextHistory}
-                onApplyAttachedResearchContext={
-                  handleApplyAttachedResearchContext
-                }
-                onResetAttachedResearchContext={
-                  handleResetAttachedResearchContext
-                }
-                onRemoveAttachedResearchContext={
-                  handleRemoveAttachedResearchContext
-                }
-                onPinAttachedResearchContext={handlePinAttachedResearchContext}
-                onPinAttachedResearchContextHistory={
-                  handlePinAttachedResearchContextHistory
-                }
-                onUnpinAttachedResearchContext={
-                  handleUnpinAttachedResearchContext
-                }
-                onRestorePinnedResearchContext={
-                  handleRestorePinnedResearchContext
-                }
-                onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
-                onSelectAttachedResearchContextHistory={
-                  handleSelectAttachedResearchContextHistory
-                }
-                onDraftPresenceChange={handleComposerDraftPresenceChange}
-                composerMessageCount={composerMessageCount}
-                composerMessageCountLabel={composerMessageCountLabel}
-                characterWorkflowActive={characterWorkflowActive}
-                characterChatSendBlocker={characterChatSendBlocker}
-                characterChatModelUsability={activeChatModelUsability}
-                characterChatModelUsabilityLabel={
-                  activeChatModelSelectorLabel
-                }
-                characterChatModelUsabilityTitle={
-                  activeChatModelSelectorTitle
-                }
-              />
+              <div className="min-h-0 overflow-y-auto overscroll-contain">
+                <PlaygroundForm
+                  onCharacterRouteApplyReady={onCharacterRouteApplyReady}
+                  droppedFiles={droppedFiles}
+                  stickyDockEnabled={stickyChatInput}
+                  mobileCockpitModeActive={mobileCockpitComposerConstrained}
+                  forceWideMode={cockpitRailCollapsedWideContent}
+                  onComposerLayoutChange={
+                    stickyChatInput ? handleComposerLayoutChange : undefined
+                  }
+                  attachedResearchContext={attachedResearchContext}
+                  attachedResearchContextBaseline={attachedResearchContextBaseline}
+                  attachedResearchContextPinned={attachedResearchContextPinned}
+                  attachedResearchContextHistory={attachedResearchContextHistory}
+                  onApplyAttachedResearchContext={handleApplyAttachedResearchContext}
+                  onResetAttachedResearchContext={handleResetAttachedResearchContext}
+                  onRemoveAttachedResearchContext={handleRemoveAttachedResearchContext}
+                  onPinAttachedResearchContext={handlePinAttachedResearchContext}
+                  onPinAttachedResearchContextHistory={
+                    handlePinAttachedResearchContextHistory
+                  }
+                  onUnpinAttachedResearchContext={handleUnpinAttachedResearchContext}
+                  onRestorePinnedResearchContext={handleRestorePinnedResearchContext}
+                  onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
+                  onSelectAttachedResearchContextHistory={
+                    handleSelectAttachedResearchContextHistory
+                  }
+                  onDraftPresenceChange={handleComposerDraftPresenceChange}
+                  composerMessageCount={composerMessageCount}
+                  composerMessageCountLabel={composerMessageCountLabel}
+                  characterWorkflowActive={characterWorkflowActive}
+                  characterChatSendBlocker={characterChatSendBlocker}
+                  characterChatModelUsability={activeChatModelUsability}
+                  characterChatModelUsabilityLabel={activeChatModelSelectorLabel}
+                  characterChatModelUsabilityTitle={activeChatModelSelectorTitle}
+                />
+              </div>
             </div>
           </div>
         </PlaygroundCockpitShell>

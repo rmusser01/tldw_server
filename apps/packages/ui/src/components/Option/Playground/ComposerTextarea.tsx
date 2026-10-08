@@ -105,7 +105,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         onActiveIndexChange={onSlashActiveIndexChange}
         onSelect={onSlashSelect}
         emptyLabel={slashEmptyLabel}
-        className="absolute bottom-full left-3 right-3 mb-2"
+        className="relative mx-3 mb-2"
       />
       <textarea
         id="textarea-message"

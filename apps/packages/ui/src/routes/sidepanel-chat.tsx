@@ -27,6 +27,7 @@ import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { useComposerDockHeight } from "@/hooks/useComposerDockHeight"
 import {
   useChatShortcuts,
   useSidebarShortcuts,
@@ -524,7 +525,7 @@ const SidepanelChatContent = ({
   const [sidebarSearchQuery, setSidebarSearchQuery] = React.useState("")
   const sidebarSearchInputRef = React.useRef<HTMLInputElement>(null)
   const [sidebarSearchFocusNonce, setSidebarSearchFocusNonce] = React.useState(0)
-  const [composerHeight, setComposerHeight] = React.useState(0)
+  const { ref: composerDockRef, height: composerHeight } = useComposerDockHeight()
   const { t } = useTranslation(["playground", "sidepanel", "common"])
   // Avoid depending on the `t` function in effects; it can be referentially unstable.
   const newChatLabel = React.useMemo(
@@ -2782,7 +2783,7 @@ const SidepanelChatContent = ({
             aria-relevant="additions"
             aria-label={t("playground:aria.chatTranscript", "Chat messages")}
             data-testid="chat-messages"
-            className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
+            className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 min-h-0 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
             style={
               {
                 "--composer-padding": composerPadding,
@@ -2970,7 +2971,6 @@ const SidepanelChatContent = ({
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
                   inputRef={textareaRef}
-                  onHeightChange={setComposerHeight}
                   draftKey={draftKey}
                   onRecoverDraft={handleRecoverDraft}
                   onFindConversations={requestSidebarSearchFocus}
@@ -2998,14 +2998,14 @@ const SidepanelChatContent = ({
           )}
           {!isRestoringChat && stickyChatInput && (
             <div
-              className="absolute bottom-0 left-0 right-0 z-10 w-full min-w-0"
+              ref={composerDockRef}
+              className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
               <SidepanelForm
                 key={activeTabId || "sidepanel-chat"}
                 dropedFile={dropedFile}
                 inputRef={textareaRef}
-                onHeightChange={setComposerHeight}
                 draftKey={draftKey}
                 onRecoverDraft={handleRecoverDraft}
                   onFindConversations={requestSidebarSearchFocus}

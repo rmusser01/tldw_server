@@ -4888,53 +4888,21 @@ export const PlaygroundForm = ({
     messageDisplayValue.trim().length === 0;
   const composerShellRef = React.useRef<HTMLDivElement>(null);
 
-  const keepComposerBottomInView = React.useCallback(() => {
-    if (stickyDockEnabled) return;
-    if (typeof window === "undefined") return;
-    const composerEl = composerShellRef.current;
-    if (!composerEl) return;
-
-    const bottomPadding = 8;
-    const scrollingElement = document.scrollingElement as HTMLElement | null;
-
-    const adjustAncestor = (ancestor: HTMLElement | null) => {
-      if (!ancestor) return;
-      const composerRect = composerEl.getBoundingClientRect();
-
-      if (ancestor === scrollingElement) {
-        const viewportBottom = window.innerHeight - bottomPadding;
-        const overflow = composerRect.bottom - viewportBottom;
-        if (overflow > 0) {
-          window.scrollBy({ top: overflow, behavior: "auto" });
-        }
-        return;
-      }
-
-      const ancestorRect = ancestor.getBoundingClientRect();
-      const overflow =
-        composerRect.bottom - (ancestorRect.bottom - bottomPadding);
-      if (overflow > 0) {
-        ancestor.scrollTop += overflow;
-      }
-    };
-
-    let parent = composerEl.parentElement;
-    while (parent) {
-      const style = window.getComputedStyle(parent);
-      const allowsVerticalScroll = /(auto|scroll|overlay)/.test(
-        `${style.overflowY} ${style.overflow}`,
-      );
-      if (
-        allowsVerticalScroll &&
-        parent.scrollHeight > parent.clientHeight + 1
-      ) {
-        adjustAncestor(parent);
-      }
-      parent = parent.parentElement;
+  const keepComposerFocusInView = React.useCallback(() => {
+    if (stickyDockEnabled || typeof document === "undefined") return
+    const composerEl = composerShellRef.current
+    if (!composerEl) return
+    const focused = document.activeElement
+    const target =
+      focused && composerEl.contains(focused)
+        ? focused
+        : !focused || focused === document.body
+          ? textareaRef.current
+          : null
+    if (target && composerEl.contains(target)) {
+      target.scrollIntoView?.({ block: "nearest", inline: "nearest" })
     }
-
-    adjustAncestor(scrollingElement);
-  }, [stickyDockEnabled]);
+  }, [stickyDockEnabled, textareaRef])
 
   const notifyComposerLayoutChange = React.useCallback(() => {
     if (!onComposerLayoutChange) return;
@@ -5013,9 +4981,9 @@ export const PlaygroundForm = ({
 
     let timeoutId: number | null = null;
     const rafId = window.requestAnimationFrame(() => {
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       timeoutId = window.setTimeout(() => {
-        keepComposerBottomInView();
+        keepComposerFocusInView();
       }, 220);
     });
 
@@ -5025,7 +4993,7 @@ export const PlaygroundForm = ({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [actionBarVisible, keepComposerBottomInView]);
+  }, [actionBarVisible, keepComposerFocusInView]);
 
   const previousKeyboardOpenRef = React.useRef(false);
   React.useEffect(() => {
@@ -5041,9 +5009,9 @@ export const PlaygroundForm = ({
 
     let timeoutId: number | null = null;
     const rafId = window.requestAnimationFrame(() => {
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       timeoutId = window.setTimeout(() => {
-        keepComposerBottomInView();
+        keepComposerFocusInView();
       }, 120);
     });
 
@@ -5055,7 +5023,7 @@ export const PlaygroundForm = ({
     };
   }, [
     isMobileViewport,
-    keepComposerBottomInView,
+    keepComposerFocusInView,
     mobileComposerViewport.keyboardInsetPx,
     mobileComposerViewport.keyboardOpen,
   ]);
@@ -5067,10 +5035,10 @@ export const PlaygroundForm = ({
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (!composerShellRef.current?.contains(target)) return;
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       if (typeof window !== "undefined") {
         window.setTimeout(() => {
-          keepComposerBottomInView();
+          keepComposerFocusInView();
         }, 80);
       }
     };
@@ -5079,7 +5047,7 @@ export const PlaygroundForm = ({
     return () => {
       document.removeEventListener("focusin", handleFocusIn);
     };
-  }, [keepComposerBottomInView]);
+  }, [keepComposerFocusInView]);
 
   const previousSendStateRef = React.useRef(isSending);
   React.useEffect(() => {
@@ -5101,9 +5069,9 @@ export const PlaygroundForm = ({
 
     let timeoutId: number | null = null;
     const rafId = window.requestAnimationFrame(() => {
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       timeoutId = window.setTimeout(() => {
-        keepComposerBottomInView();
+        keepComposerFocusInView();
       }, 100);
     });
 
@@ -5113,7 +5081,7 @@ export const PlaygroundForm = ({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [isMobileViewport, isSending, keepComposerBottomInView]);
+  }, [isMobileViewport, isSending, keepComposerFocusInView]);
 
   const toolRunStatusLabel = React.useMemo(() => {
     if (chatLoopState.pendingApprovals.length > 0) {

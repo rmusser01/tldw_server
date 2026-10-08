@@ -27,13 +27,30 @@ import {
   TOGGLE_WEB_SEARCH_EVENT,
 } from "../playground-cockpit-actions";
 
-const forkSettings = vi.hoisted(() => ({controller: null as any, mode: "ordinary", current: true, update: vi.fn<(...args: any[]) => Promise<any>>(async () => ({}))}))
-vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
-  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
-  return {...actual, useHistorySelectionContext: () => {
-    const controller = actual.useHistorySelectionContext()
-    return forkSettings.controller ?? {...controller, settingsMode: () => forkSettings.mode, updateForkSettings: forkSettings.update, fence: () => () => forkSettings.current}
-  }}
+const forkSettings = vi.hoisted(() => ({
+  controller: null as any,
+  mode: "ordinary",
+  current: true,
+  fence: () => () => forkSettings.current,
+  update: vi.fn<(...args: any[]) => Promise<any>>(async () => ({}))
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {
+    ...actual,
+    useHistorySelectionContext: () => {
+      const controller = actual.useHistorySelectionContext()
+      return (
+        forkSettings.controller ?? {
+          ...controller,
+          settingsMode: () => forkSettings.mode,
+          updateForkSettings: forkSettings.update,
+          fence: forkSettings.fence
+        }
+      )
+    }
+  }
 })
 
 vi.mock("@/db/dexie/history-selection", () => ({ensureLocalProfileId: async () => "profile", loadHistoryBookmark: async () => null, saveHistoryBookmark: async () => {}, loadHistoryTurnRecoveries: async () => []}))
@@ -246,7 +263,7 @@ vi.mock("@/services/model-settings", () => ({
 vi.mock("@/services/ocr", () => ({ getOCRLanguage: async () => null }));
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChatWithCharacterFallback: async () => null,
-  saveActorSettingsForChat: vi.fn(),
+  saveActorSettingsForChat: vi.fn(async ({ settings }) => settings),
 }));
 vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [null, vi.fn(), { isLoading: false }],
