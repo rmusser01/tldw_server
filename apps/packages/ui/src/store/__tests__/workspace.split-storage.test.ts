@@ -33,7 +33,10 @@ describe("workspace split-key persistence storage adapter", () => {
 
   it("writes split index and only updates changed workspace keys", async () => {
     const storage = createWorkspaceStorage()
-    const setItemSpy = vi.spyOn(localStorage, "setItem")
+    const setItemSpy = vi.spyOn(
+      Object.getPrototypeOf(localStorage) as Storage,
+      "setItem",
+    );
 
     const baseState = {
       workspaceId: "workspace-a",

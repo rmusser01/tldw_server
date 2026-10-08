@@ -342,7 +342,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const lastEditAtRef = React.useRef(0)
   const dirtySinceRef = React.useRef(0)
   const lastFailureAtRef = React.useRef(0)
-  const [originalMetadata, setOriginalMetadataState] = React.useState<Record<string, any> | null>(null)
+  const [originalMetadata, setOriginalMetadataState] = React.useState<(Record<string, unknown> & KnowledgeNoteHead) | null>(null)
   const [selectedStudioSummary, setSelectedStudioSummary] =
     React.useState<NoteStudioDocumentSummary | null>(null)
   const [selectedVersion, setSelectedVersion] = React.useState<number | null>(null)
@@ -557,7 +557,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const pendingWrite = request ? {
         ...(request.path.endsWith('/provenance/restore') ? { operation: 'restore' as const } : {}),
         key: String(request.headers?.['Idempotency-Key']),
-        body: request.body as Record<string, any>,
+        body: request.body as Record<string, unknown>,
         expectedVersion: request.headers?.['expected-version'] != null ? Number(request.headers['expected-version']) : null,
         previousTitle: pending!.previousTitle
       } : offlineDraftQueueRef.current[key]?.pendingWrite
@@ -650,17 +650,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setOfflineDraftQueue
     ]
   )
-
-  const removeOfflineDraftByKey = React.useCallback((key: string) => {
-    const normalized = String(key || '').trim()
-    if (!normalized) return
-    setOfflineDraftQueue((current) => {
-      if (!current[normalized]) return current
-      const next = { ...current }
-      delete next[normalized]
-      return next
-    })
-  }, [setOfflineDraftQueue])
 
   /** Remove a queued draft before the next await (loadDetail re-applies queued drafts). */
   const dropOfflineDraftNow = React.useCallback((key: string) => {
@@ -1819,8 +1808,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           let expectedVersion = baseVersion
           if (expectedVersion == null) {
             const latest = await request({
-              path: noteResourcePath(noteId) as any,
-              method: 'GET' as any
+              path: noteResourcePath(noteId),
+              method: 'GET'
             })
             expectedVersion = toNoteVersion(latest)
           }
@@ -1833,8 +1822,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             savedTitleRef.current?.noteId === String(noteId) ? savedTitleRef.current.title : null)
           const updated = await request(
             {
-              path: noteResourcePath(noteId) as any,
-              method: 'PUT' as any,
+              path: noteResourcePath(noteId),
+              method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
                 'expected-version': String(expectedVersion)
@@ -1873,7 +1862,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (updatedVersion == null) {
             try {
               const latest = await request({
-                path: noteResourcePath(noteId) as any,
+                path: noteResourcePath(noteId),
                 method: 'GET' as any
               })
               assignSelectedVersion(toNoteVersion(latest))
@@ -1920,7 +1909,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           if (noteId != null && ownedSaveRequest) {
             try {
-              const current = await bgRequest<any>({ ...ownedSaveRequest, path: noteResourcePath(noteId) as any, method: 'GET' })
+              const current = await bgRequest<NotesWriteResponse & KnowledgeNoteHead>({ ...ownedSaveRequest, path: noteResourcePath(noteId), method: 'GET' })
               if (!isCurrent() || controller.signal.aborted) return (result = false)
               setOriginalMetadata(previous => ({ ...previous, ...knowledgeNoteHead(current) }))
             } catch (error) {
@@ -2267,6 +2256,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     dispatchSave,
     dropOfflineDraftNow,
     offlineDraftQueueHydrated,
+    setDirtyFlag,
     setOfflineDraftQueue,
     isOnline,
     loadDetail,
@@ -3031,7 +3021,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     let serverVersion: number | null = null
     try {
       serverVersion = toNoteVersion(
-        await bgRequest<any>({ path: noteResourcePath(noteId) as any, method: 'GET' as any })
+        await bgRequest<NotesWriteResponse>({ path: noteResourcePath(noteId), method: 'GET' })
       )
     } catch {
       serverVersion = null
@@ -3312,7 +3302,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         try {
           const detail = await bgRequest<any>({
-            path: noteResourcePath(noteId) as any,
+            path: noteResourcePath(noteId),
             method: 'GET' as any
           })
           return toNoteVersion(detail)

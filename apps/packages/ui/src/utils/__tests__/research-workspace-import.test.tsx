@@ -1,3 +1,6 @@
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import type { WorkspaceNote } from "@/types/workspace"
+import type { ResearchWorkspacePrefill } from "../research-workspace-prefill"
 import type { BgRequestInit } from "@/services/background-proxy"
 import type { KnowledgeNoteProvenance } from "../knowledge-note-provenance"
 import {
@@ -26,9 +29,14 @@ import {
 } from "../research-workspace-prefill"
 import { useResearchWorkspacePrefill } from "../use-research-workspace-prefill"
 
+type CanonicalNote = Omit<WorkspaceNote, "isDirty"> & {
+  id: string | number;
+  conversation_id?: string | null;
+};
+
 const mocks = vi.hoisted(() => ({
   owner: "alice",
-  answerState: {} as any,
+  answerState: {} as Record<string, unknown>,
   navigate: vi.fn(),
   multiUser: false,
   values: new Map<string, unknown>(),
@@ -40,17 +48,17 @@ const mocks = vi.hoisted(() => ({
   persistent: true,
   writeError: false,
   readGate: null as Promise<void> | null,
-}))
+}));
 vi.mock("@/services/chat-surface-scope", () => ({
   buildChatSurfaceScopeKeyFromConfig: (
-    config: any,
+    config: TldwConfig,
     options?: { userId?: string | number | null },
   ) =>
     config.serverUrl +
     (config.authMode === "multi-user"
       ? `:${options?.userId ?? (config.accessToken ? "user-a" : "anonymous")}`
       : ""),
-}))
+}));
 vi.mock("@/utils/media-navigation-scope", () => ({
   deriveScopedUserId: () => "user:single",
 }))
@@ -102,10 +110,10 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: any) =>
+    t: (key: string, options?: string | { defaultValue?: string }) =>
       typeof options === "string" ? options : options?.defaultValue || key,
   }),
-}))
+}));
 vi.mock("@/components/Option/KnowledgeQA/KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => mocks.answerState,
 }))
@@ -133,12 +141,12 @@ vi.mock("@/hooks/useFeatureFlags", () => ({
   useFeatureFlag: () => [true],
 }))
 vi.mock("@/services/background-proxy", () => ({
-  bgRequest: (request: any) =>
+  bgRequest: (request: BgRequestInit) =>
     request.method === "GET" &&
     mocks.sourceNoteIds.has(decodeURIComponent(request.path.split("/").at(-1)))
       ? mocks.sourceNoteRequest(request)
       : mocks.request(request),
-}))
+}));
 vi.mock("@/components/Option/ResearchWorkspace/WorkspaceHeader", () => ({
   WorkspaceHeader: () => null,
 }))
@@ -202,14 +210,14 @@ beforeEach(() => {
   mocks.sourceNoteIds.add("note-uuid")
   mocks.sourceNoteRequest
     .mockReset()
-    .mockImplementation(async (request: any) => ({
+    .mockImplementation(async (request: BgRequestInit) => ({
       id: decodeURIComponent(request.path.split("/").at(-1)),
       title: "Field note",
       version: 4,
       deleted: false,
       content:
         "First excerpt\nSecond excerpt\nComplete note ending outside retrieved chunks.",
-    }))
+    }));
   mocks.writeError = false
   mocks.readGate = null
   localStorage.clear()
@@ -740,10 +748,10 @@ it.each([false, true])(
       added_at: "2026-10-01T00:00:00Z",
       version: 1,
     }))
-    let canonical: any = null
+    let canonical: CanonicalNote = null;
     let droppedResponse = false
-    mocks.request.mockImplementation(async (request: any) => {
-      const { path, method, body, headers } = request
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      const { path, method, body, headers } = request;
       if (path === "/api/v1/notes/" && method === "POST") {
         canonical = {
           id: body.id,
@@ -752,30 +760,30 @@ it.each([false, true])(
           keywords: body.keywords.map((keyword: string) => ({ keyword })),
           conversation_id: body.conversation_id,
           version: 1,
-        }
+        };
         if (loseResponse && !droppedResponse) {
-          droppedResponse = true
-          throw new Error("response lost")
+          droppedResponse = true;
+          throw new Error("response lost");
         }
-        return canonical
+        return canonical;
       }
       if (path.startsWith("/api/v1/notes/search/"))
-        return { notes: canonical ? [canonical] : [] }
+        return { notes: canonical ? [canonical] : [] };
       if (path.startsWith("/api/v1/notes/")) {
         if (!canonical)
-          throw Object.assign(new Error("missing"), { status: 404 })
+          throw Object.assign(new Error("missing"), { status: 404 });
         if (method === "PUT") {
           if (headers?.["expected-version"] !== String(canonical.version))
             throw Object.assign(new Error("expected-version header required"), {
               status: 422,
-            })
+            });
           canonical = {
             ...canonical,
             ...body,
             version: canonical.version + 1,
-          }
+          };
         }
-        return canonical
+        return canonical;
       }
       if (path.endsWith("/context"))
         return {
@@ -783,9 +791,9 @@ it.each([false, true])(
           workspace,
           sources: { items: serverSources },
           partial_errors: [],
-        }
-      return []
-    })
+        };
+      return [];
+    });
     const restore = () =>
       restoreMigratedResearchWorkspace({
         signal: new AbortController().signal,
@@ -922,24 +930,27 @@ it.each(["edit", "clear", "owner", "workspace"])(
       }),
     )
     let finish!: () => void
-    let canonical: any = null
-    mocks.request.mockImplementation(async ({ method, body }: any) => {
-      if (method === "POST") {
-        canonical = {
-          id: body.id,
-          title: body.title,
-          content: body.content,
-          keywords: body.keywords.map((keyword: string) => ({ keyword })),
-          version: 1,
+    let canonical: CanonicalNote = null;
+    mocks.request.mockImplementation(
+      async ({ method, body }: BgRequestInit) => {
+        if (method === "POST") {
+          canonical = {
+            id: body.id,
+            title: body.title,
+            content: body.content,
+            keywords: body.keywords.map((keyword: string) => ({ keyword })),
+            version: 1,
+          };
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          return canonical;
         }
-        await new Promise<void>((resolve) => {
-          finish = resolve
-        })
-        return canonical
-      }
-      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-      return canonical
-    })
+        if (!canonical)
+          throw Object.assign(new Error("missing"), { status: 404 });
+        return canonical;
+      },
+    );
     const transfer = payload()
     transfer.sources = transfer.sources.slice(3)
     await queueResearchWorkspacePrefill(transfer)
@@ -999,7 +1010,7 @@ it("retains an existing canonical note's unsaved title and body when appending t
   useWorkspaceStore.getState().loadNote({ ...canonical, keywords: ["new"] })
   useWorkspaceStore.getState().updateNoteTitle("Unsaved title")
   useWorkspaceStore.getState().updateNoteContent("Unsaved body")
-  mocks.request.mockImplementation(async ({ method, body }: any) => {
+  mocks.request.mockImplementation(async ({ method, body }: BgRequestInit) => {
     if (method === "PUT")
       canonical = {
         ...canonical,
@@ -1007,9 +1018,9 @@ it("retains an existing canonical note's unsaved title and body when appending t
         content: body.content,
         keywords: body.keywords.map((keyword: string) => ({ keyword })),
         version: 2,
-      }
-    return canonical
-  })
+      };
+    return canonical;
+  });
   const transfer = payload()
   transfer.sources = transfer.sources.slice(3)
   await queueResearchWorkspacePrefill(transfer)
@@ -1044,35 +1055,38 @@ it.each([
         contentRetained: false,
       }),
     )
-    let canonical: any = null
+    let canonical: CanonicalNote = null;
     let finishRetry!: () => void
-    mocks.request.mockImplementation(async ({ method, body }: any) => {
-      if (method === "POST") {
-        canonical = {
-          id: body.id,
-          title: body.title,
-          content: body.content,
-          keywords: body.keywords.map((keyword: string) => ({ keyword })),
-          version: 1,
+    mocks.request.mockImplementation(
+      async ({ method, body }: BgRequestInit) => {
+        if (method === "POST") {
+          canonical = {
+            id: body.id,
+            title: body.title,
+            content: body.content,
+            keywords: body.keywords.map((keyword: string) => ({ keyword })),
+            version: 1,
+          };
+          if (failure === "lost response")
+            throw new Error("response lost after commit");
         }
-        if (failure === "lost response")
-          throw new Error("response lost after commit")
-      }
-      if (method === "PUT") {
-        canonical = {
-          ...canonical,
-          title: body.title,
-          content: body.content,
-          keywords: body.keywords.map((keyword: string) => ({ keyword })),
-          version: 2,
+        if (method === "PUT") {
+          canonical = {
+            ...canonical,
+            title: body.title,
+            content: body.content,
+            keywords: body.keywords.map((keyword: string) => ({ keyword })),
+            version: 2,
+          };
+          await new Promise<void>((resolve) => {
+            finishRetry = resolve;
+          });
         }
-        await new Promise<void>((resolve) => {
-          finishRetry = resolve
-        })
-      }
-      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-      return canonical
-    })
+        if (!canonical)
+          throw Object.assign(new Error("missing"), { status: 404 });
+        return canonical;
+      },
+    );
     mocks.upload
       .mockResolvedValueOnce({ id: 101 })
       .mockRejectedValueOnce(new Error("offline"))
@@ -1162,10 +1176,10 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
         deletedAt: "2026-10-03T00:00:00Z",
       }),
     )
-    let canonical: any = null
+    let canonical: CanonicalNote = null;
     let finishCreate!: () => void
-    mocks.request.mockImplementation(async (request: any) => {
-      const { path, method, body, headers } = request
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      const { path, method, body, headers } = request;
       if (path === "/api/v1/workspaces/workspace-a/context")
         return {
           workspace_id: "workspace-a",
@@ -1177,7 +1191,7 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           },
           sources: { items: [] },
           partial_errors: [],
-        }
+        };
       if (path === "/api/v1/workspaces/workspace-a/notes")
         return [
           {
@@ -1190,7 +1204,7 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
             created_at: "2026-10-01T00:00:00Z",
             last_modified: "2026-10-01T00:00:00Z",
           },
-        ]
+        ];
       if (path === "/api/v1/notes/" && method === "POST") {
         canonical = {
           id: body.id,
@@ -1198,37 +1212,37 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           content: body.content,
           keywords: body.keywords.map((keyword: string) => ({ keyword })),
           version: 1,
-        }
+        };
         await new Promise<void>((resolve) => {
-          finishCreate = resolve
-        })
-        return canonical
+          finishCreate = resolve;
+        });
+        return canonical;
       }
-      if (path.startsWith("/api/v1/notes/search/")) return { notes: [] }
-      if (path.startsWith("/api/v1/notes/keywords/")) return []
+      if (path.startsWith("/api/v1/notes/search/")) return { notes: [] };
+      if (path.startsWith("/api/v1/notes/keywords/")) return [];
       if (path.startsWith("/api/v1/notes/")) {
         if (
           !canonical ||
           path.split("?")[0] !== `/api/v1/notes/${canonical.id}`
         )
-          throw Object.assign(new Error("missing"), { status: 404 })
+          throw Object.assign(new Error("missing"), { status: 404 });
         if (method === "PUT") {
           if (headers?.["expected-version"] !== String(canonical.version))
             throw Object.assign(new Error("expected-version header required"), {
               status: 422,
-            })
+            });
           canonical = {
             ...canonical,
             title: body.title,
             content: body.content,
             keywords: body.keywords.map((keyword: string) => ({ keyword })),
             version: canonical.version + 1,
-          }
+          };
         }
-        return canonical
+        return canonical;
       }
-      return []
-    })
+      return [];
+    });
     await restoreMigratedResearchWorkspace({
       signal: new AbortController().signal,
       apply: useWorkspaceStore.getState().restoreServerWorkspace,
@@ -1355,22 +1369,25 @@ it.each([
       title: "Original legacy note",
       content: "Original legacy body",
     })
-    let canonical: any = null
-    mocks.request.mockImplementation(async ({ method, body, headers }: any) => {
-      if (method === "POST") {
-        canonical = { ...body, version: 1 }
-        throw new Error("response lost after commit")
-      }
-      if (method === "PUT") {
-        if (headers?.["expected-version"] !== String(canonical.version))
-          throw Object.assign(new Error("expected-version header required"), {
-            status: 422,
-          })
-        canonical = { ...canonical, ...body, version: 2 }
-      }
-      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-      return canonical
-    })
+    let canonical: CanonicalNote = null;
+    mocks.request.mockImplementation(
+      async ({ method, body, headers }: BgRequestInit) => {
+        if (method === "POST") {
+          canonical = { ...body, version: 1 };
+          throw new Error("response lost after commit");
+        }
+        if (method === "PUT") {
+          if (headers?.["expected-version"] !== String(canonical.version))
+            throw Object.assign(new Error("expected-version header required"), {
+              status: 422,
+            });
+          canonical = { ...canonical, ...body, version: 2 };
+        }
+        if (!canonical)
+          throw Object.assign(new Error("missing"), { status: 404 });
+        return canonical;
+      },
+    );
     const transfer = payload()
     transfer.sources = transfer.sources.slice(3)
     await queueResearchWorkspacePrefill(transfer)
@@ -1440,13 +1457,15 @@ const markMigrated = () =>
     }),
   )
 const checkpoint = (id: string) =>
-  [...mocks.values.values()].find((value: any) => value.id === id) as any
+  ([...mocks.values.values()] as ResearchWorkspacePrefill[]).find(
+    (value) => value.id === id,
+  );
 
 it.each([false, true])(
   "persists the actual AnswerPanel default scope and current import over old marker=%s through canonical restore",
   async (withOldMarker) => {
     markMigrated()
-    let canonical: any = withOldMarker
+    let canonical: CanonicalNote = withOldMarker
       ? {
           id: canonicalNoteId,
           title: "Review draft",
@@ -1457,7 +1476,7 @@ it.each([false, true])(
           keywords: ["workspace:workspace-a"],
           version: 1,
         }
-      : null
+      : null;
     if (canonical) useWorkspaceStore.getState().loadNote(canonical)
     const sources = [7, 101].map((mediaId, position) => ({
       id: `server-source-${mediaId}`,
@@ -1472,8 +1491,8 @@ it.each([false, true])(
       added_at: "2026-10-01T00:00:00Z",
       version: 1,
     }))
-    mocks.request.mockImplementation(async (request: any) => {
-      const { path, method, body, headers } = request
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      const { path, method, body, headers } = request;
       if (path.endsWith("/context"))
         return {
           workspace_id: "workspace-a",
@@ -1485,19 +1504,20 @@ it.each([false, true])(
           },
           sources: { items: sources },
           partial_errors: [],
-        }
+        };
       if (path.startsWith("/api/v1/notes/search/"))
-        return { notes: canonical ? [canonical] : [] }
-      if (!path.startsWith("/api/v1/notes/")) return []
-      if (method === "POST") canonical = { ...body, version: 1 }
+        return { notes: canonical ? [canonical] : [] };
+      if (!path.startsWith("/api/v1/notes/")) return [];
+      if (method === "POST") canonical = { ...body, version: 1 };
       if (method === "PUT") {
         if (headers?.["expected-version"] !== String(canonical.version))
-          throw Object.assign(new Error("version required"), { status: 422 })
-        canonical = { ...canonical, ...body, version: canonical.version + 1 }
+          throw Object.assign(new Error("version required"), { status: 422 });
+        canonical = { ...canonical, ...body, version: canonical.version + 1 };
       }
-      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-      return canonical
-    })
+      if (!canonical)
+        throw Object.assign(new Error("missing"), { status: 404 });
+      return canonical;
+    });
     mocks.upload.mockResolvedValue({ media_id: 101 })
     mocks.answerState = {
       isAuthorityCurrent: () => true,
@@ -1736,25 +1756,25 @@ it.each([false, true])(
     transfer.sources = [transfer.sources[3]]
     let mutations = 0
     let capturedDraft: unknown
-    const seen: any[] = []
-    mocks.request.mockImplementation(async (request: any) => {
-      seen.push(request)
-      const expectedUser = request.headers?.["X-TLDW-Expected-User-ID"]
+    const seen: BgRequestInit[] = [];
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      seen.push(request);
+      const expectedUser = request.headers?.["X-TLDW-Expected-User-ID"];
       if (expectedUser && expectedUser !== principal)
         throw Object.assign(new Error("request_config_scope_changed"), {
           status: 412,
-        })
+        });
       if (request.method === "PUT") {
         if (request.headers?.["expected-version"] !== "2")
-          throw Object.assign(new Error("version required"), { status: 422 })
-        mutations += 1
-        canonical = { ...canonical, ...request.body, version: 3 }
+          throw Object.assign(new Error("version required"), { status: 422 });
+        mutations += 1;
+        canonical = { ...canonical, ...request.body, version: 3 };
       } else if (changePrincipal) {
-        capturedDraft = useWorkspaceStore.getState().currentNote
-        principal = "user-b"
+        capturedDraft = useWorkspaceStore.getState().currentNote;
+        principal = "user-b";
       }
-      return canonical
-    })
+      return canonical;
+    });
     await queueResearchWorkspacePrefill(transfer, "alice:user-a")
     const receiver = renderHook(() =>
       useResearchWorkspacePrefill("workspace-a", true),
@@ -1850,12 +1870,12 @@ it("imports complete canonical note content once and retains the original eviden
       deletedAt: "2026-10-03T00:00:00Z",
     }),
   )
-  let canonical: any = null
-  mocks.request.mockImplementation(async ({ method, body }: any) => {
-    if (method === "POST") canonical = { ...body, version: 1 }
-    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-    return canonical
-  })
+  let canonical: CanonicalNote = null;
+  mocks.request.mockImplementation(async ({ method, body }: BgRequestInit) => {
+    if (method === "POST") canonical = { ...body, version: 1 };
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 });
+    return canonical;
+  });
   const handoff = payload()
   handoff.sources = handoff.sources.filter(
     (source) => source.sourceType === "notes",
@@ -2037,16 +2057,20 @@ it.each(["streamed", "restored"])(
 )
 
 it("retains canonical import provenance in a fresh server workspace", async () => {
-  let canonical: any = null
-  mocks.request.mockImplementation(async ({ method, body }: any) => {
-    if (method === "POST") canonical = { ...body, version: 1,
-      content: stripKnowledgeNoteProvenance(body.content),
-      knowledge_provenance_state: "active", knowledge_provenance_version: 1,
-      knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
-    }
-    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-    return canonical
-  })
+  let canonical: CanonicalNote = null;
+  mocks.request.mockImplementation(async ({ method, body }: BgRequestInit) => {
+    if (method === "POST")
+      canonical = {
+        ...body,
+        version: 1,
+        content: stripKnowledgeNoteProvenance(body.content),
+        knowledge_provenance_state: "active",
+        knowledge_provenance_version: 1,
+        knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+      };
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 });
+    return canonical;
+  });
   const handoff = payload()
   handoff.sources = handoff.sources.filter(
     (source) => source.sourceType === "notes",
@@ -2079,8 +2103,11 @@ it("does not revive a discarded completed local import when the server workspace
     { initialProps: { serverBacked: false } },
   )
   await waitFor(() =>
-    expect((mocks.values.values().next().value as any)?.completed).toBe(true),
-  )
+    expect(
+      (mocks.values.values().next().value as ResearchWorkspacePrefill)
+        ?.completed,
+    ).toBe(true),
+  );
   act(() => {
     useWorkspaceStore.getState().clearCurrentNote()
   })
@@ -2095,7 +2122,10 @@ it("does not revive a discarded completed local import when the server workspace
 
 it("waits for server workspace confirmation before starting a fresh canonical import", async () => {
   const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-  const client = tldwClient as any
+  const client = tldwClient as unknown as Pick<
+    typeof tldwClient,
+    "getWorkspaceSources" | "addWorkspaceSource"
+  > & { upsertWorkspace: ReturnType<typeof vi.fn> };
   let confirm!: (value: unknown) => void
   client.upsertWorkspace = vi.fn(
     () =>
@@ -2105,12 +2135,12 @@ it("waits for server workspace confirmation before starting a fresh canonical im
   )
   client.getWorkspaceSources = vi.fn().mockResolvedValue([])
   client.addWorkspaceSource = vi.fn().mockResolvedValue({})
-  let canonical: any = null
-  mocks.request.mockImplementation(async ({ method, body }: any) => {
-    if (method === "POST") canonical = { ...body, version: 1 }
-    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-    return canonical
-  })
+  let canonical: CanonicalNote = null;
+  mocks.request.mockImplementation(async ({ method, body }: BgRequestInit) => {
+    if (method === "POST") canonical = { ...body, version: 1 };
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 });
+    return canonical;
+  });
   const handoff = payload()
   handoff.sources = handoff.sources.filter(
     (source) => source.sourceType === "notes",
@@ -2206,12 +2236,15 @@ it.each(["note-first", "media-first"])(
         : [mediaSource, ...noteSources]
     await queueResearchWorkspacePrefill(handoff, "alice")
     mocks.upload.mockResolvedValue({ media_id: 7 })
-    let canonical: any = null
-    mocks.request.mockImplementation(async ({ method, body }: any) => {
-      if (method === "POST") canonical = { ...body, version: 1 }
-      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-      return canonical
-    })
+    let canonical: CanonicalNote = null;
+    mocks.request.mockImplementation(
+      async ({ method, body }: BgRequestInit) => {
+        if (method === "POST") canonical = { ...body, version: 1 };
+        if (!canonical)
+          throw Object.assign(new Error("missing"), { status: 404 });
+        return canonical;
+      },
+    );
     const view = renderHook(() =>
       useResearchWorkspacePrefill("workspace-a", true, true),
     )

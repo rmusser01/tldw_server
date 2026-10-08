@@ -186,7 +186,14 @@ describe("WebClipperPanel save flow", () => {
     ).toBeNull()
   })
   it("does not publish a captured-note handoff from a save completed after owner change", async () => {
-    const pending = createDeferred<any>()
+    const pending =
+      createDeferred<
+        Awaited<
+          ReturnType<
+            typeof import("@/services/tldw/TldwApiClient").tldwClient.saveWebClip
+          >
+        >
+      >();
     apiMocks.saveWebClip.mockReturnValue(pending.promise)
     render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
     await userEvent.click(screen.getByRole("button", { name: "Save clip" }))
@@ -194,14 +201,21 @@ describe("WebClipperPanel save flow", () => {
     act(() => clipOwner.controller.abort())
     await act(async () =>
       pending.resolve({
+        clip_id: "clip-owner-change",
+        note_id: "12345678-1234-4234-8234-123456789abc",
+        workspace_placement: null,
+        workspace_placement_saved: false,
+        workspace_placement_count: 0,
+        attachments: [],
         status: "saved",
         note: {
           id: "12345678-1234-4234-8234-123456789abc",
-          title: "Other owner"
+          title: "Other owner",
+          version: 1,
         },
-        warnings: []
-      })
-    )
+        warnings: [],
+      }),
+    );
     expect(
       screen.queryByRole("button", { name: "Ask captured source" })
     ).toBeNull()
