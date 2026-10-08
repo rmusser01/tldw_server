@@ -1,3 +1,4 @@
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
 import { readSurfaceOfflineDraftQueue, retainSurfaceOfflineDraft, type OfflineDraftEntry } from "@/components/Notes/notes-manager-utils"
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 import React from "react"
@@ -40,6 +41,12 @@ const {
 }))
 const state = {
   notesAuthorityScope: "export-alice",
+  notesAuthorityId: deriveConnectionAuthorityId({
+    serverUrl: "https://shared.example/server-a",
+    authMode: "multi-user",
+    authSource: "cookie-session",
+    accessToken: "original-token",
+  }),
   messages: [] as Array<{ role: string; content: string }>,
   currentThreadId: "thread-1" as string | null,
   results: [] as RagResult[],
@@ -94,6 +101,7 @@ vi.mock("../KnowledgeQAProvider", () => {
     useKnowledgeQA: () => ({
       isAuthorityCurrent: () => true,
       notesAuthorityScope: state.notesAuthorityScope,
+      notesAuthorityId: state.notesAuthorityId,
       client,
       messages: state.messages,
       currentThreadId: state.currentThreadId,
@@ -132,6 +140,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
   state.notesAuthorityScope = "export-alice";
+  state.notesAuthorityId = deriveConnectionAuthorityId({
+    serverUrl: "https://shared.example/server-a",
+    authMode: "multi-user",
+    authSource: "cookie-session",
+    accessToken: "original-token",
+  });
   createNoteMock.mockResolvedValue({ id: 1 });
   exportChatbookMock.mockResolvedValue({
     success: true,
@@ -1146,3 +1160,78 @@ it("retries the acknowledged export after retirement fails and accepts a new del
   await waitFor(() => expect(notes.size).toBe(2))
   expect(createNoteMock.mock.calls[2][0]).toContain("Newer answer after acknowledgment")
 })
+
+
+it.each(["base-path", "org", "auth-source", "credential"])(
+  "refuses retained Export adoption after a same-owner %s authority change",
+  async (change) => {
+    createNoteMock.mockRejectedValueOnce(
+      new Error("Committed, response dropped"),
+    );
+    render(<CloseableExport />);
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    await waitFor(() => expect(messageOpenMock).toHaveBeenCalledTimes(1));
+    const retained = await readSurfaceOfflineDraftQueue("export-alice");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close export dialog" }),
+    );
+    state.notesAuthorityId = deriveConnectionAuthorityId({
+      serverUrl:
+        change === "base-path"
+          ? "https://shared.example/server-b"
+          : "https://shared.example/server-a",
+      authMode: "multi-user",
+      authSource: change === "auth-source" ? "manual" : "cookie-session",
+      orgId: change === "org" ? 2 : undefined,
+      accessToken: change === "credential" ? "other-token" : "original-token",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reopen export" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    await waitFor(() =>
+      expect(
+        createNoteMock.mock.calls.length > 1 ||
+          messageOpenMock.mock.calls.length > 1,
+      ).toBe(true),
+    );
+    expect(createNoteMock).toHaveBeenCalledTimes(1);
+    expect(await readSurfaceOfflineDraftQueue("export-alice")).toEqual(
+      retained,
+    );
+  },
+);
+
+it("reuses the captured credential-free authority through a same-principal JWT refresh after Close", async () => {
+  const token = (iat: number) =>
+    `${btoa("{}")}.${btoa(JSON.stringify({ sub: "alice", iat }))}.signature`;
+  const config = {
+    serverUrl: "https://shared.example/server-a",
+    authMode: "multi-user" as const,
+    authSource: "manual" as const,
+    orgId: 1,
+    accessToken: token(1),
+  };
+  state.notesAuthorityId = deriveConnectionAuthorityId(config);
+  createNoteMock
+    .mockRejectedValueOnce(new Error("Committed, response dropped"))
+    .mockResolvedValue({ id: "accepted-original" });
+  render(<CloseableExport />);
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledTimes(1));
+  const retained = await readSurfaceOfflineDraftQueue("export-alice");
+  const serialized = JSON.stringify(retained);
+  expect(serialized.includes(token(1))).toBe(false);
+  expect(Object.values(retained)[0].pendingWrite?.authorityId).toBe(
+    state.notesAuthorityId,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close export dialog" }));
+  const refreshedAuthority = deriveConnectionAuthorityId({
+    ...config,
+    accessToken: token(2),
+  });
+  expect(refreshedAuthority).toBe(state.notesAuthorityId);
+  state.notesAuthorityId = refreshedAuthority;
+  fireEvent.click(screen.getByRole("button", { name: "Reopen export" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+  await screen.findByRole("link", { name: "Open saved note" });
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0]);
+});

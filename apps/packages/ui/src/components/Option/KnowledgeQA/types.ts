@@ -390,6 +390,7 @@ export type KnowledgeQAContextValue = KnowledgeQAState &
     isAuthorityCurrent: () => boolean;
     storageScopeKey: string | null;
     notesAuthorityScope: string | null;
+    notesAuthorityId: string | null;
   };
 
 // Export format options

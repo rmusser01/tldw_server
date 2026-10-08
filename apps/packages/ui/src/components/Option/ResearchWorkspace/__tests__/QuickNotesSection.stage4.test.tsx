@@ -32,6 +32,7 @@ const {
       version: 1,
       isDirty: false,
     },
+    workspaceId: "workspace-test",
     workspaceTag: "workspace:test",
     updateNoteTitle: vi.fn(),
     updateNoteContent: vi.fn(),
@@ -76,12 +77,33 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
+  hasResearchWorkspaceMigrationTombstone: () => false,
   useWorkspaceStore: Object.assign(
     (selector: (state: typeof workspaceStoreState) => unknown) =>
       selector(workspaceStoreState),
-    { getState: () => workspaceStoreState, subscribe: () => () => {} }
-  )
-}))
+    {
+      getState: () => workspaceStoreState,
+      subscribe: () => () => {},
+      persist: {
+        getOptions: () => ({
+          name: "tldw-workspace",
+          storage: {
+            getItem: async () => ({
+              state: {
+                workspaceSnapshots: {
+                  [workspaceStoreState.workspaceId]: {
+                    workspaceTag: workspaceStoreState.workspaceTag,
+                    currentNote: workspaceStoreState.currentNote,
+                  },
+                },
+              },
+            }),
+          },
+        }),
+      },
+    },
+  ),
+}));
 
 vi.mock("@/services/tldw/TldwAuth", () => ({
   tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) },

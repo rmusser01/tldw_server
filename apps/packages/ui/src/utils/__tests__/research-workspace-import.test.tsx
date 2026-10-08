@@ -49,7 +49,8 @@ const mocks = vi.hoisted(() => ({
   writeError: false,
   readGate: null as Promise<void> | null,
 }));
-vi.mock("@/services/chat-surface-scope", () => ({
+vi.mock("@/services/chat-surface-scope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/chat-surface-scope")>()),
   buildChatSurfaceScopeKeyFromConfig: (
     config: TldwConfig,
     options?: { userId?: string | number | null },
