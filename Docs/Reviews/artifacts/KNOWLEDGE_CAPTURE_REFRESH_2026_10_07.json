@@ -3,7 +3,7 @@
   "task6_base": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
   "canonical_dev_baseline": "2c5f19d0328360d45bce99b8bae75ce252cc312f",
   "status": "DONE_WITH_CONCERNS",
-  "qualification": "Final I1/I2 shared-root repairs locally verified; one scoped rereview and subsequent current-artifact affected acceptance, publication, human Change summary and updated-head CI/merge remain controller gates. Earlier receipts retain their exact scope.",
+  "qualification": "Final scoped repairs independently approved; rebuilt current clients pass native page2 acceptance, extension real deleted-head/current-body Send refusal. WebUI I1 RAG-processing setup precondition and precise live post-pin retry remain explicit limitations, complemented by reviewed real owning/store/SQLite evidence. Controller accepts the bounded local evidence qualification; review/publication/human Change summary/current CI/merge remain pending; earlier receipts retain exact scope.",
   "receipts": [
     {
       "name": "backend",
@@ -117,7 +117,7 @@
         "(Use `node --trace-warnings ...` to show where the warning was created)",
         "(Use `node --trace-warnings ...` to show where the warning was created)",
         "(Use `node --trace-warnings ...` to show where the warning was created)",
-        "⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯",
+        "\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 12 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
         "        data-menu-id=\"rc-menu-uuid-preset:failedIngest\"",
         " Test Files  6 failed | 87 passed (93)",
         "      Tests  12 failed | 1818 passed (1830)"
@@ -207,7 +207,7 @@
         "(Use `node --trace-warnings ...` to show where the warning was created)",
         "(Use `node --trace-warnings ...` to show where the warning was created)",
         "(Use `node --trace-warnings ...` to show where the warning was created)",
-        "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+        "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
         " Test Files  1 failed | 98 passed (99)",
         "      Tests  1 failed | 2155 passed (2156)"
       ]
@@ -234,7 +234,7 @@
       "receipt_sha256": "1a00f27ed052b7a53e891da94e7f3c092ed2165db8911544d244d22f34cb95fc",
       "summaries": [
         "(Use `node --trace-warnings ...` to show where the warning was created)",
-        " ✓ src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx (33 tests | 32 skipped) 2229ms",
+        " \u2713 src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx (33 tests | 32 skipped) 2229ms",
         " Test Files  1 passed (1)",
         "      Tests  1 passed | 32 skipped (33)"
       ]
@@ -278,12 +278,7 @@
     {
       "name": "resume7-web-budget",
       "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
-      "command": [
-        "node",
-        "scripts/check-bundle-budget.mjs",
-        "--dir",
-        ".next"
-      ],
+      "command": ["node", "scripts/check-bundle-budget.mjs", "--dir", ".next"],
       "cwd": "apps/tldw-frontend",
       "exit_code": 0,
       "seconds": 0.13,
@@ -295,11 +290,7 @@
     {
       "name": "resume7-extension",
       "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
-      "command": [
-        "node",
-        "scripts/build-with-profile.mjs",
-        "--browser=chrome"
-      ],
+      "command": ["node", "scripts/build-with-profile.mjs", "--browser=chrome"],
       "cwd": "apps/extension",
       "exit_code": 0,
       "seconds": 35.36,
@@ -308,7 +299,7 @@
       "receipt_sha256": "fb5e953b4651e669000c4176d22331d86083b09b4c67d00607be97145157fddb",
       "summaries": [
         "(Use `node --trace-warnings ...` to show where the warning was created)",
-        "Σ Total size: 49.42 MB                                                             "
+        "\u03a3 Total size: 49.42 MB                                                             "
       ]
     },
     {
@@ -491,11 +482,7 @@
     {
       "client": "web",
       "head": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
-      "command": [
-        "node",
-        "node_modules/typescript/bin/tsc",
-        "--noEmit"
-      ],
+      "command": ["node", "node_modules/typescript/bin/tsc", "--noEmit"],
       "cwd": "apps/tldw-frontend",
       "environment": {
         "NODE_OPTIONS": "--max-old-space-size=8192"
@@ -2006,8 +1993,8 @@
         "log": "/private/tmp/knowledge-final-wave-green-owning.log",
         "log_sha256": "44c96ac85a86f12e9717e6b844b32af3e88cd1a711939e5447be16c4ed60be32",
         "summaries": [
-          " ❯ src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx (37 tests | 1 failed) 5390ms",
-          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " \u276f src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx (37 tests | 1 failed) 5390ms",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
           " Test Files  1 failed | 2 passed (3)",
           "      Tests  1 failed | 130 passed (131)"
         ]
@@ -2194,9 +2181,7 @@
         "input_sha256": "0a2eec260f76991505d031db57890778d24e541138f891b49af74acdc42059cb",
         "log": "/private/tmp/knowledge-final-wave-backend-current-green.log",
         "log_sha256": "a63eb4c84e21fad5dacd4916a1246d6713d7eb2c4f7d7cc1aad7b6dc8b1bc364",
-        "summaries": [
-          "1 passed, 41 warnings in 1.25s"
-        ]
+        "summaries": ["1 passed, 41 warnings in 1.25s"]
       },
       {
         "name": "m1-owning",
@@ -2295,10 +2280,7 @@
       {
         "name": "style",
         "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
-        "command": [
-          "node",
-          "/private/tmp/knowledge-final-wave-style.mjs"
-        ],
+        "command": ["node", "/private/tmp/knowledge-final-wave-style.mjs"],
         "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
         "exit_code": 0,
         "signal": null,
@@ -2345,9 +2327,7 @@
         "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
         "log": "/private/tmp/knowledge-final-wave-python-style.log",
         "log_sha256": "371c42a95fe1155a79f2dbba142ba2169fe61595b417255c3ee2764b7655ef30",
-        "summaries": [
-          "ruff failed"
-        ]
+        "summaries": ["ruff failed"]
       },
       {
         "name": "python-style-green",
@@ -2377,9 +2357,7 @@
         "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
         "log": "/private/tmp/knowledge-final-wave-python-style-green.log",
         "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
-        "summaries": [
-          "All checks passed!"
-        ]
+        "summaries": ["All checks passed!"]
       },
       {
         "name": "black",
@@ -2545,11 +2523,11 @@
           "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error",
           "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error",
           "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn",
-          "     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  429ms",
-          "     ✓ clears default assistant modal state before failed reloads can reuse stale values  357ms",
-          " ❯ src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed) 3124ms",
+          "     \u2713 hydrates a failed saved turn before Retry without duplicating the canonical user  429ms",
+          "     \u2713 clears default assistant modal state before failed reloads can reuse stale values  357ms",
+          " \u276f src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed) 3124ms",
           "Stream completion failed: Model 'missing-model' is not available for provider 'ollama'. Select one of the server-advertised models for this provider.",
-          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
           " Test Files  1 failed | 98 passed (99)",
           "      Tests  1 failed | 2249 passed (2250)"
         ],
@@ -2600,8 +2578,8 @@
         "log": "/private/tmp/knowledge-final-wave-restore-named.log",
         "log_sha256": "a1652263a5c3986e5a5ebba580cdcab0f5111e52f6978283605bf86c0894babc",
         "summaries": [
-          " ❯ src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed | 37 skipped) 1106ms",
-          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " \u276f src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed | 37 skipped) 1106ms",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
           " Test Files  1 failed (1)",
           "      Tests  1 failed | 37 skipped (38)"
         ]
@@ -2637,10 +2615,7 @@
         "input_sha256": "db86b3c6cc50399ffa9f26e7b4d48d383713db57fb2ee7ec007ef2ad214ac3c4",
         "log": "/private/tmp/knowledge-final-wave-restore-diagnosis.log",
         "log_sha256": "befa1f6d995f38e0491f6e6b996bb21fa632702f0e806768576a93187b0249f2",
-        "summaries": [
-          " Test Files  1 failed (1)",
-          "      Tests  no tests"
-        ]
+        "summaries": [" Test Files  1 failed (1)", "      Tests  no tests"]
       },
       {
         "name": "restore-diagnosis-corrected",
@@ -2674,8 +2649,8 @@
         "log": "/private/tmp/knowledge-final-wave-restore-diagnosis-corrected.log",
         "log_sha256": "fe507f83459d07df60256de4b219cbf71f8a297e5a1566f19afca732e186b725",
         "summaries": [
-          " ❯ src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed | 37 skipped) 1097ms",
-          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " \u276f src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed | 37 skipped) 1097ms",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
           " Test Files  1 failed (1)",
           "      Tests  1 failed | 37 skipped (38)"
         ]
@@ -2720,10 +2695,7 @@
       {
         "name": "style-with-restore-fixture",
         "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
-        "command": [
-          "node",
-          "/private/tmp/knowledge-final-wave-style.mjs"
-        ],
+        "command": ["node", "/private/tmp/knowledge-final-wave-style.mjs"],
         "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
         "exit_code": 0,
         "signal": null,
@@ -2825,7 +2797,7 @@
       "M1": "ADDRESSED as tracking/diagnosis; historical CSV cause unresolved",
       "report_sha256": "bd8ae575206b9f3330fade1b26a184f2a4c2a2bb22a88cc0702210017453016d"
     },
-    "disposition": "Residual I2 locally repaired; independent scoped check and current-artifact acceptance pending; not merge-ready",
+    "disposition": "Residual I2 independently scoped approved; both current-client real page2 acceptance passed. Precise live post-pin retirement/retry is unverified and complemented by reviewed real hook/native producer tests. Not merge-ready.",
     "implementation": "Checkpointed recovery directly reads exact active version/UUID after frozen owner/body/source validation; unpinned confirmation pages native active history at limit10 until match or exhaustion, followed by exact read. Default two-argument list URL unchanged. No new endpoint or authority prefix.",
     "adr": "No new decision; approved ADR-066 governs",
     "receipts": {
@@ -2865,10 +2837,10 @@
         "log": "/private/tmp/knowledge-pagination-red.log",
         "log_sha256": "749a2fc4e55430a2949eb21e70431d4f6275d22e18263f69957034ddd28664fc",
         "summaries": [
-          " ❯ src/utils/__tests__/research-web-capture.test.ts (88 tests | 8 failed) 44ms",
-          " ❯ src/services/__tests__/background-proxy.web-clipper-scope.test.ts (75 tests | 1 failed) 23ms",
-          " ❯ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (43 tests | 1 failed) 13ms",
-          "⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯",
+          " \u276f src/utils/__tests__/research-web-capture.test.ts (88 tests | 8 failed) 44ms",
+          " \u276f src/services/__tests__/background-proxy.web-clipper-scope.test.ts (75 tests | 1 failed) 23ms",
+          " \u276f src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (43 tests | 1 failed) 13ms",
+          "\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 10 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
           " Test Files  3 failed (3)",
           "      Tests  10 failed | 196 passed (206)"
         ]
@@ -3257,5 +3229,2370 @@
       "Current RAG and pagination reads are not atomic; canonical current body is not an attestation of every vector chunk; no historical RAG guarantee.",
       "Scoped check, Task6 affected current-artifact acceptance, publication, requester-written Change summary, seven updated-headCI checks, authorized merge and owned cleanup remain separate gates."
     ]
+  },
+  "final_affected_acceptance": {
+    "base": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+    "product_head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+    "recorded_at": "2026-10-08T09:27:53.662431+00:00",
+    "status": "DONE_WITH_CONCERNS",
+    "production_inputs": {
+      "apps/packages/ui/src/utils/research-web-capture.ts": "7641ed8982989dfb75f7e57577879c67b12db5962cbbca60972b65ecf32dfba4",
+      "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+      "apps/packages/ui/src/services/tldw/domains/media.ts": "3a16257f3935dad6bc566e6ebd17b90cc58d8cf8d5439da5c322f6d49f6cf7e5"
+    },
+    "builds": {
+      "web-webpack": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "command": [
+          "node",
+          "scripts/build-with-profile.mjs",
+          "--bundler=webpack"
+        ],
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/tldw-frontend",
+        "exit_code": 0,
+        "seconds": 35.6,
+        "log_bytes": 5143,
+        "log_sha256": "61c509626575fd07a17167d0947cd49940a66ad63e377a39dcd3775d61d4168b",
+        "profile": "production",
+        "nodeHeapMiB": 8192
+      },
+      "web-tokens": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "command": [
+          "node",
+          "scripts/verify-shared-token-sync.mjs",
+          "--dir",
+          ".next"
+        ],
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/tldw-frontend",
+        "exit_code": 0,
+        "seconds": 0.08,
+        "log_bytes": 77,
+        "log_sha256": "68098f7581f425393c92a558b68cea09a15f981ea03e0a2b56af6933178cc570",
+        "profile": "production",
+        "nodeHeapMiB": null
+      },
+      "web-budget": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "command": [
+          "node",
+          "scripts/check-bundle-budget.mjs",
+          "--dir",
+          ".next"
+        ],
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/tldw-frontend",
+        "exit_code": 0,
+        "seconds": 0.15,
+        "log_bytes": 165,
+        "log_sha256": "515d2e9bf7af7dbe76a2b0ac967e1d9a98ac9be37fc7ece9e4676d3f73fddc81",
+        "profile": "production",
+        "nodeHeapMiB": null
+      },
+      "extension": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "command": [
+          "node",
+          "scripts/build-with-profile.mjs",
+          "--browser=chrome"
+        ],
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/extension",
+        "exit_code": 0,
+        "seconds": 45.62,
+        "log_bytes": 225409,
+        "log_sha256": "0a393ca9c74d51e08c82ad7f257344a47c32dbc9e89018788c4671ac57c5bf81",
+        "profile": "development",
+        "nodeHeapMiB": null
+      },
+      "web-advanced": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "command": [
+          "node",
+          "scripts/build-with-profile.mjs",
+          "--bundler=webpack"
+        ],
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/tldw-frontend",
+        "exit_code": 0,
+        "seconds": 61.06,
+        "log_bytes": 5081,
+        "log_sha256": "7caa24aaf5cb1799aa49cba2dbf4ef7e80e927675713b061b4cfd43a7206ba95",
+        "profile": "development",
+        "nodeHeapMiB": 8192
+      }
+    },
+    "standalone": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "oldPid": 47152,
+      "oldGroup": 47152,
+      "newPid": 88275,
+      "port": 19252,
+      "profile": "development",
+      "mode": "built advanced standalone runtime",
+      "originalPrivateEnvSha256": "14ae02ee860f6b0f3240f42bede63217a870036a535b6eded1c8c581258054e1",
+      "originalPrivateEnvUnchanged": true,
+      "overrideKeyNames": [
+        "TLDW_BUILD_PROFILE",
+        "TLDW_NEXT_DIST_DIR",
+        "HOSTNAME",
+        "PORT"
+      ],
+      "freshDistValidated": true,
+      "artifactEntrySha256": "c6d310ec59dbad7c43e9e715dd02b0b6ed9f71712b92842b13cb5e9467f4895d",
+      "copiedOnlyGeneratedStaticAndPublic": true,
+      "protectedBefore": [
+        {
+          "pid": 52363,
+          "alive": true
+        },
+        {
+          "pid": 37531,
+          "alive": true
+        },
+        {
+          "pid": 79323,
+          "alive": true
+        }
+      ],
+      "protectedAfter": [
+        {
+          "pid": 52363,
+          "alive": true
+        },
+        {
+          "pid": 37531,
+          "alive": true
+        },
+        {
+          "pid": 79323,
+          "alive": true
+        }
+      ],
+      "ready": true
+    },
+    "loaded_web": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "actualExecutedScripts": [
+        {
+          "path": "/_next/static/chunks/webpack-a77c90ab66ee32fb.js",
+          "bytes": 23725,
+          "sha256": "3bc0294d14aaee224d8b48e8c8f37d23ab13b325b8d56676ab919023f2b8ecc1",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/framework-6b7f85289a471b4b.js",
+          "bytes": 139788,
+          "sha256": "264f8bedd87f57a543d91953e77f95aec5e5c87f9fb543bb0390a146a119257f",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/main-8ea4911ee3c5227e.js",
+          "bytes": 134309,
+          "sha256": "9255bd6fbdab138c2457e1402aafae89fb3f8b6923bdc48468902fd1d4d10763",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/_app-f8b641c58721b8a5.js",
+          "bytes": 1488330,
+          "sha256": "f3d1e588bc6e858b4767be22ddb11bd0b1fa1c4d961483c526f3eebb9d22a3be",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/research-workspace-a5e3fd9c7f1af4dd.js",
+          "bytes": 812,
+          "sha256": "c57a68dc4723991bee531a3939d27c7a17bb6155368e2ee9a678d9655867f269",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/cLw8SKaaQZfnSSdyolFVq/_buildManifest.js",
+          "bytes": 15948,
+          "sha256": "ba203852fa97335c5430616834550bfe47adb65e21c429a3fcdfab0cc89d7eee",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/cLw8SKaaQZfnSSdyolFVq/_ssgManifest.js",
+          "bytes": 77,
+          "sha256": "6f5b4aa00d2f8d6aed9935b471806bf7acef464d0c1d390260e5fe27f800c67e",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/62882-f7e952ddd1b7667c.js",
+          "bytes": 9813,
+          "sha256": "358322eca09d71faed5d41e5051c2f67dff4769391cf8622232d9ac0d51f88e1",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/34785.89241febd3d1ab22.js",
+          "bytes": 7150,
+          "sha256": "a8d466bdda61c67ce643d33460cee1fe9a73af176bdc8d7114a9ce4d635601ed",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/19844.e2757b2333c6ff96.js",
+          "bytes": 11466,
+          "sha256": "b4c9538023f2331d5e6f6e065a615a406ce0fa51e43b7b159bc31e945ee87c7b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/37053-1c5ba66fc6e5ad66.js",
+          "bytes": 22305,
+          "sha256": "51841ecc637f2f62c2f8f5c98331d75d1eb51d29639459ddf0a24da3affaaedd",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/30263-d95c9c486d25397a.js",
+          "bytes": 42020,
+          "sha256": "2ac028a480630e1f5bd54b3f5869ab8a2a0d4cab82809f603b4d244b5a9cd68a",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/18818-cde812edce953d1d.js",
+          "bytes": 37442,
+          "sha256": "7b762c4a248a575ede882bc6e860ec15c05e59b9e750eab2baba1d394dacd71d",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/8949.9612830f0e50e39e.js",
+          "bytes": 94697,
+          "sha256": "dba2e311794bb77c094078cb8208f030efefd35f5294162c0de4bc4164abdc91",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/87233-73dd29b9c09c7247.js",
+          "bytes": 444377,
+          "sha256": "b83a6ff66dc054b8133b1c4a3c531595f42508751d4d30cba9f2b427fb736f8f",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/31051.b704af308ced2fd7.js",
+          "bytes": 12142,
+          "sha256": "ca7626cd28a8be93ff0e232020b196e1046493721f272007b7780cf0a81ea20d",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/86857-2479cbee9e224544.js",
+          "bytes": 18465,
+          "sha256": "05deb7ae95b6823990a29e5b803adc22b2009c522f665c03b4b7eeb1c56af4c2",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/49431-aecd728d8bbe7ec8.js",
+          "bytes": 8945,
+          "sha256": "69ef61a31f9ae79bcad82dc47350736ae67d2dace3f5d918bf58879895cb26aa",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/58090.a37d804f79179600.js",
+          "bytes": 51288,
+          "sha256": "a15a35f8d1296f062e79a5d86c11bb36aceebed0b0ecddbfd9872b4a9fd21a88",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/38731.967be66e53dde2f5.js",
+          "bytes": 66285,
+          "sha256": "dbc78d700869868f06ebf5b8648b6d26fef2a63341cf9079f5306558d67a8805",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/25217.18fff7b86861fad3.js",
+          "bytes": 8059,
+          "sha256": "23fc7d237bd6c8888ec11475657480c47f8510495b9b341ea920f39754946f00",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/93733.7bc66102d93f1390.js",
+          "bytes": 23243,
+          "sha256": "5b98e1c0e60aa2bacb33180fcd970b5553d295469923d8a948648c8fecfab48b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/13301.21868c3b5d0e5dbd.js",
+          "bytes": 8667,
+          "sha256": "a205918baf345c1656bb6907036532b2ca80b3953667a3f519a1e7bf4fefeee1",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/91925.f9e0b98171f2de89.js",
+          "bytes": 20904,
+          "sha256": "3bcf5647f7dd39627b7824a48bceb830e5f6e452a7a9127da1b076c6ed9f7018",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/40769.9a43a0ad89475a37.js",
+          "bytes": 22635,
+          "sha256": "a5a1ea56d409946fb0791a3bbafc5613ffab4aa07f86d801fdb7351abbe396ae",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/69559.8db33da7fadf0bbe.js",
+          "bytes": 10884,
+          "sha256": "6561e07bc64b3e406e529a41bbd8fb46ffc9394075671168989e30a6bdd09854",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/8155.c3ad29797508d2ca.js",
+          "bytes": 36042,
+          "sha256": "6a66f967f399106603ed4af0b1e50d53155c134a3a7558e1779aaf51b552971d",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/428eda59.a49745a194a87ed1.js",
+          "bytes": 156244,
+          "sha256": "818e26969b710701901c9b9f146ac278fa7c3128b1a66bd110c973724dea8a8e",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/59830.53a9e5606ab54b84.js",
+          "bytes": 9333,
+          "sha256": "2b68d9ac3171485d2a80e9f73903b48b9b866ffd09842fe49e76cd44d37c7f27",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/33628.6aa447cbb3d7e64a.js",
+          "bytes": 51150,
+          "sha256": "2714701cdefb0a8bf0c159dde1fcf76f7c577c924d6f29fdcddea3ce75f19889",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/26917.e681b5e653f90199.js",
+          "bytes": 8123,
+          "sha256": "dc373186c817745d91164266fa70d4cc7ccadc9e23579f91a40f9738211a9697",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/59884.807d0a3870612df1.js",
+          "bytes": 15154,
+          "sha256": "158011088f9b50c5f0472c2d4ecd220d53115cb560305de8a39818764f8c32a3",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/58230.fc58e95355572c79.js",
+          "bytes": 139987,
+          "sha256": "0b090cac8b7bb827b1b93df12ed51d6ef5226c6ca4f4e46cd2c6adbce22103dd",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/15053.d7217191b934ee4f.js",
+          "bytes": 8920,
+          "sha256": "a996c1a6c15b3287b5495469e278899e41c1216152525a23c122dad7e74da346",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/86477.dc53c1eeeee5f718.js",
+          "bytes": 12114,
+          "sha256": "a8551d17399c41dc44383b46b0aca74d68f89c2b3692d5eaeb5ea066db1d5423",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/16333.07d8f9d6ea066d17.js",
+          "bytes": 7977,
+          "sha256": "aeccd982c4e07f4f9168938ae37868e7e8df8797a7c0254bf73227bb20d18135",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/88547.c398d218ceec5894.js",
+          "bytes": 9344,
+          "sha256": "62a6b3dd6383af94494e5527f4d87c69278e78789eb0757546b0c313a1fcd594",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/60666.e7d2538f6f2a9290.js",
+          "bytes": 34050,
+          "sha256": "78cee849bb2a1169ef0b48ec6e681e6c2d46692450d3b5bd7c61d634612b4a2b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/12335.420c99f2d3b2ee1d.js",
+          "bytes": 20869,
+          "sha256": "330ee592637098536fc3925e6dd3f2a8b211d5611532aae59ce093a2aa5eb4e4",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/262.554d91d0c57fd434.js",
+          "bytes": 22652,
+          "sha256": "a8d0de0fbeccc081641ea124b23cb131e2526a8d52f54b8bdf88eedf61b891ef",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/37276.b3db6c501bf4cd11.js",
+          "bytes": 18177,
+          "sha256": "e5121448f1883c7d19952358b5c72817a3241c70caffa1b65e3a5741480295e7",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/21530.3ee824866d53b74b.js",
+          "bytes": 20665,
+          "sha256": "84e8522f0c66c77e0133e9f4756661a8b2b77ae5eac7d3e61f911299cb48b9a0",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/64738.7bbffdffdb40bab1.js",
+          "bytes": 28662,
+          "sha256": "1b79b0ab72ead6a9942b8c7700593d52f580649df235399a30e9f30bc76a41df",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/28716.b59cad5f5ac1ffba.js",
+          "bytes": 47541,
+          "sha256": "2d046064e19104d62833eaab74b105b2d6459c622c4040820303726da058eb9b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/80397.17569eeea9da5a0a.js",
+          "bytes": 50086,
+          "sha256": "21cc3b10408b1060038f96e8ca80703273680dc211f351e1a51f1ea0fbb34887",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/53932-824cb689ece0ad27.js",
+          "bytes": 26845,
+          "sha256": "9747ef7afd9dd3d65243a5dcab3809c894e2c1f11a56d6b2e7b74c907aae44a7",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/25439.95e0762189d023a0.js",
+          "bytes": 113600,
+          "sha256": "ffb250cf01eb0e15a0d8f79e5edfc6102478dcc773d5a9e2cfa68cdeac4e6316",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/82069.8b0520d99b909e6c.js",
+          "bytes": 511107,
+          "sha256": "d7666fce7359c7788902b69bee1cdb876d5d14bb3feadfa0a9421d1ba8df9164",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/44831.102d0c87b7f1fec1.js",
+          "bytes": 74797,
+          "sha256": "e14d90b946cf737f68e3a22600f6c5d580cb23a62b5daed12e5c20f2535e52a0",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/87695.48edef205440190e.js",
+          "bytes": 18180,
+          "sha256": "30ab349e1ea7161988fe4a9e1bfad096fc2c4d108f8f3121c74abcc1b24e7569",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/30438.ad86797288b391d4.js",
+          "bytes": 68276,
+          "sha256": "2f771daab9322aad6905fed87fb70d646e2bd5c9ce8f9c1569c50f7d7011ab72",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/25915.6766937f1f334f09.js",
+          "bytes": 30332,
+          "sha256": "02e20db6eeb63b63e38022a062f798f4218e3ba4ea44b61467e5d13a67fac56d",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/19189.a07f8e9faa75b44a.js",
+          "bytes": 75189,
+          "sha256": "17ef8fdba1f82923b813c2e981899a50759e429b76f88eaa1826fef33ab1ed34",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/70393.59be2472c83ef1ed.js",
+          "bytes": 147573,
+          "sha256": "fd7a1bb581ac12fad28f799fe8b78a68a0fbff92a35f6432d62676d158eed06b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/78858.7dbe9cab7972c1f2.js",
+          "bytes": 290634,
+          "sha256": "98fe33fa21d82156686b99bb10aad990c7d6100b4ec54198423cae0938ba24a5",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/80430.cb3ec235a1b4b752.js",
+          "bytes": 79630,
+          "sha256": "22e76558e827a84d6fdba8a2acb9dbd777dc464c48a6e3c3ca37d3f36b8685ec",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/15432.61882bb19a094460.js",
+          "bytes": 67718,
+          "sha256": "495bb59715ce27827195221342bb12d29f2aca6822cebd093d6f65192c83fa13",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/2943.bf1e47e06007517d.js",
+          "bytes": 24839,
+          "sha256": "14ab4ac3b5e36b2f7c73d21c7259bf6fa9cc1d5411557693106486e2a1360b17",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/32048.9e6d769bb2a311f0.js",
+          "bytes": 543776,
+          "sha256": "63fba71bdd2bea5e4e74ab200019e7c8cb34440c762b0fc42f47a86bca6ece36",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/1486.c9fb06311f4225f2.js",
+          "bytes": 19637,
+          "sha256": "dc803ddf3508779189a6a7315dc4a64c8e66edce53f37bd8ebe3661b1bf7d1f6",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/4336.68a08ee7073d557f.js",
+          "bytes": 11439,
+          "sha256": "cc2e164236f674009346f8d40f752251310b11311455383416e4a6048b61fe3a",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/83455.b5cd04362201fd32.js",
+          "bytes": 10745,
+          "sha256": "e18e63f5aa0cb731d19eee0d446dbbd6e06a48fc7c6d9a4fb63cd8e2bdd03260",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/46620-9546ad6596297fa0.js",
+          "bytes": 22150,
+          "sha256": "789452af186eab5709b510210aedb785133de2d095b592145015b8a4d2432376",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/55732.dce7f44c4c5691c4.js",
+          "bytes": 27207,
+          "sha256": "9c4eb872d8fb3009172cd904e66148008fe07df79996f3f1015eb71ad5c33fcc",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/61532.1364b504b972cdc2.js",
+          "bytes": 4109,
+          "sha256": "79da8bdd602502775fe879fe7e05ec5793c8a02a0536f34bf81fe514a302aea9",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/37768.f37a103a6a9d0f27.js",
+          "bytes": 58360,
+          "sha256": "47875e14ed2946111bac888faa4eda512580a2b3d657a1b70dab688842de9911",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/81723.c1eb14e48f7a746b.js",
+          "bytes": 3869,
+          "sha256": "9d0ff9f54fccd5f3f0777d1b6e432c27eb9270c365396acfd75016e284e5c159",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/97001.cb8c0de82bc79f36.js",
+          "bytes": 32209,
+          "sha256": "882046c22f7804f1ee20c158605cfe872d25ae34e51e053298048b5a46928e30",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/29224.4c95948b50084f06.js",
+          "bytes": 5773,
+          "sha256": "91142942b03547e268ae7b7864a2ff18631b058ebb88c52164b81aae8c31c22f",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/44543.0dd25144101ef12d.js",
+          "bytes": 96362,
+          "sha256": "279607e25541c7426e9aa3f10e8f595ad5c38256e6be858bcbb8b963cf226747",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/a2bde3b7.997745f29b2fd76d.js",
+          "bytes": 428596,
+          "sha256": "f8676bddb6d5332e37e4d3a524d281274e478584250b710e36cecf26a2da648a",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/31304.c0209ef942337e9b.js",
+          "bytes": 23561,
+          "sha256": "15ed892e59c0d41b5a70d19771dcf42bf0c475ee0130c7b0cdf6f8412ac87c0d",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/89378.4ca2749d240e4e85.js",
+          "bytes": 47203,
+          "sha256": "cdd382d513cecd57981f5ee6a0d931bb0358c1181de9773e0784a6e51acd2f8d",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/12324-b9acf406eb112182.js",
+          "bytes": 39054,
+          "sha256": "1f27d8def3a25a6ce29c730d95042af0d97e77078208f22509b091dc9eb5c381",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/91482.787aa33e9e34d20c.js",
+          "bytes": 89033,
+          "sha256": "12271674c8c936d247978a8170992875b30bcba58cb0f8b1a5b64dc37fa2eb1b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/92139.44d07f7ccd1b5b9b.js",
+          "bytes": 27312,
+          "sha256": "c428526a2f44ec1d95d65ceaac8f86b184d383fc7c908e83b5d26b3d0989ccfb",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/53748.a53dbda15b2bf4b4.js",
+          "bytes": 195722,
+          "sha256": "50ea215cb71d2f12d6de116874a7dd67177619d9e879ffcd6d47eb68bfb39c39",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/24366.54827c2ae0f4fada.js",
+          "bytes": 91896,
+          "sha256": "7832e853d0140761afa69fc0a0b404628907535c05965c950250705d858996d4",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/20412.017fe6f860c694ea.js",
+          "bytes": 169309,
+          "sha256": "9a9af6326447a356a7e45994a2ba88c627510d013f0bbb14caa4e5b4118a9619",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/b7527acd-b29f16206ce7d9df.js",
+          "bytes": 264463,
+          "sha256": "62d6454a2c6d9f509d78b8c795ca7f338c182129e12ae05a513df26c86f063c7",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/25918.574047d3e31541c3.js",
+          "bytes": 377128,
+          "sha256": "3f056a30be009211c9675e72042c73055a4e9605fcea93db4d5bd9701be1ae66",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/52652.4717a19248e8bd52.js",
+          "bytes": 102634,
+          "sha256": "5b949d18f7c87cb10a6295c81bd5da09301ad6e07e3dfada6a2dd10498a31a69",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/25861.97b35a8e7496f048.js",
+          "bytes": 175616,
+          "sha256": "39048259f4f4b81bffb5e94f54d5eab1b64f04fe3e81f3ad7d7bc6d2841221a9",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/chat-b8c4e7c981ab2e9a.js",
+          "bytes": 8399,
+          "sha256": "13a3d7bcc22fd9a9d15d55be6e08d6148da5dc0b2214a06f24978135fb8d4d09",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/media-3be3e214e5f3186e.js",
+          "bytes": 1134,
+          "sha256": "8053a967cae6823d1c63e40bcfacd8061d04943204a4af3b079d9ce1df030b6e",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/media-multi-f33e1c9ac803e512.js",
+          "bytes": 1256,
+          "sha256": "7d2a1a18d88f1a551fd2a3a9fd49648667df16671c5a959cccc42980f5c75d4a",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/research-21ab8af059370a8b.js",
+          "bytes": 43408,
+          "sha256": "43803e3f20d60674a53424004f75b7d1670c348851aa17073c025ae56ac2f5f6",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/knowledge-dee1b5f353e8d086.js",
+          "bytes": 1142,
+          "sha256": "a0aae62a7c24ff6cdda2fa1b660bfab559ae16d0c6d5deb5d2988894d86cbbc8",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/prompts-9a4d76057b8fa0ba.js",
+          "bytes": 1167,
+          "sha256": "fcb143875b69bd27dbf97693adf00f735d20643781e06888ccec44a6a3665395",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/characters-80627917d6bae149.js",
+          "bytes": 1175,
+          "sha256": "9fe3277572859f7afb85093f4520a889625a283f6ef3553770cc4559e3b93e0b",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/dictionaries-076c7cd6b532bec9.js",
+          "bytes": 869,
+          "sha256": "e9147b6981b08f96c9ff389acfb15f3b2ef2a1362f701cb18dfbfecd58e5d947",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/world-books-6e6fc7930257bd5f.js",
+          "bytes": 870,
+          "sha256": "0d8580cae33909eaae9b6996df8d5d46b4716963645be54e69240a9e3435da24",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/settings-ef8f7b4d5dd0b9c3.js",
+          "bytes": 1177,
+          "sha256": "cff79c4fe6cca4e788066ee707ca63f5deec1298c13ea977554517ac9a039a5a",
+          "matchesBuilt": true
+        },
+        {
+          "path": "/_next/static/chunks/pages/document-workspace-e5c779cdb2f961a9.js",
+          "bytes": 834,
+          "sha256": "ec6431eddb3a28319557501f434f884c7f56a9cc203b061552cb297e4a1132eb",
+          "matchesBuilt": true
+        }
+      ],
+      "qualification": "Seven observed HTTP200 resource bodies were empty in initial Network.getResponseBody capture and are not byte-match claims; Debugger getScriptSource independently attests actual parsed scripts."
+    },
+    "loaded_extension": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "scripts": [
+        {
+          "file": "theme-bootstrap.js",
+          "bytes": 501,
+          "sha256": "691ddeffd19a00c6e3661dec46aa2624455219dfbeda8248d95f230ad9c3f479",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/options-Bzrxfyr9.js",
+          "bytes": 3118,
+          "sha256": "fb36663d0d6a376b30787bff768d67fbae09014511224e1c13590db936a8dedb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/options-Bzrxfyr9.js",
+          "bytes": 3118,
+          "sha256": "fb36663d0d6a376b30787bff768d67fbae09014511224e1c13590db936a8dedb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/route-hosted-visibility-BWcXQAAI.js",
+          "bytes": 315,
+          "sha256": "7851597bf18059bed925fc3eeca25639eae3999a979fd11ee08c83f6ef785f9e",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/react-instance-check-t4DRWB-h.js",
+          "bytes": 3081653,
+          "sha256": "de58d8d15b27e0bda92df72dd961c8d67f7cb0aff6dc0c1bcb3d3951bd8a553e",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/common-B-atXJPE.js",
+          "bytes": 29666,
+          "sha256": "d79201ec9919b194ab9b13899adae23f5a7986b233dc5733c2b7a608d5a7daf5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/WorkflowIntegrationHost-CWJ9-YAS.js",
+          "bytes": 4948,
+          "sha256": "9982159a9a6b514d97971109463de738c71f13acb9320e82521b1153b8f72cf7",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ui-diagnostics-BBRcITRP.js",
+          "bytes": 5702,
+          "sha256": "40ab85105c5964b699e4fe0b075dc0e8dd6ef530bfde0e7764593897fbc8af70",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/option-C62TsCCM.js",
+          "bytes": 103200,
+          "sha256": "a7fd2821e71ac0f1c3cb00db0791414c2d0f662a8bb8656d600e1857c42ce8d8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/settings-DB_J6PMo.js",
+          "bytes": 96858,
+          "sha256": "6649a547b49fef2d387961a726bbc233835726abb956f1f81db6c1747f1033d9",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/TutorialPrompt-m0gMtjwy.js",
+          "bytes": 2368,
+          "sha256": "88480033de7806be3430f37cf77605e6e9626f690f321b38a478805448c761a6",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index--r_F92bG.js",
+          "bytes": 23988,
+          "sha256": "7c3ec1c416ea8fa4a78e999ba59c82ce7e5e2aa07c0001d54add18e390666fb9",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/route-registry-1d2dl1eu.js",
+          "bytes": 17616,
+          "sha256": "a4b8eedfe444f809793547fcd93295ca4de399c2ba2aefa9c99042a8e8b793b0",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/TutorialRunner-CoV8sF7p.js",
+          "bytes": 102841,
+          "sha256": "5d46ad6926788ccff4e5a7f54f5c5b34c60393dec40a28a0acb858b606ebec0a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/graduation-cap-Br044RBa.js",
+          "bytes": 520,
+          "sha256": "3503652528ab7563a28c705d64cf9afbdeba101942bb375d0d5d8c9fcf65526a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/wrench-C1KEl26Z.js",
+          "bytes": 491,
+          "sha256": "0fbecd5c77116943c64ecfaa2a30a5712beadcd40f0bee2e55db0539d97c27d8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/Alert-COti3cy-.js",
+          "bytes": 2088,
+          "sha256": "cbd19c40d058cca4218b56c21d1be1c7febca566dd0229b5eecde05166e89c0f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/users-round-BX2Qjxso.js",
+          "bytes": 1432,
+          "sha256": "b4e481c135febb322e88aba0cf787822d75c075154312c116b2c433899ceac1f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/Badge-C-zA4Ife.js",
+          "bytes": 1476,
+          "sha256": "075e429b355a84357b3b90e2d05bed0e6681e7fe33405fd190034b31c95bff0a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/registry-DA68XLmc.js",
+          "bytes": 42234,
+          "sha256": "1579897c7cacd588ae6e1e757c9237233dd1b1dcc27c9fe4d6666e3daa603dbd",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ReloadOutlined-CN1oORQQ.js",
+          "bytes": 1213,
+          "sha256": "e84cbdf78b24ae041b7cbb27076b86fd0bc3593467d13733698d9abc8412d1cb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/translateMessage-BTglSftz.js",
+          "bytes": 66,
+          "sha256": "4a7f7468bcd439ce0e4583d98dcbd67d459c6d4097f0cbe64efa0d3b61cfbfb8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ZoomOutOutlined-Bh-mvcim.js",
+          "bytes": 3678,
+          "sha256": "30ce247ab20a089994d3eac98417b1890ec1255b930ce6633f12ceab686761f6",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/timeline-actions-DEJJhf0E.js",
+          "bytes": 105,
+          "sha256": "9b0c4a626e208f2cc85f987c0a42988886612fe146853b8b5fad300a28897b88",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-DF6G_228.js",
+          "bytes": 18599,
+          "sha256": "61b3041640ca11a375cc2b7b05ecbe88d777303072b753a142654c5c35e9457a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/SettingOutlined-CxzouMJF.js",
+          "bytes": 2333,
+          "sha256": "e7122661662fdc6f9be2b909cbd713df9dae71c4e622697dccb764f8e34f022f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-C0Ee7uw8.js",
+          "bytes": 4461,
+          "sha256": "b91902e6510c43497dd6886bfd7ff0fe72cd346acf191b745f98b852e3cc01df",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/Button-C7ionIuq.js",
+          "bytes": 1793,
+          "sha256": "e9c66bfbd98f2eec1457bac314387a402581eff7ebc25a4d69bf8a31cb137aca",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/circle-check-big-B3fYUCCu.js",
+          "bytes": 382,
+          "sha256": "a70ddfd4705fb5b021d058aa7165f8bfcaa9054775c9550746c60696084d590d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-BxNGpa1M.js",
+          "bytes": 11257,
+          "sha256": "e6435c9fe53905d1ba189eadb00fd97f0a825a4e048019669a31fa07b822a359",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/info-B-Y9ALxt.js",
+          "bytes": 392,
+          "sha256": "6b3c9ddb6fa98e52578c8dce16eba4035a962bd6906bf378a2c37166b16832a8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/now-D1DSp4a3.js",
+          "bytes": 2170,
+          "sha256": "833c6de574f7d92316e6710be4bd76b20a35e2a1b0631ffcfa96652793b66384",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/sliders-horizontal-BWMg-Pt_.js",
+          "bytes": 612,
+          "sha256": "58a697f7167ac2b28f288b66e50424c49de40b646e7db48c2e27311d0ca73c03",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/share-DxtQRqPn.js",
+          "bytes": 896,
+          "sha256": "f4338d30e50541b16d678b20908982451c4cce44dc58cb6bcefb06e82a742669",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/cytoscape-dagre-D92va_0W.js",
+          "bytes": 62764,
+          "sha256": "f9b981ea6c0d0c0e05a15a622340ee9c40c6d3e07315af9e024eba1c6b49d5bf",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/image-LY83kUxX.js",
+          "bytes": 457,
+          "sha256": "cb907cffc53c5f67c4d82e020ec5ffdbb75dfb42c7abd9b9fc0c1b905735c427",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/database-BNDf0svB.js",
+          "bytes": 749,
+          "sha256": "4cf42bc4c9d0e36e22155120e88610918a53549adb88f4b80b461ff15131d58c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/action-CQ_IMUQx.js",
+          "bytes": 408,
+          "sha256": "eac380e44c0dfe1bb81b2594f41019b2f28bb2aac398147976a2713ef86e8db0",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/sparkles-QkiOPAXQ.js",
+          "bytes": 682,
+          "sha256": "137a750b4a6ae7f0e34675df0bffe6b0f8ddb518c89962b1cc51eb86765e9baa",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/settings-route-Ci71fBH8.js",
+          "bytes": 13858,
+          "sha256": "3e85d91d488c6d9d9fafeac3f8759e721e10a9151d6212fe1e02943f45f064fc",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/upload-HZLyQZWS.js",
+          "bytes": 418,
+          "sha256": "4e20d9e689b7581d0bbc159980d6074060cb90e619d39806f2c5820d5f3465f1",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/StatePanel-BIaDlHQi.js",
+          "bytes": 3468,
+          "sha256": "07558d0e1c033061976dcc2cbc3023dce6a56f74fd688cf4cdda9ca9657ff7e4",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useComposerFocus-DjYv1zyJ.js",
+          "bytes": 315,
+          "sha256": "db54d9d605ef07c22df162c2a5b97209c7ec125655017caaa0e4d2dc7a072a23",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/sortBy-CScSy7Z2.js",
+          "bytes": 30832,
+          "sha256": "3dd9ec399b727b93f0eb7c70a1925f1b1bee53a1679b953c3d2d1789ed17ca2a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/RecoveryCallout-cEOzukPo.js",
+          "bytes": 192,
+          "sha256": "03ee8d9b12e9ab7f80cab95572dd6aac8689ba546c9d977315e1d4a3349ee1db",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/rotate-cw-BG6ZWVK5.js",
+          "bytes": 1747,
+          "sha256": "b6a0dcf16825b292a0154134dcc446593e6694973ac7a5c458bb8ff5cd2091bb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/key-round-CF7phX_T.js",
+          "bytes": 543,
+          "sha256": "9e8c37b415ea4fd17c5586d02232cbc3fb3070303fd11c233ebcce3817d15929",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/option-index-gBJEgoNM.js",
+          "bytes": 18584,
+          "sha256": "a70d1477f2f4f4435b872fd7800f99087c6f25bd574eeabaf0defbc064d5e2da",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/RouteErrorBoundary-Y98-oZDx.js",
+          "bytes": 13175,
+          "sha256": "8218004343903f563076d9874ff801ca27b7fbe722473b3c73c0e5cff748fccf",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/milestones-DDmqKh0y.js",
+          "bytes": 3187,
+          "sha256": "305434d5a329d48c5690093af4668bd3d6068207c6391acfb1c5cde4d6698c0e",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useHomeMilestoneScope-DPOKzI3h.js",
+          "bytes": 988,
+          "sha256": "4d2e8946953acacafa5601295c2726dac9a97b975b0bd8e7d01f359cc77b9e67",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/family-guardrails-wizard-telemetry-B3tDV_z-.js",
+          "bytes": 1618,
+          "sha256": "38e286b433b1399b2a5c6daa6f49bdbbb9185fa12ecf7386a642d4c8c9cda017",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-CrHwRBlD.js",
+          "bytes": 805,
+          "sha256": "09a16ff8b597db5987dda513c5b34b8590d95341e905257f6c6e1866979bd0bd",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/runtime-tokens-CNDSHMuV.js",
+          "bytes": 1041,
+          "sha256": "a962dd9423e20b2323f3b50a571f2c2124b41ff355f02254badc6a690538cc0d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/cytoscape.esm-CyJtwmzi.js",
+          "bytes": 442413,
+          "sha256": "70ef66263d0b6db4e3d05fe604b702b66155d8566ab6b2e1bda36e8cea6ad58c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/purify.es-A66Cw1IH.js",
+          "bytes": 22630,
+          "sha256": "c9ad02852a8d0b184dabafa9c1832ea9673f29e8ab516f62c6a559a97c30ea43",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/states-D20ek-QR.js",
+          "bytes": 4307,
+          "sha256": "25eb12f9d324c7f5c24df168ac4596119ae067ee3f6dae8d33ec1071b5e325f2",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/option-research-workspace-Bat5sXyF.js",
+          "bytes": 1270,
+          "sha256": "2787c6092cd8e162b977cc2e7aaf7bbabac5d4ec4507d89b1729cbe87649828d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-GXMydGQS.js",
+          "bytes": 345161,
+          "sha256": "777288d445450671de6fc310eb28d21c9cc800e04512808763f085d9a83fbd4d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/research-workspace-prefill-BAlf_oiF.js",
+          "bytes": 6596,
+          "sha256": "d032683af452a6c73aa4642b2e6d722d5eebcf512a9e2e3f4606a02884f138ff",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/BuddyManagementButton-CPrJU5uy.js",
+          "bytes": 604,
+          "sha256": "f79b3ca2ca04b704f2f0ff97e3a95f0aea393e1c3cac6febc3760be504593c63",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/note-keywords-CV-Akc2w.js",
+          "bytes": 1990,
+          "sha256": "60f93932e18da62e791a731d52bdbc5bc0846c53dcea5d89784e5935fa52b061",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useSharing-CKIlgAcD.js",
+          "bytes": 2430,
+          "sha256": "afa749e0dd9296e6997e604f7779c1a5ce58a4a395ed636d39a8bf9d4c6861b8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-bxjGMnph.js",
+          "bytes": 9903,
+          "sha256": "5ce6a0e3f924453053e9c38541ccca086dcebf6ead3dbdf190f8d485287d438c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/copy-BBmRDNtJ.js",
+          "bytes": 424,
+          "sha256": "6a71cd5f692bea243433659669610e9c1e645510322e93d62eb9dd4b99556a2d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/EmptyState-BhhnJAgC.js",
+          "bytes": 2853,
+          "sha256": "bb59ed20a0b46a28a8f47d82d2c604429f9ec71770c633ec57dbda518c064412",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/link-2-6IKQFsHJ.js",
+          "bytes": 430,
+          "sha256": "205a099a775b1dcc72acc071e2578bda092f9cd2e81419523f1be4c5e6f61991",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/workspace-events-BUyfEKCR.js",
+          "bytes": 647,
+          "sha256": "f4a852514060e8893f23670ead19426e6d3125464783015370ff585fead65d94",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-CR23Zocl.js",
+          "bytes": 21133,
+          "sha256": "fe3b56e8b12098aee6d4848f87e505ac0453df0044ea955fb27f37257ad26bbc",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/sharing-Ck8HeLAs.js",
+          "bytes": 173,
+          "sha256": "421b7de5c8e6ceaca10c0295d133eb6996085507227c8a543dc089d341b3dbcb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/connection-B4QEFfpx.js",
+          "bytes": 944,
+          "sha256": "f72ecb32ecb8d1ad166071859107d1ad5f08e7da7a7bb74784b7684b70d4a08c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/LoadingState-CKibqFt2.js",
+          "bytes": 2591,
+          "sha256": "f6d71099061d0e1845b3649571915ae90853419adcbeab59bf1a7dbb9e1c9181",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-B86aj43J.js",
+          "bytes": 34567,
+          "sha256": "4ad496849ec3ae779a1392f674aa554ebaa7cab66dd7e5f2d5fa475ff4bd636c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ModalFooter-Bw5U0Uhv.js",
+          "bytes": 1386,
+          "sha256": "29468483375a6fb18e504e588a72c22e995e95bc8d66e4a9522fd24b7dacc9c9",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/external-link-DHhrMjGm.js",
+          "bytes": 439,
+          "sha256": "5e3e57aa2ab7050a421110e612e464852d623db144f8fb2e823ef396f0107cf8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/shield-alert-iSIgZsSj.js",
+          "bytes": 541,
+          "sha256": "048870c39cd06d74767946338097235300f5347d3f05e64e82b6aa956ce25232",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/workspace-AKeDqApe.js",
+          "bytes": 77265,
+          "sha256": "413859aedc74fa6aa7e016a6b0748def927ed4e623f02efe6cc236fc798daaea",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useTldwApiClient-B-eKOxx4.js",
+          "bytes": 93,
+          "sha256": "b15edb1fff7e36a0f026ada6fa202c8c69398556be97952238a9f35e5876bff8",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/history-CyvQ8yPZ.js",
+          "bytes": 425,
+          "sha256": "39a7a3e97b44e9e721345227610b9981365e568e986d15112c5bd04204c4f861",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/panel-left-open-Dk1hKHKw.js",
+          "bytes": 422,
+          "sha256": "0ca13cf76ed129e746e990a8df32f775a5f61a4a4747778e5f9abd612e3acc4a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/archive-BchKlN8b.js",
+          "bytes": 441,
+          "sha256": "d4d4a7f32ab437e212445cc905fe076541734fcd8dbbeb128ed6f59b61340f3a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/chart-column-BiqaZ8f2.js",
+          "bytes": 439,
+          "sha256": "21432c92be1b21067f7c2e2dc2beefc1a2624b71559e4eb82b7e56461d9f4856",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/check-z_DADdNa.js",
+          "bytes": 312,
+          "sha256": "a4d64295a48558d042bdede04b290059161d531618d9c197683df340d5dfdf11",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/command-CdsuchKe.js",
+          "bytes": 370,
+          "sha256": "5d419a76932089c54c708bbf3b3f989890f5c7e4d222dc21e2f7ad1e90a804ce",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/panel-right-open-DM74kHHM.js",
+          "bytes": 425,
+          "sha256": "39fcdfa278aed5f7cc3347f0e47215f8c22095612a0f71f9d929cf7a688766b5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/circle-question-mark-DDrCIu85.js",
+          "bytes": 436,
+          "sha256": "290984ba38c4ecdbf66b56911fbecb14f4c0dca8ac0e92521848a2f987177aa5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/chevron-up-CTqqjAbQ.js",
+          "bytes": 316,
+          "sha256": "848a12743c33889d3a1d56570412d57ac370eb1ae7f0fd11d9f34dbf49aec965",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/star-D1DeH7xu.js",
+          "bytes": 660,
+          "sha256": "867fabc2f6cfe45396d4efd68633cf43ea6fca7479b3fafe5f0be8801ce620ca",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useSmartScroll-BiKvQBnF.js",
+          "bytes": 1693,
+          "sha256": "20bee3d05cc5c4df484d8be0f6a4a5fdc379a74b6f9d1aa49673d1ffce030227",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/workspace-migration-BeRUa9HB.js",
+          "bytes": 16848,
+          "sha256": "b25508f3944e078db4ef21a6ad6a95072d20ec72f051048954c314a1364ee9fc",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/model-startup-selection-CEU3g9Ho.js",
+          "bytes": 519,
+          "sha256": "0dd6fc203dd7d2b1aae615d2ddaf9d05a351e3dd75fbb21f421fcc4f69c89205",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ChatModelSelectorDropdown-DqDBpLBg.js",
+          "bytes": 13089,
+          "sha256": "920882a99992ad8cdd48075b2b1d05f9bf38ba637364a2459f1e7001b2d545ef",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/briefcase-FqIRC_Ob.js",
+          "bytes": 408,
+          "sha256": "5a32594bd75b1ac767af86ff91053fa23bc879c6aee00f539380e01e8956792b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/message-square-plus-B3BB-CF6.js",
+          "bytes": 498,
+          "sha256": "96b84b8d424338c0d3c9c7ba88f28d9bdde036b837b78a61b08af973c4da7f7d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/circle-alert-xwrBwfUl.js",
+          "bytes": 438,
+          "sha256": "343ff35c329f21d70b8a48713f23ce8b3976ee4e8933ecc4af58d6b28191f069",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/wifi-off-BKcsY3HZ.js",
+          "bytes": 648,
+          "sha256": "76e152cc9aeb3a3b1ac3216ae584e6a3d641e9d632e90bdb42939c3252feb05b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/productStatePrimitives-Cse-740j.js",
+          "bytes": 849,
+          "sha256": "579a72aa3bae741689c463abb6f7851031001ebae18fd068d8e043f3f8229794",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-CV2yrleh.js",
+          "bytes": 23943,
+          "sha256": "304bb9f19a433f3bcc6fd3142a67d2051bcbae4d4d505a7ba2e223b71e353c6c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-fyUAZVK_.js",
+          "bytes": 3318,
+          "sha256": "af96c1ca272aa99658004f272e1ac359cafd2c9d4fcfe70f4487394b3161c63f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/bookmark-DUuebhSz.js",
+          "bytes": 351,
+          "sha256": "520c716e34896f77bb24191b6b654b4e791be68d533ec739967f0e069241d549",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/Table-Bs_ZVu83.js",
+          "bytes": 92731,
+          "sha256": "e69b9a987a2cdd3d94615f56ab517cf91d468ff2d4b06c4a83da6978d9d19f15",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/normalizers-CotiFFWw.js",
+          "bytes": 5337,
+          "sha256": "2d51763d123ae32f5e24b49817e5e6d68c5adf5f52626d17d3c857eca3983bdc",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/save-ZOKXJYrG.js",
+          "bytes": 515,
+          "sha256": "9281dc2b10934bf417a47963cb71941da039650bebf36c6642d35248c343b03a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/agent-task-handoff-CNjVjq7J.js",
+          "bytes": 3852,
+          "sha256": "5282c1168fcd37143e9bb1ead486abb65b5b9b376c19247b9298597f550976d3",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-Cif-gnhI.js",
+          "bytes": 174361,
+          "sha256": "83a7569200ea1de3dbab09a97d8763d099b744d6f7dd845094eaefd9f5a7ab80",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/Message-BNTyTDYG.js",
+          "bytes": 140029,
+          "sha256": "f6e9919df30651dd0a1929aa4ad832d6cd1eded9d645e45306566dd9f06c7ff4",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useBubbleLock-B407uOw4.js",
+          "bytes": 1396,
+          "sha256": "37b33e31540c5e04164d80427c8770fc6590d235db4704bbe4906bf3a9e22b2c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/buddy-management-DWmtpvty.js",
+          "bytes": 306,
+          "sha256": "7ffb670ff6c14ce03be1ced6515aa9bacf06124581421582505a5f54682f3077",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useForm-Cpd6I3xK.js",
+          "bytes": 4952,
+          "sha256": "f446d678a7375e1fb61cf078c3bdddd0a805f2c70038d3fa67393cfa34d073aa",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/row-DwE9SYjc.js",
+          "bytes": 2655,
+          "sha256": "9a8cab4082af6221a68a1941b81f15e965c1bb7ef6e6deabafab268b0196f209",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/QuestionCircleOutlined-2idW2rxw.js",
+          "bytes": 1148,
+          "sha256": "c4192a406abb70e5b526b140b1b5207619c054bd18435bc0226aea598229ac52",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/file-CKXX2zWs.js",
+          "bytes": 458,
+          "sha256": "5b243d5d38d3bbe8544719f88336335495c28beb11751d6ea6ffe2f222d2770f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useForceUpdate-CaIqK4w6.js",
+          "bytes": 106,
+          "sha256": "16fa32eeadb7ecb5f436e07cb97f353b282eea037131f569f156eee61b0a370b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ProviderIcon-BrUAZbVr.js",
+          "bytes": 161,
+          "sha256": "4d79de5558aee360882eccbc5c3a836563aa32572ce157536f928a2d8e9450f6",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/globe-BGzg_3ZD.js",
+          "bytes": 430,
+          "sha256": "5eb8224a7ae7e43495f1b64b8a20c9cc2628e2da661b24b5f1e6f30ba98747e5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/color-EWMn5mLb.js",
+          "bytes": 110,
+          "sha256": "227047d437b4b6e1e47635eaabd188997873631827487df04371c66fcddb56a7",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/corner-up-left-CU8V2Aq7.js",
+          "bytes": 805,
+          "sha256": "4493e3199e683c9bea73a1a56fd2848a543c899cf61dfa0943075c78985591bf",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/arrow-right-B7uSUWK0.js",
+          "bytes": 353,
+          "sha256": "643a58fcff63912f8c0cccd9dbd353480817aa010bf5483228721711a1c1c3ff",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/play-DXsUUu5x.js",
+          "bytes": 378,
+          "sha256": "faaca91beeb04c8b4efa6f0aa8fba5de7a91b3d7bff0429e3f54a3b489d00e70",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/modelSelectorUtils-y3GZs15O.js",
+          "bytes": 4124,
+          "sha256": "7554fbff0e8584fbdf7e99bd1706c8831de7ef60dab2990d219ac2cb467f6223",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/clipboard-B_GJoVqd.js",
+          "bytes": 801,
+          "sha256": "9b9a91b5159f7226d6e816055678e2e7cb8c7a3a18a1f0c954a2d4b95b9ca977",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/customParseFormat-VF875NaG.js",
+          "bytes": 4773,
+          "sha256": "4c2cc0482c7400a82f97291d5680df5370239e12adb2f44c5b6e9791c3a423bd",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/pen-CB0Kkipc.js",
+          "bytes": 423,
+          "sha256": "2c576e87249a0664674cd1e67990894eff4231427171e437c1ece20858e45998",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/dayjs.min-DTfti-tR.js",
+          "bytes": 7117,
+          "sha256": "ca47feaa03bbd33cf0dddff48e6be0f44ac7e195955445fd28d2d1cafef9b890",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useSimpleForm-B_-5bNio.js",
+          "bytes": 1484,
+          "sha256": "10ab145cd92a3256748635d24d6c5bad9274d3545d02e93bf730664cda097ed4",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useTTS-sNMB2No4.js",
+          "bytes": 6990,
+          "sha256": "8b404765ed7fb10ac282d9699d3f34ee22afe7f46aab40ce4fd93738e7dff9cb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useBreakpoint-DXAsRTT-.js",
+          "bytes": 1897,
+          "sha256": "8f4fb0bc6832f9bc700c93be5dd500f22a9a9dfea47b4df48427273857e804f5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/ClockCircleOutlined-DfBh5m53.js",
+          "bytes": 892,
+          "sha256": "412653fa146ce48bdc999f59f25e8638dc1b38207154b39676b61f678d49c0bc",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/thumbs-up-DfX0gC4c.js",
+          "bytes": 917,
+          "sha256": "a2294f2f327d20b8fe89979730dd86ad0a7820bb36c31f259847a84bb2578f6b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/smile-eKNUYP8S.js",
+          "bytes": 884,
+          "sha256": "e5b661ffce2e2a56f3e50329170068ba8247f2d0b85558bfcbb18d405a555f33",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/minus-B7AF_8wE.js",
+          "bytes": 305,
+          "sha256": "d1eba30e6fc3f5b66a17e1cbe81cca8feccb22f89fc4f01534f58cfc375ea5e5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/text-highlight-CImBCDWB.js",
+          "bytes": 776,
+          "sha256": "992e15d911df00bf1e72d2b2f1dc45532d2ca2bcd75f360ff76304f354377fa1",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/Pagination-BDUsIY8T.js",
+          "bytes": 22866,
+          "sha256": "5e11aefc3bded08ee7ef7c99af4e2e28f645ce050653d5d1f25b17c5a3ad63ce",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/terminal-CDhGeIir.js",
+          "bytes": 350,
+          "sha256": "a3e3b8d7f7cc54e4356fe526fb0785c5d9f7476be12c51f6e488b488c78f8835",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/circle-stop-DtOs2A_U.js",
+          "bytes": 387,
+          "sha256": "3f4e524a8943cb15fc83828ab1bd72cf5af2d41f0bf357b1363910da7a7fd734",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/feedback-MihrsdzK.js",
+          "bytes": 864,
+          "sha256": "5caba7016c15e10f37141dbf35965a926e6286961ff779e3c0f8384f4aa6658c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/audio-voices-CAQB9eSL.js",
+          "bytes": 1138,
+          "sha256": "dcd0582452fd8eecad5144dcbdea06d810d1eaabcdf64e60eae2b37dc3255f0b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/circle-play-DQO7s8JH.js",
+          "bytes": 444,
+          "sha256": "4dc8d3d483c4e1e13fb6fe9a92d6ca995d105420d8312352f891be6e2481fde5",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/humanize-milliseconds-C9iOgouT.js",
+          "bytes": 162,
+          "sha256": "12af04061022320b2034201f281bb0837281d971bd7ecbd904001c6b55c45be2",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/tts-provider-keys-Cqxq6_7M.js",
+          "bytes": 521,
+          "sha256": "56ea25d24354e61e91a96076038222432f6b3df9811f7f1a9e836736ddff0e18",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-BLUL3Vmp.js",
+          "bytes": 33896,
+          "sha256": "9def9bb7451fa5ebaafcaf8587dc48934864bbdddb63847c6fbe7e1b9dcd980a",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/useDiscoSkills-0Lxr3V8O.js",
+          "bytes": 11539,
+          "sha256": "243d0c17c8adfe94fa6ccdb345d0547fb7b2f25610947fac5adf002831d36bc4",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/tts-provider-9sxp_fLQ.js",
+          "bytes": 6344,
+          "sha256": "bfb7d0f8fbfb87b58688e4d1d89023213b16e252089be95cef436101b01ac55c",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-BQg9ktNr.js",
+          "bytes": 1378,
+          "sha256": "90fc2590fe59e4f1edff39864c7fd77c32d97a4b8a03396187af1e0f0511e2cb",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/katex-BVCvkFhb.js",
+          "bytes": 1171,
+          "sha256": "922d8558802b18b37b3131807f5d95a872729f5dab6f8b32f7adfb9f1fe6e1be",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/marked.esm-CjN3lz7a.js",
+          "bytes": 40849,
+          "sha256": "d800103be4265098faf0e4ca9d18ddc733bdc925ff47f31a0213066a5c746f33",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/tts-BWy_zxLa.js",
+          "bytes": 1483,
+          "sha256": "07bf27c6d85e99c4fbe7c34eab6b2b7ccf24fc751d9b176a26fe9056c8b4b905",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/PurePanel-CehMVxei.js",
+          "bytes": 3312,
+          "sha256": "f8d1ad7f473aaaf7a427c4a80e7b1ff43304aedaa722515542309d33b38da890",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/markdown-to-text-KY_d1vM8.js",
+          "bytes": 589,
+          "sha256": "f578e81abf3a2f760192271ee2cab54da3776fc978c8bcddab8fe31057d5c78e",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/katex-Cu_Erd72.js",
+          "bytes": 265433,
+          "sha256": "a41eb1cb24a1c7fbabe4f6f7937249f25733c0ad0613d340ae698e288bf7871b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-CaYOBcZw.js",
+          "bytes": 101898,
+          "sha256": "63f67fd38b2c570c8cef02507fd85d53a87d6643116558024e270b1d46a68678",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/type-BJaBfteU.js",
+          "bytes": 408,
+          "sha256": "68060092cb109d3685a55103d51f45cbdb7d040cc177dbee95b6ae52afafaab3",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/panel-left-close-DG_XXzlW.js",
+          "bytes": 424,
+          "sha256": "5c3d92428ea2c612dbd9e58d4174c5cd1cb2f4195403493b2b03a78e45e60200",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/clipboard-check-BIw3ENwi.js",
+          "bytes": 492,
+          "sha256": "ffaa4cdab6e1fda8bd518240cc2e4c3602efce1d7860298b4641a6d014c1fba7",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-Ct0ucuRL.js",
+          "bytes": 3456,
+          "sha256": "c0623cfda1b9fdfa6de6f095333860d9ebeddd92dfbfb29cef00bf18d2c2236f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/video-DQZ9iXmZ.js",
+          "bytes": 436,
+          "sha256": "27ed6db48fd7b760188b5dcdedc5d52612652782fcd75a6893b31f1b32154ed9",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/DeleteOutlined-DKBw6ABT.js",
+          "bytes": 864,
+          "sha256": "1daf3a0d02babbd8db3e8bbc180ce515cbfdb293d81accced7f9e94d2cd18b52",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/DownloadOutlined-BB3EJfxl.js",
+          "bytes": 823,
+          "sha256": "49e5495867cab9aa2ae9273fa444afbdca026c530093a2e3bd4da0bb07dda099",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/progress-DhxW826g.js",
+          "bytes": 15089,
+          "sha256": "7d018dd4721d9923598569a431d0a096604aee0cb092fd3e05fe20139d856a5b",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-CpidZnMh.js",
+          "bytes": 31926,
+          "sha256": "2619ad07b11555780da83e880dc01b5c70d9d39431fe29b8b3b90d6c1e5332a2",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/index-BBssGglx.js",
+          "bytes": 157711,
+          "sha256": "7e22ffae1d885b4acf617f26018ca2523dae4c74310a85fda39701749f6d991d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/file-output-i78zrMsp.js",
+          "bytes": 560,
+          "sha256": "aa12a14d41324b26baceb885df5ee701cdc90950424041843efc9b6b45ec3417",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/flashcards-Dn-xtmHn.js",
+          "bytes": 9187,
+          "sha256": "81b193bde830ba807d6bc26e5dcfc60e4c167ef72dd20972f29d13449ed3e953",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/scale-s-yebPp0.js",
+          "bytes": 520,
+          "sha256": "e8840aeb641f5b4170112894f19bb8ad5a34e4f4d7deea1e888c2f1b3bff6a55",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/audio-providers-Bi1V5SNQ.js",
+          "bytes": 2949,
+          "sha256": "92da997d1c0adddd2519746a86610f718356119d3eb2bedf40592be817f3dddc",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/presentation-DlsSpChU.js",
+          "bytes": 422,
+          "sha256": "395e4faed7a7b58d1a5657cee9d582a43923478e9d9b2cb5b712a508b7773f0d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/audio-models-BgEIsu2q.js",
+          "bytes": 2661,
+          "sha256": "a0702bebfbbb770da17bbd80e275a7a68d12905b183a131c56617c4ee29cbf01",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/file-spreadsheet-Kg5QP-g4.js",
+          "bytes": 616,
+          "sha256": "33d68e4aba496f11fcc950782fde2ccb4d925aebb52b9bae0b5b71b04786692d",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/quizzes-C74UdQoy.js",
+          "bytes": 4927,
+          "sha256": "1cbabbf3849d5436e9cf3a0191ba799bd30c03f29343b90ed72afd1fdec7e26e",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/table-Dfbscy01.js",
+          "bytes": 444,
+          "sha256": "0c6656006e5c706e8a5718bb5cd3963bf0205201db9fd8e1d28c46fc2011c56f",
+          "matchesBuilt": true
+        },
+        {
+          "file": "chunks/panel-right-close-Bw6_jGqE.js",
+          "bytes": 424,
+          "sha256": "8cba3eba0c0e3d23902b6ec176ad37a89640703a77dab5014bb2be846399dd74",
+          "matchesBuilt": true
+        }
+      ]
+    },
+    "i2": {
+      "web": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "client": "web",
+        "clipId": "3ba41d85-c02a-4bbe-af58-09571c3ac8db",
+        "noteId": "535f2b42-ee64-4bd0-a703-4810abaf5b3b",
+        "sourceId": "web-clipper:3ba41d85-c02a-4bbe-af58-09571c3ac8db",
+        "mediaId": 11,
+        "saveHttp": 200,
+        "saveResponseSha256": "ec50aed32be07c8f749b85c94c65be52f5cb889b50cb6a4901e3ed7551dc9ddc",
+        "frozenBodySha256": "8f80e002074f915de349a400dc82c5b86ac92b4cfde22852266564f1b3a87329",
+        "originalVersion": {
+          "number": 1,
+          "uuid": "f1d81f0e-2286-4b7e-aaa9-547c43dcd30f",
+          "contentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a"
+        },
+        "realPutStatuses": [200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+        "firstPageVersions": [
+          {
+            "number": 11,
+            "uuid": "f7d39d52-4885-4cee-ae55-4173f0f09e2e"
+          },
+          {
+            "number": 10,
+            "uuid": "1d435b4e-18e3-4947-8f53-7d9e690db2ee"
+          },
+          {
+            "number": 9,
+            "uuid": "a6ddafcf-f0c8-4e42-9abc-40de45806ff1"
+          },
+          {
+            "number": 8,
+            "uuid": "a14ae2dc-23da-4be1-80b2-9b8ad411b3f9"
+          },
+          {
+            "number": 7,
+            "uuid": "17cccd59-602b-4137-9e29-a8c80b64bf77"
+          },
+          {
+            "number": 6,
+            "uuid": "d211be92-a059-411b-afa7-5a14d812152c"
+          },
+          {
+            "number": 5,
+            "uuid": "c62c91e8-cf3f-4003-9900-dbea9339df7d"
+          },
+          {
+            "number": 4,
+            "uuid": "94bb1d64-cbd6-4168-ad10-479519960bfe"
+          },
+          {
+            "number": 3,
+            "uuid": "8f7fe11b-efb2-4704-8892-95cf244e3216"
+          },
+          {
+            "number": 2,
+            "uuid": "9806586b-f81e-4afb-95cb-f466b411c087"
+          }
+        ],
+        "firstPageExcludesOriginal": true,
+        "physicalSaveResponseHeld": true,
+        "responseInvented": false,
+        "pages": [
+          {
+            "client": "web",
+            "method": "GET",
+            "path": "/api/v1/media/11/versions",
+            "query": "?include_content=true&limit=10&page=1"
+          },
+          {
+            "client": "web",
+            "method": "GET",
+            "path": "/api/v1/media/11/versions",
+            "query": "?include_content=true&limit=10&page=2"
+          }
+        ],
+        "physicalSaveDispatchCount": 1,
+        "canonicalAccepted": {
+          "sourceId": "web-clipper:3ba41d85-c02a-4bbe-af58-09571c3ac8db",
+          "mediaId": 11,
+          "pin": {
+            "clipId": "3ba41d85-c02a-4bbe-af58-09571c3ac8db",
+            "requestedUrl": "https://example.org/task6-public-synthetic",
+            "capturedAt": "2026-10-08T09:11:24.555Z",
+            "contentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a",
+            "refreshOf": "ab5f7c58-db82-4d4a-a000-e0ce0f4a0e29",
+            "mediaId": 11,
+            "versionNumber": 1,
+            "versionUuid": "f1d81f0e-2286-4b7e-aaa9-547c43dcd30f"
+          },
+          "selected": true,
+          "reason": "chunking_pending"
+        },
+        "originalPinMatched": true,
+        "priorPinRetained": true,
+        "priorEvidenceRetained": true,
+        "olderPageReached": true,
+        "qualification": "Actual Save HTTP response retained; ten native PUT edits create real newer versions; untouched response released; unpinned client confirms original page2 active version, no fabricated identity/storage/ack."
+      },
+      "extension": {
+        "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+        "client": "extension",
+        "clipId": "823f1afe-30ec-443b-962f-b63f77b85cde",
+        "noteId": "5fcab771-e66f-44d9-a2dc-d72f49cf18b7",
+        "sourceId": "web-clipper:823f1afe-30ec-443b-962f-b63f77b85cde",
+        "mediaId": 12,
+        "saveHttp": 200,
+        "saveResponseSha256": "b7805849bc272b417b1001f35f3507c099aef73b53f7f1df549c38f6bffc6889",
+        "frozenBodySha256": "ad9da974c25f814869ee450b26e8b3d28275e239938b0ba0c0ec6289b08b2de2",
+        "originalVersion": {
+          "number": 1,
+          "uuid": "f91b9b20-620c-45b4-97bb-646e1c7fa478",
+          "contentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a"
+        },
+        "realPutStatuses": [200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+        "firstPageVersions": [
+          {
+            "number": 11,
+            "uuid": "c15536fe-0bef-44e9-9d3b-4fa97d50ae9c"
+          },
+          {
+            "number": 10,
+            "uuid": "4e2866d4-8e7f-4279-b4b2-a9d195353838"
+          },
+          {
+            "number": 9,
+            "uuid": "76e25b9c-1449-4d03-b162-7618e8952bd7"
+          },
+          {
+            "number": 8,
+            "uuid": "6a8ec872-ae99-47b1-bbfe-23798f54f844"
+          },
+          {
+            "number": 7,
+            "uuid": "e83367c1-dc55-43ac-a0a8-b5367dfd93d7"
+          },
+          {
+            "number": 6,
+            "uuid": "5117db5d-b415-4634-9f49-c7440bc5da00"
+          },
+          {
+            "number": 5,
+            "uuid": "97cf75c2-a079-4096-9701-6a8ef3b12428"
+          },
+          {
+            "number": 4,
+            "uuid": "8f497162-9938-4f9c-8194-45389bfb22f3"
+          },
+          {
+            "number": 3,
+            "uuid": "627ea5eb-6718-4b77-b843-5c9b03285c02"
+          },
+          {
+            "number": 2,
+            "uuid": "104d5661-6653-46c5-b81e-a03e57d9bf5c"
+          }
+        ],
+        "firstPageExcludesOriginal": true,
+        "physicalSaveResponseHeld": true,
+        "responseInvented": false,
+        "pages": [
+          {
+            "requestId": "65054.25825",
+            "path": "/api/v1/media/12/versions",
+            "query": "?include_content=true&limit=10&page=1",
+            "method": "GET"
+          },
+          {
+            "requestId": "65054.25826",
+            "path": "/api/v1/media/12/versions",
+            "query": "?include_content=true&limit=10&page=2",
+            "method": "GET"
+          }
+        ],
+        "physicalSaveDispatchCount": 1,
+        "canonicalAccepted": {
+          "sourceId": "web-clipper:823f1afe-30ec-443b-962f-b63f77b85cde",
+          "mediaId": 12,
+          "pin": {
+            "clipId": "823f1afe-30ec-443b-962f-b63f77b85cde",
+            "requestedUrl": "https://example.org/task6-public-synthetic",
+            "capturedAt": "2026-10-08T09:12:13.655Z",
+            "contentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a",
+            "refreshOf": "d0de1cf5-46e2-473a-8c59-1e51d0c8ab29",
+            "mediaId": 12,
+            "versionNumber": 1,
+            "versionUuid": "f91b9b20-620c-45b4-97bb-646e1c7fa478"
+          },
+          "selected": true,
+          "reason": "chunking_pending"
+        },
+        "originalPinMatched": true,
+        "priorPinRetained": true,
+        "priorEvidenceRetained": true,
+        "olderPageReached": true,
+        "qualification": "Actual Save HTTP response retained; ten native PUT edits create real newer versions; untouched response released; unpinned client confirms original page2 active version, no fabricated identity/storage/ack."
+      }
+    },
+    "i1_extension": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "client": "extension",
+      "sourceId": "web-clipper:d0de1cf5-46e2-473a-8c59-1e51d0c8ab29",
+      "mediaId": 10,
+      "putHttp": 200,
+      "existingQueriedReadyCapture": true,
+      "deletedNewerVersions": [
+        {
+          "number": 2,
+          "uuid": "e7b96439-283e-4689-93ae-e3f4a39e6592",
+          "http": 204
+        }
+      ],
+      "latestActive": {
+        "number": 1,
+        "uuid": "b76c6983-461b-45aa-bb68-9a96cab4f0aa"
+      },
+      "currentBody": {
+        "http": 200,
+        "sha256": "d738c7306d2297a22bcd9b79c6aaa2f4d1d4fff896441ed84537b61dd50c3e27",
+        "differsFromPin": true
+      },
+      "initialRefusalAbsent": true,
+      "actualCurrentContentRead": true,
+      "ragOrGenerationRequests": 0,
+      "refusal": {
+        "reason": "capture_head_changed",
+        "selected": false,
+        "visibleWarning": true,
+        "pinRetained": true,
+        "evidenceRetained": true
+      },
+      "oldExactPreview": {
+        "http": 200,
+        "version": 1,
+        "sha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+      },
+      "requests": [
+        {
+          "requestId": "65054.26385",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/context",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26386",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868",
+          "query": "",
+          "method": "PUT",
+          "bodyHash": "0e1e06bbb83e701f4fc1a1a21b5f92cdc52853b8b85543ca425cef31d46239b5"
+        },
+        {
+          "requestId": "65054.26387",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/context",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26388",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/sources",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26389",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/sources/selection",
+          "query": "",
+          "method": "PUT",
+          "bodyHash": "ca13544d3f519e94ed960de68f7eceff7a97bbbd40d85664090e35c0e69a2128"
+        },
+        {
+          "requestId": "65054.26390",
+          "path": "/api/v1/research-workspace/capabilities",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26391",
+          "path": "/api/v1/media/1",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26392",
+          "path": "/api/v1/media/10",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26393",
+          "path": "/api/v1/media/12",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26394",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/context",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26395",
+          "path": "/api/v1/media/1",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26396",
+          "path": "/api/v1/media/10",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26397",
+          "path": "/api/v1/media/12",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26398",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/sources",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26399",
+          "path": "/api/v1/media/10/versions",
+          "query": "?include_content=true",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26400",
+          "path": "/api/v1/media/10",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26401",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868",
+          "query": "",
+          "method": "PUT",
+          "bodyHash": "0e1e06bbb83e701f4fc1a1a21b5f92cdc52853b8b85543ca425cef31d46239b5"
+        },
+        {
+          "requestId": "65054.26402",
+          "path": "/api/v1/workspaces/908e7763-9924-43d0-b26f-63f9cf3a8868/context",
+          "query": "",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26403",
+          "path": "/api/v1/media/1",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        },
+        {
+          "requestId": "65054.26404",
+          "path": "/api/v1/media/12",
+          "query": "?include_content=true&include_versions=false&include_version_content=false",
+          "method": "GET"
+        }
+      ],
+      "qualification": "Real native Media PUT edits changed current body/FTS; DELETE newer active versions leaves accepted original active but current body divergent. Current actual Send refuses before RAG; no arbitrary vector-chunk or server-atomic guarantee."
+    },
+    "i1_web_canonical": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "client": "web",
+      "mediaId": 9,
+      "sourceId": "web-clipper:ab5f7c58-db82-4d4a-a000-e0ce0f4a0e29",
+      "canonicalHttp": 200,
+      "ui": {
+        "status": "processing",
+        "reason": "chunking_pending",
+        "selected": true,
+        "pin": {
+          "clipId": "ab5f7c58-db82-4d4a-a000-e0ce0f4a0e29",
+          "requestedUrl": "https://example.org/task6-public-synthetic",
+          "capturedAt": "2026-10-08T04:57:09.009Z",
+          "contentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd",
+          "refreshOf": "260df582-7939-4f42-baa9-0a85e00bd0d8",
+          "mediaId": 9,
+          "versionNumber": 1,
+          "versionUuid": "9281af2e-d915-4856-bc7b-cd55e30f418b"
+        }
+      },
+      "checkboxDisabled": false,
+      "sendDisabled": true,
+      "latestActive": [
+        {
+          "number": 1,
+          "uuid": "9281af2e-d915-4856-bc7b-cd55e30f418b"
+        }
+      ],
+      "originalPin": {
+        "number": 1,
+        "uuid": "9281af2e-d915-4856-bc7b-cd55e30f418b",
+        "contentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+      },
+      "exactHttp": 200,
+      "currentBodyHttp": 200,
+      "currentBodySha256": "5bee4bd1d30ff7537412b9e123e9435a5d78519837880b5de186b94144380739",
+      "oldPreview": {
+        "http": 200,
+        "sha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+      },
+      "qualification": "Two native selection setup timeouts before Send: new processing Media11 and existing Media9 after actual PUT/DELETE. No WebUI I1 guard proof and no readiness/poll bypass."
+    },
+    "i1_web_last_state": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "viewport": null,
+      "row": {
+        "status": "processing",
+        "reason": "chunking_pending",
+        "selected": true
+      },
+      "rag": {
+        "count": 1,
+        "disabled": true,
+        "box": {
+          "x": 476.9609375,
+          "y": 536.71875,
+          "width": 80.390625,
+          "height": 24
+        },
+        "pressed": "false",
+        "centerTarget": {
+          "tag": "BUTTON",
+          "same": true,
+          "dialogAncestor": false,
+          "viewport": {
+            "width": 1200,
+            "height": 897
+          }
+        }
+      },
+      "send": {
+        "count": 1,
+        "disabled": false,
+        "box": {
+          "x": 792,
+          "y": 787.71875,
+          "width": 36,
+          "height": 36
+        },
+        "pressed": null
+      },
+      "modalCount": 0,
+      "qualification": "Two source-checkbox and one RAG-toggle native click timeout retained. Filled composer enabled Send; no actual Web Send or pre-Ask current-body guard receipt, no further click attempts."
+    },
+    "history_attestation": {
+      "head": "c38b728d87b262fba72c18dfabb7ff194e4a668d",
+      "graphs": [
+        {
+          "client": "web",
+          "mediaId": 9,
+          "versionsHttp": 200,
+          "currentHttp": 200,
+          "activeCount": 1,
+          "maxActive": {
+            "number": 1,
+            "uuid": "9281af2e-d915-4856-bc7b-cd55e30f418b"
+          },
+          "retainedOriginal": {
+            "number": 1,
+            "uuid": "9281af2e-d915-4856-bc7b-cd55e30f418b",
+            "sha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd",
+            "activeExactBodyMatches": true,
+            "descriptorSha256": "4db9df21353d1b5f62acedaeb5aa67eaa461652b2087cf41b170d6b1e95ceeec",
+            "descriptorContentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+          },
+          "currentBodySha256": "5bee4bd1d30ff7537412b9e123e9435a5d78519837880b5de186b94144380739"
+        },
+        {
+          "client": "extension",
+          "mediaId": 10,
+          "versionsHttp": 200,
+          "currentHttp": 200,
+          "activeCount": 1,
+          "maxActive": {
+            "number": 1,
+            "uuid": "b76c6983-461b-45aa-bb68-9a96cab4f0aa"
+          },
+          "retainedOriginal": {
+            "number": 1,
+            "uuid": "b76c6983-461b-45aa-bb68-9a96cab4f0aa",
+            "sha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd",
+            "activeExactBodyMatches": true,
+            "descriptorSha256": "c14f243f72fbf131f62ac447c291a3fd1a049f4ee1abdf81cad1e86dd1dcc8e8",
+            "descriptorContentSha256": "90e48414b53659e9ff26b9dd632fed5ffcec062c2519f5ff340f6320817b35dd"
+          },
+          "currentBodySha256": "d738c7306d2297a22bcd9b79c6aaa2f4d1d4fff896441ed84537b61dd50c3e27"
+        },
+        {
+          "client": "web-page2",
+          "mediaId": 11,
+          "versionsHttp": 200,
+          "currentHttp": 200,
+          "activeCount": 1,
+          "maxActive": {
+            "number": 1,
+            "uuid": "f1d81f0e-2286-4b7e-aaa9-547c43dcd30f"
+          },
+          "retainedOriginal": {
+            "number": 1,
+            "uuid": "f1d81f0e-2286-4b7e-aaa9-547c43dcd30f",
+            "sha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a",
+            "activeExactBodyMatches": true,
+            "descriptorSha256": "b1e3a65ef3a11814b7de281b5759298b55585eddff8bea3cbba7a98222e6e2a3",
+            "descriptorContentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a"
+          },
+          "currentBodySha256": "10991be8149ddf2d5f0dea8b46b5c1939f36a6e4d5cce2baf3afd1a7f40952fb"
+        },
+        {
+          "client": "extension-page2",
+          "mediaId": 12,
+          "versionsHttp": 200,
+          "currentHttp": 200,
+          "activeCount": 1,
+          "maxActive": {
+            "number": 1,
+            "uuid": "f91b9b20-620c-45b4-97bb-646e1c7fa478"
+          },
+          "retainedOriginal": {
+            "number": 1,
+            "uuid": "f91b9b20-620c-45b4-97bb-646e1c7fa478",
+            "sha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a",
+            "activeExactBodyMatches": true,
+            "descriptorSha256": "d03aecb012bfa4811ec65d34018961c81058f195353bcb8d9b5c94bfe52cdda8",
+            "descriptorContentSha256": "7d05e61951cb748486cfd265499280c7d4294a695410e7a422da17916e22834a"
+          },
+          "currentBodySha256": "10991be8149ddf2d5f0dea8b46b5c1939f36a6e4d5cce2baf3afd1a7f40952fb"
+        }
+      ]
+    },
+    "private_receipt_manifest": [
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-extension-artifacts.json",
+        "bytes": 33004,
+        "sha256": "62f457a986a0fb09546e627345ade4814451166f14f5c8ae9c7677b4584e55fd"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-extension-i1.json",
+        "bytes": 5117,
+        "sha256": "7f2ffe26964e96c7a56eab3e993e87ec1098e896eff080d4c89efcecd1f1a9fc"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-extension-i2.json",
+        "bytes": 3109,
+        "sha256": "c1bbc91e589d037c9791ef06088183fb0d1b7ec8cf54e657ccf2ec582e97b30d"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-extension-staged.json",
+        "bytes": 1754,
+        "sha256": "09991eb436ba2ac1aa72d781842e73c8539e627005419461ef05ae830192d580"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-history-attestation.json",
+        "bytes": 3185,
+        "sha256": "04a4c9773bba44dc938105e3df8f441e199d44987e3aed182c00d5bd5f343be8"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-standalone-receipt.json",
+        "bytes": 1009,
+        "sha256": "3ba7a1a630687949af9e11ce4fbc208d3f7eeef43045b94a255719f174931f5a"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-web-executed.json",
+        "bytes": 20190,
+        "sha256": "16cd51212cd634f75c7d55cffdf977ec45a1c251bfc940d7fe432b60971ee70a"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-web-i1-last-state.json",
+        "bytes": 937,
+        "sha256": "5245c7535a4838b461c8dc70329cc3cc4c792fcd87aba46a9cac81d71bb326af"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-web-i1-readiness-limitation.json",
+        "bytes": 1521,
+        "sha256": "4f7de0312419caba97fb8c2e96364a7d1af0e4892bfe1454a4b0a3c73aa84227"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-web-i2.json",
+        "bytes": 3081,
+        "sha256": "e2324a0d19fdcc3d387dae0f3d4e5a98241abbfc09678770e7d3347cfcae1835"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-final-affected-web-staged.json",
+        "bytes": 1748,
+        "sha256": "103455276312589f377f3bf6bc9530cfd186b786fb4cd71a00ce453cc993a560"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-task6-final-affected-extension-receipt.json",
+        "bytes": 703,
+        "sha256": "901cf3f05b2c57f48d5f40422e32109a3765df27715835ec379dd4864d471c18"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-task6-final-affected-web-advanced-receipt.json",
+        "bytes": 741,
+        "sha256": "8e814b983a75db78680ea5aacd26b077f34366b75d96c9fce3679c3c3ffb6aa2"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-task6-final-affected-web-budget-receipt.json",
+        "bytes": 578,
+        "sha256": "9b1d43adba918a5e53ca861bd5afc8d89a6bf34b0650d0d86f19efb30188104d"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-task6-final-affected-web-tokens-receipt.json",
+        "bytes": 582,
+        "sha256": "762687642456332f26a5cef38166495548244ef054eaa93dcd4810d75c6828e4"
+      },
+      {
+        "path": "/private/tmp/knowledge-capture-task6-final-affected-web-webpack-receipt.json",
+        "bytes": 738,
+        "sha256": "1665a0a495a9137687c528e98704fc35869b6688f1a7c6247ee2028b4c805cc7"
+      }
+    ],
+    "live_retry_qualification": "Exact post-pin retirement/retry window not safely reproduced; independently reviewed direct-checkpoint/hook/native producer tests complement live page2 acceptance, with no fabricated storage or canonical acknowledgment.",
+    "limits": [
+      "Web I1 stopped at3 native setup timeouts; no Web Send guard success claim",
+      "Current Media body comparison is not universal vector-chunk or server-atomic RAG attestation",
+      "All3real public429 attempts exhausted; extraction response fixture only, no new public fetch",
+      "Historical broad/default failures and active TASK13532 CSV uncertainty retained",
+      "Current builds/loaded artifacts separate from prior native unchanged-scope receipts",
+      "No publication, human Change summary, seven updated-head CI, merge or cleanup performed"
+    ],
+    "controller_disposition": "Controller accepts the bounded Web I1 live qualification for local affected acceptance: actual Web processing disables RAG before dispatch; independently approved actual ChatPane/store tests, real SQLite current-body/FTS regression and current extension real Send cover the shared repaired guard. This is not a Web live guard pass or vector/server-atomicity claim. No further browser retry. Product acceptance criteria 2/3 and verified DoD1/2 are satisfied; TASK-13530.1 and parent TASK-13530 remain In Progress solely for publication, requester-written Change summary, seven updated-head CI statuses and merge, not unresolved I1/I2 product defects. TASK-13514 remains Done on dev; residual pagination repair is reviewed and both current clients passed actual page2 acceptance. Historical CSV uncertainty remains active TASK-13532; all remote/default/native/device qualifications remain."
   }
 }
