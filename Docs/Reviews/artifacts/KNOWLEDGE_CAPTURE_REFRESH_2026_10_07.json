@@ -5610,5 +5610,275 @@
     ],
     "merged": false,
     "cleanup": false
+  },
+  "pr3213_head_ci_repair": {
+    "input_head": "45925ab03d09e20f386324f153f1d0d5f922783a",
+    "status": "locally_verified_pending_independent_review",
+    "product_files_changed": false,
+    "owning_default": {
+      "passed": 99,
+      "failed": 0,
+      "files": 2,
+      "exit": 0
+    },
+    "native_storage_quota_neighbors": {
+      "passed": 59,
+      "failed": 0,
+      "files": 2,
+      "exit": 0
+    },
+    "qualified_failures": [
+      {
+        "log": "knowledge-pr3213-owning-default-green.log",
+        "passed": 110,
+        "failed": 4,
+        "total": 114,
+        "exit": 1,
+        "scope": "Default five-file receipt: unchanged quota-eviction tests patch Storage.prototype, local MemoryStorage fallback bypasses it. No BASE replay; not claimed canonical-dev inherited."
+      },
+      {
+        "log": "knowledge-pr3213-storage-native-neighbors-green.log",
+        "passed": 69,
+        "failed": 1,
+        "total": 70,
+        "exit": 1,
+        "scope": "Native four-file receipt: unchanged split-storage test spies native storage instance; no interception. No BASE replay or neighbor edit."
+      }
+    ],
+    "types": {
+      "web": 0,
+      "extension": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 3,
+      "introduced": []
+    },
+    "format": "Both full-file checks fail at input BASE and current; added fixture formatted in adjacent no-semi/double-quote style.",
+    "bandit": "N/A: TS tests/docs/tracking only; no Python changes.",
+    "adr": "No new durable rule; ADR066/007/036/042 govern.",
+    "source_manifest": [
+      {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui/src/store/__tests__/workspace.test.ts",
+        "bytes": 102159,
+        "sha256": "4c7f1843522f75fb6a162407299be668cc486f0fe8386a53920ab2e447721ef6"
+      },
+      {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "bytes": 55366,
+        "sha256": "f4df1cb1466a665126e8a331e80b332535e4a02ee22218cf9118b080431876a6"
+      }
+    ],
+    "base_source_manifest": [
+      {
+        "path": "apps/packages/ui/src/store/__tests__/workspace.test.ts",
+        "sha256": "60c51b2f0a350ed9ca537c2b3619f14c9e0663aeae442149028ca64073ea5cde"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx",
+        "sha256": "1d65f71e9635c66bd84cc3900cb4212d36e82ca52b9fc03848f6197f63ecf0d8"
+      }
+    ],
+    "config_manifest": [
+      {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/Helper_Scripts/ci/vitest_deterministic.config.ts",
+        "bytes": 808,
+        "sha256": "5393dd2f8652fe784c0cc268f3b52b4438bedb7dfdce23e579babf972c42dafd"
+      },
+      {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui/.tldw-vitest-ratchet.config.ts",
+        "bytes": 808,
+        "sha256": "5393dd2f8652fe784c0cc268f3b52b4438bedb7dfdce23e579babf972c42dafd"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-native-storage.config.mts",
+        "bytes": 344,
+        "sha256": "805d27f804d184193db54cd1854c9d1235f27236e757d1b77f6a68c01dcae8f5"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-native-storage.ts",
+        "bytes": 630,
+        "sha256": "4beea452d31ec22ae7bf186e343362488f37366ca47676bfd1cd24f5ef6d5b2d"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-observe.config.mts",
+        "bytes": 293,
+        "sha256": "67670b14f26eb2d3415e9da4a3da10b211699603c233bfa3de370b9c96004124"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-storage-observe.ts",
+        "bytes": 353,
+        "sha256": "de06b50a0b46f5d8d98334b66078f7966447d92ec25c8653b4e9a4d110ecb787"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-observe.config.mts",
+        "bytes": 292,
+        "sha256": "8632a0890fa8247b7e3c196690af4dd7271892ab9d82c980ac97b2dc6f619352"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-observe.ts",
+        "bytes": 987,
+        "sha256": "f53654672c148813d7f3f018e4ee18e43a5c2a91064d5ba2dbade25efb5fbf76"
+      }
+    ],
+    "log_manifest": [
+      {
+        "path": "/private/tmp/knowledge-pr3213-auth-status.log",
+        "bytes": 246,
+        "sha256": "1c6c84c035f7aca49f731f8add7197e23647c79632fd109565b538b603a2dea5"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-backend-gap12.log",
+        "bytes": 220214,
+        "sha256": "ec0ae521a531a58c20e1e94cd222720fbf2179532b70da5e7a911dd01876a1aa"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-container-webui.log",
+        "bytes": 74197,
+        "sha256": "43bf1554754ba164dbdac03b149bebb2bb081340e7fd748d3f72f397d9a3366c"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-default-red.log",
+        "bytes": 19238,
+        "sha256": "3b10ee15bf943c9fb0188566737d1ac568cd601a11ca05eefd138d3a1ed49edc"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-green1.log",
+        "bytes": 19238,
+        "sha256": "07da4ff2e14190ad9c6a4c236a1e38eaf5dbdf08689346eb6c7d15f91a30a6c5"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-id-green3.log",
+        "bytes": 688,
+        "sha256": "851202dd6a72097906b5e98f7711485940bea90d1b627a147bb64fe4135c6418"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-lifecycle-red.log",
+        "bytes": 21874,
+        "sha256": "967a95f80ff82eeff6afff7a1895d796c8f340571d76bc3e6419d02142afe43c"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-native-green2.log",
+        "bytes": 19238,
+        "sha256": "14ebe4d4c44b89983d22b46859ed0cd97dcb36fd8ead686a5142b42651eb4c43"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-native-observe.log",
+        "bytes": 69797,
+        "sha256": "5e19b2c177a4642831b605e8edccda9a92d6bc7d250bf6c5d63fbc5ebba56d5c"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-qualified-check.log",
+        "bytes": 19238,
+        "sha256": "22339bf78afad6bcf4bb8572b08703712e16c7676a836f4aa127e56318986317"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-dialog-unique-id-diagnostic.log",
+        "bytes": 688,
+        "sha256": "c68d17ded9779b4616c2e7e9a8fb93e4689fd93ce9506ed4e52aa7181a44f511"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-extension-types.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-frontend-shard4.log",
+        "bytes": 150125,
+        "sha256": "c7cbc41e51c4d58db57128e8e4967e70a97a4651551c649fb6f299494b72897b"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-frontend-shard5.log",
+        "bytes": 409784,
+        "sha256": "f858919b8fd72296a18a6e42c39b84554a2499307e32bd7d06bd1c59438e789d"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-lint-scoped.log",
+        "bytes": 927,
+        "sha256": "6693670df756bc34f407429fde02a9040d26c4c6ee12e44b94d838b7bfe01174"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-lint.log",
+        "bytes": 476,
+        "sha256": "12a9f689cc732d7530a74aad66196ff8ea10a3a0ad764ad9a9bbad1d289bfbec"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-onboarding.log",
+        "bytes": 506938,
+        "sha256": "6faa1cbd1893f97f70366257ec873c7ba9ad65c9d85980031712a5b70ecff419"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-owning-default-green.log",
+        "bytes": 6206,
+        "sha256": "9be3b96618d0dce3e270baffa151e88fcb14ade6f829320fad1fb5f36a4b24ef"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-owning-final-green.log",
+        "bytes": 2525,
+        "sha256": "e189b3fdbd50b5902326281b7b42d73cbf5fd09ddf3b82ef867c0d99209c4601"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-quota-native-final-green.log",
+        "bytes": 1174,
+        "sha256": "d4fc4dc7554e37bbd8559b147dfa35a200718c092c83f4b46fda07272f78f1ee"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-quota-native-green.log",
+        "bytes": 717,
+        "sha256": "be66c9cfab940a64e322d519cf353195de4695cfd648158fc39ecb2969433571"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-quota-native-red.log",
+        "bytes": 5659,
+        "sha256": "1f94be31e18281289d0895f07c213582d68c9d443bd67d92ca3946b6b256f9d6"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-quota-red.log",
+        "bytes": 553,
+        "sha256": "1b318fb082e2b01725e5bd3a89961ca19f1ff3f2f319d63e57db68bfc5c2cf29"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-scoped-format.log",
+        "bytes": 107,
+        "sha256": "1be9f70e9aa41e84f5ff2994cf1d8dce3fa9ddf39578becd6232780906b9c4e0"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-storage-native-neighbors-green.log",
+        "bytes": 3488,
+        "sha256": "910caa639fb8c139f3a357245b1ff16155e312435f9b6c0db98587373b33352b"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-storage-owning-observe.log",
+        "bytes": 735,
+        "sha256": "5f274f1e331a2cf1c8737b43912a566ebbd3f2cccca8e59aade630cf452daa06"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-style-comparison.log",
+        "bytes": 1036,
+        "sha256": "d5eddf26eec4671ec6f158d5671d2549f0f034878959e43ed258ad837b101484"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-task13531-reopen.log",
+        "bytes": 98,
+        "sha256": "6e310adce5575f8f338ca9f7a41e08ad5f4c7aaf31f4db2fb5342fa081222d5d"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-task13533-create.log",
+        "bytes": 84,
+        "sha256": "f1363ca0ea66f48a7539fddfbd7793d992f6f0a3ac37ab2294bd61412ef2d483"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-web-types.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "qualifications": "All existing broad/default React/native/browser/public429/CSV TASK13532 and TASK13512 external-device qualifications remain. No native acceptance rerun, rebuilt artifact claim, CI/global-green/merge claim.",
+    "manual_hooks": {
+      "exit": 0,
+      "path": "/private/tmp/knowledge-pr3213-hooks.log",
+      "sha256": "3901a38bf379d0a01891fe4ccca12714bc91d1f047e338c098fa206a946464c3",
+      "normal_commit": "pending controller-independent review; commit receipt is in private report, no hook bypass"
+    }
   }
 }

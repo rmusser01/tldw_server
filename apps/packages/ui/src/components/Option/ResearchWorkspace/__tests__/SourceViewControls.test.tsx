@@ -19,6 +19,23 @@ import {
 import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
 
+// rc-component uses the same "test-id" for tooltip and dialog in NODE_ENV=test.
+// Keep the real tooltip and give it the React ID used outside that test branch.
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>()
+  const React = await import("react")
+  return {
+    ...actual,
+    Tooltip: React.forwardRef<
+      React.ComponentRef<typeof actual.Tooltip>,
+      React.ComponentProps<typeof actual.Tooltip>
+    >(function Tooltip(props, ref) {
+      const id = React.useId()
+      return <actual.Tooltip {...props} id={props.id ?? id} ref={ref} />
+    })
+  }
+})
+
 // Keep real Ant Design dialogs and menus; jsdom never completes CSS leave motion.
 const render = (ui: React.ReactElement) =>
   rtlRender(ui, {

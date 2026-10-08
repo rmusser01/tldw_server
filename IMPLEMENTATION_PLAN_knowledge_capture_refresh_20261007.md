@@ -243,3 +243,19 @@ Task7 fix2: shared saved-view dialog focus now restores from existing native clo
 Task7 fix3 f12bb3e743: verified account-scoped saved-view reads/writes reuse the existing snapshot lease, account watcher and generation/retry lifecycle; typed scope loss retires, ordinary transient resolution can explicitly retry, rejected-request teardown cannot focus after unmount. Independent scoped review approves these three findings with383owning/default4/finalworker-root38/both types0 and inherited style qualifications. Historical checkpoint: rapid WebUI pointer Cancel was open at fix3. Independently reviewed fix4 stabilizes validation geometry; current Resume7 built WebUI and extension pass trusted pointer/native CSS closure at desktop, narrow and measured wrapped feedback layouts, rapid current Cancel/Close/Escape, account retirement and eight real acknowledgments. TASK13531 can close; Stage5 controller review/publication gates remain.
 
 Task6 local verification at63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec is DONE_WITH_CONCERNS; [canonical evidence](Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md) distinguishes historical failed runs, exact unchanged scopes, real persistence/FTS/citation from the deterministic extraction-response fixture and exhausted three429 public probes. Stage4 complete; Stage5 remains In Progress until controller gates.
+
+
+### TASK-13531: PR3213 head-specific frontend CI repair
+**Goal:** Repair only the quota-warning assertion and corrected same-workspace saved-view assertion from head45925ab.
+**Success Criteria:** Meaningful RED→GREEN evidence with unchanged quota event, native completion, generation/retirement/focus authority and current built acceptance.
+**Tests:** CI deterministic sequencer/options, owning/default cases plus necessary storage/native-dialog neighbors; types, scoped lint/format, manual hooks and normal commit.
+**Status:** Complete
+
+- [x] Diagnose both actual head assertions against dev2c5f19d and CI logs.
+- [x] Reproduce meaningful RED; implement minimal repair without timeouts/assertion waivers.
+- [x] Verify owning scope and preserve all historical/broader/default/native qualifiers.
+- [x] Update canonical evidence/task through backlog-py and pass scoped hooks; prepare the normal commit. Independent review remains controller-owned.
+
+ADR required: no; restoring existing approved test contracts introduces no durable rule. ADR066/007/036/042 remain governing. No runtime, dependency, public probe, browser, push, PR, merge or cleanup actions.
+
+Exact source: native Storage instance spy misses real write; Tooltip/dialog test-id collision mislabels real Replace dialog. First two native-close hypotheses failed and were reverted; third narrow real Tooltip ID fixture passes. Owning99/native59 pass; failed local neighbor receipts and prior broader/browser qualifiers remain explicit. No product roots changed. Independent review/current hosted CI remain controller-owned.

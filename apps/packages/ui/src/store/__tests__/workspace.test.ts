@@ -1457,7 +1457,7 @@ describe("workspace store snapshot persistence", () => {
     }
 
     const setItemSpy = vi
-      .spyOn(localStorage, "setItem")
+      .spyOn(Object.getPrototypeOf(localStorage), "setItem")
       .mockImplementation(() => {
         throw quotaError
       })
