@@ -601,39 +601,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     temporaryChat
   ])
 
-  const persistChatMetadata = React.useCallback(
-    async (patch: Record<string, any>) => {
-      if (!serverChatId) return
-      try {
-        const updated = await tldwClient.updateChat(serverChatId, patch)
-        setServerChatState(
-          (updated as any)?.state ??
-            (updated as any)?.conversation_state ??
-            "in-progress"
-        )
-        setServerChatSource((updated as any)?.source ?? null)
-        setServerChatVersion((updated as any)?.version ?? null)
-        invalidateServerChatHistory()
-      } catch (e: any) {
-        notificationApi.error({
-          message: t("error", { defaultValue: "Error" }),
-          description:
-            e?.message ||
-            t("somethingWentWrong", { defaultValue: "Something went wrong" })
-        })
-      }
-    },
-    [
-      invalidateServerChatHistory,
-      notificationApi,
-      serverChatId,
-      setServerChatSource,
-      setServerChatState,
-      setServerChatVersion,
-      t
-    ]
-  )
-
   const handleDismissServerPersistenceHint = React.useCallback(() => {
     setShowServerPersistenceHint(false)
   }, [setShowServerPersistenceHint])
@@ -649,7 +616,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       showServerPersistenceHint && persistenceKind === "server",
     handleToggleTemporaryChat,
     handleSaveChatToServer,
-    persistChatMetadata,
     handleDismissServerPersistenceHint
   }
 }

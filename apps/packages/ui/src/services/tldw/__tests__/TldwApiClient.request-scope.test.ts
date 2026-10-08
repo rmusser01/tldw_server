@@ -174,7 +174,12 @@ describe("TldwApiClient captured request scope", () => {
     const client = new TldwApiClient()
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
     vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
-    mocks.bgRequest.mockResolvedValue({ ok: true, data: new ArrayBuffer(0), id: "owned" })
+    if (method === "updateChat") {
+      mocks.bgRequest.mockImplementation(async request => ({
+        id: "owned", version: request.method === "GET" ? 4 : 5,
+        title: request.method === "GET" ? "Own title" : "Own renamed title"
+      }))
+    } else mocks.bgRequest.mockResolvedValue({ ok: true, data: new ArrayBuffer(0), id: "owned" })
     const signal = new AbortController().signal
     await (client[method as keyof typeof client] as (...args: unknown[]) => Promise<unknown>)(...args, { requestScope, signal })
     const outbound = mocks.bgRequest.mock.calls.at(-1)?.[0]

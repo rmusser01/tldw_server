@@ -3750,7 +3750,6 @@ export const PlaygroundForm = ({
     showServerPersistenceHint,
     handleToggleTemporaryChat,
     handleSaveChatToServer,
-    persistChatMetadata,
     handleDismissServerPersistenceHint,
   } = persistence;
 

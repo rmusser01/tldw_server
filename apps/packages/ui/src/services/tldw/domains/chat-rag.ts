@@ -388,11 +388,9 @@ export const chatRagMethods = {
       forked_from_message_id:
         input?.forked_from_message_id ?? input?.forkedFromMessageId ?? null,
       version:
-        typeof input?.version === "number"
+        Number.isSafeInteger(input?.version) && input.version > 0
           ? input.version
-          : typeof input?.expected_version === "number"
-            ? input.expected_version
-            : null,
+          : null,
       scope_type,
       workspace_id,
       matched_in: Array.isArray(input?.matched_in)
@@ -878,7 +876,9 @@ export const chatRagMethods = {
   ): Promise<number | undefined> {
     const cid = String(chat_id)
     const current = await this.getChat(cid, options)
-    return typeof current?.version === "number" ? current.version : undefined
+    if (current.id !== cid || !Number.isSafeInteger(current.version) || (current.version ?? 0) <= 0)
+      throw new Error("The conversation version could not be verified. Reload before saving.")
+    return current.version!
   },
 
   isVersionConflictError(this: TldwApiClientCore, error: unknown): boolean {
@@ -945,47 +945,55 @@ export const chatRagMethods = {
     payload: Record<string, any>,
     options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
-    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
+    const signal = options?.signal
+    const scope = options?.scope ? { ...options.scope } : undefined
+    const requestScope = options?.requestScope ? {
+      config: { ...options.requestScope.config }, userId: options.requestScope.userId
+    } : undefined
+    const scopeFields = requestScopeFields(requestScope)
+    signal?.throwIfAborted()
+    if (!cid || !payload || typeof payload !== "object" || Array.isArray(payload))
+      throw new Error("A conversation and supported metadata edit are required.")
+    const patch: Record<string, string | number | null> = {}
+    for (const [key, value] of Object.entries(payload)) {
+      if (!["title", "rating", "state", "topic_label", "cluster_id", "source", "external_ref"].includes(key))
+        throw new Error(`The server does not support editing ${key} here.`)
+      if (value === undefined) continue
+      if (value !== null && (key === "rating"
+        ? !Number.isInteger(value) || value < 1 || value > 5
+        : typeof value !== "string"))
+        throw new Error(`Invalid conversation ${key}.`)
+      const canonical = key === "state" && typeof value === "string" ? value.trim().toLowerCase() : value
+      if (key === "state" && canonical !== null && !["in-progress", "resolved", "backlog", "non-viable"].includes(canonical))
+        throw new Error("Invalid conversation state.")
+      patch[key] = canonical
+    }
+    if (!Object.keys(patch).length) throw new Error("No supported conversation changes to save.")
     let expectedVersion = options?.expectedVersion
-    if (expectedVersion == null) {
-      try {
-        expectedVersion = await this.getLatestChatVersion(cid, options)
-      } catch {
-        // ignore and fall back to unversioned update
-      }
-    }
-    const attemptUpdate = async (
-      versionToUse: number | undefined,
-      hasRetried = false
-    ): Promise<ServerChatSummary> => {
-      const qp =
-        buildQuery({
-          ...toChatScopeParams(options?.scope),
-          ...(typeof versionToUse === "number"
-            ? { expected_version: versionToUse }
-            : {})
-        })
-      try {
-        const res = await bgRequest<any>({
-          ...scopeFields,
-          ...(options?.signal ? { abortSignal: options.signal } : {}),
-          path: appendPathQuery(`/api/v1/chats/${cid}`, qp),
-          method: "PUT",
-          headers: { ...scopeFields.headers, "Content-Type": "application/json" },
-          body: payload
-        })
-        return this.normalizeChatSummary(res)
-      } catch (error) {
-        if (hasRetried || !this.isVersionConflictError(error)) {
-          throw error
-        }
-        const latestVersion = await this.getLatestChatVersion(cid, options)
-        return await attemptUpdate(latestVersion, true)
-      }
-    }
-
-    return await attemptUpdate(expectedVersion)
+    if (expectedVersion !== undefined && (!Number.isSafeInteger(expectedVersion) || expectedVersion <= 0))
+      throw new Error("A valid observed conversation version is required.")
+    if (expectedVersion === undefined)
+      expectedVersion = await this.getLatestChatVersion(cid, { scope, signal, requestScope })
+    signal?.throwIfAborted()
+    if (!Number.isSafeInteger(expectedVersion) || (expectedVersion ?? 0) <= 0)
+      throw new Error("The conversation version could not be verified. Reload before saving.")
+    const qp = buildQuery({ ...toChatScopeParams(scope), expected_version: expectedVersion })
+    const res = await bgRequest<any>({
+      ...scopeFields,
+      abortSignal: signal,
+      path: appendPathQuery(`/api/v1/chats/${cid}`, qp),
+      method: "PUT",
+      headers: { ...scopeFields.headers, "Content-Type": "application/json" },
+      body: patch
+    })
+    signal?.throwIfAborted()
+    if (!res || typeof res !== "object" || Array.isArray(res) ||
+      !["string", "number"].includes(typeof res.id) || String(res.id) !== cid ||
+      !Number.isSafeInteger(res.version) || res.version <= expectedVersion! ||
+      Object.entries(patch).some(([key, value]) => !Object.prototype.hasOwnProperty.call(res, key) || res[key] !== value))
+      throw new Error("The server did not confirm these conversation changes. Reload before retrying.")
+    return this.normalizeChatSummary(res)
   },
 
   async deleteChat(

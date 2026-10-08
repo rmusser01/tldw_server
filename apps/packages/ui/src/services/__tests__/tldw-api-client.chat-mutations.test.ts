@@ -28,6 +28,7 @@ import { TldwApiClient } from "@/services/tldw/TldwApiClient"
 describe("TldwApiClient chat mutations", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.bgRequest.mockReset()
   })
 
   it("creates chats through the backend-canonical trailing-slash endpoint", async () => {
@@ -73,70 +74,142 @@ describe("TldwApiClient chat mutations", () => {
     }
   )
 
-  it("retries updateChat once with the latest version after conflict", async () => {
-    mocks.bgRequest.mockImplementation(
-      async (request: { path?: string; method?: string; body?: unknown }) => {
-        if (
-          request.path === "/api/v1/chats/abc?expected_version=4" &&
-          request.method === "PUT"
-        ) {
-          throw Object.assign(new Error("Version conflict"), { status: 409 })
-        }
-        if (
-          request.path === "/api/v1/chats/abc?scope_type=global" &&
-          request.method === "GET"
-        ) {
-          return {
-            id: "abc",
-            title: "Latest",
-            created_at: "2026-02-18T00:00:00Z",
-            updated_at: "2026-02-18T00:01:00Z",
-            version: 7
-          }
-        }
-        if (
-          request.path ===
-            "/api/v1/chats/abc?scope_type=global&expected_version=7" &&
-          request.method === "PUT"
-        ) {
-          return {
-            id: "abc",
-            title: "Renamed",
-            created_at: "2026-02-18T00:00:00Z",
-            updated_at: "2026-02-18T00:02:00Z",
-            version: 8
-          }
-        }
-        throw new Error(`Unexpected request: ${request.method} ${request.path}`)
-      }
-    )
-
-    const client = new TldwApiClient()
-    const result = await client.updateChat(
-      "abc",
-      { title: "Renamed" },
-      { expectedVersion: 4 }
-    )
-
-    const calls = mocks.bgRequest.mock.calls.map(([request]) => request as {
-      path?: string
-      method?: string
+  it.each([409, 412])("preserves explicit update version on conflict %s without replay", async (status) => {
+    const conflict = Object.assign(new Error("Version conflict"), { status })
+    mocks.bgRequest.mockImplementation(async (request) => {
+      if (request.method === "GET") return { id: "abc", version: 7, title: "Changed elsewhere" }
+      if (request.path.endsWith("expected_version=4")) throw conflict
+      return { id: "abc", version: 8, title: "Renamed" }
     })
-    expect(calls).toEqual([
-      expect.objectContaining({
-        path: "/api/v1/chats/abc?scope_type=global&expected_version=4",
-        method: "PUT"
-      }),
-      expect.objectContaining({
-        path: "/api/v1/chats/abc?scope_type=global",
-        method: "GET"
-      }),
-      expect.objectContaining({
-        path: "/api/v1/chats/abc?scope_type=global&expected_version=7",
-        method: "PUT"
-      })
+    await expect(new TldwApiClient().updateChat("abc", { title: "Renamed" }, { expectedVersion: 4 })).rejects.toBe(conflict)
+    expect(mocks.bgRequest.mock.calls.map(([request]) => [request.method, request.path])).toEqual([
+      ["PUT", "/api/v1/chats/abc?scope_type=global&expected_version=4"]
     ])
-    expect(result.version).toBe(8)
+  })
+
+  it("does not silently rebase an implicitly discovered version after conflict", async () => {
+    const conflict = Object.assign(new Error("Version conflict"), { status: 409 })
+    mocks.bgRequest.mockImplementation(async (request) => {
+      if (request.method === "GET") return { id: "abc", version: 4, title: "Before" }
+      throw conflict
+    })
+    await expect(new TldwApiClient().updateChat("abc", { title: "Renamed" })).rejects.toBe(conflict)
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.method)).toEqual(["GET", "PUT"])
+  })
+
+  it("does not PUT when metadata version discovery fails", async () => {
+    const failure = new Error("Details unavailable")
+    mocks.bgRequest.mockImplementation(async (request) => {
+      if (request.method === "GET") throw failure
+      return { id: "abc", version: 5, title: "Renamed" }
+    })
+    await expect(new TldwApiClient().updateChat("abc", { title: "Renamed" })).rejects.toBe(failure)
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.method)).toEqual(["GET"])
+  })
+
+  it.each([
+    { id: "other", version: 4 }, { id: "abc" }, { id: "abc", expected_version: 4 },
+    { id: "abc", version: 0 }, { id: "abc", version: -1 }, { id: "abc", version: 1.5 },
+    { id: "abc", version: Number.NaN }, { id: "abc", version: Number.POSITIVE_INFINITY },
+    { id: "abc", version: Number.MAX_SAFE_INTEGER + 1 }
+  ])("does not PUT after unqualified metadata discovery %j", async (details) => {
+    mocks.bgRequest.mockImplementation(async (request) => request.method === "GET" ? details : { id: "abc", version: 5, title: "Renamed" })
+    await expect(new TldwApiClient().updateChat("abc", { title: "Renamed" })).rejects.toThrow()
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.method)).toEqual(["GET"])
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid explicit metadata version %s before transport", async (expectedVersion) => {
+      await expect(new TldwApiClient().updateChat("abc", { title: "Renamed" }, { expectedVersion })).rejects.toThrow()
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    null, [], {}, { version: 5, title: "Renamed" }, { id: "other", version: 5, title: "Renamed" },
+    { id: "abc", expected_version: 5, title: "Renamed" }, { id: "abc", version: 4, title: "Renamed" },
+    { id: "abc", version: 5.5, title: "Renamed" }, { id: "abc", version: 5 },
+    { id: "abc", version: 5, title: "Unchanged" }
+  ].map(reply => ({ reply })))("rejects unacknowledged metadata reply $reply", async ({ reply }) => {
+    mocks.bgRequest.mockResolvedValue(reply)
+    await expect(new TldwApiClient().updateChat("abc", { title: "Renamed" }, { expectedVersion: 4 })).rejects.toThrow()
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("requires an explicit topic clear in the raw receipt", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "abc", version: 5 })
+    await expect(new TldwApiClient().updateChat("abc", { topic_label: null }, { expectedVersion: 4 })).rejects.toThrow()
+  })
+
+  it.each([{ persona_memory_mode: "read_write" }, { topic_label: undefined }, {}])(
+    "rejects unsupported or empty metadata intent before transport %j", async (patch) => {
+      await expect(new TldwApiClient().updateChat("abc", patch, { expectedVersion: 4 })).rejects.toThrow()
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([{ title: "Renamed" }, { topic_label: null }, { rating: 1 }])(
+    "returns matching scoped acknowledged metadata %j", async (patch) => {
+      const signal = new AbortController().signal
+      const requestScope = { config: { serverUrl: "https://owned.test", authMode: "single-user" as const }, userId: 1 }
+      mocks.bgRequest.mockResolvedValue({ id: "abc", version: 5, ...patch })
+      const result = await new TldwApiClient().updateChat("abc", patch, { expectedVersion: 4, requestScope, signal, scope: { type: "workspace", workspaceId: "W" } })
+      expect(result).toMatchObject({ id: "abc", version: 5 })
+      if ("title" in patch) expect(result.title).toBe(patch.title)
+      if ("topic_label" in patch) expect(result.topic_label).toBeNull()
+      expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+        path: "/api/v1/chats/abc?scope_type=workspace&workspace_id=W&expected_version=4",
+        method: "PUT", body: patch, abortSignal: signal,
+        servicePromptConfig: expect.objectContaining({ serverUrl: "https://owned.test" })
+      }))
+    }
+  )
+
+  it.each([{ rating: 0 }, { rating: 6 }, { rating: 1.5 }, { title: {} }, { state: "invalid" }])(
+    "rejects invalid supported metadata %j before transport", async (patch) => {
+      await expect(new TldwApiClient().updateChat("abc", patch, { expectedVersion: 4 })).rejects.toThrow()
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it("uses the deployed canonical lifecycle state in the intent and receipt", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "abc", version: 5, state: "resolved" })
+    const saved = await new TldwApiClient().updateChat("abc", { state: " Resolved " }, { expectedVersion: 4 })
+    expect(saved.state).toBe("resolved")
+    expect(mocks.bgRequest.mock.calls[0][0].body).toEqual({ state: "resolved" })
+  })
+
+  it("captures metadata intent before a held version read", async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    mocks.bgRequest.mockImplementation(async (request) => {
+      if (request.method === "GET") { await gate; return { id: "abc", version: 4 } }
+      return { id: "abc", version: 5, title: "Original edit" }
+    })
+    const patch = { title: "Original edit" }
+    const pending = new TldwApiClient().updateChat("abc", patch)
+    patch.title = "Newer edit"
+    release()
+    await pending
+    expect(mocks.bgRequest.mock.calls[1][0].body).toEqual({ title: "Original edit" })
+  })
+
+  it.each(["GET", "PUT"])("refuses a retired metadata %s continuation", async (phase) => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let enter!: () => void
+    const entered = new Promise<void>(resolve => { enter = resolve })
+    const controller = new AbortController()
+    mocks.bgRequest.mockImplementation(async (request) => {
+      if (request.method === phase) { enter(); await gate }
+      return { id: "abc", version: request.method === "GET" ? 4 : 5, title: "Original edit" }
+    })
+    const pending = new TldwApiClient().updateChat("abc", { title: "Original edit" }, { signal: controller.signal })
+    await entered
+    controller.abort()
+    release()
+    await expect(pending).rejects.toThrow()
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.method)).toEqual(phase === "GET" ? ["GET"] : ["GET", "PUT"])
   })
 
   it("forwards nested routing overrides when creating a chat completion", async () => {
