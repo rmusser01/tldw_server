@@ -5975,7 +5975,7 @@
     "independent_fixture_review_reconciliation": {
       "review": "/private/tmp/knowledge-pr3213-ci-fixtures-review.md",
       "result": "Approved; 0 Critical, 0 Important; Minor evidence qualification",
-      "report_sha256": "ff8f1df9d282b04109972f86d81a163b44c3bc34c5c2936a7b931311051fe797",
+      "report_sha256": "6d3ecbb0b9d4cc0fe721f91150ab45ba89bff45fcbeb8688df52e1f85fc6375f",
       "original_format_receipt": {
         "path": "/private/tmp/knowledge-pr3213-scoped-format.log",
         "bytes": 107,
@@ -5986,21 +5986,30 @@
         "bytes": 191,
         "sha256": "3a8c723f90fb789aca7e6701ae9b71a9aae35c90bc1c280c9d7a98b5ee50eba6"
       },
-      "qualification": "Original manifest claim is preserved; no fresh formatter pass is claimed."
+      "qualification": "Original manifest claim is preserved; no fresh formatter pass is claimed.",
+      "implementation_report": {
+        "path": "/private/tmp/knowledge-pr3213-ci-repair-report.md",
+        "sha256": "38281f93608a6ec0534ab9f04288671dbe2d2a83982a12a0e6b4e1793b04b72f",
+        "previous_pre_lineage_sha256": "ff8f1df9d282b04109972f86d81a163b44c3bc34c5c2936a7b931311051fe797",
+        "previous_versions": [
+          "b72ebdd14655d68a13482fb2587e2945af78e544a71028067c814a4abe5747c9",
+          "ff8f1df9d282b04109972f86d81a163b44c3bc34c5c2936a7b931311051fe797"
+        ]
+      }
     },
     "qualifications": "Local targeted contract only; pytest emitted environment permission/cache warnings. No current-head hosted CI success inferred; no change to historical broad-suite qualifications. Existing CI contract governs; no ADR required.",
     "verification": {
       "ruff": {
         "command": "python -m ruff check tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
         "exit_code": 0,
-        "log": "/private/tmp/knowledge-pr3213-ruff.log",
+        "log": "/private/tmp/knowledge-pr3213-shard-inventory-ruff.log",
         "bytes": 19,
         "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
       },
       "black_changed_range": {
         "command": "python -m black --check --line-ranges 1040-1046 tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
         "exit_code": 0,
-        "log": "/private/tmp/knowledge-pr3213-black-changed-range.log",
+        "log": "/private/tmp/knowledge-pr3213-shard-inventory-black-changed-range.log",
         "bytes": 55,
         "sha256": "1a56c7cd8457fd05d978cfbd139d7bfd86e86acaa9b57668e718ef8bccc0cf48"
       },
@@ -6009,44 +6018,158 @@
         "base_exit": 1,
         "current_log_sha256": "2f272bbd86978f200f565194d5bf0a019227c5118fb5d9b9fd47015e86cd6f90",
         "base_log_sha256": "2f23d28e72e8d69c55c2a6f7484cd51cce99c2873443b2cb4c8556fc919136ce",
-        "qualification": "Pre-existing whole-file formatting failure reproduced at BASE; changed line range passes."
+        "qualification": "Pre-existing whole-file formatting failure reproduced at BASE; changed line range passes.",
+        "current_log": "/private/tmp/knowledge-pr3213-shard-inventory-black-current-full.log",
+        "base_log": "/private/tmp/knowledge-pr3213-shard-inventory-black-base-full.log"
       },
       "bandit": {
         "command": "<repo>/.venv/bin/bandit -r tldw_Server_API/tests/CI/test_required_workflow_contracts.py -s B101 -f json -o /private/tmp/knowledge-pr3213-bandit.json",
         "base_exit": 1,
         "current_exit": 1,
         "base_json": {
-          "path": "/private/tmp/knowledge-pr3213-bandit-base.json",
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-base.json",
           "bytes": 1535,
           "sha256": "6b183994639a5416a9bf031f86ebe70462123c185b26343d0e9f0b1ed5722588"
         },
         "current_json": {
-          "path": "/private/tmp/knowledge-pr3213-bandit.json",
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-current.json",
           "bytes": 1565,
           "sha256": "42dae8afcec7d59cb7a574c8a939fcc8919e715e3bcc854447341bae401c8ae3"
         },
         "medium_plus_excluding_b101_exit": 0,
         "medium_json": {
-          "path": "/private/tmp/knowledge-pr3213-bandit-medium.json",
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-medium-plus.json",
           "bytes": 779,
           "sha256": "3157d525982e33787bfb0d2dcf7178cd6258241b617e96f3d1421e7748014e0f"
         },
-        "qualification": "B101 assertions excluded; the same inherited LOW/MEDIUM-confidence B105 --cov at line 202 is present at BASE/current, no errors; no MEDIUM/HIGH issues. Designated venv lacks Bandit, so used the repository sibling .venv executable; no installation."
+        "qualification": "B101 assertions excluded; the same inherited LOW/MEDIUM-confidence B105 --cov at line 202 is present at BASE/current, no errors; no MEDIUM/HIGH issues. Designated venv lacks Bandit, so used the repository sibling .venv executable; no installation.",
+        "current_log": {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-current.log",
+          "bytes": 5739,
+          "sha256": "5663708d7b5abf88edc7ccb2def11699bcefd282423a2fda3c0828694ee2afea"
+        },
+        "base_log": {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-base.log",
+          "bytes": 5744,
+          "sha256": "1f5ed26c544ecf3ab15774c962547739355c2e202012711d70a34a2a2273f02a"
+        },
+        "medium_log": {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-medium-plus.log",
+          "bytes": 5746,
+          "sha256": "39e6aa8403106cc6ec0841848602322308ff12d7888d3cfbeb063789935df1d8"
+        }
       },
       "normal_pre_commit": {
         "command": "python -m pre_commit run --files <six owned files>",
         "exit_code": 0,
-        "log": "/private/tmp/knowledge-pr3213-hooks-final.log",
+        "log": "/private/tmp/knowledge-pr3213-shard-inventory-hooks.log",
         "bytes": 1288,
         "sha256": "0df7099f9a8b4a45386a58e7a418da4adf3c050b2e32efd044a75694172496d9"
       },
       "git_diff_check": {
         "command": "git diff --check",
         "exit_code": 0,
-        "log": "/private/tmp/knowledge-pr3213-diffcheck-final.log",
+        "log": "/private/tmp/knowledge-pr3213-shard-inventory-diffcheck.log",
         "bytes": 0,
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
+    },
+    "receipt_path_lineage": {
+      "current_inventory_receipts": [
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-red.log",
+          "bytes": 15754,
+          "sha256": "942b18d63b38a14e2fe14d055537e420529d48fc37eceecbc5e614bc8482113e"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-green.log",
+          "bytes": 9429,
+          "sha256": "21ad9e3795779894476cefbf65a9725043cb2dc77e6968dd2cfdabdccb29056e"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-ruff.log",
+          "bytes": 19,
+          "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-black-current-full.log",
+          "bytes": 128,
+          "sha256": "2f272bbd86978f200f565194d5bf0a019227c5118fb5d9b9fd47015e86cd6f90"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-black-base-full.log",
+          "bytes": 115,
+          "sha256": "2f23d28e72e8d69c55c2a6f7484cd51cce99c2873443b2cb4c8556fc919136ce"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-black-changed-range.log",
+          "bytes": 55,
+          "sha256": "1a56c7cd8457fd05d978cfbd139d7bfd86e86acaa9b57668e718ef8bccc0cf48"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-current.json",
+          "bytes": 1565,
+          "sha256": "42dae8afcec7d59cb7a574c8a939fcc8919e715e3bcc854447341bae401c8ae3"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-base.json",
+          "bytes": 1535,
+          "sha256": "6b183994639a5416a9bf031f86ebe70462123c185b26343d0e9f0b1ed5722588"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-medium-plus.json",
+          "bytes": 779,
+          "sha256": "3157d525982e33787bfb0d2dcf7178cd6258241b617e96f3d1421e7748014e0f"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-hooks.log",
+          "bytes": 1288,
+          "sha256": "0df7099f9a8b4a45386a58e7a418da4adf3c050b2e32efd044a75694172496d9"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-diffcheck.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-current.log",
+          "bytes": 5739,
+          "sha256": "5663708d7b5abf88edc7ccb2def11699bcefd282423a2fda3c0828694ee2afea"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-base.log",
+          "bytes": 5744,
+          "sha256": "1f5ed26c544ecf3ab15774c962547739355c2e202012711d70a34a2a2273f02a"
+        },
+        {
+          "path": "/private/tmp/knowledge-pr3213-shard-inventory-bandit-medium-plus.log",
+          "bytes": 5746,
+          "sha256": "39e6aa8403106cc6ec0841848602322308ff12d7888d3cfbeb063789935df1d8"
+        }
+      ],
+      "reused_generic_paths_now_containing_inventory_outputs": [
+        "/private/tmp/knowledge-pr3213-ruff.log",
+        "/private/tmp/knowledge-pr3213-black.log",
+        "/private/tmp/knowledge-pr3213-black-changed-range.log",
+        "/private/tmp/knowledge-pr3213-black-base.log",
+        "/private/tmp/knowledge-pr3213-bandit.json",
+        "/private/tmp/knowledge-pr3213-bandit-base.json",
+        "/private/tmp/knowledge-pr3213-bandit-medium.json",
+        "/private/tmp/knowledge-pr3213-bandit.log",
+        "/private/tmp/knowledge-pr3213-bandit-base.log",
+        "/private/tmp/knowledge-pr3213-bandit-medium.log",
+        "/private/tmp/knowledge-pr3213-hooks.log",
+        "/private/tmp/knowledge-pr3213-hooks-final.log",
+        "/private/tmp/knowledge-pr3213-diffcheck.log",
+        "/private/tmp/knowledge-pr3213-diffcheck-final.log"
+      ],
+      "original_fixture_hook": {
+        "sha256": "3901a38bf379d0a01891fe4ccca12714bc91d1f047e338c098fa206a946464c3",
+        "controller_verified_before_overwrite": true,
+        "historical_only": true
+      },
+      "prior_diffcheck_fingerprint": "Unavailable to this worker; no hash or byte count asserted.",
+      "qualification": "Current copies are preserved under unique names. Do not read current content at reused paths as historical receipts. No tests rerun for this evidence correction; scoped documentation/task hooks passed to validate record changes."
     }
   }
 }
