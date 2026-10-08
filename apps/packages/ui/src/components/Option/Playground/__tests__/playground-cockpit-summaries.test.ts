@@ -151,9 +151,9 @@ describe("playground cockpit summary helpers", () => {
         systemPrompt: "You are terse.",
       }),
     ).toEqual({
-      state: "quick",
-      label: "Quick prompt",
-      detail: "Summarize this",
+      state: "custom",
+      label: "Custom prompt",
+      detail: "Inline system prompt selected",
     });
 
     expect(
@@ -166,7 +166,7 @@ describe("playground cockpit summary helpers", () => {
     ).toEqual({
       state: "custom",
       label: "Custom prompt",
-      detail: "Inline system prompt active",
+      detail: "Inline system prompt selected",
     });
   });
 
@@ -285,7 +285,8 @@ describe("playground cockpit summary helpers", () => {
         copy: {
           personaSelected: "TR persona selected",
           memoryReadOnly: "TR memory read-only",
-          personaSelectedWithMemoryMode: (mode) => `TR persona selected (${mode})`,
+          personaSelectedWithMemoryMode: (mode) =>
+            `TR persona selected (${mode})`,
         },
       }).detail,
     ).toBe("TR persona selected (TR memory read-only)");
@@ -471,5 +472,14 @@ describe("playground cockpit summary helpers", () => {
       statusLabel: "Ready",
       error: null,
     });
+  });
+  it("does not publish an uninserted quick prompt as request context", () => {
+    expect(
+      buildCockpitPromptSummary({
+        selectedSystemPrompt: null,
+        selectedQuickPrompt: "Pending review",
+        systemPrompt: null,
+      }).state,
+    ).toBe("none");
   });
 });

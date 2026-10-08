@@ -140,7 +140,10 @@ export const resolveContextReadiness = ({
     }
   }
 
-  const readiness = composition?.readiness ?? "ready"
+  if (!composition) {
+    return { readiness: "partial", label: "Not previewed", tone: "partial" }
+  }
+  const readiness = composition.readiness
   if (readiness === "blocked") {
     return {
       readiness,
@@ -153,7 +156,7 @@ export const resolveContextReadiness = ({
   }
   return {
     readiness,
-    label: getDesignSystemState("ready").label,
+    label: `Preview: ${getDesignSystemState("ready").label}`,
     tone: "ready"
   }
 }

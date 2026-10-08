@@ -945,7 +945,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     <div
       data-testid="composer-context-strip"
       aria-label={
-        t("playground:composer.activeContext", "Active context") as string
+        t("playground:composer.selectedContext", "Selected context") as string
       }
       className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
       {casualContextItems.map((item) =>
@@ -1007,7 +1007,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       <div
         data-testid="composer-context-strip"
         aria-label={
-          t("playground:composer.activeContext", "Active context") as string
+          t("playground:composer.selectedContext", "Selected context") as string
         }
         className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
         {visibleContextItems.map((item) =>

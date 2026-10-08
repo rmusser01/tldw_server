@@ -12,6 +12,7 @@ import type {
 
 export type PlaygroundCompositionPreviewState =
   | "ready"
+  | "planned"
   | "degraded"
   | "unavailable";
 
@@ -42,10 +43,10 @@ export type PlaygroundCompositionPreviewEntry = {
 };
 
 export type PlaygroundCompositionPreviewFootprint = {
-  providerMessageCount: number;
-  previewSectionCount: number;
-  contextPieceCount: number;
-  warningCount: number;
+  providerMessageCount: number | null;
+  previewSectionCount: number | null;
+  contextPieceCount: number | null;
+  warningCount: number | null;
   readiness: ConversationContextComposition["readiness"] | "unavailable";
 };
 
@@ -106,15 +107,15 @@ const countActiveSources = (sources: PlaygroundContextSource[]): number =>
   sources.filter((source) => source.state !== "disabled").length;
 
 const formatSourceCount = (count: number): string =>
-  count === 1 ? "1 active source" : `${count} active sources`;
+  count === 1 ? "1 selected source" : `${count} selected sources`;
 
 const buildFootprint = (
   composition: ConversationContextComposition | null,
 ): PlaygroundCompositionPreviewFootprint => ({
-  providerMessageCount: composition?.providerMessages.length ?? 0,
-  previewSectionCount: composition?.previewSections.length ?? 0,
-  contextPieceCount: composition?.pieces.length ?? 0,
-  warningCount: composition?.warnings.length ?? 0,
+  providerMessageCount: composition?.providerMessages.length ?? null,
+  previewSectionCount: composition?.previewSections.length ?? null,
+  contextPieceCount: composition?.pieces.length ?? null,
+  warningCount: composition?.warnings.length ?? null,
   readiness: composition?.readiness ?? "unavailable",
 });
 
@@ -183,9 +184,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
       ? assistantSummary.compositionDetail
       : assistantSummary.mode === "none"
         ? null
-      : assistantSummary.detail === assistantName
-        ? null
-        : assistantSummary.detail;
+        : assistantSummary.detail === assistantName
+          ? null
+          : assistantSummary.detail;
   const assistantEntry: PlaygroundCompositionPreviewEntry = {
     id: "assistant",
     kind: "assistant",
@@ -245,7 +246,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     kind: "context",
     label: "Context",
     title:
-      activeSourceCount > 0 ? formatSourceCount(activeSourceCount) : "No extra context",
+      activeSourceCount > 0
+        ? formatSourceCount(activeSourceCount)
+        : "No extra context",
     detail:
       contextSources.length > 0
         ? `${contextSources.length} configured source${
@@ -351,7 +354,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     ? "unavailable"
     : hasUnhealthyOptionalEntry
       ? "degraded"
-      : "ready";
+      : composition
+        ? "ready"
+        : "planned";
 
   return {
     overallState,

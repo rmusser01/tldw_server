@@ -134,7 +134,7 @@ describe("usePlaygroundContextItems role-play state", () => {
           id: "rolePlayBehavior",
           label: "Behavior",
           value: "Character Actor",
-          tone: "active",
+          tone: "neutral",
         }),
       ]),
     );
@@ -277,14 +277,15 @@ describe("usePlaygroundContextItems role-play state", () => {
     ).toBeUndefined();
   });
 
-  it("shows included character context when the current request can use character flow", () => {
+  it("shows selected unverified character context when the current request can use character flow", () => {
     const { result } = renderHook(() =>
       usePlaygroundContextItems(
         createDeps({
           rolePlayCompatibility: {
             status: "included",
             reasonCode: "character_flow",
-            messageKey: "playground:composer.rolePlayCompatibility.character_flow",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.character_flow",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -303,8 +304,8 @@ describe("usePlaygroundContextItems role-play state", () => {
         expect.objectContaining({
           id: "rolePlayCompatibility",
           label: "Character context",
-          value: "Included",
-          tone: "active",
+          value: "Selected — not verified",
+          tone: "neutral",
         }),
       ]),
     );
@@ -319,7 +320,8 @@ describe("usePlaygroundContextItems role-play state", () => {
           rolePlayCompatibility: {
             status: "override-risk",
             reasonCode: "custom_prompt",
-            messageKey: "playground:composer.rolePlayCompatibility.custom_prompt",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.custom_prompt",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -360,7 +362,8 @@ describe("usePlaygroundContextItems role-play state", () => {
           rolePlayCompatibility: {
             status: "excluded",
             reasonCode: "compare_mode",
-            messageKey: "playground:composer.rolePlayCompatibility.compare_mode",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.compare_mode",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -399,7 +402,8 @@ describe("usePlaygroundContextItems role-play state", () => {
           rolePlayCompatibility: {
             status: "included",
             reasonCode: "persona_flow",
-            messageKey: "playground:composer.rolePlayCompatibility.persona_flow",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.persona_flow",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -418,9 +422,30 @@ describe("usePlaygroundContextItems role-play state", () => {
         expect.objectContaining({
           id: "rolePlayCompatibility",
           label: "Persona context",
-          value: "Included",
+          value: "Selected — not verified",
         }),
       ]),
     );
+  });
+  it("does not show a pending quick insertion as a prompt context chip", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({ selectedQuickPrompt: "Pending review" }),
+      ),
+    );
+    expect(result.current.find((item) => item.id === "prompt")).toBeUndefined();
+  });
+
+  it("labels an enabled local scene as a draft rather than active behavior", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          rolePlayState: { ...baseRolePlayState, scene: { active: true } },
+        }),
+      ),
+    );
+    expect(
+      result.current.find((item) => item.id === "rolePlayScene")?.value,
+    ).toBe("Draft enabled");
   });
 });

@@ -916,7 +916,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
                 {scenePreview.tokenCount > 0
                   ? `${scenePreview.tokenCount} tokens`
                   : scenePreview.active
-                    ? t("playground:composer.sceneActive", "Scene active")
+                    ? t("playground:composer.sceneDraftEnabled", "Scene draft enabled")
                     : t("playground:composer.sceneInactive", "No scene draft")}
               </p>
             </div>

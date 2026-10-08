@@ -87,6 +87,8 @@ const evaluateRootReadiness = new Function(
   "streaming",
   "isProcessing",
   "isLoading",
+  "chatModelsFetching",
+  "chatModelsError",
   `return ${readiness.node.getText(readiness.ast)};`
 )
 const ordinaryReadiness = expression(
@@ -99,6 +101,8 @@ const evaluateOrdinaryRootReadiness = new Function(
   "selectedModel",
   "apiProvider",
   "readinessChatModels",
+  "chatModelsFetching",
+  "chatModelsError",
   `return ${ordinaryReadiness.node.getText(ordinaryReadiness.ast)};`
 )
 const recovery = expression(

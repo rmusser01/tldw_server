@@ -2540,9 +2540,7 @@ const PlaygroundContent = () => {
   const ragMediaIdCount = Array.isArray(ragMediaIds) ? ragMediaIds.length : 0;
   const trimmedSystemPrompt = String(systemPrompt || "").trim();
   const hasPromptContext = Boolean(
-    selectedSystemPrompt ||
-    selectedQuickPrompt ||
-    trimmedSystemPrompt.length > 0,
+    selectedSystemPrompt || trimmedSystemPrompt.length > 0,
   );
   const promptSummary: PlaygroundPromptSummary = buildCockpitPromptSummary({
     selectedSystemPrompt,
@@ -2554,10 +2552,10 @@ const PlaygroundContent = () => {
       customPromptLabel: toText(
         t("playground:cockpit.customPrompt", "Custom prompt"),
       ),
-      inlineSystemPromptActiveDetail: toText(
+      inlineSystemPromptSelectedDetail: toText(
         t(
-          "playground:cockpit.inlineSystemPromptActive",
-          "Inline system prompt active",
+          "playground:cockpit.inlineSystemPromptSelected",
+          "Inline system prompt selected",
         ),
       ),
       loadingPromptDetail: toText(
@@ -2568,8 +2566,8 @@ const PlaygroundContent = () => {
       ),
       noPromptContextDetail: toText(
         t(
-          "playground:cockpit.noPromptContext",
-          "No prompt context will be added.",
+          "playground:cockpit.noAdditionalSystemPrompt",
+          "No additional system prompt selected.",
         ),
       ),
       noPromptSelectedLabel: toText(
@@ -2580,9 +2578,6 @@ const PlaygroundContent = () => {
           "playground:cockpit.promptDetailsUnavailable",
           "Prompt details unavailable",
         ),
-      ),
-      quickPromptLabel: toText(
-        t("playground:cockpit.quickPrompt", "Quick prompt"),
       ),
       selectedPromptDetail: toText(
         t("playground:cockpit.systemPrompt", "System prompt"),
@@ -3052,8 +3047,8 @@ const PlaygroundContent = () => {
             title: toText(t("playground:cockpit.webSearch", "Web search")),
             detail: toText(
               t(
-                "playground:cockpit.webSearchDetail",
-                "Enabled for the next reply.",
+                "playground:cockpit.webSearchPlanned",
+                "Selected for the next message.",
               ),
             ),
             state: "active" as const,
@@ -3151,7 +3146,10 @@ const PlaygroundContent = () => {
           label: toText(t("playground:cockpit.file", "File")),
           title,
           detail: toText(
-            t("playground:cockpit.nextReply", "Used on next reply"),
+            t(
+              "playground:cockpit.selectedForNextMessage",
+              "Selected for the next message",
+            ),
           ),
           state: "active" as const,
           onRemove: () => removeContextFileAt(index),
@@ -3176,7 +3174,10 @@ const PlaygroundContent = () => {
           label: toText(t("playground:cockpit.knowledge", "Knowledge")),
           title,
           detail: toText(
-            t("playground:cockpit.nextReply", "Used on next reply"),
+            t(
+              "playground:cockpit.selectedForNextMessage",
+              "Selected for the next message",
+            ),
           ),
           state: "active" as const,
           onOpen: () => openSearchAndContext({ tab: "context" }),
@@ -3202,7 +3203,12 @@ const PlaygroundContent = () => {
             id: mediaId,
           }),
         ),
-        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+        detail: toText(
+          t(
+            "playground:cockpit.selectedForNextMessage",
+            "Selected for the next message",
+          ),
+        ),
         state: "active" as const,
         onOpen: () => openSearchAndContext({ tab: "context" }),
         onRemove: () => removeRagMediaAt(index),

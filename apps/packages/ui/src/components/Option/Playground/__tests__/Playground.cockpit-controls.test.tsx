@@ -706,6 +706,7 @@ describe("Playground cockpit controls", () => {
 
   it("surfaces existing context and runtime state in cockpit rails", async () => {
     messageOptionState.value.selectedQuickPrompt = "Draft a concise summary";
+    modelSettingsState.value.systemPrompt = "Be curious.";
     const openKnowledgePanel = vi.fn();
     const openModelSettings = vi.fn();
     const openActorSettings = vi.fn();
@@ -729,7 +730,7 @@ describe("Playground cockpit controls", () => {
       const compositionPreview = within(contextRail).getByRole("region", {
         name: "Next message composition",
       });
-      expect(within(compositionPreview).getByText("Draft a concise summary")).toBeInTheDocument();
+      expect(within(compositionPreview).getByText("Inline system prompt selected")).toBeInTheDocument();
       expect(within(compositionPreview).getByText("Mira Vale")).toBeInTheDocument();
       expect(
         within(compositionPreview).getAllByText("openai:gpt-4.1-mini").length,
@@ -738,7 +739,7 @@ describe("Playground cockpit controls", () => {
       expect(
         within(compositionPreview).getByText("Scope: openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
-      expect(within(contextRail).getByText("Context active")).toBeInTheDocument();
+      expect(within(contextRail).getByText("Context selected")).toBeInTheDocument();
       expect(within(contextRail).getByText("1 file")).toBeInTheDocument();
       expect(
         within(contextRail).getByText("1 knowledge item"),
@@ -753,11 +754,11 @@ describe("Playground cockpit controls", () => {
         within(contextRail).getByRole("heading", { name: "Prompt" }),
       ).toBeInTheDocument();
       expect(
-        within(contextRail).getAllByText("Quick prompt").length,
-      ).toBeGreaterThan(0);
+        within(contextRail).queryByText("Quick prompt"),
+      ).not.toBeInTheDocument();
       expect(
-        within(contextRail).getAllByText("Draft a concise summary").length,
-      ).toBeGreaterThan(0);
+        within(contextRail).queryByText("Draft a concise summary"),
+      ).not.toBeInTheDocument();
       fireEvent.click(
         within(contextRail).getByRole("button", { name: "Clear prompt" }),
       );
@@ -984,6 +985,7 @@ describe("Playground cockpit controls", () => {
   it("lists prompt and assistant as first-class context sources and removes one knowledge item at a time", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedQuickPrompt = "Draft a concise summary";
+    modelSettingsState.value.systemPrompt = "Be curious.";
     messageOptionState.value.selectedKnowledge = [
       { id: "knowledge-1", title: "Research notes" },
       { id: "knowledge-2", title: "Protocol notes" },
@@ -998,11 +1000,11 @@ describe("Playground cockpit controls", () => {
       name: "Context sources",
     });
 
-    const promptSource = within(sourceList).getByText("Quick prompt").closest("li");
+    const promptSource = within(sourceList).getByText("Custom prompt").closest("li");
     expect(promptSource).not.toBeNull();
     expect(within(promptSource as HTMLElement).getByText("Prompt")).toBeInTheDocument();
     expect(
-      within(promptSource as HTMLElement).getByText("Draft a concise summary"),
+      within(promptSource as HTMLElement).getByText("Inline system prompt selected"),
     ).toBeInTheDocument();
 
     const assistantSource = within(sourceList).getByText("Mira Vale").closest("li");

@@ -33,15 +33,54 @@ const createDeps = (
 })
 
 describe("usePromptTemplates role-play setup apply", () => {
+  it("keeps a pending quick insertion out of the toolbar system-prompt summary", () => {
+    const { result } = renderHook(() =>
+      usePromptTemplates(createDeps({ selectedQuickPrompt: "Pending command" }))
+    )
+    expect(result.current.promptSummaryLabel).toBe("No prompt")
+  })
+
+  it("preserves selected system behavior while a quick insertion is pending", () => {
+    const { result } = renderHook(() =>
+      usePromptTemplates(
+        createDeps({
+          selectedQuickPrompt: "Pending command",
+          systemPrompt: "Be curious."
+        })
+      )
+    )
+    expect(result.current.promptSummaryLabel).toBe("Custom prompt")
+  })
+
   it("projects a saved setup before identity preflight rejects it", async () => {
     const applyAssistantSelection = vi.fn(async () => false)
     const deps = createDeps({ applyAssistantSelection })
-    const setup = createStartupTemplateBundle({ name: "Projected", selectedModel: "ollama:gemma3:4b", systemPrompt: "Proposed prompt", presetKey: "precise", character: { id: "new", name: "New" } as Character, ragPinnedResults: [{ id: "source-1", snippet: "Pinned source excerpt" }] as Parameters<typeof createStartupTemplateBundle>[0]["ragPinnedResults"] })
+    const setup = createStartupTemplateBundle({
+      name: "Projected",
+      selectedModel: "ollama:gemma3:4b",
+      systemPrompt: "Proposed prompt",
+      presetKey: "precise",
+      character: { id: "new", name: "New" } as Character,
+      ragPinnedResults: [
+        { id: "source-1", snippet: "Pinned source excerpt" }
+      ] as Parameters<typeof createStartupTemplateBundle>[0]["ragPinnedResults"]
+    })
     const { result } = renderHook(() => usePromptTemplates(deps))
-    await act(async () => { expect(await result.current.applyStartupTemplateBundle(setup)).toBe(false) })
-    expect(applyAssistantSelection).toHaveBeenCalledWith(expect.objectContaining({ id: "new" }), expect.objectContaining({
-      model: "ollama:gemma3:4b", settings: expect.objectContaining({ systemPrompt: "Proposed prompt", temperature: 0.2, topK: 20 }), hasExplicitContext: true
-    }))
+    await act(async () => {
+      expect(await result.current.applyStartupTemplateBundle(setup)).toBe(false)
+    })
+    expect(applyAssistantSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "new" }),
+      expect.objectContaining({
+        model: "ollama:gemma3:4b",
+        settings: expect.objectContaining({
+          systemPrompt: "Proposed prompt",
+          temperature: 0.2,
+          topK: 20
+        }),
+        hasExplicitContext: true
+      })
+    )
     expect(deps.setSelectedModel).not.toHaveBeenCalled()
     expect(deps.updateChatModelSettings).not.toHaveBeenCalled()
     expect(deps.setSystemPrompt).not.toHaveBeenCalled()
@@ -140,7 +179,9 @@ describe("usePromptTemplates role-play setup apply", () => {
         id: "persona-guide",
         name: "Patient Guide"
       }),
-      expect.objectContaining({ sceneSettings: expect.objectContaining({ isEnabled: false }) })
+      expect.objectContaining({
+        sceneSettings: expect.objectContaining({ isEnabled: false })
+      })
     )
     expect(applyAssistantSelection).toHaveBeenCalledTimes(1)
   })

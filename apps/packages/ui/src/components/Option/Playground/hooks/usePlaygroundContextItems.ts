@@ -77,7 +77,6 @@ export function usePlaygroundContextItems(
     composerMessageCount = 0,
     composerMessageCountLabel = null,
     selectedSystemPrompt,
-    selectedQuickPrompt,
     systemPrompt,
     promptSummaryLabel,
     jsonMode,
@@ -162,8 +161,8 @@ export function usePlaygroundContextItems(
       const identityValue = characterPendingApply
         ? toText(
             t(
-              "playground:composer.context.characterNextTurn",
-              "{{name}} (next turn)",
+              "playground:composer.context.characterPendingSelection",
+              "{{name}} (pending selection)",
               {
                 name: rolePlayState.identity.name || identityLabelFallback,
               } as any,
@@ -176,7 +175,7 @@ export function usePlaygroundContextItems(
         id: "rolePlayIdentity",
         label: toText(t(identityLabelKey, identityLabelFallback)),
         value: identityValue,
-        tone: "active",
+        tone: characterPendingApply ? "warning" : "neutral",
         onClick: onClearRolePlayIdentity ?? (() => setOpenActorSettings(true)),
       });
     }
@@ -190,10 +189,7 @@ export function usePlaygroundContextItems(
       const isPersona = rolePlayState.identity.kind === "persona";
       const label = isPersona
         ? toText(
-            t(
-              "playground:composer.context.personaContext",
-              "Persona context",
-            ),
+            t("playground:composer.context.personaContext", "Persona context"),
           )
         : toText(
             t(
@@ -206,12 +202,15 @@ export function usePlaygroundContextItems(
         string
       > = {
         included: toText(
-          t("playground:composer.rolePlayCompatibility.included", "Included"),
+          t(
+            "playground:composer.rolePlayCompatibility.selectedUnverified",
+            "Selected — not verified",
+          ),
         ),
         blended: toText(
           t(
-            "playground:composer.rolePlayCompatibility.blended",
-            "Blended with sources",
+            "playground:composer.rolePlayCompatibility.selectedWithSourcesUnverified",
+            "Selected with sources — not verified",
           ),
         ),
         excluded: toText(
@@ -232,7 +231,8 @@ export function usePlaygroundContextItems(
       > = {
         custom_prompt: onClearRolePlayBehavior,
         rag_sources: () => openKnowledgePanel("search"),
-        compare_mode: onDisableCompareMode ?? (() => setOpenModelSettings(true)),
+        compare_mode:
+          onDisableCompareMode ?? (() => setOpenModelSettings(true)),
         context_files: openContextWindowModal,
         documents: openContextWindowModal,
         image_command: onOpenRolePlaySetup,
@@ -242,7 +242,7 @@ export function usePlaygroundContextItems(
         label,
         value: valueByStatus[rolePlayCompatibility.status],
         tone:
-          rolePlayCompatibility.status === "included" ? "active" : "warning",
+          rolePlayCompatibility.status === "included" ? "neutral" : "warning",
         ...(actionByReason[rolePlayCompatibility.reasonCode]
           ? { onClick: actionByReason[rolePlayCompatibility.reasonCode] }
           : {}),
@@ -278,7 +278,7 @@ export function usePlaygroundContextItems(
           ),
         ),
         value: behaviorValue,
-        tone: "active",
+        tone: "neutral",
         ...(onClearRolePlayBehavior
           ? { onClick: onClearRolePlayBehavior }
           : {}),
@@ -288,11 +288,15 @@ export function usePlaygroundContextItems(
     if (hasRolePlayState && rolePlayState?.scene) {
       items.push({
         id: "rolePlayScene",
-        label: toText(t("playground:composer.context.scene", "Scene")),
+        label: toText(
+          t("playground:composer.context.sceneDraft", "Scene draft"),
+        ),
         value:
           rolePlayState.scene.summary ||
-          toText(t("playground:composer.context.sceneActive", "Active")),
-        tone: "active",
+          toText(
+            t("playground:composer.context.sceneDraftEnabled", "Draft enabled"),
+          ),
+        tone: "neutral",
         onClick: () => setOpenActorSettings(true),
       });
     }
@@ -366,13 +370,13 @@ export function usePlaygroundContextItems(
         value: characterPendingApply
           ? toText(
               t(
-                "playground:composer.context.characterNextTurn",
-                "{{name}} (next turn)",
+                "playground:composer.context.characterPendingSelection",
+                "{{name}} (pending selection)",
                 { name: selectedCharacterName } as any,
               ),
             )
           : selectedCharacterName,
-        tone: "active",
+        tone: characterPendingApply ? "warning" : "neutral",
         onClick: () => setOpenActorSettings(true),
       });
     }
@@ -446,9 +450,7 @@ export function usePlaygroundContextItems(
     }
     if (
       !hasRolePlayState &&
-      (selectedSystemPrompt ||
-        selectedQuickPrompt ||
-        String(systemPrompt || "").trim().length > 0)
+      (selectedSystemPrompt || String(systemPrompt || "").trim().length > 0)
     ) {
       items.push({
         id: "prompt",
@@ -552,7 +554,6 @@ export function usePlaygroundContextItems(
     ragPinnedResultsLength,
     selectedCharacterName,
     selectedModel,
-    selectedQuickPrompt,
     selectedSystemPrompt,
     composerMessageCount,
     composerMessageCountLabel,

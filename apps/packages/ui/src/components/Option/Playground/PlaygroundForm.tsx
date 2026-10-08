@@ -1604,9 +1604,8 @@ export const PlaygroundForm = ({
   const hasPromptContext = React.useMemo(
     () =>
       Boolean(selectedSystemPrompt) ||
-      Boolean(selectedQuickPrompt) ||
       String(systemPrompt || "").trim().length > 0,
-    [selectedQuickPrompt, selectedSystemPrompt, systemPrompt],
+    [selectedSystemPrompt, systemPrompt],
   );
 
   const modelComparison = useModelComparison({

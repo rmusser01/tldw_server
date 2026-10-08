@@ -144,4 +144,16 @@ describe("deriveRolePlayState", () => {
     });
     expect("onClick" in state.context).toBe(false);
   });
+  it("does not treat a pending quick insertion as system behavior", () => {
+    expect(
+      deriveRolePlayState({ selectedQuickPrompt: "Speak like Mira" }).behavior,
+    ).toBeNull();
+  });
+
+  it("keeps cancelled or inserted user-text prompts separate from system behavior", () => {
+    expect(
+      deriveRolePlayState({ selectedQuickPrompt: null, systemPrompt: null })
+        .active,
+    ).toBe(false);
+  });
 });
