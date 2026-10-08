@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     HttpUrl,
+    StrictBool,
     ValidationError,
     field_serializer,
     field_validator,
@@ -25,6 +26,7 @@ from pydantic import (
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HISTORY_BRANCH_FIELD_DESCRIPTION,
     DurableHistoryV1,
     HistoryResultPayloadV1,
     HistorySelectionV1,
@@ -1191,6 +1193,7 @@ class ChatCompletionRequest(BaseModel):
     )
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
     tldw_turn: Optional[TLDWTurnSpec] = Field(
         None,
         description="Stable user-turn identity; requires an existing conversation and explicit save_to_db=true.",
@@ -1331,6 +1334,8 @@ class ChatCompletionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
+        if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
+            raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
         if self.tldw_history_selection_v1 is not None:
             if self.tldw_continuation is not None:
                 raise ValueError("Versioned selection cannot be combined with legacy continuation controls")

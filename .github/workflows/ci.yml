@@ -1380,6 +1380,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_trash_restore.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_session_client_id_create.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
@@ -1389,6 +1391,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -3034,6 +3037,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_trash_restore.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_session_client_id_create.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
@@ -3043,6 +3048,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -4525,6 +4531,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_trash_restore.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_session_client_id_create.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
@@ -4534,6 +4542,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -5927,6 +5936,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_trash_restore.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_session_client_id_create.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
@@ -5936,6 +5947,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -7320,6 +7332,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_exemplars_api.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_memory_endpoint.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_trash_restore.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_session_client_id_create.py
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
@@ -7329,6 +7343,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py

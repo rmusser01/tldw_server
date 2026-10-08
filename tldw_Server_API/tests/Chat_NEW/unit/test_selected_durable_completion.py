@@ -15,6 +15,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompleti
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1, HistorySelectionV1
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
+from tldw_Server_API.app.core.exceptions import SanitizedProviderStreamError
 
 pytestmark = pytest.mark.unit
 DIGEST = "a" * 64
@@ -382,15 +383,21 @@ async def test_raw_stream_qualification_preserves_text_and_closes_source(asynchr
         finally:
             closed.append(True)
 
-    qualified = chat_service._validated_selected_durable_stream(async_source() if asynchronous else sync_source())
+    stream_state = {}
+    qualified = chat_service._validated_selected_durable_stream(
+        async_source() if asynchronous else sync_source(), stream_state=stream_state
+    )
 
     async def collect():
         return [chunk async for chunk in qualified] if asynchronous else list(qualified)
 
     if invalid:
-        with pytest.raises(HTTPException) as rejected:
+        with pytest.raises(SanitizedProviderStreamError) as rejected:
             await collect()
-        assert rejected.value.detail["code"] == "unsupported_history_result_projection"
+        assert rejected.value.code == "provider_unavailable"
+        assert stream_state == {"selected_durable_projection_rejected": True}
+        assert rejected.value.allow_non_stream_fallback is False
     else:
         assert await collect() == chunks
+        assert stream_state == {}
     assert closed == [True]

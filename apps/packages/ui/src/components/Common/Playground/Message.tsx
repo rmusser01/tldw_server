@@ -514,6 +514,11 @@ export const PlaygroundMessage = (props: Props) => {
   const interruptedGeneration = missingFinalAnswer || Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
   )
+  // The user stopped this reply on purpose; label it "Stopped", not
+  // "Interrupted" (CS-04, #3104).
+  const stoppedGeneration =
+    interruptedGeneration &&
+    Boolean((props.generationInfo as Record<string, unknown> | undefined)?.stopped)
   const interruptionReason = React.useMemo(() => {
     const raw = (props.generationInfo as Record<string, unknown> | undefined)
       ?.interruptionReason
@@ -2588,12 +2593,27 @@ export const PlaygroundMessage = (props: Props) => {
               aria-live="polite"
               className="rounded-md border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
               <p className="font-medium">
-                {t(
-                  "playground:errorRecovery.interruptedSummary",
-                  "Generation was interrupted. You can retry, switch model, or continue from the partial response."
-                )}
+                <span
+                  data-interruption-label
+                  className="mr-1.5 inline-flex items-center rounded border border-warn/40 px-1.5 py-0.5 text-[11px] font-semibold">
+                  {stoppedGeneration
+                    ? t("playground:errorRecovery.stoppedLabel", "Stopped")
+                    : t(
+                        "playground:errorRecovery.interruptedLabel",
+                        "Interrupted"
+                      )}
+                </span>
+                {stoppedGeneration
+                  ? t(
+                      "playground:errorRecovery.stoppedSummary",
+                      "You stopped this reply. What it wrote so far is kept."
+                    )
+                  : t(
+                      "playground:errorRecovery.interruptedSummary",
+                      "Generation was interrupted. You can retry, switch model, or continue from the partial response."
+                    )}
               </p>
-              {interruptionReason && (
+              {interruptionReason && !stoppedGeneration && (
                 <p className="mt-1 opacity-90">{interruptionReason}</p>
               )}
               {interruptionRecoveryActions.length > 0 && (

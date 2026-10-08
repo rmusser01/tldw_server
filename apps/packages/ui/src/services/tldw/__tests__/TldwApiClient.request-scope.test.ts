@@ -387,6 +387,7 @@ describe("TldwApiClient captured request scope", () => {
 
   it("reads fresh promotion messages with captured scope without joining cached or pending reads", async () => {
     const client = new TldwApiClient()
+    vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
     mocks.bgRequest.mockResolvedValueOnce([{ id: "cached", sender: "user", content: "old" }])
     await client.listChatMessages("chat-1")
     const controller = new AbortController()

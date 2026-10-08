@@ -7,8 +7,7 @@ const mocks = vi.hoisted(() => ({
   tldwRequest: vi.fn(),
   storage: new Map<string, unknown>(),
   sessionStorage: new Map<string, unknown>(),
-  storageRemoveError: null as Error | null,
-  envApiKey: vi.fn<() => string | null>()
+  storageRemoveError: null as Error | null
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -58,12 +57,6 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     vi.stubEnv("NEXT_PUBLIC_X_API_KEY", undefined)
     vi.stubEnv("VITE_TLDW_API_KEY", undefined)
     vi.stubEnv("VITE_TLDW_DEFAULT_API_KEY", undefined)
-    mocks.envApiKey.mockReset()
-    mocks.envApiKey.mockReturnValue(null)
-    vi.spyOn(
-      TldwApiClient.prototype as any,
-      "getEnvApiKey"
-    ).mockImplementation(() => mocks.envApiKey())
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
     mocks.bgStream.mockReset()
@@ -542,7 +535,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
   })
 
   it("uses an active environment key after scrubbing a legacy key", async () => {
-    mocks.envApiKey.mockReturnValue("active-environment-key")
+    vi.stubEnv("NEXT_PUBLIC_X_API_KEY", "active-environment-key")
     mocks.storage.set("tldwConfig", {
       authMode: "single-user",
       serverUrl: "https://api.example.test/path",

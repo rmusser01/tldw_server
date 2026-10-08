@@ -41,11 +41,15 @@ def test_v74_upgrade_preserves_legacy_and_rejects_unknown_anchor(legacy_v73):
     path, cid, ids, rows = legacy_v73
     with sqlite3.connect(path) as conn:
         upstream_schema = set(conn.execute("SELECT type, name, sql FROM sqlite_master"))
+        upstream_columns = set(conn.execute("PRAGMA table_info(conversations)"))
     db = CharactersRAGDB(path, client_id="order-owner")
     try:
-        assert upstream_schema <= {tuple(row) for row in db.get_connection().execute(
+        # The fingerprint migration extends conversations; existing columns and
+        # every other upstream schema object must remain unchanged.
+        assert {row for row in upstream_schema if row[:2] != ("table", "conversations")} <= {tuple(row) for row in db.get_connection().execute(
             "SELECT type, name, sql FROM sqlite_master"
         )}
+        assert upstream_columns <= {tuple(row) for row in db.get_connection().execute("PRAGMA table_info(conversations)")}
         assert [db.get_message_by_id(mid) for mid in ids] == rows
         assert db.get_connection().execute("SELECT COUNT(*) FROM message_insertion_order").fetchone()[0] == 0
         context = db.get_conversation_by_id(cid)
@@ -60,7 +64,7 @@ def test_v74_upgrade_preserves_legacy_and_rejects_unknown_anchor(legacy_v73):
             )
             assert [row["id"] for row in history] == expected
         assert [db.get_message_by_id(mid) for mid in ids] == rows
-        assert db._get_db_version(db.get_connection()) == 75
+        assert db._get_db_version(db.get_connection()) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     finally:
         db.close_all_connections()
 
@@ -98,7 +102,7 @@ def test_v74_failed_migration_rolls_back_schema_version_and_data(legacy_v73, mon
             db.close_all_connections()
     recovered = CharactersRAGDB(path, client_id="order-owner")
     try:
-        assert recovered._get_db_version(recovered.get_connection()) == 75
+        assert recovered._get_db_version(recovered.get_connection()) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     finally:
         recovered.close_all_connections()
 

@@ -32,6 +32,13 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_STATUS_COMPLETE,
+    GENERATION_STATUS_INTERRUPTED,
+    GENERATION_STATUS_LENGTH,
+    GENERATION_STATUS_STOPPED,
+    sanitize_usage,
+)
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     SSE_CONTROL_FIELD_PREFIXES,
@@ -1296,6 +1303,77 @@ async def _close_unstarted_sync_stream_bounded(stream: Any) -> None:
             )
             return
 
+
+# Settlement writes that may outlive the stream which started them. The set holds
+# strong references so the event loop cannot garbage-collect a pending write.
+_DETACHED_SETTLEMENTS: set[asyncio.Future[Any]] = set()
+STREAM_SETTLEMENT_TASK_MAX_ACTIVE = daemon_capacity_from_env(
+    "CHAT_STREAM_SETTLEMENT_MAX_TASKS",
+    default=256,
+)
+
+
+def _accepts_keyword(callback: Any, name: str) -> bool:
+    """Return whether ``callback`` can take ``name`` as a keyword argument."""
+
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == name and parameter.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            return True
+    return False
+
+
+async def _invoke_partial_save(
+    callback: Callable[..., Any],
+    text: str,
+    generation: dict[str, Any],
+) -> Any:
+    result = callback(text, generation=generation)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
+def start_detached_settlement(operation: Callable[[], Any]) -> asyncio.Future[Any] | None:
+    """Start a settlement write in its own task that no stream cancellation reaches.
+
+    A client disconnect reaches the stream through Starlette's anyio task
+    group. anyio cancellation is level-triggered: every ``await`` inside the
+    cancelled scope is cancelled again, so a write awaited from a ``finally``
+    there never finishes. Stream cleanup also runs under 50 ms deadlines that
+    cancel the closing task, and callers reuse or close the generator as soon as
+    its task was cancelled.
+
+    The write therefore runs in a separate task that is not part of any cancel
+    scope and that nothing cancels. A module-level set holds a strong reference
+    until it finishes. Callers that still have a connected client may wait for
+    it through ``asyncio.shield``; a cancelled stream must not wait at all.
+
+    Args:
+        operation: Zero-argument callable returning the coroutine to run. It
+            must handle its own errors.
+
+    Returns:
+        The running task, or None when too many settlements are already pending.
+    """
+
+    if len(_DETACHED_SETTLEMENTS) >= STREAM_SETTLEMENT_TASK_MAX_ACTIVE:
+        return None
+    task = asyncio.ensure_future(operation())
+    _DETACHED_SETTLEMENTS.add(task)
+    task.add_done_callback(_DETACHED_SETTLEMENTS.discard)
+    task.add_done_callback(_observe_stream_task)
+    return task
+
+
 class StreamingResponseHandler:
     """
     Handles streaming responses with proper error handling, cleanup, and timeouts.
@@ -1353,6 +1431,15 @@ class StreamingResponseHandler:
         self.system_message_id: Optional[str] = None
         self.user_message_id: Optional[str] = None
         self.continuation_metadata: Optional[dict[str, Any]] = None
+        # Settlement metadata (D7 P2). finish_reason/usage come from the provider;
+        # stop_requested distinguishes a deliberate stop from a dropped client;
+        # provider_interrupted marks a provider failure after the stream started,
+        # as opposed to a local policy, size or transform failure.
+        self.finish_reason: Optional[str] = None
+        self.usage: Optional[dict[str, int]] = None
+        self.stop_requested = False
+        self.provider_interrupted = False
+        self._settlement_started = False
         # Lock for thread-safe state modifications
         self._state_lock = asyncio.Lock()
 
@@ -1449,6 +1536,141 @@ class StreamingResponseHandler:
         """Mark the stream as cancelled."""
         self.is_cancelled = True
         logger.info(f"Stream cancelled for conversation {self.conversation_id}")
+
+    def request_stop(self) -> None:
+        """Stop generation on purpose; the partial reply settles as ``stopped``.
+
+        The stream notices the request before it processes the next provider
+        chunk. Dropped connections call ``cancel`` instead and settle as
+        ``interrupted``.
+        """
+        self.stop_requested = True
+        self.cancel()
+
+    def _record_usage(self, value: Any) -> None:
+        usage = sanitize_usage(value)
+        if usage:
+            self.usage = usage
+
+    def generation_status(self) -> str:
+        """Return how generation ended, using the ``generation_metadata`` vocabulary."""
+        if self.finish_reason == "length":
+            return GENERATION_STATUS_LENGTH
+        if self.stop_requested:
+            return GENERATION_STATUS_STOPPED
+        if self.is_cancelled or self.error_occurred:
+            return GENERATION_STATUS_INTERRUPTED
+        return GENERATION_STATUS_COMPLETE
+
+    def generation_snapshot(self) -> dict[str, Any]:
+        """Return the generation metadata the stream itself observed."""
+        snapshot: dict[str, Any] = {"generation_status": self.generation_status()}
+        if self.finish_reason:
+            snapshot["finish_reason"] = self.finish_reason
+        if self.usage:
+            snapshot["usage"] = dict(self.usage)
+        return snapshot
+
+    def _partial_settlement_eligible(self) -> bool:
+        """Whether an unfinished reply should be kept.
+
+        Kept: the client went away or a stop was requested, or the provider
+        failed after the stream started. Not kept: local failures such as a
+        moderation block, a transform failure or the response size limit.
+        """
+        if self.provider_interrupted:
+            return True
+        return self.is_cancelled and not self.error_occurred
+
+    def _absorb_transform_tail(self) -> bool:
+        """Fold text a transform still holds back into the partial reply.
+
+        The moderation transform holds back the end of the reply so it can
+        check patterns that span chunks. That text was already checked as part
+        of the chunk that produced it, so it belongs to the partial reply.
+
+        Returns:
+            False when the transform refuses the tail on policy grounds, in
+            which case no partial reply may be saved.
+        """
+        flush_fn = getattr(self.text_transform, "flush", None)
+        if not callable(flush_fn):
+            return True
+        try:
+            tail = flush_fn()
+        except StopStreamWithError:
+            return False
+        except _STREAMING_NONCRITICAL_EXCEPTIONS as flush_err:
+            logger.debug(
+                "text_transform flush before partial settlement failed error_type={}",
+                type(flush_err).__name__,
+            )
+            return True
+        if not tail:
+            return True
+        tail_text = str(tail)
+        tail_size = len(tail_text.encode("utf-8"))
+        if (
+            self.response_size + tail_size > self.max_response_size
+            or len(self.full_response) >= MAX_RESPONSE_LIST_LENGTH
+        ):
+            return True
+        self.full_response.append(tail_text)
+        self.response_size += tail_size
+        return True
+
+    def _start_partial_settlement(
+        self,
+        partial_save_callback: Callable[..., Any],
+    ) -> asyncio.Future[Any] | None:
+        """Hand the reply produced so far to a write that cancellation cannot abort.
+
+        This never awaits, so a cancelled stream can call it before any cleanup
+        that its teardown deadline might cut short. It starts at most one write
+        per stream.
+
+        Returns:
+            The detached write, or None when there is nothing to keep, the
+            write was already started, or the reply may not be saved.
+        """
+        if self._settlement_started:
+            return None
+        if not self._partial_settlement_eligible() or not self.has_accumulated_output():
+            return None
+        self._settlement_started = True
+        if not self._absorb_transform_tail():
+            return None
+        partial_text = "".join(self.full_response)
+        if not partial_text.strip():
+            return None
+        generation = self.generation_snapshot()
+        conversation_id = self.conversation_id
+
+        async def settle() -> Any:
+            try:
+                result = await _invoke_partial_save(partial_save_callback, partial_text, generation)
+            except Exception as partial_err:  # noqa: BLE001 - persistence must not break stream cleanup
+                logger.error(
+                    "Failed to save partial streaming response for {} error_type={}",
+                    conversation_id,
+                    type(partial_err).__name__,
+                )
+                return None
+            logger.info(
+                "Saved partial streaming response for {} (status={}, text_len={})",
+                conversation_id,
+                generation["generation_status"],
+                len(partial_text),
+            )
+            return result
+
+        settlement = start_detached_settlement(settle)
+        if settlement is None:
+            logger.warning(
+                "Partial streaming response for {} not saved: too many settlements pending",
+                conversation_id,
+            )
+        return settlement
 
     def _accumulate_tool_calls(self, tool_calls: list[dict[str, Any]]) -> None:
         """Merge incremental tool call deltas into a final structure.
@@ -1596,15 +1818,23 @@ class StreamingResponseHandler:
         finalize_callback: Optional[callable] = None,
         before_success_callback: Optional[Callable[[], Any]] = None,
         on_first_output: Optional[Callable[[], Any]] = None,
+        partial_save_callback: Optional[Callable[..., Any]] = None,
     ) -> AsyncIterator[str]:
         """
         Safely generate streaming responses with error handling and cleanup.
 
         Args:
             stream: The stream to process (sync or async iterator)
-            save_callback: Optional callback to save the full response
+            save_callback: Optional callback to save the full response. When it
+                accepts a ``generation`` keyword it also receives
+                ``generation_snapshot()``.
             finalize_callback: Optional callback invoked on error/cancel to finalize state
             on_first_output: Optional callback invoked once after the first valid provider output
+            partial_save_callback: Optional ``callback(text, *, generation)`` that
+                saves an unfinished reply after a disconnect, a stop request or a
+                provider failure mid-stream. It is never called for an empty reply
+                or after a local policy failure. It runs in a detached task that
+                cancelling the stream cannot abort.
 
         Yields:
             SSE formatted messages
@@ -1655,6 +1885,7 @@ class StreamingResponseHandler:
                 err_payload = provider_stream_error_payload(value)
                 self._attach_stream_metadata(err_payload)
                 self.error_occurred = True
+                self.provider_interrupted = True
                 return sse_data(err_payload)
 
             def structural_error_code(value: Any) -> str | None:
@@ -1739,6 +1970,8 @@ class StreamingResponseHandler:
                     if error_code is not None:
                         outputs.append(canonical_provider_error(error_code))
                         return outputs, True
+                    if isinstance(data, dict) and data.get("usage") is not None:
+                        self._record_usage(data.get("usage"))
                     if isinstance(data, dict):
                         choices = data.get("choices")
                         if isinstance(choices, list) and choices:
@@ -1760,6 +1993,7 @@ class StreamingResponseHandler:
                                         )
                                         return outputs, True
                                     self.valid_finish_received = True
+                                    self.finish_reason = finish_reason
                                     if finish_reason == "content_filter":
                                         self.semantic_output_seen = True
                                         first_output_pending = True
@@ -2088,6 +2322,13 @@ class StreamingResponseHandler:
         finally:
             # Cleanup and final message
             try:
+                # A cancelled stream (client disconnect or stop request) is torn
+                # down inside a cancelled task and under short deadlines, so any
+                # await below may be cut off. Hand its partial reply to a detached
+                # write first, without awaiting (D7 S3-1).
+                if self.is_cancelled and partial_save_callback is not None:
+                    self._start_partial_settlement(partial_save_callback)
+
                 # Async cleanup is safe on the loop. Raw synchronous streams are
                 # closed by the daemon bridge worker; never call close() here.
                 try:
@@ -2202,10 +2443,18 @@ class StreamingResponseHandler:
                     and not self.error_occurred
                     and has_output
                 ):
+                    # The complete reply is being settled; a stop or timeout that
+                    # arrives during the save must not also save it as a partial.
+                    self._settlement_started = True
                     full_text = "".join(self.full_response)
                     aggregated_tool_calls = self.get_accumulated_tool_calls()
                     aggregated_function_call = self.get_accumulated_function_call()
                     extra_events: list[dict[str, Any]] = []
+                    generation_kwargs: dict[str, Any] = (
+                        {"generation": self.generation_snapshot()}
+                        if _accepts_keyword(save_callback, "generation")
+                        else {}
+                    )
                     try:
                         # Support flexible callback signatures (text only or extended)
                         maybe_result = None
@@ -2215,6 +2464,7 @@ class StreamingResponseHandler:
                                 full_text,
                                 aggregated_tool_calls,
                                 aggregated_function_call,
+                                **generation_kwargs,
                             )
                         except TypeError:
                             maybe_result = save_callback(full_text)
@@ -2264,6 +2514,18 @@ class StreamingResponseHandler:
                                 self.conversation_id,
                                 type(event_err).__name__,
                             )
+
+                # Keep an unfinished reply after a provider failure (D7 S3-1). The
+                # client is still connected, so wait for the write and report the
+                # saved message ID with stream_end. The shield keeps a late
+                # disconnect from aborting the write.
+                if partial_save_callback is not None:
+                    settlement = self._start_partial_settlement(partial_save_callback)
+                    if settlement is not None and not self.is_cancelled:
+                        partial_result = await asyncio.shield(settlement)
+                        partial_message_id, _partial_events = self._parse_save_callback_result(partial_result)
+                        if partial_message_id:
+                            self.saved_message_id = partial_message_id
 
                 # Send completion marker(s) after save so metadata includes IDs.
                 if not self.is_cancelled and not self.error_occurred:
@@ -2332,6 +2594,7 @@ async def create_streaming_response_with_timeout(
     continuation_metadata: Optional[dict[str, Any]] = None,
     history_persistence_ack: bool = False,
     user_message_id: Optional[str] = None,
+    partial_save_callback: Optional[Callable[..., Any]] = None,
 ) -> AsyncIterator[str]:
     """
     Create a streaming response with timeout and error handling.
@@ -2349,6 +2612,8 @@ async def create_streaming_response_with_timeout(
         system_message_id: Optional system message ID to echo in stream_end payload
         continuation_metadata: Optional continuation metadata to attach to stream payloads
         history_persistence_ack: Reserve native owner fields and emit saved IDs independently of optional metadata
+        partial_save_callback: Optional ``callback(text, *, generation)`` that keeps an
+            unfinished reply; see ``StreamingResponseHandler.safe_stream_generator``
 
     Yields:
         SSE formatted messages
@@ -2395,6 +2660,7 @@ async def create_streaming_response_with_timeout(
             guarded_finalize,
             before_success_callback,
             on_first_output,
+            partial_save_callback=partial_save_callback,
         )
         heartbeats_enabled = isinstance(heartbeat_interval, (int, float)) and heartbeat_interval > 0
         heartbeat_gen = handler.heartbeat_generator() if heartbeats_enabled else None

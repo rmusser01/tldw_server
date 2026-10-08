@@ -1174,6 +1174,52 @@ it("pending turn updates preserve confirmation and reject changed immutable inte
   ).toBe("retained")
 })
 
+it("keeps how a retained reply ended and drops unknown outcomes (CS-04)", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending = {
+    operation_id: "operation",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    input_id: "input",
+    assistant_id: "result",
+    created_at: 1,
+    input_text: "question",
+    input_images: [],
+    result_text: "partial",
+    state: "generated_unsaved" as const,
+    origin_view: origin,
+    selection_digest: "selected",
+    request_context_digest: "prepared",
+    outcome: "stopped" as const,
+    interruption_reason: "Stopped",
+    settled_message_id: "result",
+    model_name: "local-model",
+    model_id: "provider:local-model",
+    credential: "never stored"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const [kept] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+  expect(kept.turn).toMatchObject({
+    outcome: "stopped",
+    interruption_reason: "Stopped",
+    settled_message_id: "result",
+    model_name: "local-model",
+    model_id: "provider:local-model"
+  })
+  expect(kept.turn).not.toHaveProperty("credential")
+
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    operation_id: "other",
+    outcome: "resumed-elsewhere"
+  } as unknown as Parameters<typeof history.saveHistoryTurnRecovery>[2])
+  const other = (await history.loadHistoryTurnRecoveries(bookmark, owner)).find(
+    (entry) => entry.turn.operation_id === "other"
+  )
+  expect(other?.turn).not.toHaveProperty("outcome")
+})
+
 it("terminal recovery outcomes fence late callbacks without erasing another operation", async () => {
   const owner = await history.getLocalHistoryOwner("chat")
   const origin = view(owner)

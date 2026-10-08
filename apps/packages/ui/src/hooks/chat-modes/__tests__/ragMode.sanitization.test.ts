@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   maybeInjectActorMessage: vi.fn(),
   getModels: vi.fn(),
   runChatPipeline: vi.fn(),
+  captureNormalHistoryTurn: vi.fn(),
   appendSystemPromptSuffix: vi.fn()
 }))
 
@@ -123,12 +124,17 @@ vi.mock("../chatModePipeline", async (importOriginal) => ({
   }
 }))
 
+vi.mock("../normalChatMode", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../normalChatMode")>(),
+  captureNormalHistoryTurn: (...args: unknown[]) => mocks.captureNormalHistoryTurn(...args)
+}))
+
 vi.mock("@/utils/output-formatting-guide", () => ({
   appendSystemPromptSuffix: (...args: unknown[]) =>
     mocks.appendSystemPromptSuffix(...args)
 }))
 
-import { __testing__ } from "../ragMode"
+import { __testing__, ragMode } from "../ragMode"
 
 const servicePromptSnapshot = {
   scopeKey: "test-scope",
@@ -222,6 +228,29 @@ const createRagContext = (overrides: Record<string, unknown> = {}) =>
     servicePromptSnapshot,
     ...overrides
   }) as any
+
+describe("ragMode captured-turn lifecycle", () => {
+  it.each(["submitted", "failed", "throws"])("releases its captured turn when the pipeline %s", async (status) => {
+    const turn = {
+      capture: { rows: [], selected_content: [], snapshot: { owner_key: "native-owner", nodes: [] }, view: { conversation_id: "chat-1" } },
+      resultId: status === "submitted" ? "result-1" : null,
+      followResult: vi.fn().mockResolvedValue(true),
+      finish: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn()
+    }
+    mocks.captureNormalHistoryTurn.mockResolvedValue(turn)
+    mocks.runChatPipeline.mockReset()
+    if (status === "throws") mocks.runChatPipeline.mockRejectedValue(new Error("preparation failed"))
+    else mocks.runChatPipeline.mockResolvedValue({ status })
+    const context = createRagContext({ historySelection: {}, tldwTurn: { user_message_id: "input-1" } })
+    const request = ragMode(context.message, "", false, [], [], context.signal, context)
+    if (status === "throws") await expect(request).rejects.toThrow("preparation failed")
+    else await expect(request).resolves.toEqual({ status })
+    expect(turn.release).toHaveBeenCalledOnce()
+    if (status === "submitted") expect(turn.finish).toHaveBeenCalledWith(true)
+    else expect(turn.finish).not.toHaveBeenCalled()
+  })
+})
 
 describe("ragMode sanitizer", () => {
   beforeEach(() => {

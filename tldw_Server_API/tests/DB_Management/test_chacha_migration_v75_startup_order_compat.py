@@ -23,6 +23,13 @@ pytestmark = pytest.mark.integration
 RECEIPTS = "workspace_chat_startup_receipts"
 ORDER = "message_insertion_order"
 
+
+@pytest.fixture(autouse=True)
+def _compatibility_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Later feature migrations have their own catalog coverage.
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 75)
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 79)
+
 # Populated mechanically from the frozen prior-native migration, not modern DDL.
 _PRIOR_NATIVE_SQLITE_ORDER_DDL = (
     """
@@ -281,7 +288,9 @@ def test_existing_collision_schema_skips_unrelated_postgres_ddl_and_reopen_migra
         upgraded = db_factory()
     if pg:
         assert ddl, "Native 78 must install missing startup storage"
-        assert all("workspace_chat_startup" in query for query in ddl), ddl
+        fingerprint_ddl = CharactersRAGDB._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES
+        assert all("workspace_chat_startup" in query or query == fingerprint_ddl for query in ddl), ddl
+        assert ddl.count(fingerprint_ddl) == 1
     assert upgraded.backend.table_exists(RECEIPTS)
     assert upgraded.backend.table_exists(ORDER)
     upgraded.close_all_connections()

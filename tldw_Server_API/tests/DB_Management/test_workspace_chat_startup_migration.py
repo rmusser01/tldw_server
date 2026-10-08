@@ -42,6 +42,9 @@ def test_upgrade_and_reopen_retains_existing_chat(
     for _ in range(2):
         ddl.clear()
         with monkeypatch.context() as upgrade:
+            # Stop at the receipts version so later migrations' DDL is out of scope here.
+            upgrade.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 74)
+            upgrade.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 78)
             if old.backend_type.value == "postgresql":
                 upgrade.setattr(backend_class, "execute", observe_ddl)
             upgraded = db_factory()
@@ -50,11 +53,7 @@ def test_upgrade_and_reopen_retains_existing_chat(
         assert upgraded.get_conversation_by_id(cid)["title"] == "Retained"
         assert upgraded.execute_query(
             "SELECT version FROM db_schema_version WHERE schema_name = ?", (upgraded._SCHEMA_NAME,), read_only=True
-        ).fetchone()["version"] == (
-            upgraded._POSTGRES_SCHEMA_VERSION
-            if upgraded.backend_type.value == "postgresql"
-            else upgraded._CURRENT_SCHEMA_VERSION
-        )
+        ).fetchone()["version"] == (78 if upgraded.backend_type.value == "postgresql" else 74)
         upgraded.close_all_connections()
 
 

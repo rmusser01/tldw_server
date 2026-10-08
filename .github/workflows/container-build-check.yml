@@ -59,7 +59,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout_minutes || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +70,8 @@ jobs:
             backend: true
           - name: worker
             dockerfile: Dockerfiles/Dockerfile.worker
+            # TASK-13369: allow the completed cold image to finish loading.
+            timeout_minutes: 45
             build_args: ""
             backend: true
           - name: audio-worker

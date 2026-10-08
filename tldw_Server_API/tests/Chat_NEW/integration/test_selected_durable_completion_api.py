@@ -133,6 +133,301 @@ def receipt_sources():
     ]
 
 
+@pytest.mark.parametrize("generation_status", ["stopped", "interrupted"])
+@pytest.mark.parametrize("verified", [True, False], ids=["verified", "unverified"])
+async def test_selected_durable_generation_projection_preserves_protected_authority(generation_status, verified):
+    """Exercise the real projection with a receipt-boundary double, not native Stop."""
+    from fastapi import HTTPException
+
+    cid, uid = str(uuid4()), str(uuid4())
+    reference = {
+        "version": 1,
+        "owner_key": "generation-projection-owner",
+        "conversation_id": cid,
+        "input_message_id": uid,
+        "input_message_revision": "1",
+        "selection_digest": "selection-digest",
+    }
+    result_metadata = {"version": 1, "request_context_digest": "a" * 64, "sources": []}
+    generation = {
+        "generation_status": generation_status,
+        "model_id": "gpt-4o-mini",
+        "provider": "openai",
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+    }
+    payload = {
+        "role": "assistant",
+        "content": "Partial reply",
+        "id": "provider-result",
+        "sender": "system",
+        "parent_message_id": "provider-parent",
+        "extra_metadata": {"history_result_v1": {"forged": True}},
+        "generation_metadata": {
+            **generation,
+            "sender_role": "system",
+            "history_result_v1": {"forged": True},
+            "tldw_history_recovery_v1": {"status": "result_verified"},
+            "usage": {**generation["usage"], "billed_tokens": 1000},
+        },
+    }
+    prepared = []
+    scope = {"scope_type": "global", "workspace_id": None}
+
+    def settle(conversation_id, binding, message, *, owner_client_id, owner_key):
+        assert (conversation_id, binding, owner_client_id, owner_key) == (cid, reference, "1", reference["owner_key"])
+        prepared.append(deepcopy(message))
+        return message["id"]
+
+    def read(conversation_id, *, owner_client_id, owner_key, scope, message_id):
+        assert (conversation_id, owner_client_id, owner_key, message_id) == (
+            cid,
+            "1",
+            reference["owner_key"],
+            prepared[0]["id"],
+        )
+        return [
+            {
+                "tldw_history_recovery_v1": {
+                    "version": 1,
+                    "status": "result_verified" if verified else "unverified",
+                    "scope": scope,
+                    "result": {
+                        **result_metadata,
+                        "result_message_id": message_id,
+                        "result_message_revision": "1",
+                        "admission": reference,
+                    },
+                }
+            }
+        ], 1
+
+    runtime = {}
+    call = endpoint._settle_selected_durable_result(
+        SimpleNamespace(settle_history_admission=settle, read_history_recovery_messages=read),
+        cid,
+        payload,
+        reference=reference,
+        owner_client_id="1",
+        owner_key=reference["owner_key"],
+        scope=scope,
+        result_metadata=result_metadata,
+        runtime=runtime,
+    )
+    if verified:
+        result_id = await call
+        assert runtime["tldw_history_result_v1"]["result_message_id"] == result_id
+    else:
+        with pytest.raises(HTTPException) as refused:
+            await call
+        assert refused.value.detail == {"code": "unverified_history_result"}
+        assert runtime == {}
+    assert len(prepared) == 1
+    message = prepared[0]
+    assert message["id"] != payload["id"]
+    assert message["sender"] == "assistant"
+    assert message["parent_message_id"] == uid
+    assert message["extra_metadata"] == {
+        **generation,
+        "sender_role": "assistant",
+        "history_result_v1": result_metadata,
+    }
+
+
+@pytest.mark.parametrize("generation_status", ["stopped", "interrupted"])
+def test_selected_durable_partial_generation_boundary_reopens_with_metadata(
+    selected_api, monkeypatch, generation_status
+):
+    """A finite provider plus save-boundary metadata exercises HTTP/SQLite, not native Stop."""
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    client, db, cid, headers = selected_api
+    body = body_for(client, cid, headers, stream=True)
+    generation = {
+        "generation_status": generation_status,
+        "model_id": "gpt-4o-mini",
+        "provider": "openai",
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+    }
+    save = chat_service.save_assistant_message
+    seen_payloads = []
+
+    async def partial_generation_boundary(**kwargs):
+        payload = deepcopy(kwargs["payload"])
+        assert payload["role"] == "assistant"
+        payload["generation_metadata"] = {
+            **generation,
+            "sender_role": "system",
+            "history_result_v1": {"forged": True},
+            "usage": {**generation["usage"], "billed_tokens": 1000},
+        }
+        seen_payloads.append(payload)
+        return await save(**{**kwargs, "payload": payload})
+
+    monkeypatch.setattr(chat_service, "save_assistant_message", partial_generation_boundary)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert len(seen_payloads) == 1
+    rows = db.get_messages_for_conversation(cid)
+    assert len(rows) == 2
+    result = next(row for row in rows if row["sender"] == "assistant")
+    extra = db.get_message_metadata(result["id"])["extra"]
+    expected_result = {"version": 1, "request_context_digest": selected_durable_request_digest(body), "sources": []}
+    assert extra == {**generation, "sender_role": "assistant", "history_result_v1": expected_result}
+    events = frames(response, True)
+    assert not any("error" in event for event in events), response.text
+    receipt = next(event["tldw_history_result_v1"] for event in events if "tldw_history_result_v1" in event)
+    assert receipt["result_message_id"] == result["id"]
+    assert receipt["admission"]["input_message_id"] == body["tldw_turn"]["user_message_id"]
+    reopened, _ = db.read_history_recovery_messages(
+        cid,
+        owner_client_id="1",
+        owner_key=receipt["admission"]["owner_key"],
+        scope={"scope_type": "global", "workspace_id": None},
+        message_id=result["id"],
+    )
+    assert reopened[0]["tldw_history_recovery_v1"]["result"] == receipt
+    assert db.get_message_metadata(reopened[0]["id"])["extra"] == extra
+
+
+def _settled_generation_record(selected_api, updates=None, removed=(), include_generation=True):
+    client, db, cid, headers = selected_api
+    body = body_for(client, cid, headers)
+    selection = body["tldw_turn"]["history_v1"]["selection"]
+    admission = db.append_selected_history_input(
+        cid,
+        selection,
+        {"id": body["tldw_turn"]["user_message_id"], "sender": "user", "content": body["messages"][-1]["content"]},
+        owner_client_id="1",
+        owner_key=selection["owner_key"],
+    )
+    reference = {
+        key: admission[key]
+        for key in (
+            "version",
+            "owner_key",
+            "conversation_id",
+            "input_message_id",
+            "input_message_revision",
+            "selection_digest",
+        )
+    }
+    extra = {
+        "sender_role": "assistant",
+        "history_result_v1": {
+            "version": 1,
+            "request_context_digest": selected_durable_request_digest(body),
+            "sources": [],
+        },
+    }
+    if include_generation:
+        extra.update(
+            generation_status="stopped",
+            model_id="gpt-4o-mini",
+            provider="openai",
+            finish_reason="stop",
+            usage={"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+        )
+    extra.update(deepcopy(updates or {}))
+    for key in removed:
+        extra.pop(key)
+    message = {
+        "id": str(uuid4()),
+        "sender": "assistant",
+        "content": "Partial reply",
+        "images": [],
+        "tool_calls": None,
+        "extra_metadata": extra,
+        "parent_message_id": reference["input_message_id"],
+    }
+    mid = db.settle_history_admission(cid, reference, message, owner_client_id="1", owner_key=reference["owner_key"])
+    return SimpleNamespace(db=db, cid=cid, mid=mid, reference=reference, message=message)
+
+
+def _generation_recovery(record):
+    rows, _ = record.db.read_history_recovery_messages(
+        record.cid,
+        owner_client_id="1",
+        owner_key=record.reference["owner_key"],
+        scope={"scope_type": "global", "workspace_id": None},
+        message_id=record.mid,
+    )
+    return rows[0]["tldw_history_recovery_v1"]
+
+
+@pytest.mark.parametrize(
+    "updates,removed",
+    [
+        ({"provider_claim": {"saved": True}}, ()),
+        ({"tldw_history_recovery_v1": {"status": "result_verified"}}, ()),
+        ({"generation_status": "aborted"}, ()),
+        ({"usage": {"prompt_tokens": True}}, ()),
+        ({"usage": {"prompt_tokens": 2, "billed_tokens": 5}}, ()),
+        ({"model_id": " gpt-4o-mini "}, ()),
+        ({"provider": " openai "}, ()),
+        ({"sender_role": "system"}, ()),
+        ({}, ("sender_role",)),
+        ({}, ("history_result_v1",)),
+        ({"history_result_v1": {"forged": True}}, ()),
+    ],
+    ids=[
+        "unknown-extra",
+        "forged-proof",
+        "invalid-status",
+        "boolean-usage",
+        "unknown-usage",
+        "noncanonical-model",
+        "noncanonical-provider",
+        "wrong-role",
+        "missing-role",
+        "missing-result",
+        "forged-result",
+    ],
+)
+def test_selected_durable_generation_recovery_rejects_noncanonical_metadata(selected_api, updates, removed):
+    """Even authority-sealed invalid metadata must not be sanitized into a receipt."""
+    record = _settled_generation_record(selected_api, updates, removed)
+    assert _generation_recovery(record) == {"version": 1, "status": "unverified", "code": "unsupported_projection"}
+    assert record.db.get_message_metadata(record.mid)["extra"] == record.message["extra_metadata"]
+
+
+def test_selected_durable_generation_recovery_keeps_legacy_base_metadata(selected_api):
+    record = _settled_generation_record(selected_api, include_generation=False)
+    proof = _generation_recovery(record)
+    assert proof["status"] == "result_verified"
+    assert proof["result"]["result_message_id"] == record.mid
+    assert proof["result"]["admission"] == record.reference
+
+
+@pytest.mark.parametrize("fence", ["live-state", "intent"])
+def test_selected_durable_generation_recovery_rejects_live_metadata_mutation(selected_api, monkeypatch, fence):
+    """Both full-metadata hashes fence edits; the intent case holds only the state boundary fixed."""
+    record = _settled_generation_record(selected_api)
+    assert _generation_recovery(record)["status"] == "result_verified"
+    state = record.db.message_store._history_message_state
+    with record.db.transaction() as conn:
+        original_state = state(
+            record.cid, record.mid, owner_client_id="1", owner_key=record.reference["owner_key"], conn=conn
+        )
+    assert record.db.set_message_metadata_extra(record.mid, {"generation_status": "complete"})
+    if fence == "intent":
+
+        def original_result_state(conversation_id, message_id, **kwargs):
+            return (
+                original_state
+                if (conversation_id, message_id) == (record.cid, record.mid)
+                else state(conversation_id, message_id, **kwargs)
+            )
+
+        monkeypatch.setattr(record.db.message_store, "_history_message_state", original_result_state)
+    assert _generation_recovery(record) == {
+        "version": 1,
+        "status": "unverified",
+        "code": "live_state_mismatch" if fence == "live-state" else "unsupported_projection",
+    }
+
+
 @pytest.mark.parametrize("cited", [False, True])
 @pytest.mark.parametrize("stream", [False, True])
 def test_monthly_token_admission_excludes_persistence_only_sources(selected_api, monkeypatch, cited, stream):
@@ -474,6 +769,10 @@ def test_receipt_is_server_owned_verified_atomic_result(
     assert db.get_message_by_id(uid)["content"] == " original {{char}} "
     extra = db.get_message_metadata(result_id)["extra"]
     assert extra == {
+        "generation_status": "complete",
+        "model_id": body["model"],
+        "provider": body["api_provider"],
+        **({"finish_reason": "stop"} if not stream else {}),
         "sender_role": "assistant",
         "history_result_v1": {
             "version": 1,
@@ -597,6 +896,10 @@ def test_raw_string_result_returns_verified_receipt_without_resettling(
     assert receipt["sources"] == sources
     assert db.get_message_by_id(result_id)["parent_message_id"] == uid
     assert db.get_message_metadata(result_id)["extra"] == {
+        "generation_status": "complete",
+        "model_id": body["model"],
+        "provider": body["api_provider"],
+        "finish_reason": "stop",
         "sender_role": "assistant",
         "history_result_v1": {
             "version": 1,
@@ -874,6 +1177,57 @@ def test_raw_provider_projection_rejects_before_result_authority(selected_api, m
         if invalid != "number":
             assert response.json()["detail"]["code"] == "unsupported_history_result_projection"
     assert db.count_messages_for_conversation(cid) == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(
+    "malformed", ["utf8", None, "projection"], ids=["malformed-utf8", "provider-interruption", "malformed-projection"]
+)
+def test_raw_byte_validation_fences_partial_result_authority(selected_api, monkeypatch, asynchronous, malformed):
+    client, db, cid, headers = selected_api
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    body = body_for(client, cid, headers, True)
+    prefix = (
+        "data: " + json.dumps({"choices": [{"delta": {"role": "assistant", "content": "prefix "}}]}) + "\n\n"
+    ).encode("utf-8")
+    rejected_chunk = (
+        b"\xff" if malformed == "utf8" else b'data: {"choices":[{"delta":{"role":"user","content":"bad"}}]}\n\n'
+    )
+
+    def synchronous_stream():
+        yield prefix
+        if malformed:
+            yield rejected_chunk
+        else:
+            raise RuntimeError("provider connection closed")
+
+    async def asynchronous_stream():
+        yield prefix
+        if malformed:
+            yield rejected_chunk
+        else:
+            raise RuntimeError("provider connection closed")
+
+    monkeypatch.setattr(
+        endpoint,
+        "perform_chat_api_call",
+        lambda *args, **kwargs: asynchronous_stream() if asynchronous else synchronous_stream(),
+    )
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    events = frames(response, True)
+    assert any(
+        choice.get("delta", {}).get("content") == "prefix " for event in events for choice in event.get("choices", [])
+    ), response.text
+    assert any("error" in event for event in events), response.text
+    if malformed:
+        assert not any(event.get("success") is True for event in events)
+        assert not any(choice.get("finish_reason") == "stop" for event in events for choice in event.get("choices", []))
+        assert not any("tldw_history_result_v1" in event or "tldw_message_id" in event for event in events)
+        assert db.count_messages_for_conversation(cid) == 1
+    else:
+        assert any("tldw_history_result_v1" in event for event in events), response.text
+        assert db.count_messages_for_conversation(cid) == 2
 
 
 @pytest.mark.parametrize("fault", ["metadata", "unverified"])

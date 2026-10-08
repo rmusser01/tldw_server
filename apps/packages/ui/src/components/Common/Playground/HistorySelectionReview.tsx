@@ -39,12 +39,17 @@ export function HistorySelectionReview({
   selection,
   onExpand,
   onBind,
-  onReprepareRecovery
+  onReprepareRecovery,
+  hideRecovery
 }: {
   selection: HistorySelectionController
   onExpand?: () => void
   onBind?: () => void
   onReprepareRecovery?: (turn: HistoryTurnRecovery) => void
+  /** Leave out retained turns the transcript already shows or still handles (CS-04). */
+  hideRecovery?: (
+    entry: NonNullable<HistorySelectionController["recoveries"]>[number]
+  ) => boolean
 }) {
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
@@ -197,66 +202,88 @@ export function HistorySelectionReview({
           )}
         </p>
       )}
-      {selection.recoveries?.map((entry) => (
-        <div
-          key={entry.turn.operation_id}
-          className="mb-3 rounded border p-3"
-          role="status">
-          <p className="font-medium">
-            {text("recoveryTitle", "Turn needs review")}
-          </p>
-          <p>
-            {text(
-              "recoveryMessage",
-              "The original send outcome is retained separately from history. It will not be sent again automatically."
-            )}
-          </p>
-          <p>
-            {entry.turn.persistence === "server" && entry.turn.admission
-              ? text(
-                  "recoveryState.accepted_response_unknown",
-                  "User input accepted; response outcome unknown"
-                )
-              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
-          </p>
-          <details>
-            <summary>
-              {text("inspectRecovery", "Inspect original input and result")}
-            </summary>
-            <pre className="whitespace-pre-wrap break-words">
-              {entry.turn.input_text}
-            </pre>
-            <pre className="whitespace-pre-wrap break-words">
-              {entry.turn.result_text}
-            </pre>
-          </details>
-          <Button
-            onClick={() =>
-              void navigator.clipboard.writeText(
-                entry.turn.result_text || entry.turn.input_text
-              )
-            }>
-            {text("copyRecovery", "Copy recovered text")}
-          </Button>
-          <Button onClick={() => void selection.dismissRecovery(entry)}>
-            {text("dismissRecovery", "Dismiss recovery")}
-          </Button>
-          {entry.turn.persistence === "server" && entry.turn.logical_user_message_id && (
-            <Button onClick={() => void selection.inspectRecovery(entry)} disabled={!selection.settingsQualified}>
-              {text("verifyRecovery", "Verify saved outcome")}
-            </Button>
-          )}
-          {onReprepareRecovery && entry.turn.persistence === "server" && entry.turn.admission &&
-            entry.turn.finalized_selection && entry.turn.logical_user_message_id && !entry.turn.observed_result && (
+      {selection.recoveries
+        ?.filter((entry) => !hideRecovery?.(entry))
+        .map((entry) => (
+          <div
+            key={entry.turn.operation_id}
+            className="mb-3 rounded border p-3"
+            role="status">
+            {entry.turn.outcome === "stopped" ||
+            entry.turn.outcome === "interrupted" ? (
               <>
-                <p>{text("reprepareWarning", "A new send can produce another answer. The earlier outcome remains unresolved.")}</p>
-                <Button onClick={() => onReprepareRecovery(entry.turn)} disabled={!selection.settingsQualified}>
-                  {text("reprepareRecovery", "Reprepare input")}
-                </Button>
+                {/* A partial reply kept on this device only (CS-04, #3104). */}
+                <p className="font-medium">
+                  {entry.turn.outcome === "stopped"
+                    ? text("keptReplyStoppedTitle", "Reply stopped")
+                    : text("keptReplyInterruptedTitle", "Reply interrupted")}
+                </p>
+                <p>
+                  {text(
+                    "keptReplyMessage",
+                    "Your question is saved. The part of the reply that arrived is kept on this device only; it was not saved to your server."
+                  )}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">
+                  {text("recoveryTitle", "Turn needs review")}
+                </p>
+                <p>
+                  {text(
+                    "recoveryMessage",
+                    "The original send outcome is retained separately from history. It will not be sent again automatically."
+                  )}
+                </p>
+                <p>
+                  {entry.turn.persistence === "server" && entry.turn.admission
+                    ? text(
+                        "recoveryState.accepted_response_unknown",
+                        "User input accepted; response outcome unknown"
+                      )
+                    : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
+                </p>
               </>
             )}
-        </div>
-      ))}
+            <details>
+              <summary>
+                {text("inspectRecovery", "Inspect original input and result")}
+              </summary>
+              <pre className="whitespace-pre-wrap break-words">
+                {entry.turn.input_text}
+              </pre>
+              <pre className="whitespace-pre-wrap break-words">
+                {entry.turn.result_text}
+              </pre>
+            </details>
+            <Button
+              onClick={() =>
+                void navigator.clipboard.writeText(
+                  entry.turn.result_text || entry.turn.input_text
+                )
+              }>
+              {text("copyRecovery", "Copy recovered text")}
+            </Button>
+            <Button onClick={() => void selection.dismissRecovery(entry)}>
+              {text("dismissRecovery", "Dismiss recovery")}
+            </Button>
+            {entry.turn.persistence === "server" && entry.turn.logical_user_message_id && (
+              <Button onClick={() => void selection.inspectRecovery(entry)} disabled={!selection.settingsQualified}>
+                {text("verifyRecovery", "Verify saved outcome")}
+              </Button>
+            )}
+            {onReprepareRecovery && entry.turn.persistence === "server" && entry.turn.admission &&
+              entry.turn.finalized_selection && entry.turn.logical_user_message_id && !entry.turn.observed_result && (
+                <>
+                  <p>{text("reprepareWarning", "A new send can produce another answer. The earlier outcome remains unresolved.")}</p>
+                  <Button onClick={() => onReprepareRecovery(entry.turn)} disabled={!selection.settingsQualified}>
+                    {text("reprepareRecovery", "Reprepare input")}
+                  </Button>
+                </>
+              )}
+          </div>
+        ))}
       {selection.status === "loading" && (
         <StatePanel
           state="loading"

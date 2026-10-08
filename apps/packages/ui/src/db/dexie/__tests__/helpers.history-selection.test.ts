@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }))
 import { formatToChatHistory, formatToMessage } from "../helpers"
 import type { Message } from "../types"
+import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 const rows: Message[] = [
   {
     id: "a",
@@ -97,4 +98,52 @@ it("restores ordered bounded source presentation without treating public metadat
   expect(formatSelectedHistory(capture).messages[0].metadataExtra).not.toHaveProperty("tldw_history_recovery_v1")
   capture.selected_content[0].extra_metadata.history_result_v1.sources[0].metadata.headers = { authorization: "not-a-display-field" }
   expect(() => formatSelectedHistory(capture)).toThrow("invalid_history_durable_result")
+})
+
+const ownedCapture = (ownerKey: string): HistorySelectionCaptureV1 => {
+  const rows = [
+    { id: "u", revision: "digest-u", parent_id: null, role: "user", settled: true },
+    { id: "a", revision: "digest-a", parent_id: "u", role: "assistant", settled: true }
+  ]
+  return {
+    status: "captured",
+    snapshot: {
+      version: 1,
+      owner_key: ownerKey,
+      conversation_id: "h",
+      fences: { conversation: "c", history: "h", settings: "s" },
+      nodes: rows,
+      source_digest: "source",
+      interpretation_status: { kind: "parent_graph_v1" },
+      storage_context_digest: "storage"
+    },
+    rows,
+    selected_content: [
+      { id: "u", revision: "digest-u", message: "Question", images: [], extra_metadata: { local_history: {} } },
+      { id: "a", revision: "digest-a", message: "Answer", images: [], extra_metadata: { local_history: { modelId: "m" } } }
+    ],
+    view: {
+      view_session_id: "view",
+      owner_key: ownerKey,
+      conversation_id: "h",
+      interpretation: { kind: "parent_graph_v1" },
+      cursor: { kind: "after_message", message_id: "a" },
+      selection_revision: 1
+    },
+    purpose: "send",
+    storage_context_digest: "storage"
+  }
+}
+
+it("leaves serverMessageId unset on a locally owned capture, whose ids are local rows", () => {
+  const display = formatSelectedHistory(ownedCapture("local-history-v1:profile"))
+
+  expect(display.messages.map((row) => row.serverMessageId)).toEqual([undefined, undefined])
+})
+
+it("does not read a server message version from the node revision digest", () => {
+  const display = formatSelectedHistory(ownedCapture(`native-history-v1:sha256:${"c".repeat(64)}`))
+
+  expect(display.messages.map((row) => row.serverMessageId)).toEqual(["u", "a"])
+  expect(display.messages.map((row) => row.serverMessageVersion)).toEqual([undefined, undefined])
 })

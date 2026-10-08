@@ -12,6 +12,12 @@ export class HistorySelectionError extends Error {
   }
 }
 
+/** Owner keys minted by this client's local H1 authority (db/dexie/history-selection.ts). */
+export const LOCAL_HISTORY_OWNER_KEY_PREFIX = "local-history-v1:"
+/** Any other owner key belongs to a server (native) conversation, whose node ids are its message ids. */
+export const isLocalHistoryOwnerKey = (ownerKey: string): boolean =>
+  ownerKey.startsWith(LOCAL_HISTORY_OWNER_KEY_PREFIX)
+
 const indexNodes = (nodes: readonly HistoryNodeV1[], validateGraph = false): Map<string, HistoryNodeV1> => {
   const byId = new Map<string, HistoryNodeV1>()
   let conversationId: string | undefined
@@ -43,6 +49,20 @@ const indexNodes = (nodes: readonly HistoryNodeV1[], validateGraph = false): Map
     }
   }
   return byId
+}
+
+/**
+ * The conversation's latest leaf: the last node, in owner order, that no other
+ * node replies to. A view opened without a bookmark starts here.
+ */
+export const latestHistoryTipId = (
+  nodes: readonly Pick<HistoryNodeV1, "id" | "parent_id">[]
+): string | null => {
+  const parents = new Set(nodes.map((node) => node.parent_id))
+  for (let index = nodes.length - 1; index >= 0; index--) {
+    if (!parents.has(nodes[index].id)) return nodes[index].id
+  }
+  return null
 }
 
 /** Resolve only explicit parent IDs. Source order, content and timestamps have no authority. */

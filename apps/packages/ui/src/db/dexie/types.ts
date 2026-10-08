@@ -250,6 +250,10 @@ export type Prompt = {
   lastSyncedAt?: number | null;       // Timestamp of last successful sync
   serverUpdatedAt?: string | null;    // Server's updated_at for conflict detection
 
+  // ─── Server prompt library link (/api/v1/prompts, not Prompt Studio) ───
+  serverLibraryId?: number | null;    // Library prompt id this local copy was made from
+  serverLibraryUuid?: string | null;  // Library prompt uuid; the stable link used for de-duplication
+
   // ─── Studio-specific Fields (progressive disclosure) ───
   promptFormat?: PromptFormat;
   promptSchemaVersion?: number | null;
@@ -264,6 +268,7 @@ export type Prompt = {
 };
 
 export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
+export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
 /** Recovery text is never a message, selected history, or persisted write capability. */
 export type HistoryTurnRecovery = {
   operation_id: string;
@@ -278,6 +283,19 @@ export type HistoryTurnRecovery = {
   result_text: string;
   state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
+  /**
+   * Set when the reply belongs back in the transcript rather than in review
+   * (CS-04, #3104): "complete" (it finished but its view was gone),
+   * "interrupted" (cut off: reload, dropped connection, navigation) or
+   * "stopped" (the user stopped it). Absent for failures that need review.
+   */
+  outcome?: HistoryTurnOutcome;
+  interruption_reason?: string;
+  /** The reply was already written to the owner; only the view must follow it. */
+  settled_message_id?: string;
+  /** Display identity of the model that wrote the reply. */
+  model_name?: string;
+  model_id?: string;
 } & (
   | { persistence?: "client"; input_id: string; assistant_id: string }
   | {

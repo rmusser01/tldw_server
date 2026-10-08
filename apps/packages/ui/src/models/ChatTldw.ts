@@ -30,6 +30,10 @@ import { canonicalHistoryJson } from "@/db/dexie/history-selection"
 import { historyAdmissionReference, prepareHistoryContext } from "@/services/chat-history-selection"
 import { historyDurableRequestDigest, validateHistoryDurableAdmission } from "@/services/history-durable-turn"
 import { parseHistoryDurableResult, validateHistoryDurableResultReceipt } from "@/utils/history-durable-sources"
+import {
+  beginServerChatWrite,
+  type ServerChatWriteOutcome
+} from "@/store/server-chat-save-status"
 
 export interface ChatTldwOptions {
   model: string
@@ -198,6 +202,7 @@ export class ChatTldw {
         selectedRequest.tldw_turn!.result_v1?.sources.length ? "rag" : "plain")
     }
     let observationChunk: Record<string, unknown> | null = null
+    let serverWriteAcknowledged = false
 
     const tldwMessages = options?.preparedRequest
       ? []
@@ -269,6 +274,7 @@ export class ChatTldw {
             this.historyResult = result
             this.serverMessageId = result.result_message_id
             this.serverMessagesAlreadyPersisted = true
+            serverWriteAcknowledged = true
           }
           if (changed) observationChunk = {
             tldw_history_admission_v1: admission,
@@ -306,6 +312,7 @@ export class ChatTldw {
           chunk.tldw_message_id.trim().length > 0
         ) {
           this.serverMessagesAlreadyPersisted = true
+          if (streamedConversationId === requestedConversationId) serverWriteAcknowledged = true
         }
       }
       if (acceptsReceipt && this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
@@ -377,7 +384,20 @@ export class ChatTldw {
     )
 
     const getUserMessageId = () => this.serverUserMessageId
+    // A completion the server persists into an existing server chat is a
+    // server write. Record its outcome so chat persistence labels only claim
+    // the server once it has acknowledged the turn (CS-03 / XS-05, #3104).
+    const serverWriteChatId =
+      this.saveToDb === true && !this.clientManagedHistory
+        ? this.conversationId
+        : undefined
+
     async function* generator() {
+      const endServerWrite = serverWriteChatId
+        ? beginServerChatWrite(serverWriteChatId)
+        : null
+      // Stops and dropped transports leave the server outcome unknown.
+      let serverWriteOutcome: ServerChatWriteOutcome = "unknown"
       let fullText = ""
       try {
         for await (const token of stream) {
@@ -411,7 +431,14 @@ export class ChatTldw {
         if (interruptionChunk && !signal?.aborted) {
           yield interruptionChunk
         }
+        if (!interruptionChunk && !signal?.aborted) {
+          serverWriteOutcome = serverWriteAcknowledged ? "saved" : "failed"
+        }
+      } catch (error) {
+        if (!signal?.aborted) serverWriteOutcome = "failed"
+        throw error
       } finally {
+        endServerWrite?.(serverWriteOutcome)
         // Synthesize a minimal LangChain-style result for handleLLMEnd
         if (callbacks && callbacks.length > 0) {
           const userMessageId = getUserMessageId()

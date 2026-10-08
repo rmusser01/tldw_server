@@ -117,6 +117,7 @@ export const isServicePromptRequestPath = (
   )) return true
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
+  if (pathname === "/api/v1/notes/wikilinks/resolve") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true

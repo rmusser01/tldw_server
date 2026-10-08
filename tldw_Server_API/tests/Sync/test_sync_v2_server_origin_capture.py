@@ -8,7 +8,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chat_sessions_endpoint
 from tldw_Server_API.app.api.v1.endpoints import character_messages as messages_endpoint
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
@@ -136,6 +137,7 @@ def _notes_app(
 
     app.dependency_overrides[notes_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[notes_endpoint.get_request_user] = _user_override
+    app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(kind="user", is_admin=True)
     app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     monkeypatch.setattr(
         notes_endpoint,
@@ -166,6 +168,7 @@ def _chat_messages_app(
     app.dependency_overrides[messages_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[chat_sessions_endpoint.get_request_user] = _user_override
     app.dependency_overrides[messages_endpoint.get_request_user] = _user_override
+    app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(kind="user", is_admin=True)
     monkeypatch.setattr(
         chat_sessions_endpoint,
         "get_active_server_origin_sync_service_for_user",
@@ -1200,6 +1203,95 @@ def test_inactive_sync_note_restore_keeps_existing_direct_behavior(
     assert restore_response.status_code == 200
     assert restore_response.json()["deleted"] is False
     assert chacha_db.get_note_by_id("note-restore-direct", include_deleted=True)["deleted"] in (0, False)
+
+
+def test_active_sync_wikilink_rewrite_and_undo_are_captured_as_server_origin_upserts(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """Updating ``[[Old title]]`` links after a rename (#3110) must not bypass active Sync."""
+
+    client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+    for note_id, title, content in (
+        ("note-renamed", "Old title", "The renamed note."),
+        ("note-linker", "Linker", "See [[Old title]]."),
+        ("note-stale", "Stale linker", "Also [[Old title]]."),
+    ):
+        created = client.post("/api/v1/notes/", json={"id": note_id, "title": title, "content": content})
+        assert created.status_code == 201, created.text
+    renamed = client.put(
+        "/api/v1/notes/note-renamed", json={"title": "New title"}, headers={"expected-version": "1"}
+    )
+    assert renamed.status_code == 200, renamed.text
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+
+    def note_envelopes(object_id: str) -> list[SyncEnvelope]:
+        envelopes = sync_service.store.list_envelopes_after(dataset_id, 0, domains=["notes.note"], limit=50)
+        return [envelope for envelope in envelopes if envelope.object_id == object_id]
+
+    referrers = client.post(
+        "/api/v1/notes/wikilinks/referrers",
+        json={"title": "Old title", "exclude_note_id": "note-renamed", "unresolved_only": True},
+    )
+    assert referrers.status_code == 200, referrers.text
+    targets = {note["id"]: note["version"] for note in referrers.json()["notes"]}
+    assert set(targets) == {"note-linker", "note-stale"}
+    # One linking note changes after the count.
+    edited = client.put(
+        "/api/v1/notes/note-stale",
+        json={"content": "Edited: [[Old title]]."},
+        headers={"expected-version": str(targets["note-stale"])},
+    )
+    assert edited.status_code == 200, edited.text
+    stale_envelopes_before = len(note_envelopes("note-stale"))
+
+    rewrite = client.post(
+        "/api/v1/notes/wikilinks/rewrite",
+        json={
+            "note_id": "note-renamed",
+            "old_title": "Old title",
+            "notes": [{"id": note_id, "expected_version": version} for note_id, version in targets.items()],
+        },
+    )
+
+    assert rewrite.status_code == 200, rewrite.text
+    results = {result["id"]: result for result in rewrite.json()["results"]}
+    assert results["note-linker"]["status"] == "updated"
+    assert results["note-stale"]["status"] == "skipped_conflict"
+    assert chacha_db.get_note_by_id("note-linker")["content"] == "See [[New title]]."
+    assert chacha_db.get_note_by_id("note-stale")["content"] == "Edited: [[Old title]]."
+    assert len(note_envelopes("note-stale")) == stale_envelopes_before
+    linker_envelopes = note_envelopes("note-linker")
+    assert [envelope.operation for envelope in linker_envelopes] == ["upsert", "upsert"]
+    assert linker_envelopes[-1].payload == {
+        "title": "Linker",
+        "content": "See [[New title]].",
+        "conversation_id": None,
+        "message_id": None,
+    }
+
+    undo = client.post(
+        "/api/v1/notes/wikilinks/rewrite/undo",
+        json={
+            "old_title": "Old title",
+            "replacement": rewrite.json()["replacement"],
+            "notes": [
+                {
+                    "id": "note-linker",
+                    "expected_version": results["note-linker"]["version"],
+                    "replacements": results["note-linker"]["replacements"],
+                }
+            ],
+        },
+    )
+
+    assert undo.status_code == 200, undo.text
+    assert [result["status"] for result in undo.json()["results"]] == ["restored"]
+    assert chacha_db.get_note_by_id("note-linker")["content"] == "See [[Old title]]."
+    linker_envelopes = note_envelopes("note-linker")
+    assert [envelope.operation for envelope in linker_envelopes] == ["upsert", "upsert", "upsert"]
+    assert linker_envelopes[-1].payload["content"] == "See [[Old title]]."
 
 
 def test_active_sync_note_create_idempotency_key_replays_and_rejects_conflicts(

@@ -1920,3 +1920,291 @@ actual dev3ca1ff055be3c75a7fa844a02b5d8ba925baa2be, which includes PR3203 Chat,
 Notes and Sync changes beyond the prior7ba tip. Queue remains unset. All five
 findings are locally corrected, but incoming union/global corrected-batch
 qualification is not yet established. No native allowance or merge gate is waived.
+
+The normal five-fix correction commit95b is local, not published. Current dev3ca
+is being semantically integrated without resetting existing fixes or protected
+worktrees. Incoming review found Retry partial-reply data loss (P1), additional
+save-receipt/lifecycle/selected-generation-metadata P2s, VN retry/cancellation and
+quarantine P2s, and Notes version/selection/typing/private-query P2s. Bounded causal
+tests and minimum existing-pattern corrections are active; no overall clean
+review or integrated qualification is claimed. Shared main Vitest was externally
+repointed to a missing foreign dependency target; unchanged owned COW dependencies
+are used in immutable source snapshots instead of altering shared links/caches.
+All failed fixtures, collectors, test/type runs and original review findings stay
+separately retained. Published135 CI is untouched and historical for a successor.
+
+The first integrated Chat re-review validates four additional recovery findings:
+adjacency can discard an original partial after a failed replacement (P1), a real
+message-id conflict can become false Keep success, delayed Retry reads can cross
+a navigation ABA, and failed automatic Keep can hide recovery controls. The
+distinct final causal corpus is8FAIL/127PASS; the same135 cases pass after minimum
+shared fixes. The earlier fixture cached no retained entry and therefore did not
+reproduce the adjacency issue; retain its3FAIL/8PASS report separately. Original
+records are now dismissed only by a confirmed submitted Retry or verified owner
+settlement, not transcript adjacency. Substantive re-review remains pending.
+
+Notes conflict-action9causal failures now pass the same12 cases, with42 owning
+passes and a completed independent source-bound review without actionable P1/P2.
+The captured-owner wikilink query corpus has15causal failures then16focused and
+103owning passes; explicit query-result types correct two compile errors. A real
+transport allowlist omission is being corrected, so this is not yet production
+transport qualification. Backend atomic version guarding and selected-generation
+projection owning checks are still active, with original failures retained.
+
+The first new11file frontend execution has434PASS/5FAIL: two VN fixture deadlines,
+two omitted snapshot config dependencies and one sandbox loopback permission
+failure. Distinct host-access execution passes the VN cases unchanged but lacks
+the second inspected tracked MCP config input (437PASS/2FAIL). The external
+collector now archives both exact tracked inputs; no test assertion, timeout,
+shared dependency, profile, provider or shared service was changed. These are
+failed predecessor executions, not a clean final integrated suite.
+
+Current Chat re-review has no actionable P1/P2 on35 source-bound files. The
+additional already-kept/hidden-original case was causal1FAIL/6PASS before the
+minimum hide-predicate correction; the final same three-file corpus has136PASS.
+All prior failed reports remain separately retained. Native provider acceptance
+is not established by these finite mounted transport/storage/capture doubles.
+
+Notes lookup ownership was reproduced by3FAIL/6PASS on the actual route and
+existing expected-user dependency. Adding only that dependency to the two search
+aliases and wikilink resolve produces the same9PASS. The real extension worker
+also exposed mutually exclusive request guards; retaining only the existing
+captured request scope and adding the exact POST allowlist path gives411PASS.
+Original three static findings and failed fixture attempts remain retained.
+After correcting only the finite Sync fixture's missing authenticated-principal
+override, the five whole-file Notes/Sync corpus has123PASS. Its broad collector
+still fails because concurrent OpenAPI regeneration changed a non-owning input;
+this is own-domain passing execution, not a global source-equivalence claim.
+Independent final Notes/atomic-Sync review remains pending.
+
+The predecessor full UI execution is6434PASS/9FAIL: five protected memory tests
+lack a synthetic configured owner, three settings5s deadlines, and one Media
+footer5s deadline. Unchanged isolation passes the three settings cases but
+retains the Media failure. Scoping only two named Media control queries avoids
+unrelated accessible-role traversal:142PASS, footer1.774s, same assertions,
+clicks and5s deadline. No protected memory test was edited. A single narrow
+human fixture-only permission question is unanswered; do not silently edit,
+exclude or weaken those tests or the production cache ownership guard.
+
+Current immutable types execution is exit0 with exact app source. Original
+build-v1 fails before compilation because the external collector chose a
+nonconforming dist-directory name; only the collector is corrected to the
+existing .next-live-tier-* convention. Original quality-v1 rejects a fatal or
+ignored lint row before qualification; diagnostic successor preserves actual
+raw rows rather than weakening the assertion. These failures are not product
+qualification, and no budgets, test deadlines, shared dependencies, services,
+profiles or protected databases were changed. Published135 remains untouched;
+current dev3ca is independently unchanged and not yet committed/published as
+an integrated batch. Stage26 and TASK13421.1 remain In Progress.
+
+### Final Bounded Qualification And Protected-Test Stop
+
+The final narrow Chat quality correction preserves runtime behavior: callback
+dependencies now match actual messages, and new negative-control fixtures use
+existing types rather than any. Three complete owning files pass125 cases with
+exact app source; a separate three-file independent review has no actionable
+P1/P2. Compose this review with Dewey's prior35-file report, not a claim that all35
+were rereviewed after fixture typing changes.
+
+Hooke's selected-generation review identified a real malformed-UTF8 partial
+authority gap. Actual finite HTTP/SQLite sync and native-async iterator cases
+reproduce RED2FAIL/2PASS. The first correction produces3PASS/1FAIL: native-async
+validation HTTPException incorrectly reaches successful cleanup. Retain both
+failed runs. Minimum shared correction converts validation-owned rejection to
+the existing sanitized provider error after setting the existing rejection
+marker; provider iteration remains outside that catcher. Six corrected cases
+pass. The final formatted two-file owning run passes135/0FAIL/ERROR/SKIP with
+all16894 bound source entries exact. Hooke's corrected14-file substantive review
+has no actionable P1/P2 and exact final hashes; reviewer executed no tests. The
+earlier135-pass run predates formatting and remains separately attributed.
+
+Euclid's final WIK12323-file and atomic-Sync12-file reviews have no actionable
+P1/P2, with parent-read full reports and current source exact. Existing two-file
+wikilink tests pass25 cases; that overbroad collector exits1 only because two
+non-owning Chat files changed. Copernicus's40-file migration/storage/AuthNZ/Jobs
+review also remains exact and has no actionable P1/P2. These are bounded review
+and owning evidence, not current global backend/AuthNZ qualification.
+
+Final app types exit0. Immutable production build/tokens/unchanged budgets each
+exit0, app source exact, not served: shared556073<614400 and heaviest856775<921600
+bytes. Final372-file matched lint has11inherited errors/2416inherited warnings and
+zero new findings. Fresh66-production-Python Bandit has11inherited lows/0errors
+and zero new findings; rawCleanfalse, not a zero-finding scan. The touched selected
+test's raw Bandit has194B101 assertions/0other findings/errors/suppressions,
+distinct from earlier185/157/106 scans. Official OpenAPI sandbox check first
+fails with permission logs and actual fingerprint drift; separate unchanged
+host-access official check exits0 with source exact. Original failure retained,
+no fingerprint regeneration or test/permission policy weakening. Canonical
+tool/task tests pass149 cases before this final note append.
+
+Current frontend qualification is STOPPED at three bounded whole11-file runs:
+each437PASS/2FAIL, source exact, last run one worker. Both Task69 account/server
+trusted-memory recovery cases at VNAssetsWorkbench.test.tsx468 time out at the
+unchanged5s deadline. No causal production root is established; the predecessor
+439-pass run is not current qualification and compiler contention is not proven
+the cause. No fourth rerun, protected VN edit, assertion/timeout/cache/ownership
+weakening, test exclusion or native operation. Alternatives read: scoped named
+role queries in the corrected Media footer test, same-file storage recovery
+controls, and VN journal authority/denied-storage tests. Query traversal versus
+actual recovery settlement remains a hypothesis, not a diagnosed fix. One NEW
+bounded provider-free VN investigation/fixture-correction question is pending;
+the prior protected-memory synthetic-owner fixture question is unanswered and
+was not repeated. The predecessor full UI6434PASS/9FAIL remains failed; no final
+whole UI/backend/AuthNZ run or global corrected-batch qualification is claimed.
+
+Actual dev independently advanced to005802bdb070fd68e087c4db3f831c33bef07c39:
+explicit GitHub refs and separate branch API agree. Its19-file Buddy/Persona
+runtime/test and VN-test delta is not docs-only, integrated or qualified. Only a
+read-only qualification ref was fetched. The retained local merge remains
+HEAD95b/MERGE_HEAD3ca with14 unresolved index entries and resolved working
+markers, not a committed integration. Published135 and its human740-byte suffix
+and healthy hosted CI are unchanged. No new commit/publication/body/hosted retry,
+PR merge, cleanup, artifact serving, shared-service/protectedDB/profile/native
+mutation. Task/Stage26 remain In Progress; all reviewers are closed and local
+qualification sessions drained. Final explicit normal preflight includes owned
+untracked test files as well as the tracked PR/incoming union, unlike its
+predecessor's narrower argument list. That normal preflight passes with source
+exact; final owned-note preflight/readback records the later note updates
+separately. Do not publish a partial or evidence-only batch.
+
+### 2026-10-08 Authorized Protected-Fixture Continuation
+
+The human's direct instruction to fix the issues answers the two pending bounded
+VN recovery investigation and configured-owner memory-fixture questions. Stage26
+continues in the same isolated95b/3ca checkout. Preserve all previous failed
+reports, qualified changes and unresolved merge index until verification.
+
+The new provider-free VN diagnostic reaches the refresh click in under150ms but
+times out waiting for the storage-refusal message. Slow button traversal is not
+the demonstrated cause. Trace the actual storage object and spy before changing
+the fixture. The memory fixture must supply a synthetic configured server/owner
+without mocking away real domain-cache authority checks. Keep every assertion,
+timeout, guard, health check and budget. No native input, browser probe, provider
+inference, protected database or shared-service operation is authorized.
+
+The old isolated framework-venv activation file is unavailable. Existing main
+venv activation runs the official backlog-py task editor; no shared dependencies
+are installed or changed. Reusable owned frontend dependency copies remain
+available. Final integrated tests, types, immutable build, security, substantive
+manual review and normal preflights still precede publication to existing3071.
+
+Both bounded fixture questions are now answered by the direct human request.
+The VN diagnostic proves the global Storage prototype differs from the actual
+sessionStorage prototype: the old spy intercepted zero reads. The one-line
+fixture correction spies on the actual prototype. Memory tests now supply a
+complete synthetic manual/device credential through the existing storage mock;
+real configuration and domain-cache authority checks remain active. All test
+bodies, assertions and deadlines are retained. No production fix was needed.
+
+The original memory fixture fails all five cases with server-not-configured;
+the corrected fixture passes all five. Its owning configuration/domain-cache
+controls pass181 cases across3 files. The unchanged11-file frontend corpus first
+has438PASS/1FAIL in the sandbox because an isolated harness listener is denied
+EPERM, then439PASS/0FAIL with host permission and identical source. Both original
+VN recovery cases pass. Planck's completed17-file independent review has no
+actionable P1/P2, and parent verifies current hashes and unchanged assertions.
+Every failed diagnostic, historical timeout and permission attempt is retained.
+
+The broader345-file UI corpus and reviewed safe backend/AuthNZ unions are still
+in progress; no overall corrected-batch acceptance is claimed. Actual dev2c5f
+also needs normal integration. Independent read-only inspection identifies
+SQLite77/PostgreSQL81 migration-ID collisions and the product-write extraction
+overlap with the existing atomic wikilink guard. Retain both catalogs/guards and
+incoming transaction preservation; qualify the actual combined source before
+publication. ADR065 is Accepted; ADR066 alone remains Proposed.
+
+The resumed current-source UI owning run completes6446PASS/345 files and the
+frontend run439PASS/11 files, zero failures/pending/todo. Types use the unchanged
+8GB limit and pass. Immutable build/tokens/unchanged budgets all pass, with
+shared556150<614400 and heaviest856880<921600 bytes; artifact is not served.
+Matched373-file TypeScript lint has zero new findings (11 inherited errors/2416
+warnings);66 production Python files have zero new findings (11 inherited lows).
+Canonical149PASS and the normal PR/incoming/owned-test preflight pass. Counts
+overlap and are not repository-wide unique totals.
+
+The completed safe backend attempt is FAILED:6138PASS/26FAIL/135SKIP. Its100
+Jobs gating skips require explicit RUN_JOBS=1 in the final safe owning runner;
+do not activate heavy Evaluations or model tests. Four migration/stream/plugin
+contract corrections now pass71 cases with the pinned framework and official
+PostgreSQL fixtures, zero failures/errors/skips. Nash independently reviews the
+exact corrected tests with no actionable P1/P2. The fingerprint DDL exception
+accepts only the exact registered statement and requires one occurrence.
+
+Actual dev advances to97ea9cd5 throughPR3213, with129 functional capture/refresh,
+egress and Workspace changes. ADR066 is now Accepted on that incoming source.
+The branch is fetched read-only; these changes are not yet integrated or locally
+qualified. Keep the completed current UI/build evidence distinct from the final
+successor. Catalog historical-shape compatibility, KnowledgeQA citation/thread
+currentness and metadata corrections remain private sidecars until integration.
+
+The missing older framework runtime is not restored over shared dependencies.
+An owned COW runtime pins repository-required Pydantic2.13.5 with FastAPI0.142.1.
+Main runtime Pydantic2.11.7 causes three-schema OpenAPI drift; that failed check
+is retained. The distinct pinned-runtime official check passes without changing
+the fingerprint. AuthNZ passes522 cases with zero skips under both runtimes;
+the pinned run supplies current framework evidence. Copied historical editable
+ML dependency metadata still has inherited conflicts and is not globally
+qualified or upgraded. The210-file safe backend run remains active at this
+checkpoint; no total backend pass or final publication readiness is claimed.
+
+Actual dev2c5f is independently unchanged. Private pre-integration KnowledgeQA
+corrections bind partial results and exported scope to the captured request,
+with identical-test72PASS/5FAIL then77PASS and223 owning passes. These results
+are not integrated-source acceptance. Private metadata whitespace/navigation
+and migration79/83 compatibility work continues independently. Preserve the
+426 changed tracked paths,11 owned new tests and original unresolved merge
+index in the resumed before-staging recovery artifact. No partial publication,
+native/browser operation, protected-data/service change or merge has occurred.
+
+### 2026-10-08 Continued Incoming Functional Corrections
+
+Private catalog startup correction retains released74/78 behavior and passes
+243 SQLite cases with six inherited skips,25 focused PostgreSQL cases and18
+modern PostgreSQL/RLS cases. Mill independently evaluates the exact source
+with no actionable P1/P2. Actual97ea Workspace ON CONFLICT/boolean changes
+are preservation-checked, not runtime-qualified, and remain unintegrated.
+
+The bounded public HTTP probe now uses the existing16MiB article byte cap.
+Actual valid-gzip/oversize/identity RED-v2 has three failures; identical cases
+pass after the correction and the owning corpus passes266 cases. Carver's
+independent review has no actionable P1/P2. Production Bandit is clean; the
+raw touched test scan reports229 B101 assertions, not zero findings. The cap
+is per response, not an aggregate capture budget or configured article limit.
+
+Private Notes materializer restores the existing owner-bound wikilink product
+guard inside the incoming transaction-aware method. Singleton RED-v2 is
+five failures/one pass, then six passes; the177-case owning run passes with
+all372 scoped inputs exact. Singer identifies the missing actual capture
+caller union and paired conflict classification. A genuine two-member
+SQLite/PostgreSQL regression has two stale-case failures/eight passes; the
+identical formatted10 cases pass with nonretryable conflict and rollback.
+The original first paired test placement mistake remains separately retained.
+Actual rewrite/undo/expected-owner caller qualification is still active;
+the177-case predecessor does not qualify these subsequent changes.
+
+VN worker predecessor53 focused/1086 owning passes do not close Aquinas's
+new transient adapter OSError retry finding. Turing is correcting that
+failure-origin case privately with finite real-SDK regression coverage.
+Incoming capture and KnowledgeQA corrections also remain private and active.
+No overall qualification, publication, native acceptance, merge, or cleanup
+is claimed, and original failed backend/collector/test attempts are retained.
+
+Actual Notes rewrite/undo/expected-owner caller RED has seven failures and27
+passes; the identical34 cases pass after restoring the existing owner and
+product-version guards. Final Notes/Sync owning passes215 cases, zero skips,
+with375 scoped inputs exact. This supersedes the177-case predecessor only for
+that owning scope; final independent follow-up review remains pending.
+
+The enabled Jobs corpus completes272 passes and two inherited unavailable-
+crypto skips across274 cases, with all16894 source entries exact. The original
+full backend6138/26/135 attempt remains failed. Its26 failures are covered by
+distinct corrected contract and VN owning executions, not relabeled.
+
+The adapter-origin OSError regression fails causally, then passes through the
+real SDK retry and same-item redelivery. All54 focused cases pass; Aquinas
+independently finds no actionable P1/P2 on the updated correction. The exact
+worker and new finite-adapter test are now applied to the authority checkout.
+Private final VN owning reports1087 passes; its completed source/exit/XML
+binding is being independently read before local integration readiness.
+No inference, native UAT, latest-dev global qualification, or publication is
+claimed by these bounded local corrections.

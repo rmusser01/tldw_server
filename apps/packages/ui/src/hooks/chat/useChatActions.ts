@@ -6,6 +6,8 @@ import {
 import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
 import { useHistorySelectionContext, type HistoryLoadReceipt } from "./useHistorySelection"
+import { resetStaleSelectionForFreshTurn } from "./fresh-chat-selection"
+import { isHistoryTurnLive, markHistoryTurnLive, releaseHistoryTurn } from "@/services/history-turn-keep"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import React from "react"
 import { isChatPromotionIncompleteError, waitForChatPromotion } from "@/services/pending-chat-promotion"
@@ -119,7 +121,8 @@ import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream"
 import {
   discardAbortedTurnIfRequested,
-  isAbortLikeError
+  isAbortLikeError,
+  markChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
@@ -190,6 +193,11 @@ import {
   createServicePromptScopeChangedError,
   isRequestConfigScopeChangedError
 } from "@/services/tldw/service-prompt-scope-error"
+import {
+  loadHistoryTurnRecoveries,
+  loadLocalHistoryAdmission
+} from "@/db/dexie/history-selection"
+import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
@@ -3316,7 +3324,8 @@ export const useChatActions = ({
     continueOutputTarget = "chat",
     serverChatIdOverride,
     historyIdOverride,
-    researchContext
+    researchContext,
+    historyRetryAdmission
   }: {
     message: string
     image: string
@@ -3343,7 +3352,20 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     historyIdOverride?: string | null
     researchContext?: ChatResearchContext
+    /**
+     * Retry of a reply that ended early (CS-04): the admission the question
+     * already has with the selected history's owner. The turn settles a new
+     * reply against it instead of admitting the question again.
+     */
+    historyRetryAdmission?: HistoryAdmissionReferenceV1
   }): Promise<ChatSubmitResult> => {
+    // CS-01 (#3106) defence in depth: a turn that addresses no conversation
+    // must not be built from a selection another conversation left behind.
+    // Reset it before the origin fence is taken, so the turn starts clean.
+    resetStaleSelectionForFreshTurn(historySelection, {
+      historyId: historyIdOverride ?? historyId,
+      serverChatId: serverChatIdOverride || serverChatId
+    })
     const historyOriginIsCurrent = historySelection?.fence()
     const lastVisibleMessage = messages.at(-1)
     if (isContinue && lastVisibleMessage && getLocalRagDiagnosticUser(messages, lastVisibleMessage)) {
@@ -4100,7 +4122,10 @@ export const useChatActions = ({
                       useConnectionStore.getState().state.isConnected &&
                       useConnectionStore.getState().state.phase === ConnectionPhase.CONNECTED &&
                       useConnectionStore.getState().state.mode === "normal" &&
-                      !useConnectionStore.getState().state.offlineBypass
+                      !useConnectionStore.getState().state.offlineBypass,
+                    ...(historyRetryAdmission
+                      ? { retryAdmission: historyRetryAdmission }
+                      : {})
                   }
                 : undefined
             }
@@ -4878,7 +4903,7 @@ export const useChatActions = ({
     (temporaryChat && !actionSelectionState?.owner)
       ? null
       : historySelection
-  const regenerateLastMessage = createRegenerateLastMessage({
+  const regenerateLastMessageBase = createRegenerateLastMessage({
     notification,
     allowOrdinaryRetry: true,
     validateBeforeSubmitFn,
@@ -4903,6 +4928,107 @@ export const useChatActions = ({
     }
   })
 
+  // CS-04 (#3104): Retry on a kept interrupted reply in a selected-history
+  // chat asks the same question again from the point before it. The question
+  // is already saved with the chat's owner (it was admitted before the reply
+  // streamed), so the new reply settles against that admission: the chat keeps
+  // one copy of the question. A local chat keeps the cut-off reply as an
+  // alternative to the new one; a server chat never received it. Regenerate in
+  // general is not supported on selected history yet (CM-01, #3106).
+  const retryInterruptedHistoryTurn =
+    async (): Promise<ChatSubmitResult | null> => {
+      const selection = selectedHistoryForActions
+      if (!selection) return null
+      const replyIndex = messages.length - 1
+      const reply = messages[replyIndex]
+      const replyInfo = reply?.generationInfo as
+        | Record<string, unknown>
+        | undefined
+      if (!reply?.isBot || !replyInfo?.interrupted) return null
+      const question = messages[replyIndex - 1]
+      if (!question || question.isBot || !question.id) return null
+      if (!validateBeforeSubmitFn())
+        return chatSubmitSkipped("Retry was not submitted")
+      const current = selection.getCurrent()
+      const preparingIsCurrent = selection.fence()
+      const session = usePlaygroundSessionStore.getState()
+      const navigationIsCurrent = () =>
+        usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
+        usePlaygroundSessionStore.getState().serverChatSelectionIntent === session.serverChatSelectionIntent
+      // Read the records rather than the render's list: a reply that just
+      // ended may not have reached it yet.
+      const recoveries =
+        current.bookmarkScope && current.view
+          ? await loadHistoryTurnRecoveries(
+              current.bookmarkScope,
+              current.view
+            ).catch(() => selection.recoveries ?? [])
+          : selection.recoveries ?? []
+      if (!preparingIsCurrent() || !navigationIsCurrent())
+        return chatSubmitFailed("history_selection_changed")
+      const retained = recoveries.filter(
+        (entry) =>
+          entry.turn.input_id === question.id ||
+          entry.turn.admission?.input_message_id === question.id
+      )
+      // A server chat's partial reply exists only in its record on this
+      // device; a local chat stores the question with its admission.
+      let questionAdmission: HistoryAdmissionReferenceV1 | null =
+        retained
+          .map((entry) => entry.turn.admission)
+          .find(
+            (admission) =>
+              admission?.input_message_id === question.id &&
+              admission.owner_key === current.view?.owner_key &&
+              admission.conversation_id === current.view?.conversation_id
+          ) ?? null
+      if (!questionAdmission && current.owner?.kind === "local")
+        questionAdmission = await loadLocalHistoryAdmission(
+          current.owner,
+          question.id
+        ).catch(() => null)
+      if (!preparingIsCurrent() || !navigationIsCurrent())
+        return chatSubmitFailed("history_selection_changed")
+      if (retained.some(entry => isHistoryTurnLive(entry.turn.operation_id)))
+        return chatSubmitSkipped("Retry is already in progress")
+      for (const entry of retained) markHistoryTurnLive(entry.turn.operation_id)
+      try {
+        const moved = await selection.choose({
+          kind: "before_message",
+          message_id: question.id
+        }, navigationIsCurrent)
+        if (!moved || !navigationIsCurrent() || selection.getCurrent().owner !== current.owner) {
+          notification.error({
+            message: t("error", { defaultValue: "Error" }),
+            description: t(
+              "playground:errorRecovery.retryUnavailable",
+              "This chat changed before the reply could be retried. Send the question again."
+            )
+          })
+          return chatSubmitFailed("history_selection_changed")
+        }
+        const result = toChatSubmitResult(
+          await onSubmit({
+            message: question.message,
+            image: question.images?.[0] ?? "",
+            // Without an admission (none was recorded) the question is sent
+            // again as a new branch from the same point.
+            ...(questionAdmission
+              ? { historyRetryAdmission: questionAdmission }
+              : {})
+          })
+        )
+        if (result.status === "submitted") {
+          for (const entry of retained) await selection.dismissRecovery(entry)
+        }
+        return result
+      } finally {
+        for (const entry of retained) releaseHistoryTurn(entry.turn.operation_id)
+      }
+    }
+  const regenerateLastMessage = async () =>
+    (await retryInterruptedHistoryTurn()) ?? regenerateLastMessageBase()
+
   const stopStreamingRequest = React.useCallback(
     (options?: unknown) => {
       if (!abortController) {
@@ -4919,6 +5045,7 @@ export const useChatActions = ({
         discardCurrentTurnOnAbortSignalRef.current = abortController.signal
       }
 
+      markChatTurnStoppedByUser(abortController.signal)
       abortController.abort()
       setAbortController(null)
     },

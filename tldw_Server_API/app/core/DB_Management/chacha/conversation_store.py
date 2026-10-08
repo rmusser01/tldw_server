@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
+from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_search_snippets import (
+    build_match_snippet,
+    extract_search_terms,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
+    RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID,
+    RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
@@ -24,9 +31,19 @@ from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissin
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
+_CONVERSATION_SEARCH_FIELDS: tuple[str, ...] = ("title", "content")
+
 
 class _ReceiptAdmissionChanged(ConflictError):
     """A stale preflight may retry only after its independently owned rollback."""
+
+
+_SHA256_HEX_CHARS = frozenset("0123456789abcdef")
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    """Return True for a 64-character lowercase hexadecimal string."""
+    return isinstance(value, str) and len(value) == 64 and set(value) <= _SHA256_HEX_CHARS
 
 
 class ConversationStore:
@@ -413,16 +430,71 @@ class ConversationStore:
             return False
         return previous == binding
 
+    def is_retired_sync_placeholder_assistant(
+        self,
+        *,
+        assistant_kind: Any,
+        assistant_id: Any,
+        character_id: Any,
+    ) -> bool:
+        """Return whether an identity is the placeholder older Sync projections invented.
+
+        The stored rows were cleared by a migration, but the identity also
+        reached the Sync log: an upsert built from a stored placeholder row
+        carried it, and a device may echo it. It means "no assistant" unless
+        this owner has, or had, a persona profile with exactly that id, in
+        which case the chat names their own persona. This is the same rule the
+        migration applies, so a cleared chat cannot get the placeholder back.
+
+        Args:
+            assistant_kind: The identity's kind, as sent or stored.
+            assistant_id: The identity's id, as sent or stored.
+            character_id: The identity's character, which the placeholder never has.
+
+        Returns:
+            True only for the exact placeholder with no persona profile behind it.
+        """
+        kind = self._db._normalize_nullable_text(assistant_kind)
+        identity = self._db._normalize_nullable_text(assistant_id)
+        if (
+            character_id is not None
+            or kind is None
+            or kind.lower() != RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND
+            or identity != RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID
+        ):
+            return False
+        profile = self._db.get_persona_profile(
+            RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID,
+            user_id=self._db.owner_user_id,
+            include_deleted=True,
+        )
+        return profile is None
+
     def add_conversation(
         self,
         conv_data: dict[str, Any],
         *,
         conn: Any | None = None,
         assistant_startup: AssistantStartup | None = None,
+        create_request_fingerprint: str | None = None,
     ) -> str | None:
-        """Insert identity and optional trusted local provenance in the same transaction."""
+        """Insert identity and optional trusted local provenance in the same transaction.
+
+        Args:
+            conv_data: Conversation fields. A ``create_request_fingerprint`` key in
+                it is ignored, so copied or imported rows never carry one.
+            conn: Caller-owned connection whose transaction covers the insert.
+            assistant_startup: Trusted local startup provenance.
+            create_request_fingerprint: SHA-256 hex digest of a client-id create
+                request (D7 P3), stored by the same INSERT.
+
+        Raises:
+            ConflictError: The conversation id already exists, on either backend.
+        """
         if {"assistant_startup", "assistant_startup_json"}.intersection(conv_data):
             raise InputError("Conversation startup fields are reserved for internal creation.")
+        if create_request_fingerprint is not None and not _is_sha256_hex(create_request_fingerprint):
+            raise InputError("create_request_fingerprint must be a lowercase SHA-256 hex digest.")
         startup_json = encode_assistant_startup(assistant_startup) if assistant_startup is not None else None
         conv_id = conv_data.get("id") or self._db._generate_uuid()
         root_id = conv_data.get("root_id") or conv_id
@@ -452,14 +524,17 @@ class ConversationStore:
         )
 
         now = self._db._get_current_utc_timestamp_iso()
-        query = """
+        # Only client-id creates name the fingerprint column, so ordinary inserts are unchanged.
+        fingerprint_column = ", create_request_fingerprint" if create_request_fingerprint is not None else ""
+        fingerprint_placeholder = ", ?" if create_request_fingerprint is not None else ""
+        query = f"""
                 INSERT INTO conversations (id, root_id, forked_from_message_id, parent_conversation_id, \
                                            character_id, assistant_kind, assistant_id, persona_memory_mode, \
                                            title, state, topic_label, cluster_id, source, external_ref, rating, \
                                            created_at, last_modified, client_id, version, deleted, \
-                                           scope_type, workspace_id, assistant_startup_json) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                """
+                                           scope_type, workspace_id, assistant_startup_json{fingerprint_column}) \
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{fingerprint_placeholder}) \
+                """  # nosec B608 - fixed column names, values are bound parameters
         if self._db.backend_type == BackendType.POSTGRESQL:
             params = (
                 conv_id,
@@ -512,6 +587,8 @@ class ConversationStore:
                 workspace_id,
                 startup_json,
             )
+        if create_request_fingerprint is not None:
+            params = (*params, create_request_fingerprint)
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
@@ -526,6 +603,13 @@ class ConversationStore:
                     entity_id=conv_id,
                 ) from exc  # noqa: TRY003
             raise CharactersRAGDBError(f"Database integrity error adding conversation: {exc}") from exc  # noqa: TRY003
+        except UniqueConstraintError as exc:
+            # PostgreSQL reports the primary key without detail; it is the only unique key on this table.
+            raise ConflictError(
+                f"Conversation with ID '{conv_id}' already exists.",
+                entity="conversations",
+                entity_id=conv_id,
+            ) from exc  # noqa: TRY003
         except CharactersRAGDBError:
             raise
         return None
@@ -1408,6 +1492,13 @@ class ConversationStore:
             raise CharactersRAGDBError(f"Unexpected error during update_conversation: {exc}") from exc  # noqa: TRY003
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
+        """Move a conversation to Trash by flagging only its own row deleted.
+
+        Messages are deliberately left as they are. Message reads join on the
+        conversation's ``deleted`` flag, so they stay hidden while it is in
+        Trash, and ``restore_conversation`` brings back exactly the messages
+        that were active when it was trashed.
+        """
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
@@ -1481,7 +1572,11 @@ class ConversationStore:
     def restore_conversation(
         self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
     ) -> bool | None:
-        """Restore under current native and permanent receipt-association admission."""
+        """Restore under current native and permanent receipt-association admission.
+
+        Only the conversation row is undeleted. Message ``deleted`` flags are
+        not touched, so messages deleted individually stay deleted.
+        """
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
@@ -1869,6 +1964,11 @@ class ConversationStore:
         cause = exc.__cause__
         if not isinstance(cause, sqlite3.OperationalError):
             return None
+        return ConversationStore._sqlite_fts_literal_for_operational_error(query, cause)
+
+    @staticmethod
+    def _sqlite_fts_literal_for_operational_error(query: str, cause: sqlite3.OperationalError) -> str | None:
+        """Return ``query`` as a quoted FTS literal when ``cause`` is a MATCH parse error, else None."""
         message = str(cause)
         unknown_column = message.removeprefix("no such column: ")
         query_column_error = message.startswith("no such column: ") and bool(unknown_column) and unknown_column in query
@@ -1877,6 +1977,149 @@ class ConversationStore:
         ):
             return None
         return '"' + query.replace('"', '""') + '"'
+
+    @staticmethod
+    def _normalize_conversation_search_fields(search_in: Sequence[str] | str | None) -> tuple[str, ...]:
+        """Return the validated search fields in canonical order; title only when unspecified."""
+        if search_in is None:
+            return ("title",)
+        raw_fields = search_in.split(",") if isinstance(search_in, str) else list(search_in)
+        normalized = {str(field).strip().lower() for field in raw_fields}
+        if not normalized or not normalized.issubset(_CONVERSATION_SEARCH_FIELDS):
+            raise InputError(
+                f"Invalid conversation search fields {search_in!r}. "
+                f"Allowed: {', '.join(_CONVERSATION_SEARCH_FIELDS)}"
+            )  # noqa: TRY003
+        return tuple(field for field in _CONVERSATION_SEARCH_FIELDS if field in normalized)
+
+    def _resolve_sqlite_fts_match_query(self, fts_table: str, query: str) -> str:
+        """Return ``query`` when ``fts_table`` accepts it as MATCH syntax, else its literal phrase.
+
+        The title and message indexes are checked separately because a column
+        filter such as ``title:word`` is valid for one and a parse error for the
+        other. The probe reads at most one row and never writes to the index.
+        """
+        probe = f"SELECT 1 FROM {fts_table} WHERE {fts_table} MATCH ? LIMIT 1"  # nosec B608 - fixed table names
+        try:
+            self._db.get_connection().execute(probe, (query,)).fetchone()
+        except sqlite3.OperationalError as exc:
+            literal_query = self._sqlite_fts_literal_for_operational_error(query, exc)
+            if literal_query is None:
+                raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
+            return literal_query
+        return query
+
+    def _conversation_content_search_joins(
+        self,
+        query: str,
+        *,
+        fields: tuple[str, ...],
+        client_filter: str | None,
+    ) -> tuple[str, list[Any]] | None:
+        """Return the joins, and their parameters, that mark title and message matches.
+
+        ``title_hits`` has one row per conversation whose title matches, with its
+        relevance score. ``content_hits`` has one row per conversation with at
+        least one live matching message, and the earliest such message as
+        ``match_ref``. Message matches are limited to the owner's untrashed
+        conversations inside the subquery itself: a trashed chat keeps its
+        messages live, so the message flag alone does not hide them.
+
+        ``None`` means the query has no searchable terms on this backend.
+        """
+        joins: list[str] = []
+        params: list[Any] = []
+        owner_clause = " AND mc.client_id = ?" if client_filter is not None else ""
+
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            tsquery = FTSQueryTranslator.normalize_query(query, "postgresql")
+            if not tsquery:
+                return None
+            if "title" in fields:
+                joins.append(
+                    "LEFT JOIN ("
+                    "SELECT tc.id AS conv_key, "
+                    "ts_rank(tc.conversations_fts_tsv, to_tsquery('english', ?)) AS title_score "
+                    "FROM conversations tc "
+                    "WHERE tc.conversations_fts_tsv @@ to_tsquery('english', ?)"
+                    ") title_hits ON title_hits.conv_key = c.id"
+                )
+                params.extend([tsquery, tsquery])
+            joins.append(
+                "LEFT JOIN ("
+                "SELECT m.conversation_id AS conversation_id, "
+                "(ARRAY_AGG(m.id ORDER BY m.timestamp ASC, m.id ASC))[1] AS match_ref "
+                "FROM messages m "
+                "JOIN conversations mc ON mc.id = m.conversation_id "
+                "WHERE m.messages_fts_tsv @@ to_tsquery('english', ?) "
+                f"AND m.deleted = FALSE AND mc.deleted = FALSE{owner_clause} "
+                "GROUP BY m.conversation_id"
+                ") content_hits ON content_hits.conversation_id = c.id"
+            )
+            params.append(tsquery)
+        else:
+            if "title" in fields:
+                joins.append(
+                    "LEFT JOIN ("
+                    "SELECT conversations_fts.rowid AS conv_key, "
+                    "(bm25(conversations_fts) * -1) AS title_score "
+                    "FROM conversations_fts "
+                    "WHERE conversations_fts MATCH ?"
+                    ") title_hits ON title_hits.conv_key = c.rowid"
+                )
+                params.append(self._resolve_sqlite_fts_match_query("conversations_fts", query))
+            joins.append(
+                "LEFT JOIN ("
+                "SELECT m.conversation_id AS conversation_id, MIN(m.rowid) AS match_ref "
+                "FROM messages_fts "
+                "JOIN messages m ON m.rowid = messages_fts.rowid "
+                "JOIN conversations mc ON mc.id = m.conversation_id "
+                "WHERE messages_fts MATCH ? "
+                f"AND m.deleted = 0 AND mc.deleted = 0{owner_clause} "
+                "GROUP BY m.conversation_id"
+                ") content_hits ON content_hits.conversation_id = c.id"
+            )
+            params.append(self._resolve_sqlite_fts_match_query("messages_fts", query))
+
+        if client_filter is not None:
+            params.append(client_filter)
+        return " ".join(joins), params
+
+    def _attach_conversation_match_details(self, rows: list[dict[str, Any]], query: str) -> None:
+        """Add ``matched_in``, ``match_message_id`` and ``match_snippet`` to content-search rows.
+
+        Only the messages referenced by this page are read, so the cost is
+        bounded by the page size rather than by the number of matches.
+        """
+        refs = [row["match_message_ref"] for row in rows if row.get("match_message_ref") is not None]
+        messages: dict[Any, dict[str, Any]] = {}
+        if refs:
+            placeholders = ",".join(["?"] * len(refs))
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                message_query = (
+                    "SELECT m.id AS match_ref, m.id AS message_id, m.content AS content "  # nosec B608
+                    f"FROM messages m WHERE m.id IN ({placeholders}) AND m.deleted = FALSE"
+                )
+            else:
+                message_query = (
+                    "SELECT m.rowid AS match_ref, m.id AS message_id, m.content AS content "  # nosec B608
+                    f"FROM messages m WHERE m.rowid IN ({placeholders}) AND m.deleted = 0"
+                )
+            cursor = self._db.execute_query(message_query, tuple(refs))
+            for message_row in cursor.fetchall():
+                fetched = dict(message_row)
+                messages[fetched["match_ref"]] = fetched
+
+        terms = extract_search_terms(query)
+        for row in rows:
+            message = messages.get(row.pop("match_message_ref", None))
+            row["matched_in"] = [
+                field
+                for field, flag in (("title", "title_match"), ("content", "content_match"))
+                if row.get(flag)
+            ]
+            row["match_message_id"] = message["message_id"] if message else None
+            row["match_snippet"] = (build_match_snippet(message["content"], terms) or None) if message else None
 
     def search_conversations(
         self,
@@ -2043,13 +2286,24 @@ class ConversationStore:
         recency_weight: float = 0.35,
         scope_type: str | None = None,
         workspace_id: str | None = None,
+        search_in: Sequence[str] | str | None = None,
     ) -> tuple[list[dict[str, Any]], int, float]:
+        """Return one page of the owner's conversations, the total match count and the top title score.
+
+        ``search_in`` selects what ``query`` is matched against: ``title`` (the
+        default), ``content`` (the text of live messages) or both. With
+        ``content``, title matches rank ahead of content-only matches and each
+        row gains ``matched_in``, ``match_message_id`` and ``match_snippet``.
+        Content search covers live conversations only: with ``include_deleted``
+        or ``deleted_only`` the query stays a title, topic and state text search.
+        """
         client_filter = self._db.client_id if client_id is None else client_id
         safe_query = (query or "").strip() or None
 
         if date_field not in {"last_modified", "created_at"}:
             raise InputError("date_field must be 'last_modified' or 'created_at'")  # noqa: TRY003
 
+        search_fields = self._normalize_conversation_search_fields(search_in)
         normalized_order = self._normalize_conversation_search_order(order_by)
         as_of_dt = as_of or datetime.now(timezone.utc)
         if as_of_dt.tzinfo is None:
@@ -2071,6 +2325,20 @@ class ConversationStore:
 
         keyword_table = self._db._map_table_for_backend("keywords")
         use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
+        # The query to match against message text, or None when content search does not apply.
+        content_query = safe_query if "content" in search_fields and not use_deleted_text_search else None
+        use_content_search = content_query is not None
+        match_joins = ""
+        match_join_params: list[Any] = []
+        if content_query is not None:
+            resolved_joins = self._conversation_content_search_joins(
+                content_query,
+                fields=search_fields,
+                client_filter=client_filter,
+            )
+            if resolved_joins is None:
+                return [], 0, 0.0
+            match_joins, match_join_params = resolved_joins
 
         if self._db.backend_type == BackendType.POSTGRESQL:
             date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
@@ -2078,7 +2346,7 @@ class ConversationStore:
             where_clauses = ["TRUE"]
             base_params: list[Any] = []
             count_params: list[Any] = []
-            if safe_query:
+            if safe_query and not use_content_search:
                 if use_deleted_text_search:
                     text_clause, text_params = self._conversation_deleted_text_search_clause(
                         alias="c",
@@ -2134,7 +2402,7 @@ class ConversationStore:
             where_clauses = ["1 = 1"]
             base_params = []
             count_params = []
-            if safe_query:
+            if safe_query and not use_content_search:
                 if use_deleted_text_search:
                     text_clause, text_params = self._conversation_deleted_text_search_clause(
                         alias="c",
@@ -2181,15 +2449,38 @@ class ConversationStore:
             )
             from_clause = (
                 "conversations_fts JOIN conversations c ON conversations_fts.rowid = c.rowid"
-                if safe_query and not use_deleted_text_search
+                if safe_query and not use_deleted_text_search and not use_content_search
                 else "conversations c"
             )
+
+        match_columns = ""
+        if use_content_search:
+            # Both backends expose the same title_hits/content_hits joins, so the
+            # outer query is shared. Join parameters precede the WHERE parameters.
+            searches_title = "title" in search_fields
+            match_clause = "content_hits.conversation_id IS NOT NULL"
+            if searches_title:
+                match_clause = f"(title_hits.conv_key IS NOT NULL OR {match_clause})"
+                bm25_expr = "COALESCE(title_hits.title_score, 0.0)"
+            title_match_expr = (
+                "CASE WHEN title_hits.conv_key IS NOT NULL THEN 1 ELSE 0 END" if searches_title else "0"
+            )
+            match_columns = (
+                f", {title_match_expr} AS title_match, "
+                "CASE WHEN content_hits.conversation_id IS NOT NULL THEN 1 ELSE 0 END AS content_match, "
+                "content_hits.match_ref AS match_message_ref"
+            )
+            from_clause = f"conversations c {match_joins}"
+            where_clauses.append(match_clause)
+            base_params = [*match_join_params, *base_params]
+            count_params = [*match_join_params, *count_params]
 
         base_query = (
             "SELECT c.*, "
             f"{date_expr} AS sort_timestamp, "
             f"{topic_sort_expr} AS topic_sort_key, "
-            f"{bm25_expr} AS bm25_raw "
+            f"{bm25_expr} AS bm25_raw"
+            f"{match_columns} "
             f"FROM {from_clause} "  # nosec B608
             f"WHERE {' AND '.join(where_clauses)}"
         )  # nosec B608
@@ -2208,9 +2499,13 @@ class ConversationStore:
             count_cursor = self._db.execute_query(count_query, tuple(count_params))
             count_row = count_cursor.fetchone()
         except CharactersRAGDBError as exc:
+            # Content search resolved its MATCH expressions up front, so it never retries here.
             literal_query = (
                 self._sqlite_fts_literal_after_parse_error(safe_query, exc)
-                if self._db.backend_type == BackendType.SQLITE and safe_query and not use_deleted_text_search
+                if self._db.backend_type == BackendType.SQLITE
+                and safe_query
+                and not use_deleted_text_search
+                and not use_content_search
                 else None
             )
             if literal_query is None:
@@ -2264,18 +2559,23 @@ class ConversationStore:
         page_params = list(base_params)
         page_params.extend([half_life_days, as_of_dt.isoformat(), half_life_days, max_bm25, max_bm25])
 
+        # A chat named after the query outranks one that only mentions it, in every ordering.
+        title_first = "title_match DESC, " if use_content_search else ""
         if normalized_order == "bm25" and safe_query:
-            order_clause = "bm25_norm DESC, sort_timestamp DESC, id ASC"
+            order_clause = f"{title_first}bm25_norm DESC, sort_timestamp DESC, id ASC"
         elif normalized_order == "topic":
             if safe_query:
-                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, bm25_norm DESC, recency_score DESC, id ASC"
+                order_clause = (
+                    "topic_sort_is_null ASC, topic_sort_key ASC, "
+                    f"{title_first}bm25_norm DESC, recency_score DESC, id ASC"
+                )
             else:
                 order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, recency_score DESC, id ASC"
         elif normalized_order == "hybrid" and safe_query:
-            order_clause = "((bm25_norm * ?) + (recency_score * ?)) DESC, sort_timestamp DESC, id ASC"
+            order_clause = f"{title_first}((bm25_norm * ?) + (recency_score * ?)) DESC, sort_timestamp DESC, id ASC"
             page_params.extend([normalized_bm25_weight, normalized_recency_weight])
         else:
-            order_clause = "recency_score DESC, sort_timestamp DESC, id ASC"
+            order_clause = f"{title_first}recency_score DESC, sort_timestamp DESC, id ASC"
 
         page_params.extend([normalized_limit, normalized_offset])
         page_query = (
@@ -2294,6 +2594,8 @@ class ConversationStore:
         try:
             cursor = self._db.execute_query(page_query, tuple(page_params))
             rows = [dict(row) for row in cursor.fetchall()]
+            if content_query is not None:
+                self._attach_conversation_match_details(rows, content_query)
         except CharactersRAGDBError as exc:
             logger.error("Error fetching paged conversation search rows: {}", exc)
             raise

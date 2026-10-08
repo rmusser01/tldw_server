@@ -252,6 +252,16 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
         <span className="truncate text-sm" title={chat.title}>
           {chat.title}
         </span>
+        {chat.match_snippet && (
+          // A search matched what was said in this chat: show it, since the title alone does not explain the hit.
+          <span
+            className="truncate text-xs text-text-subtle"
+            title={chat.match_snippet}
+            data-testid="server-chat-match-snippet"
+          >
+            {chat.match_snippet}
+          </span>
+        )}
         <div className="flex flex-wrap items-center gap-2 text-xs text-text-subtle mt-1">
           <ChatStateBadge state={chat.state} />
           {lastModifiedLabel && (

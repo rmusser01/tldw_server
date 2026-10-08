@@ -119,7 +119,7 @@ const baseProps = {
   deleteMoodboard: noopAsync,
   clearBulkSelection: noop,
   exportSelectedBulk: noop,
-  assignKeywordsToSelectedBulk: noopAsync,
+  addTagsToSelectedBulk: noopAsync,
   deleteSelectedBulk: noopAsync,
   toggleNotePinned: noopAsync,
   restoreNote: noopAsync,

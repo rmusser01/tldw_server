@@ -525,9 +525,16 @@ export class TldwChatService {
         cfg?.chatStreamIdleTimeoutMs,
         30_000
       )
+      // The timers below enforce the startup limit until the first visible token
+      // and the idle limit between visible chunks. The transport (web fetch and
+      // the extension background port alike) also runs a byte-level idle timer
+      // from the value passed here. That timer already runs while the model is
+      // starting, and it cannot tell metadata frames from tokens, so it must be
+      // at least the startup budget or it cuts off a slow first token (#3107).
+      const transportIdleTimeoutMs = Math.max(startupTimeoutMs, streamIdleTimeoutMs)
       const stream = tldwClient.streamChatCompletion(request, {
         signal: controller.signal,
-        streamIdleTimeoutMs,
+        streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
         requestScope: options.requestScope,
         scope: options.scope

@@ -4,6 +4,38 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+// Pin the notes authority scope like the other Notes stage suites. Without it,
+// the notes list never loads (no scope, no list query), so the pin test saw an
+// empty list in CI and locally, on dev as well as on this branch.
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -218,6 +250,25 @@ describe("NotesManagerPage stage 38 productivity extensions", () => {
       )
     ).toContain("## Research Question")
     expect(mockMessageSuccess).toHaveBeenCalledWith("Applied template: Research Brief")
+  })
+
+  it("writes an applied template into the open WYSIWYG editor", async () => {
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId("notes-input-mode-wysiwyg"))
+    const editor = await screen.findByTestId("notes-wysiwyg-editor")
+    expect(editor.querySelector("h2")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("notes-apply-template-research-brief"))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Title")).toHaveValue("Research Brief")
+    })
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("notes-wysiwyg-editor").querySelector("h2")?.textContent
+      ).toBe("Research Question")
+    })
   })
 
   it("duplicates the current draft as a copy", async () => {

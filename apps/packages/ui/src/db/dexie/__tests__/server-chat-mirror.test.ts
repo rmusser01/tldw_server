@@ -2,21 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { HistoryInfo, Message } from "../types"
 
 // Only IndexedDB's storage/transaction boundary is replaced; reconciliation is real.
-const state = vi.hoisted(() => ({ histories: new Map<string, HistoryInfo>(), messages: new Map<string, Message>() }))
+const state = vi.hoisted(() => ({ histories: new Map<string, HistoryInfo>(), messages: new Map<string, Message>(), compareStates: new Map<string, { id: string }>() }))
 function table<T extends { id: string }>(rows: Map<string, T>) { return ({
   get: async (id: string) => rows.get(id),
   add: async (row: T) => { if (rows.has(row.id)) throw new Error("duplicate primary key"); rows.set(row.id, structuredClone(row)); return row.id },
   put: async (row: T) => { rows.set(row.id, structuredClone(row)); return row.id },
   delete: async (id: string) => { rows.delete(id) },
   update: async (id: string, changes: Partial<T>) => { if (!rows.has(id)) return 0; rows.set(id, { ...rows.get(id)!, ...changes }); return 1 },
-  where: (field: string) => ({ equals: (value: unknown) => ({ toArray: async () => [...rows.values()].filter(row => (row as Record<string, unknown>)[field] === value) }) })
+  where: (field: string) => ({ equals: (value: unknown) => ({
+    toArray: async () => [...rows.values()].filter(row => (row as Record<string, unknown>)[field] === value),
+    delete: async () => { for (const [id, row] of rows) if ((row as Record<string, unknown>)[field] === value) rows.delete(id) }
+  }) })
 }) }
 vi.mock("../schema", () => ({ db: {
-  chatHistories: table(state.histories), messages: table(state.messages), modelNickname: {}, sessionFiles: {},
+  chatHistories: table(state.histories), messages: table(state.messages), compareStates: table(state.compareStates), modelNickname: {}, sessionFiles: {},
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => operation({ abort: vi.fn() })
 } }))
 vi.mock("../helpers", () => ({ generateID: () => `history-${state.histories.size + 1}` }))
-import { acknowledgePromotedChatMessage, linkServerChatMirror, reconcileServerChatMirror, reconcileServerChatMessages, removeAcknowledgedServerMirrorMessage } from "../server-chat-mirror"
+import { acknowledgePromotedChatMessage, linkServerChatMirror, reconcileServerChatMirror, reconcileServerChatMessages, removeAcknowledgedServerMirrorMessage, removeServerChatMirror } from "../server-chat-mirror"
 
 const history = (id: string, owner?: string): HistoryInfo => ({ id, title: "Cedar", is_rag: false, createdAt: 1, server_chat_id: "chat-1", ...(owner ? { server_scope_key: owner } : {}) })
 const row = (id: string, historyId: string, content: string, serverMessageId?: string): Message => ({ id, history_id: historyId, name: "You", role: "user" as const, content, images: [], createdAt: 1, serverMessageId })
@@ -24,7 +27,24 @@ const incoming = (id: string, content: string, version = 1) => ({ id, serverMess
 const link = (ownerKey: string, extra = {}) => linkServerChatMirror({ chatId: "chat-1", title: "Cedar", ownerKey, ...extra })
 
 describe("owned server Chat mirror", () => {
-  beforeEach(() => { state.histories.clear(); state.messages.clear() })
+  beforeEach(() => { state.histories.clear(); state.messages.clear(); state.compareStates.clear() })
+  it("removes only the owner's copies of a deleted server chat, with their messages", async () => {
+    state.histories.set("alice", history("alice", "A"))
+    state.histories.set("bob", history("bob", "B"))
+    state.histories.set("other-chat", { ...history("other-chat", "A"), server_chat_id: "chat-2" })
+    state.messages.set("alice-row", row("alice-row", "alice", "Private"))
+    state.messages.set("bob-row", row("bob-row", "bob", "Private"))
+    state.compareStates.set("alice", { id: "alice" })
+    expect(await removeServerChatMirror({ chatId: "chat-1", ownerKey: "A" })).toEqual(["alice"])
+    expect([...state.histories.keys()]).toEqual(["bob", "other-chat"])
+    expect([...state.messages.keys()]).toEqual(["bob-row"])
+    expect(state.compareStates.has("alice")).toBe(false)
+  })
+  it("keeps a server chat copy whose local settings write is still pending", async () => {
+    state.histories.set("alice", { ...history("alice", "A"), local_settings_guard: { revision: "r1", pending: ["write-1"] } })
+    await expect(removeServerChatMirror({ chatId: "chat-1", ownerKey: "A" })).rejects.toThrow()
+    expect(state.histories.has("alice")).toBe(true)
+  })
   it("removes only the exact acknowledged server row after canonical deletion", async () => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("target", row("target", "alice", "Repeat", "server-target"))

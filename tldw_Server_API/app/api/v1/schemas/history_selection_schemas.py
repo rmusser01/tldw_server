@@ -270,6 +270,18 @@ class CapturedHistoryV1(HistoryWireModel):
         return self
 
 
+HISTORY_BRANCH_FIELD_DESCRIPTION = (
+    "[Extension] Branch intent for a `tldw_history_selection_v1` admission. It sits beside the "
+    "selection and is not covered by its digest. `false`: the send must extend the latest message; "
+    "if the selection's last message (or, for an empty selection, the conversation root) already has "
+    "a live child, the owner refuses with 409 `{status: 'stale_selection', code: "
+    "'history_branch_changed', conversation_id, parent_message_id, leaf_ids, history_version}` and "
+    "writes nothing. `leaf_ids` are the live leaves below that message, oldest first. `true`: an "
+    "explicit branch (for example Edit & resend), admitted beside any newer messages. Omitted: no "
+    "leaf check (the pre-D7 behaviour). Replaying an already-admitted message id is unaffected."
+)
+
+
 class HistoryFailureV1(HistoryWireModel):
     status: Literal["legacy_review_required", "stale_selection", "invalid_history", "unsupported_history_capability"]
     code: str

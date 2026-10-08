@@ -32,6 +32,7 @@ import type {
   WorldBookProcessResponse,
 } from '../TldwApiClient'
 import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
+import { trackServerChatWrite } from '@/store/server-chat-save-status'
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 
@@ -393,7 +394,22 @@ export const chatRagMethods = {
             ? input.expected_version
             : null,
       scope_type,
-      workspace_id
+      workspace_id,
+      matched_in: Array.isArray(input?.matched_in)
+        ? input.matched_in.filter(
+            (field: unknown) => field === "title" || field === "content"
+          )
+        : null,
+      match_snippet:
+        typeof input?.match_snippet === "string" &&
+        input.match_snippet.trim().length > 0
+          ? input.match_snippet
+          : null,
+      match_message_id:
+        typeof input?.match_message_id === "string" &&
+        input.match_message_id.length > 0
+          ? input.match_message_id
+          : null
     }
   },
 
@@ -766,12 +782,14 @@ export const chatRagMethods = {
     payload: Record<string, any>
   ): Promise<any> {
     const cid = String(chat_id)
-    return await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/complete-v2`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+    return await trackServerChatWrite(cid, () =>
+      bgRequest<any>({
+        path: `/api/v1/chats/${cid}/complete-v2`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+    )
   },
 
   async getChat(
@@ -1135,6 +1153,8 @@ export const chatRagMethods = {
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const useSharedCache = !options?.fresh && !options?.requestScope
+    const cacheRevision = useSharedCache ? await this.getDomainCacheRevision() : 0
+    if (useSharedCache) this.assertDomainCacheRevision(cacheRevision)
     const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
@@ -1153,6 +1173,7 @@ export const chatRagMethods = {
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
+        ...(useSharedCache ? { configSnapshot: this.getDomainCacheConfigSnapshot(cacheRevision) } : {}),
         abortSignal: options?.signal,
         ...(scopeFields.servicePromptConfig ? {
           headers: scopeFields.headers,
@@ -1267,10 +1288,14 @@ export const chatRagMethods = {
           pinned
         } as ServerChatMessage
       })
-      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
-        value: normalized,
-        expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
-      })
+      if (useSharedCache) {
+        await this.getDomainCacheRevision()
+        this.assertDomainCacheRevision(cacheRevision)
+        this.chatMessagesCache.set(cacheKey, {
+          value: normalized,
+          expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
+        })
+      }
       return normalized
     })()
 
@@ -1278,7 +1303,9 @@ export const chatRagMethods = {
     try {
       return await request
     } finally {
-      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache && this.chatMessagesInFlight.get(cacheKey) === request) {
+        this.chatMessagesInFlight.delete(cacheKey)
+      }
     }
   },
 
@@ -1335,16 +1362,18 @@ export const chatRagMethods = {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     const scopeFields = requestScopeFields(options?.requestScope)
-    const res = await bgRequest<ServerChatMessage>({
-      path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...scopeFields.headers },
-      body: payload,
-      abortSignal: options?.signal,
-      ...(scopeFields.servicePromptConfig
-        ? { servicePromptConfig: scopeFields.servicePromptConfig }
-        : {})
-    })
+    const res = await trackServerChatWrite(cid, () =>
+      bgRequest<ServerChatMessage>({
+        path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...scopeFields.headers },
+        body: payload,
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig
+          ? { servicePromptConfig: scopeFields.servicePromptConfig }
+          : {})
+      })
+    )
     this.invalidateChatMessagesCache(cid)
     return res
   },
@@ -1402,16 +1431,21 @@ export const chatRagMethods = {
     const query = buildQuery(toChatScopeParams(options?.scope))
     const scopeFields = requestScopeFields(options?.requestScope)
     try {
-      const res = await bgRequest<any>({
-        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...scopeFields.headers },
-        body: payload,
-        abortSignal: options?.signal,
-        ...(scopeFields.servicePromptConfig
-          ? { servicePromptConfig: scopeFields.servicePromptConfig }
-          : {})
-      })
+      const res = await trackServerChatWrite(
+        cid,
+        () =>
+          bgRequest<any>({
+            path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...scopeFields.headers },
+            body: payload,
+            abortSignal: options?.signal,
+            ...(scopeFields.servicePromptConfig
+              ? { servicePromptConfig: scopeFields.servicePromptConfig }
+              : {})
+          }),
+        { isAcknowledgedError: isSavedDegradedCharacterPersistError }
+      )
       this.invalidateChatMessagesCache(cid)
       return res
     } catch (error) {
@@ -1522,12 +1556,14 @@ export const chatRagMethods = {
     if (typeof options?.pinned === "boolean") {
       body.pinned = options.pinned
     }
-    const res = await bgRequest<any>({
-      path: `/api/v1/messages/${mid}${qp}`,
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body
-    })
+    const res = await trackServerChatWrite(chatId, () =>
+      bgRequest<any>({
+        path: `/api/v1/messages/${mid}${qp}`,
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body
+      })
+    )
     if (chatId != null) {
       this.invalidateChatMessagesCache(chatId)
     }
@@ -1542,10 +1578,12 @@ export const chatRagMethods = {
   ): Promise<void> {
     const mid = String(message_id)
     const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    await bgRequest<void>({
-      path: `/api/v1/messages/${mid}${qp}`,
-      method: 'DELETE'
-    })
+    await trackServerChatWrite(chatId, () =>
+      bgRequest<void>({
+        path: `/api/v1/messages/${mid}${qp}`,
+        method: 'DELETE'
+      })
+    )
     if (chatId != null) {
       this.invalidateChatMessagesCache(chatId)
     }

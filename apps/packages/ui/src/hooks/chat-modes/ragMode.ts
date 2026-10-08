@@ -655,6 +655,7 @@ export const ragMode = async (
     ))
   const executionSignal = servicePromptSnapshot.scopeSignal
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
+  let createdTurn: HistorySendTurn | undefined
   try {
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
@@ -662,6 +663,7 @@ export const ragMode = async (
       if (!params.tldwTurn || isRegenerate || image || !hasSelectedMediaSources(params) || params.actorSettings?.isEnabled)
         throw new Error("unsupported_history_action_context")
       const historyTurn = await captureNormalHistoryTurn(params, message, servicePromptSnapshot, executionSignal)
+      createdTurn = historyTurn
       messages = formatSelectedHistory(historyTurn.capture).messages
       const selectedParent = historyTurn.retryAdmission?.input_message_id ?? historyTurn.capture.rows.at(-1)?.id ?? null
       params = { ...params, historyTurn, userParentMessageId: selectedParent, historyForModel: [] }
@@ -684,10 +686,13 @@ export const ragMode = async (
           : undefined
       }
     )
-    if (result.status === "submitted" && params.historyTurn?.resultId)
-      await params.historyTurn.followResult(params.historyTurn.resultId)
+    if (result.status === "submitted" && params.historyTurn?.resultId) {
+      const followed = await params.historyTurn.followResult(params.historyTurn.resultId)
+      await params.historyTurn.finish?.(followed !== false)
+    }
     return result
   } finally {
+    createdTurn?.release?.()
     if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
   }
 }

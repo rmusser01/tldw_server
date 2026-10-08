@@ -129,6 +129,10 @@ vi.mock("../FolderPickerModal", () => ({
   FolderPickerModal: () => null
 }))
 
+vi.mock("@/hooks/useUndoNotification", () => ({
+  useUndoNotification: () => ({ showUndoNotification: vi.fn() })
+}))
+
 describe("SidepanelChatSidebar coordinator integration", () => {
   beforeEach(() => {
     useServerChatHistoryMock.mockClear()

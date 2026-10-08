@@ -60,8 +60,7 @@ def test_capture_foreign_namespace_and_workspace_have_no_mutations(history_api):
     assert db.count_messages_for_conversation(cid) == 0
 
 
-def test_legacy_review_returns_complete_bound_source_and_sync_rejects(history_api, monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import character_messages
+def test_legacy_review_returns_complete_bound_source(history_api):
     client, db, cid, headers = history_api
     for mid in ("one", "two"):
         db.add_message({"id": mid, "conversation_id": cid, "sender": "user", "content": mid})
@@ -118,9 +117,6 @@ def test_legacy_review_returns_complete_bound_source_and_sync_rejects(history_ap
         reply = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
         assert reply.status_code == 201, reply.text
     assert db.get_message_by_id("legacy-api-result")["parent_message_id"] == "legacy-api-input"
-    monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
-    response = capture(client, cid, headers)
-    assert response.status_code == 409
     assert db.count_messages_for_conversation(cid) == 4
 
 
@@ -346,19 +342,25 @@ def test_selected_history_rejects_unresolved_skill_directory_before_admission(hi
     assert db.count_messages_for_conversation(cid) == 0
 
 
-def test_sync_owner_rejects_admission_and_completion_before_mutation(history_api, monkeypatch):
+def test_sync_owner_captures_but_server_settled_completion_is_rejected_before_mutation(history_api, monkeypatch):
+    """A Sync v2 owner can capture; only the server-settled turn is still refused.
+
+    Client-managed admission and settlement for a Sync v2 owner are covered in
+    tests/Sync/test_sync_v2_native_history_capture.py.
+    """
     from tldw_Server_API.app.api.v1.endpoints import character_messages
     client, db, cid, headers = history_api
-    body = capture(client, cid, headers).json()
-    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "sync")["selection"]
     monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
-    response = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
-        "id": "unsupported-sync", "role": "user", "content": "hello", "tldw_history_selection_v1": selection})
-    assert response.status_code == 409, response.text
+    captured = capture(client, cid, headers)
+    assert captured.status_code == 200, captured.text
+    assert captured.json()["status"] == "captured"
+    body = captured.json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "sync")["selection"]
     response = client.post("/api/v1/chat/completions", headers=headers, json={"api_provider": "openai", "model": "gpt-4o-mini",
         "conversation_id": cid, "save_to_db": True, "messages": [{"role": "user", "content": "hello"}],
         "tldw_history_selection_v1": selection})
     assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {"code": "sync_owner_unsupported", "status": "unsupported_history_capability"}
     assert db.count_messages_for_conversation(cid) == 0
     assert db.get_conversation_settings(cid) is None
 

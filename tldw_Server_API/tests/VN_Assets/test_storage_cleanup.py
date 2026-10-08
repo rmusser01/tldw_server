@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio as real_asyncio
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,10 +45,25 @@ VALID_PNG_BYTES = (
 class FakeStorageService:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.records: dict[str, dict[str, Any]] = {}
+
+    async def get_vn_generated_file(self, *, user_id: int, source_ref: str) -> dict[str, Any] | None:
+        """Return an owned registration only when its stored bytes are valid."""
+        from tldw_Server_API.app.core.VN_Assets.storage import resolve_vn_asset_storage_path
+
+        record = self.records.get(source_ref)
+        if record is None or record["user_id"] != user_id:
+            return None
+        path = resolve_vn_asset_storage_path(user_id=user_id, storage_path=record["storage_path"])
+        if not path.is_file() or path.stat().st_size != record["file_size_bytes"]:
+            raise RuntimeError("Registered VN file has missing or invalid bytes")
+        return record
 
     async def register_generated_file(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
-        return {"id": 901, **kwargs}
+        record = {"id": 901, "is_deleted": False, **kwargs}
+        self.records[kwargs["source_ref"]] = record
+        return record
 
 
 class FakeGeneratedFilesRepo:
@@ -1027,6 +1043,72 @@ async def test_cleanup_deletes_item_before_unlinking_file(
     assert response.files_deleted == 1
     assert unlink_calls == ["vn_assets/fixture.png"]
     assert service.repo.get_item(asset_with_generated_file.item_id) is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cleanup_completed_v1_preserves_ledger_and_removes_file(
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    outputs_dir: Path,
+) -> None:
+    """Remove completed V1 storage while preserving a deletion receipt and counters.
+
+    Args:
+        chacha_db: Isolated native VN database.
+        asset_with_generated_file: Owned asset and registered file identity.
+        fake_generated_files_repo: Public storage boundary used by this control.
+        outputs_dir: Private physical file root.
+
+    Returns:
+        None; asserts deletion, exact retained identity and unchanged counters.
+    """
+    asset = asset_with_generated_file
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    batch = service.repo.create_batch(
+        pack_id=asset.pack_id, requested_by_user_id=USER_ID, total_variants=1,
+        recipes=[{"slot_id": asset.slot_id, "variant_index": 0, "recipe": {"prompt": "frozen"}}],
+    )
+    service.repo.delete_item(asset.item_id)
+    reserved = service.repo.reserve_variant_item(
+        batch_id=batch["id"], slot_id=asset.slot_id, variant_index=0,
+        item_fields={"pack_id": asset.pack_id, "generated_file_id": asset.file_id, "mime_type": "image/png"},
+    )
+    asset = SimpleNamespace(**{**vars(asset), "item_id": reserved["id"]})
+    fake_generated_files_repo.records[asset.file_id]["source_ref"] = f"vn_asset_item:{asset.item_id}"
+    service.repo.complete_variant(
+        batch_id=batch["id"], slot_id=asset.slot_id, variant_index=0, item_id=asset.item_id,
+    )
+    service.review_item(asset.item_id, VNAssetReviewRequest(review_status="rejected"))
+    before_recipe = service.repo.get_variant_outcome(batch["id"], asset.slot_id, 0)
+    before_batch = service.repo.get_batch(batch["id"])
+    unregistered: list[int] = []
+
+    async def unregister(file_id: int, *, hard_delete: bool) -> bool:
+        assert hard_delete is True
+        unregistered.append(file_id)
+        return await fake_generated_files_repo.hard_delete_file(file_id)
+
+    response = await service.cleanup_pack(
+        asset.pack_id, VNAssetCleanupRequest(dry_run=False, statuses=["rejected"]),
+        files_repo=fake_generated_files_repo, unregister_generated_file=unregister,
+    )
+
+    assert response.removed_item_ids == [asset.item_id]
+    assert response.files_deleted == 1
+    assert response.reclaimed_bytes == len(PNG_BYTES)
+    assert service.repo.get_item(asset.item_id) is None
+    assert fake_generated_files_repo.records == {}
+    assert unregistered == [asset.file_id]
+    assert not (outputs_dir / "vn_assets/fixture.png").exists()
+    after_recipe = service.repo.get_variant_outcome(batch["id"], asset.slot_id, 0)
+    assert after_recipe == {**before_recipe, "item_id": None, "deleted_item_json": after_recipe["deleted_item_json"]}
+    assert json.loads(after_recipe["deleted_item_json"]) == {
+        "batch_id": batch["id"], "generated_file_id": asset.file_id, "id": asset.item_id,
+        "owner_user_id": USER_ID, "pack_id": asset.pack_id, "slot_id": asset.slot_id, "variant_index": 0,
+    }
+    assert service.repo.get_batch(batch["id"]) == before_batch
 
 
 @pytest.mark.asyncio

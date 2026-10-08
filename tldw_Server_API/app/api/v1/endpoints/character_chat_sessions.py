@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from functools import lru_cache, partial
 from types import SimpleNamespace
@@ -53,12 +53,14 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.chat_import_transport import ChatImportRoute
 from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ConversationScopeParams,
 )
+from tldw_Server_API.app.api.v1.schemas.chat_import_schemas import ChatImportRequest
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
@@ -98,7 +100,10 @@ from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
     WorkspaceChatStartupRequest,
 )
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
+    _complete_message_images,
+    _detect_image_mime_type,
     format_message_content,
+    message_image_pixel_count,
     read_messages_with_images,
 )
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
@@ -150,6 +155,8 @@ from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
+    MAX_MESSAGE_IMAGE_BYTES,
+    MAX_PERSIST_CONTENT_LENGTH,
     MAX_STREAMING_BYTES,
     MAX_STREAMING_CHUNKS,
     MAX_TOOL_CALLS_COUNT,
@@ -170,6 +177,7 @@ from tldw_Server_API.app.core.Character_Chat.emote_directives import (
     resolve_character_emote_completion,
     validate_emote_events_for_text,
 )
+from tldw_Server_API.app.core.Character_Chat.modules.character_chat import _content_length_for_guardrails
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
 )
@@ -182,6 +190,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     sanitize_sender_name,
 )
+from tldw_Server_API.app.core.Chat import conversation_import
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     STREAM_CLEANUP_DAEMON_POOL,
     STREAM_DAEMON_POOL,
@@ -198,6 +207,13 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
+from tldw_Server_API.app.core.Chat.conversation_create_idempotency import (
+    CHAT_DELETED,
+    CHAT_ID_CONFLICT,
+    ClientChatIdError,
+    conversation_create_fingerprint,
+    resolve_client_chat_replay,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     evaluate_prompt_cost_guardrails,
@@ -213,7 +229,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -261,10 +279,13 @@ from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    AppliedServerOriginObject,
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
+    capture_applied_server_origin_write,
     capture_server_origin_mutation,
+    delete_unenrolled_server_origin_objects,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
@@ -272,6 +293,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.common import parse_boolean
+from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 from tldw_Server_API.app.core.Workspaces.chat_startup import start_workspace_chat
@@ -4618,9 +4640,115 @@ router.add_api_route(
 )
 
 
+_CLIENT_CHAT_ID_MESSAGES = {
+    CHAT_ID_CONFLICT: "This chat id is already in use. Retry with the original request, or use a new id.",
+    CHAT_DELETED: "The chat created with this id is in trash. Restore it, or start a new chat with a new id.",
+}
+
+
+def _client_chat_id_http_error(code: str, status_code: int) -> HTTPException:
+    """Describe a refused client chat id without any detail of the existing chat."""
+    return HTTPException(
+        status_code=status_code,
+        detail={"error_code": code, "message": _CLIENT_CHAT_ID_MESSAGES[code]},
+    )
+
+
+def _applied_conversation_object(db: CharactersRAGDB, chat_id: str) -> AppliedServerOriginObject:
+    """Describe a stored chat as the ``chat.conversation`` upsert other devices receive."""
+    row = db.get_conversation_by_id(chat_id)
+    if row is None:
+        raise CharactersRAGDBError(f"Chat session {chat_id} is unavailable for Sync capture.")
+    return AppliedServerOriginObject(
+        domain="chat.conversation",
+        operation="upsert",
+        object_id=chat_id,
+        payload=_conversation_sync_payload(row),
+    )
+
+
+def _publish_client_chat(
+    sync_service: SyncV2Service,
+    db: CharactersRAGDB,
+    *,
+    owner_id: str,
+    chat_id: str,
+    create: Callable[[], str],
+) -> str:
+    """Run a client-id chat create inside the Sync projection fence and publish the chat.
+
+    The conversation INSERT stays the single place that claims the id and stores
+    the create fingerprint, so replay, 409 and 410 mean the same with and without
+    Sync v2. The stored chat then reaches other devices as an applied
+    ``chat.conversation`` upsert. A chat that is already published is left alone.
+    """
+    return capture_applied_server_origin_write(
+        sync_service,
+        user_id=owner_id,
+        source="server_api",
+        claims=[("chat.conversation", chat_id)],
+        write=create,
+        describe=lambda created_id: [_applied_conversation_object(db, created_id)],
+    )
+
+
+async def _replay_client_chat(
+    db: CharactersRAGDB,
+    sync_service: SyncV2Service | None,
+    conversation: dict[str, Any],
+    owner_id: str,
+    response: Response,
+) -> ChatSessionResponse:
+    """Answer a repeated client-id create, first publishing a chat whose Sync capture was lost."""
+    if sync_service is not None:
+        chat_id = str(conversation["id"])
+        try:
+            await run_in_threadpool(
+                _publish_client_chat, sync_service, db, owner_id=owner_id, chat_id=chat_id, create=lambda: chat_id,
+            )
+        except SyncStoreError as sync_exc:
+            raise _chat_sync_http_error(sync_exc) from sync_exc
+    return _client_chat_replay_response(db, conversation, owner_id, response)
+
+
+def _find_client_chat_replay(
+    db: CharactersRAGDB, chat_id: str, owner_id: str, fingerprint: str,
+) -> dict[str, Any] | None:
+    """Return the caller's matching chat for this client id, None if the id is free, or raise 409/410."""
+    existing = db.get_conversation_by_id(chat_id, include_deleted=True)
+    try:
+        replay = resolve_client_chat_replay(existing, owner_id=owner_id, fingerprint=fingerprint)
+    except ClientChatIdError as error:
+        raise _client_chat_id_http_error(error.code, error.status_code) from None
+    return dict(replay) if replay is not None else None
+
+
+def _client_chat_replay_response(
+    db: CharactersRAGDB, conversation: dict[str, Any], owner_id: str, response: Response,
+) -> ChatSessionResponse:
+    """Return the current state of an already created chat as a 200 replay."""
+    response.status_code = status.HTTP_200_OK
+    response.headers["Idempotency-Replayed"] = "true"
+    logger.debug("Replayed chat session {} for user {}", conversation["id"], owner_id)
+    return _convert_db_conversation_to_response(
+        _attach_conversation_assistant_names(db, conversation, owner_id),
+        resume_state=db.get_roleplay_resume_state(conversation["id"]),
+        db=db, user_id=owner_id,
+    )
+
+
 @router.post("/", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED,
              summary="Create a new chat session", tags=["Chat Sessions"],
-             dependencies=[Depends(require_expected_user)])
+             dependencies=[Depends(require_expected_user)],
+             responses={
+                 200: {
+                     "description": "Replay: the same owner repeated a create with this client id and request",
+                     "model": ChatSessionResponse,
+                     "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
+                 },
+                 409: {"description": "The client id is taken by a different request or chat"},
+                 410: {"description": "The chat created with this client id is in trash; the id stays taken"},
+             })
 async def create_chat_session(
     session_data: ChatSessionCreate,
     response: Response,
@@ -4644,12 +4772,25 @@ async def create_chat_session(
         should POST a first user/assistant message after chat creation. The library
         helper `start_new_chat_session` can seed a first message when used directly.
 
+        With a client ``id`` (D7 P3) the chat is created under that id. The
+        same owner repeating the same request (body fields as sent, plus the
+        seeding query options) gets the existing chat back with 200 and
+        ``Idempotency-Replayed: true``; any other use of the id is 409, and a
+        repeat after the chat was trashed is 410. The conversation primary key
+        keeps concurrent duplicates to one chat. With an active Sync v2 profile
+        the same rules hold, and the new chat is published to the other devices.
+
     Returns:
         Created chat session details
 
     Raises:
-        HTTPException: 404 if character not found, 429 if rate limited
+        HTTPException: 404 if character not found, 409/410 for an unavailable
+            client id, 429 if rate limited
     """
+    owner_id = str(current_user.id)
+    client_chat_id = session_data.id
+    create_fingerprint: str | None = None
+    sync_service: SyncV2Service | None = None
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
         from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
@@ -4663,6 +4804,20 @@ async def create_chat_session(
         # Check rate limits
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")
+        sync_service = _active_chat_sync_service(current_user, scope)
+        if client_chat_id is not None:
+            create_fingerprint = conversation_create_fingerprint(
+                session_data.model_dump(mode="json", exclude_unset=True, exclude={"id"}),
+                {
+                    "seed_first_message": seed_first_message,
+                    "greeting_strategy": greeting_strategy,
+                    "alternate_index": alternate_index,
+                },
+            )
+            # A replay is answered before quota checks: it creates nothing.
+            existing = _find_client_chat_replay(db, client_chat_id, owner_id, create_fingerprint)
+            if existing is not None:
+                return await _replay_client_chat(db, sync_service, existing, owner_id, response)
         # Enforce per-user chat count limit (approximate by scanning conversations per character)
         try:
             # Use DB-layer count for efficiency/accuracy. The helper expects
@@ -4740,7 +4895,6 @@ async def create_chat_session(
                 source_message.get("id") or session_data.forked_from_message_id
             )
 
-        sync_service = _active_chat_sync_service(current_user, scope)
         stable_key = server_origin_stable_key(
             source="server_api",
             domain="chat.conversation",
@@ -4749,7 +4903,7 @@ async def create_chat_session(
         )
 
         # Generate chat ID and title
-        chat_id = (
+        chat_id = client_chat_id or (
             server_origin_object_id("chat.conversation", idempotency_key)
             if sync_service is not None
             else None
@@ -4788,7 +4942,27 @@ async def create_chat_session(
 
         created_with_factory = False
         seed_status: Optional[str] = None
-        if sync_service is not None:
+        if sync_service is not None and create_fingerprint is not None:
+            # A client id is claimed by the conversation INSERT, which also stores the
+            # fingerprint. The Sync materializer cannot do either, so the row is
+            # written here, inside the Sync fence, and published as an applied envelope.
+            def _create_client_chat() -> str:
+                native_id = db.add_conversation(conv_data, create_request_fingerprint=create_fingerprint)
+                if not native_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to create chat session"
+                    )
+                return native_id
+
+            try:
+                created_id = await run_in_threadpool(
+                    _publish_client_chat, sync_service, db,
+                    owner_id=owner_id, chat_id=chat_id, create=_create_client_chat,
+                )
+            except SyncStoreError as sync_exc:
+                raise _chat_sync_http_error(sync_exc) from sync_exc
+        elif sync_service is not None:
             try:
                 capture_server_origin_mutation(
                     sync_service,
@@ -4829,6 +5003,7 @@ async def create_chat_session(
                 **({"assistant_startup": AssistantStartup(
                     source="fork" if validated_parent_id else "explicit",
                 )} if scope.scope_type == "workspace" else {}),
+                create_request_fingerprint=create_fingerprint,
             )
             if seed_first_message:
                 created_state = db.get_roleplay_resume_state(created_id)
@@ -4852,10 +5027,11 @@ async def create_chat_session(
             created_id = create_workspace_persona_conversation(
                 db, user_id=str(current_user.id), request=session_data,
                 conversation_data=conv_data, title_timestamp=timestamp,
+                create_request_fingerprint=create_fingerprint,
             )
         else:
             # Add to database
-            created_id = db.add_conversation(conv_data)
+            created_id = db.add_conversation(conv_data, create_request_fingerprint=create_fingerprint)
             if not created_id:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -4956,6 +5132,24 @@ async def create_chat_session(
 
     except HTTPException:
         raise
+    except ConflictError as e:
+        if (
+            create_fingerprint is None
+            or getattr(e, "entity", None) != "conversations"
+            or getattr(e, "entity_id", None) != client_chat_id
+        ):
+            logger.error(f"Error creating chat session: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred while creating chat session"
+            ) from e
+        # Another request inserted this id after our read. The primary key decided the
+        # winner and this creation rolled back, so answer as a replay or a conflict.
+        existing = _find_client_chat_replay(db, client_chat_id, owner_id, create_fingerprint)
+        if existing is None:
+            # Taken by a row the caller cannot see, such as another owner's under PostgreSQL RLS.
+            raise _client_chat_id_http_error(CHAT_ID_CONFLICT, status.HTTP_409_CONFLICT) from None
+        return await _replay_client_chat(db, sync_service, existing, owner_id, response)
     except InputError as e:
         logger.warning("Invalid chat-session creation input: {}", e)
         raise map_db_error_to_http(e) from e
@@ -4965,6 +5159,327 @@ async def create_chat_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while creating chat session"
         ) from e
+
+
+# ========================================================================
+# Local chat import (D7 P8)
+# ========================================================================
+
+ChatImportError = conversation_import.ChatImportError
+PreparedChatImport = conversation_import.PreparedChatImport
+
+# One import may carry as many image bytes as one message page or one history
+# capture can read back, so an imported chat can always be loaded.
+MAX_CHAT_IMPORT_IMAGE_BYTES = MAX_CHAT_ATTACHMENT_READ_BYTES
+# Every image is decoded once on import. A small file can hold a very large
+# picture, so the decoding work is bounded as well: 32 pictures of the largest
+# size the message API accepts.
+MAX_CHAT_IMPORT_IMAGE_PIXELS = 32 * MAX_IMAGE_PIXELS
+
+
+def _chat_import_setting(name: str, default: int) -> int:
+    """Read a positive integer limit from settings, falling back to its default."""
+    try:
+        configured = int(app_settings.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return configured if configured > 0 else default
+
+
+def _chat_import_limits() -> conversation_import.ChatImportLimits:
+    """Apply the limits ordinary message creation applies, plus the import image budget."""
+    return conversation_import.ChatImportLimits(
+        max_content_chars=_chat_import_setting("MAX_PERSIST_CONTENT_LENGTH", MAX_PERSIST_CONTENT_LENGTH),
+        max_image_bytes=_chat_import_setting("MAX_MESSAGE_IMAGE_BYTES", MAX_MESSAGE_IMAGE_BYTES),
+        max_total_image_bytes=MAX_CHAT_IMPORT_IMAGE_BYTES,
+    )
+
+
+def _chat_import_image_inspector() -> Callable[[bytes], str]:
+    """Return a check for one import that accepts only images the message API can serve back.
+
+    The message API refuses to return a chat page that holds a damaged image, so
+    an import runs the same checks up front: one bad image would otherwise make
+    the saved chat unreadable. The returned function keeps a running pixel
+    total, read from each header before the picture is decoded.
+    """
+    pixels = 0
+
+    def inspect(data: bytes) -> str:
+        """Return the image's MIME type, or refuse it."""
+        nonlocal pixels
+        mime = _detect_image_mime_type(data)
+        if mime is None:
+            raise ChatImportError(
+                "invalid_image", 422, "An image is not in a supported format (PNG, JPEG, GIF, WebP, BMP or ICO)."
+            )
+        try:
+            pixels += message_image_pixel_count(data)
+            if pixels > MAX_CHAT_IMPORT_IMAGE_PIXELS:
+                raise ChatImportError(
+                    "images_too_large",
+                    413,
+                    "The pictures in this chat are larger in total than one import may carry.",
+                    limit_pixels=MAX_CHAT_IMPORT_IMAGE_PIXELS,
+                )
+            _complete_message_images({"images": [{"image_data": data, "image_mime_type": mime}]})
+        except HTTPException as error:
+            if error.status_code == status.HTTP_413_CONTENT_TOO_LARGE:
+                raise ChatImportError("image_too_large", 413, "An image is larger than the server allows.") from None
+            raise ChatImportError("invalid_image", 422, "An image is damaged or cannot be decoded.") from None
+        return mime
+
+    return inspect
+
+
+def _find_chat_import_replay(
+    db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str,
+) -> dict[str, Any] | None:
+    """Return the caller's matching imported chat, None if the id is free, or raise 409/410."""
+    existing, stored_fingerprint = db.chat_imports.get_import_state(prepared.conversation_id)
+    replay = conversation_import.resolve_import_replay(
+        existing, owner_id=owner_id, stored_fingerprint=stored_fingerprint, fingerprint=prepared.fingerprint
+    )
+    return dict(replay) if replay is not None else None
+
+
+def _resolve_chat_import_lineage(
+    db: CharactersRAGDB, prepared: PreparedChatImport, owner_id: str,
+) -> dict[str, Any]:
+    """Check the assistant binding and fork lineage against the caller's own data.
+
+    A parent that is missing, in trash or owned by someone else is reported the
+    same way, so the answer says nothing about other accounts.
+    """
+    conversation = prepared.conversation
+    kind = conversation["assistant_kind"]
+    if kind == "persona" and not db.get_persona_profile(conversation["assistant_id"] or "", user_id=owner_id):
+        raise ChatImportError("persona_not_found", 404, "The persona this chat is bound to was not found.")
+    if kind == "character" and not db.get_character_card_by_id(conversation["character_id"]):
+        raise ChatImportError("character_not_found", 404, "The character this chat is bound to was not found.")
+
+    lineage: dict[str, Any] = {
+        "root_id": prepared.conversation_id,
+        "parent_conversation_id": None,
+        "forked_from_message_id": None,
+    }
+    parent_id = conversation["parent_conversation_id"]
+    if parent_id is None:
+        return lineage
+    parent = db.get_conversation_by_id(parent_id)
+    if (
+        not parent
+        or str(parent.get("client_id") or "").strip() != owner_id
+        or (parent.get("scope_type") or "global") != "global"
+    ):
+        raise ChatImportError(
+            "parent_conversation_not_found",
+            404,
+            "The chat this one was forked from is not on the server. Save that chat first, or import without it.",
+        )
+    lineage.update(root_id=parent.get("root_id") or parent["id"], parent_conversation_id=parent["id"])
+    fork_message_id = conversation["forked_from_message_id"]
+    if fork_message_id is not None:
+        source = db.get_message_by_id(fork_message_id)
+        if not source or source.get("conversation_id") != parent["id"]:
+            raise ChatImportError(
+                "invalid_fork_source", 422, "forked_from_message_id must be a message of the parent chat."
+            )
+        lineage["forked_from_message_id"] = source["id"]
+    return lineage
+
+
+def _project_imported_chat(db: CharactersRAGDB, conversation_id: str, owner_id: str) -> ChatSessionResponse:
+    """Return the current state of an imported chat."""
+    conversation = db.get_conversation_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve imported chat session",
+        )
+    return _convert_db_conversation_to_response(
+        _attach_conversation_assistant_names(db, dict(conversation), owner_id),
+        resume_state=db.get_roleplay_resume_state(conversation_id),
+        db=db, user_id=owner_id,
+    )
+
+
+async def import_chat_session(
+    import_data: ChatImportRequest,
+    response: Response,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> ChatSessionResponse:
+    """Save a chat that exists only on a device to the signed-in account, losslessly (D7 P8).
+
+    The body is one conversation and its whole message graph. Conversation and
+    message ids, parent links, roles, text, timestamps and images are stored as
+    sent, in one transaction: either the whole chat is imported or nothing is.
+    Timestamps are never replaced with the time of the import. The result is an
+    ordinary server chat that can be read, branched and continued.
+
+    Ownership: the chat always goes to the authenticated account, in the global
+    chat scope. The body has no owner, scope, version or deleted field, and any
+    unknown field is refused.
+
+    Idempotency: the same owner repeating the same import gets the existing
+    chat back with 200 and ``Idempotency-Replayed: true``, even after the chat
+    was renamed, edited or continued. Any other use of the id is 409
+    ``chat_id_conflict``; a repeat after the chat was trashed is 410
+    ``chat_deleted``; a message id already used on the server is 409
+    ``message_id_conflict``.
+
+    Compared with sending the messages one by one:
+
+    * Text, role, per-message size and image limits are the same as
+      ``POST /chats/{chat_id}/messages``. Images are additionally decoded once,
+      as the message API does when it returns them, and one import is limited
+      in total image bytes and total image pixels.
+    * Moderation is not run, as on that route: it applies to generation.
+    * One import counts once against the chat-creation rate limit, not once per
+      message. The per-chat message limit applies and is checked before
+      anything is decoded; the chat count quota applies to new imports.
+    * No greeting is seeded, no auto-tagging is scheduled and no character
+      behavior snapshot is taken: the import is exactly the messages sent.
+    * Generation metadata is accepted only for assistant messages and only the
+      allow-listed keys; an empty message is refused.
+
+    Sync v2: refused with 409 ``sync_chat_import_unsupported`` while a Sync v2
+    profile is active. Sync envelopes are written one mutation at a time and
+    carry no images or generation metadata, so an import through them would be
+    neither atomic nor lossless.
+
+    Args:
+        import_data: The conversation and its messages.
+        response: Receives 200 and the replay header for a repeated import.
+        db: The authenticated owner's ChaCha store.
+        current_user: The authenticated owner of the imported chat.
+
+    Returns:
+        The imported chat, or the existing chat on a replay.
+
+    Raises:
+        HTTPException: 403 for the message or chat quota, 404 for an unknown
+            character, persona or fork parent, 409/410 as above, 413 for a
+            message, image or image total that is too large, 422 for an invalid
+            graph, metadata, timestamp or image, 429 when rate limited.
+    """
+    owner_id = str(current_user.id)
+    rate_limiter = get_character_rate_limiter()
+    await rate_limiter.check_rate_limit(current_user.id, "chat_create")
+    try:
+        if _active_chat_sync_service(current_user, ConversationScopeParams()) is not None:
+            raise ChatImportError(
+                "sync_chat_import_unsupported",
+                409,
+                "Saving a local chat to the server is not supported while Sync v2 is active.",
+            )
+        limits = rate_limiter._limits
+        # Checked on the count alone, before any text or image is examined.
+        try:
+            await rate_limiter.check_message_limit(import_data.id, len(import_data.messages))
+        except HTTPException as error:
+            raise ChatImportError(
+                "message_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_messages_per_chat
+            ) from None
+        prepared = await run_in_threadpool(
+            conversation_import.prepare_chat_import,
+            import_data.model_dump(),
+            limits=_chat_import_limits(),
+            now=datetime.now(timezone.utc),
+            inspect_image=_chat_import_image_inspector(),
+            content_length=_content_length_for_guardrails,
+        )
+        chat_id = prepared.conversation_id
+
+        # A replay is answered before the chat quota is checked: it creates nothing.
+        if await run_in_threadpool(_find_chat_import_replay, db, prepared, owner_id) is not None:
+            response.status_code = status.HTTP_200_OK
+            response.headers["Idempotency-Replayed"] = "true"
+            logger.debug("Replayed chat import {} for user {}", chat_id, owner_id)
+            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+
+        try:
+            chat_count = await run_in_threadpool(
+                db.count_conversations_for_user, owner_id, scope_type="global", workspace_id=None
+            )
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as error:
+            # Fail closed: quota enforcement must work to prevent resource exhaustion.
+            logger.error("Chat limit enforcement failed, denying import: {}", error)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Quota enforcement unavailable. Please try again later.",
+            ) from error
+        try:
+            await rate_limiter.check_chat_limit(current_user.id, chat_count)
+        except HTTPException as error:
+            raise ChatImportError(
+                "chat_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_chats_per_user
+            ) from None
+
+        lineage = await run_in_threadpool(_resolve_chat_import_lineage, db, prepared, owner_id)
+        try:
+            await run_in_threadpool(
+                db.chat_imports.import_conversation,
+                {**prepared.conversation, **lineage, "id": chat_id},
+                prepared.messages,
+                owner_client_id=owner_id,
+                request_fingerprint=prepared.fingerprint,
+            )
+        except ConflictError as error:
+            if getattr(error, "entity", None) == "messages":
+                raise ChatImportError(
+                    conversation_import.MESSAGE_ID_CONFLICT,
+                    409,
+                    "A message id in this chat is already in use on the server.",
+                    message_id=getattr(error, "entity_id", None),
+                ) from None
+            # Another request imported this id after our read, or a chat the caller cannot see
+            # holds it. The primary key decided, and this import rolled back.
+            if await run_in_threadpool(_find_chat_import_replay, db, prepared, owner_id) is None:
+                raise conversation_import.chat_id_conflict() from None
+            response.status_code = status.HTTP_200_OK
+            response.headers["Idempotency-Replayed"] = "true"
+            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+
+        logger.info(
+            "Imported chat session {} with {} messages for user {}", chat_id, len(prepared.messages), owner_id
+        )
+        return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+    except ChatImportError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail()) from None
+    except HTTPException:
+        raise
+    except InputError as e:
+        logger.warning("Invalid chat import input: {}", e)
+        raise map_db_error_to_http(e) from e
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
+        logger.error(f"Error importing chat session: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while importing chat session"
+        ) from e
+
+
+router.add_api_route(
+    "/import", import_chat_session, methods=["POST"], response_model=ChatSessionResponse,
+    status_code=status.HTTP_201_CREATED, summary="Import a local chat with its whole message graph",
+    tags=["Chat Sessions"], dependencies=[Depends(require_expected_user)], route_class_override=ChatImportRoute,
+    responses={
+        200: {
+            "description": "Replay: the same owner repeated this import",
+            "model": ChatSessionResponse,
+            "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
+        },
+        403: {"description": "The chat has more messages than a chat may hold, or the chat quota is used up"},
+        404: {"description": "The character, persona or fork parent named by the import was not found"},
+        409: {"description": "The chat id or a message id is already in use, or Sync v2 is active"},
+        410: {"description": "The chat imported with this id is in trash; the id stays taken"},
+        413: {"description": "The body, a message, an image or the images in total are too large"},
+        422: {"description": "The message graph, metadata, a timestamp or an image is not valid"},
+        429: {"description": "Chat creation rate limit exceeded"},
+    },
+)
 
 
 # ========================================================================
@@ -7873,7 +8388,13 @@ async def delete_chat_session(
     current_user: User = Depends(get_request_user)
 ) -> Response:
     """
-    Soft delete a chat session.
+    Soft delete a chat session (move it to Trash), or permanently delete a trashed one.
+
+    Moving a chat to Trash only marks the conversation row deleted. Its messages
+    are left untouched: every message read joins on the conversation's
+    ``deleted`` flag, so they are hidden while the chat is in Trash, and
+    ``POST /{chat_id}/restore`` brings the transcript back exactly as it was.
+    Messages the user deleted individually before trashing stay deleted.
 
     Args:
         chat_id: Chat session ID
@@ -7941,9 +8462,40 @@ async def delete_chat_session(
                         break
                     fetch_offset += fetch_limit
 
-                for message in child_messages:
-                    message_id = str(message.get("id") or "")
-                    if not message_id:
+                # Rows Sync never saw (the chat predates the profile, or a message was saved
+                # by a path that publishes nothing) are deleted directly, as without a
+                # profile. They were never in the log, so there is nothing to retract there
+                # (#3181). Published rows are tombstoned as before: every message first,
+                # then the chat.
+                message_versions = {
+                    str(message["id"]): message.get("version", 1) for message in child_messages if message.get("id")
+                }
+                chat_object = ("chat.conversation", chat_id)
+
+                def delete_messages_directly(unpublished: Sequence[tuple[str, str]]) -> None:
+                    # The chat is in the list when it is unpublished too. It goes last, below.
+                    with db.transaction() as conn:
+                        for domain, message_id in unpublished:
+                            if domain == "chat.message":
+                                db.soft_delete_message(message_id, message_versions[message_id], conn=conn)
+
+                def delete_chat_directly(_unpublished: Sequence[tuple[str, str]]) -> None:
+                    db.soft_delete_conversation(
+                        chat_id,
+                        expected_version if expected_version is not None else conversation.get('version', 1),
+                    )
+
+                # One check covers the whole chat, so a dataset that cannot take a needed
+                # tombstone refuses the request before anything is deleted.
+                published = await run_in_threadpool(
+                    delete_unenrolled_server_origin_objects,
+                    sync_service,
+                    user_id=str(current_user.id),
+                    objects=[*(("chat.message", message_id) for message_id in message_versions), chat_object],
+                    delete=delete_messages_directly,
+                )
+                for domain, message_id in published:
+                    if domain != "chat.message":
                         continue
                     capture_server_origin_mutation(
                         sync_service,
@@ -7961,79 +8513,47 @@ async def delete_chat_session(
                         },
                         source="server_api",
                     )
-                capture_server_origin_mutation(
-                    sync_service,
-                    user_id=str(current_user.id),
-                    domain="chat.conversation",
-                    operation="tombstone",
-                    object_id=chat_id,
-                    payload={
-                        "id": chat_id,
-                        "deleted": True,
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
-                    },
-                    source="server_api",
-                )
+                chat_is_published = chat_object in published
+                if not chat_is_published:
+                    # Checked again under the fence: the chat is deleted directly only if it
+                    # still has no Sync history.
+                    chat_is_published = bool(
+                        await run_in_threadpool(
+                            delete_unenrolled_server_origin_objects,
+                            sync_service,
+                            user_id=str(current_user.id),
+                            objects=[chat_object],
+                            delete=delete_chat_directly,
+                        )
+                    )
+                if chat_is_published:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="chat.conversation",
+                        operation="tombstone",
+                        object_id=chat_id,
+                        payload={
+                            "id": chat_id,
+                            "deleted": True,
+                            "client_id": str(current_user.id),
+                            "owner_user_id": str(current_user.id),
+                        },
+                        source="server_api",
+                    )
+            except (ConflictError, CharactersRAGDBError):
+                # A refused direct delete is the owner database's answer, not a Sync failure.
+                raise
             except Exception as sync_exc:
                 raise _chat_sync_http_error(sync_exc) from sync_exc
             logger.info(f"Soft deleted chat session {chat_id} by user {current_user.id}")
             return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-        # Delete messages in batches using offset-based pagination to avoid unbounded memory
-        # Track failed message IDs to prevent infinite loops when deletions fail
-        batch_size = 100
-        max_batches = 1000  # Safety limit: max 100,000 messages per conversation
-        total_deleted = 0
-        consecutive_empty_batches = 0
-        max_empty_batches = 3  # Stop after consecutive empty batches (indicates completion)
-        failed_message_ids: set = set()  # Track messages that failed to delete
-
-        for _batch_num in range(max_batches):
-            # Fetch non-deleted messages only (include_deleted=False is default)
-            batch = db.get_messages_for_conversation(chat_id, limit=batch_size, offset=0)
-
-            # Filter out messages that previously failed to delete to prevent infinite loops
-            batch = [m for m in batch if m.get("id") not in failed_message_ids]
-
-            if not batch:
-                consecutive_empty_batches += 1
-                if consecutive_empty_batches >= max_empty_batches:
-                    break
-                continue
-
-            consecutive_empty_batches = 0  # Reset counter on successful batch
-
-            # Delete messages in this batch
-            batch_deleted = 0
-            for msg in batch:
-                msg_id = msg.get("id")
-                if not msg_id:
-                    continue
-                try:
-                    db.soft_delete_message(msg_id, msg.get("version", 1))
-                    batch_deleted += 1
-                except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-                    logger.warning("Failed to soft-delete message {} during conversation delete.", msg_id)
-                    failed_message_ids.add(msg_id)  # Track failed deletions
-
-            total_deleted += batch_deleted
-
-            # If we couldn't delete any messages in this batch, we might be stuck
-            if batch_deleted == 0:
-                consecutive_empty_batches += 1
-                if consecutive_empty_batches >= max_empty_batches:
-                    logger.warning(f"Stopping message deletion for {chat_id} after {total_deleted} messages - possible stuck state")
-                    break
-
-        if failed_message_ids:
-            logger.warning(f"Failed to delete {len(failed_message_ids)} messages from conversation {chat_id}: {failed_message_ids}")
-
-        logger.debug(f"Deleted {total_deleted} messages from conversation {chat_id}")
-
-        # Soft delete conversation via DB abstraction (optimistic locking)
+        # Trash only the conversation row. Its messages stay as they are, hidden by
+        # the conversation's deleted flag, so restore returns the same transcript
+        # and never resurrects messages that were deleted individually beforehand
+        # (CS-N2, #3104).
         exp_ver = expected_version if expected_version is not None else conversation.get('version', 1)
-        # Finally soft delete the conversation
         db.soft_delete_conversation(chat_id, exp_ver)
 
         logger.info(f"Soft deleted chat session {chat_id} by user {current_user.id}")

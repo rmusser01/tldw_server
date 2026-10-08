@@ -38,4 +38,20 @@ describe("PlaygroundSendControl accessibility", () => {
     ).not.toBeInTheDocument()
     expect(screen.queryAllByRole("button", { name: /send/i })).toHaveLength(1)
   })
+
+  it("disables Send and explains why while a fresh chat's history selection is not idle (CS-01, #3106)", () => {
+    const { rerender } = render(
+      <PlaygroundSendControl {...baseProps} isHistorySelectionPending />
+    )
+
+    const send = screen.getByRole("button", { name: "Send message" })
+    expect(send).toBeDisabled()
+    expect(send).toHaveAttribute(
+      "title",
+      "Conversation history isn't ready yet. Wait for it to load, or start a new chat."
+    )
+
+    rerender(<PlaygroundSendControl {...baseProps} isHistorySelectionPending={false} />)
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+  })
 })

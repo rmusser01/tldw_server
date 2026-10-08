@@ -37,7 +37,7 @@ import {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRootDefault = path.resolve(moduleDir, "../..")
 const repoRootDefault = path.resolve(frontendRootDefault, "../..")
-const validProjects = new Set(["tier-1", "tier-2", "tier-3"])
+const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression"])
 
 function runIdNow() {
   return new Date().toISOString().replace(/[:.]/g, "-")
@@ -79,7 +79,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (!options.projects.length || options.projects.some((project) => !validProjects.has(project))) {
-    throw new Error("--projects entries must be tier-1, tier-2, or tier-3")
+    throw new Error("--projects entries must be tier-1, tier-2, tier-3, or ux-regression")
   }
   if (options.runId && !/^[A-Za-z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, numbers, dots, underscores, and hyphens")
@@ -91,7 +91,7 @@ export function formatUsage() {
   return [
     "Usage: bun run uat:live-tiers -- [options]",
     "",
-    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run.",
+    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression).",
     "  --workers=1                       Playwright worker count.",
     "  --list-only                       List and inventory without executing tests.",
     "  --grep=<pattern>                  Non-certifying bounded smoke selection.",
@@ -121,6 +121,41 @@ function playwrightProjectArgs(projects) {
   return projects.map((project) => `--project=${project}`)
 }
 
+const baseEnvKeys = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "PYTHONPATH", "VIRTUAL_ENV"]
+
+/** Where the ux-regression side-panel specs find the unpacked Chrome extension. */
+export const EXTENSION_DIR_ENV = "TLDW_UXR_EXTENSION_DIR"
+
+/**
+ * The ux-regression project's side-panel specs load the built browser
+ * extension. A run that includes the project builds it first (production
+ * profile, as the extension's own CI does). Setting TLDW_UXR_EXTENSION_DIR to
+ * an existing build skips that step for local iteration; the specs still fail,
+ * never skip, if the directory holds no usable build.
+ *
+ * @returns {{ dir: string, command: { name: string, command: string, args: string[], cwd: string, env: Record<string, string> } | null } | null}
+ */
+export function resolveExtensionBuild({
+  frontendRoot = frontendRootDefault,
+  projects,
+  baseEnv = process.env,
+}) {
+  if (!projects.includes("ux-regression")) return null
+  const extensionRoot = path.resolve(frontendRoot, "../extension")
+  const prebuilt = baseEnv[EXTENSION_DIR_ENV]
+  if (prebuilt) return { dir: path.resolve(prebuilt), command: null }
+  return {
+    dir: path.join(extensionRoot, ".output/chrome-mv3"),
+    command: {
+      name: "extension-build",
+      command: "bun",
+      args: ["run", "build:chrome:prod"],
+      cwd: extensionRoot,
+      env: safeEnv(baseEnv, baseEnvKeys),
+    },
+  }
+}
+
 export function buildCommands({
   repoRoot = repoRootDefault,
   frontendRoot = frontendRootDefault,
@@ -144,9 +179,11 @@ export function buildCommands({
   }
   const nextDistDir = `.next-live-tier-${runId}`
   const nextDistPath = path.join(frontendRoot, nextDistDir)
-  const baseKeys = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "PYTHONPATH", "VIRTUAL_ENV"]
+  const baseKeys = baseEnvKeys
+  const extension = resolveExtensionBuild({ frontendRoot, projects, baseEnv })
   const sharedFrontendEnv = {
     ...safeEnv(baseEnv, baseKeys),
+    ...(extension ? { [EXTENSION_DIR_ENV]: extension.dir } : {}),
     NEXT_PUBLIC_API_URL: backendUrl,
     NEXT_PUBLIC_API_VERSION: "v1",
     NEXT_PUBLIC_X_API_KEY: apiKey,
@@ -487,7 +524,10 @@ export function assertNoMutableRepoDatabasePaths(logText, repoRoot) {
 }
 
 export function assertOnlyLoopbackHttpRequests(logText) {
-  const allowedHosts = new Set(["127.0.0.1", "::1", "localhost"])
+  // sensitive-endpoint.invalid is the unresolvable placeholder the backend logs
+  // in place of a sensitive request's real URL (tldw_Server_API/app/core/http_client.py);
+  // it is never a real outbound request.
+  const allowedHosts = new Set(["127.0.0.1", "::1", "localhost", "sensitive-endpoint.invalid"])
   for (const line of String(logText).split(/\r?\n/)) {
     if (!/(?:url\.full|HTTP Request:)/.test(line)) continue
     for (const match of line.matchAll(/https?:\/\/[^\s"'<>]+/g)) {
@@ -538,6 +578,7 @@ export async function runLiveTierUat({
   const profileRoot = path.join(tmpdir(), `tldw-onboarding-uat-${runId}`)
   const nextDistPath = path.join(frontendRoot, `.next-live-tier-${runId}`)
   const logs = {
+    extensionBuild: path.join(artifactRoot, "extension-build.log"),
     mock: path.join(artifactRoot, "mock-openai.log"),
     backend: path.join(artifactRoot, "backend.log"),
     frontend: path.join(artifactRoot, "frontend.log"),
@@ -567,9 +608,19 @@ export async function runLiveTierUat({
   try {
     assertFreshRunTargets([artifactRoot, profileRoot, nextDistPath])
     ownsGeneratedTargets = true
-    ports = await reservePorts(["backend", "web", "mock"])
     mkdirSync(artifactRoot, { recursive: true })
     ownsArtifactRoot = true
+    // Build before reserving ports, so a slow build cannot outlive the
+    // reservation and a broken one fails before any service starts.
+    const extensionBuild = resolveExtensionBuild({ frontendRoot, projects: options.projects, baseEnv })?.command
+    if (extensionBuild) {
+      const build = await runCommand(extensionBuild, logs.extensionBuild, { signal })
+      signal?.throwIfAborted()
+      if (build.code !== 0) {
+        throw new Error(`Extension build failed with exit code ${build.code}; see ${logs.extensionBuild}`)
+      }
+    }
+    ports = await reservePorts(["backend", "web", "mock"])
     const pythonCommand = resolvePythonCommand({ repoRoot, baseEnv })
     profile = buildLiveTierProfile({
       repoRoot,

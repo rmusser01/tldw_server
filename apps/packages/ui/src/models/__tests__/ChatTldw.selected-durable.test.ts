@@ -6,6 +6,7 @@ import { historyDurableRequestDigest } from "@/services/history-durable-turn"
 import { selectionDigest } from "@/utils/history-selection"
 import type { HistorySelectionV1 } from "@/types/history-selection"
 import { consumeStreamingChunk, extractStreamingChunkError } from "@/utils/streaming-chunks"
+import { getServerChatSaveStatus, resetServerChatSaveStatus, serverChatSaveStatusStore } from "@/store/server-chat-save-status"
 
 const calls = vi.hoisted(() => ({ stream: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
@@ -50,7 +51,10 @@ const resultFrame = (request: ReturnType<typeof prepare>) => ({ ...frame(request
     admission: Object.fromEntries(Object.entries(admission(request)).filter(([key]) => !["messages", "originating_selection_revision"].includes(key))),
     request_context_digest: historyDurableRequestDigest(request), sources: request.tldw_turn.result_v1!.sources }
 })
-beforeEach(() => calls.stream.mockReset())
+beforeEach(() => {
+  calls.stream.mockReset()
+  resetServerChatSaveStatus()
+})
 describe("selected durable model transport", () => {
   it("builds an exact bare durable body with explicit provider/model/stream/save and original text", () => {
     const chat = model({ originalUserMessage: "  Original\n" })
@@ -81,8 +85,29 @@ describe("selected durable model transport", () => {
     expect(chat.serverMessageId).toBe(resultId)
     expect(chat.serverUserMessageId).toBe(inputId)
     expect(chat.serverMessagesAlreadyPersisted).toBe(true)
+    expect(getServerChatSaveStatus("chat")).toBe("saved")
+    expect(serverChatSaveStatusStore.getState().entries.chat.inFlight).toBe(0)
     expect(calls.stream.mock.calls[0][0]).toBe(request)
   })
+  it.each(["no receipt", "admission only", "provider finish"])(
+    "does not treat selected durable EOF as a saved result with %s", async receipt => {
+      const chat = model()
+      const request = prepare(chat)
+      calls.stream.mockImplementation(async function* () {
+        if (receipt !== "no receipt") yield frame(request)
+        yield { id: "provider-id", choices: [{ delta: { content: "Unconfirmed reply" } }] }
+        if (receipt === "provider finish") yield { id: "provider-id", choices: [{ delta: {}, finish_reason: "stop" }] }
+      })
+      const chunks = []
+      for await (const chunk of await chat.stream([], { preparedRequest: request })) chunks.push(chunk)
+
+      expect(chunks).toContain("Unconfirmed reply")
+      expect(chat.historyResult).toBeUndefined()
+      expect(chat.serverMessagesAlreadyPersisted).toBe(false)
+      expect(getServerChatSaveStatus("chat")).toBe("failed")
+      expect(serverChatSaveStatusStore.getState().entries.chat.inFlight).toBe(0)
+    }
+  )
   it("makes an admission visible when a receipt-only stream ends without a result", async () => {
     const chat = model()
     const request = prepare(chat)

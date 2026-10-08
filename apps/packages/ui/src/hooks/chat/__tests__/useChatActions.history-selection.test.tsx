@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatActions } from "../useChatActions"
 import type { HistorySendTurn } from "@/types/chat-modes"
 import type { HistorySelectionController } from "../useHistorySelection"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { historyDurableRequestDigest } from "@/services/history-durable-turn"
 import { historyAdmissionReference } from "@/services/chat-history-selection"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
@@ -785,6 +786,128 @@ it("routes ordinary regeneration while the mounted history controller is idle", 
   expect(normalChatModeMock).toHaveBeenCalled()
 })
 
+describe("interrupted ordinary Retry recovery lifetime", () => {
+  it.each(["journal-aba", "journal-intent", "choose-intent"])("does not resume abandoned Retry after %s", async boundary => {
+    const journal = await import("@/db/dexie/history-selection")
+    const current = h1.controller.getCurrent()
+    const abandon = () => {
+      if (boundary === "journal-aba") {
+        h1.controller.navigate()
+        h1.controller.getCurrent().view.conversation_id = current.view.conversation_id
+      } else {
+        usePlaygroundSessionStore.getState().cancelPendingRestore()
+        usePlaygroundSessionStore.getState().requestServerChatSelection("other")
+      }
+    }
+    const load = vi.spyOn(journal, "loadHistoryTurnRecoveries").mockImplementationOnce(async () => {
+      if (boundary !== "choose-intent") abandon()
+      return []
+    })
+    const choose = vi.fn(async (_cursor, isCurrentLoad?: () => boolean) => {
+      if (boundary === "choose-intent") abandon()
+      return isCurrentLoad?.() ?? true
+    })
+    h1.controller.choose = choose
+    const options = {
+      ...ordinaryOptions(),
+      messages: [
+        { id: "question", isBot: false, message: "Retry question", sources: [] },
+        { id: "partial", isBot: true, message: "Retained text", sources: [], generationInfo: { interrupted: true } }
+      ]
+    }
+    const hook = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+    try {
+      let result: unknown
+      await act(async () => { result = await hook.result.current.regenerateLastMessage() })
+      expect(result).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+      expect(normalChatModeMock).not.toHaveBeenCalled()
+      if (boundary !== "choose-intent") expect(choose).not.toHaveBeenCalled()
+    } finally {
+      hook.unmount()
+      load.mockRestore()
+    }
+  })
+
+  it.each(["failed", "skipped", "submitted"] as const)(
+    "retains the original partial reply through %s replacement preparation",
+    async status => {
+      const journal = await import("@/db/dexie/history-selection")
+      const current = h1.controller.getCurrent()
+      const entry: HistoryTurnRecoveryEntry = {
+        scope: current.bookmarkScope,
+        turn: {
+          operation_id: "original-partial",
+          origin_view: current.view,
+          created_at: 1,
+          input_text: "Retry question",
+          input_images: [],
+          state: "generated_unsaved",
+          selection_digest: "original-selection",
+          request_context_digest: "request",
+          owner_key: current.view.owner_key,
+          conversation_id: current.view.conversation_id,
+          input_id: "question",
+          assistant_id: "partial",
+          result_text: "The only retained partial reply",
+          outcome: "interrupted",
+          admission: {
+            version: 1,
+            owner_key: current.view.owner_key,
+            conversation_id: current.view.conversation_id,
+            input_message_id: "question",
+            input_message_revision: "1",
+            selection_digest: "original-selection"
+          }
+        }
+      }
+      let records = [entry]
+      const load = vi.spyOn(journal, "loadHistoryTurnRecoveries").mockImplementation(async () => records)
+      h1.controller.choose = vi.fn(async (cursor: Parameters<HistorySelectionController["choose"]>[0]) => {
+        current.view = { ...current.view, cursor, selection_revision: 2 }
+        return true
+      })
+      h1.controller.dismissRecovery = vi.fn(async () => { records = [] })
+      let recordsAtPreparation: typeof records = []
+      let liveAtPreparation = false
+      let autoKeepableAtPreparation = true
+      normalChatModeMock.mockImplementation(async () => {
+        recordsAtPreparation = [...records]
+        const { isHistoryTurnLive, isRetainedPartialReply } = await import("@/services/history-turn-keep")
+        liveAtPreparation = isHistoryTurnLive(entry.turn.operation_id)
+        autoKeepableAtPreparation = isRetainedPartialReply(entry.turn, "native")
+        return status === "failed"
+          ? { status, errorMessage: "capability_unavailable" }
+          : status === "skipped"
+            ? { status, reason: "Request scope changed" }
+            : { status }
+      })
+      const options = {
+        ...ordinaryOptions(),
+        messages: [
+          { id: "question", isBot: false, message: "Retry question", sources: [] },
+          { id: "partial", isBot: true, message: entry.turn.result_text, sources: [], generationInfo: { interrupted: true } }
+        ]
+      }
+      const hook = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+      try {
+        let result: unknown
+        await act(async () => { result = await hook.result.current.regenerateLastMessage() })
+        expect(result).toMatchObject({ status })
+        expect(recordsAtPreparation).toEqual([entry])
+        expect(liveAtPreparation).toBe(true)
+        expect(autoKeepableAtPreparation).toBe(false)
+        expect(records).toEqual(status === "submitted" ? [] : [entry])
+        expect(h1.controller.dismissRecovery).toHaveBeenCalledTimes(status === "submitted" ? 1 : 0)
+        const { isHistoryTurnLive } = await import("@/services/history-turn-keep")
+        expect(isHistoryTurnLive(entry.turn.operation_id)).toBe(false)
+      } finally {
+        hook.unmount()
+        load.mockRestore()
+      }
+    }
+  )
+})
+
 it("mounted ordinary submit sends the selected A1 and settles once under its pre-admitted input", async () => {
   const options = ordinaryOptions()
   h1.wire.mockImplementation(async function* () {
@@ -1087,6 +1210,133 @@ it("first durable ordinary send creates its local owner and admits before infere
   })
   expect(createChatMock).not.toHaveBeenCalled()
   expect(addChatMessageMock).not.toHaveBeenCalled()
+})
+
+describe("fresh-chat submit with a selection another conversation left behind (CS-01, #3106)", () => {
+  const freshOptions = () => ({
+    ...ordinaryOptions(),
+    historyId: null,
+    serverChatId: null,
+    messages: [],
+    history: []
+  })
+  const renderActions = (options: object) =>
+    renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+
+  it("resets the stale selection before the turn's fence and sends only the new message", async () => {
+    // The native tracked-chat-1 selection (cursor after A1) survives a New chat.
+    let current: unknown = h1.controller.getCurrent()
+    const order: string[] = []
+    const load = vi.fn(async (
+      { historyId }: { historyId: string; serverChatId?: string | null },
+      _reference: unknown,
+      onLoaded: (receipt: { owner: unknown; view: unknown }) => void
+    ) => {
+      const view = {
+        owner_key: "local-key",
+        conversation_id: historyId,
+        view_session_id: "new",
+        selection_revision: 0,
+        cursor: { kind: "empty" },
+        interpretation: { kind: "parent_graph_v1" }
+      }
+      const capture = {
+        ...captureFor(view),
+        snapshot: { ...captureFor(view).snapshot, owner_key: "local-key", conversation_id: historyId, nodes: [] }
+      }
+      const owner = { kind: "local", profile_id: "profile", owner_key: "local-key", conversation_id: historyId }
+      current = {
+        owner,
+        view,
+        status: "ready",
+        capture,
+        bookmarkScope: { profile_id: "profile", client_session_id: "client" }
+      }
+      h1.localCapture.mockResolvedValue(capture)
+      onLoaded({ owner, view })
+      return true
+    })
+    h1.controller = {
+      getCurrent: () => current,
+      reset: vi.fn(() => {
+        order.push("reset")
+        current = { owner: null, view: null, capture: null, bookmarkScope: null, status: "idle" }
+      }),
+      fence: () => {
+        order.push("fence")
+        return () => true
+      },
+      loadConversation: load,
+      followResult: vi.fn(async () => true)
+    }
+    h1.saveHistory.mockResolvedValue({ id: "new-local" })
+    h1.localAppend.mockImplementation(async (_owner, selection, input) => ({
+      version: 1,
+      owner_key: "local-key",
+      conversation_id: "new-local",
+      input_message_id: input.id,
+      input_message_revision: "1",
+      selection_digest: selection.selection_digest,
+      messages: [],
+      originating_selection_revision: 0
+    }))
+    h1.localSettle.mockImplementation(async (_owner, _admission, input) => input)
+    h1.wire.mockImplementation(async function* () {
+      yield { choices: [{ delta: { content: "answer" } }] }
+    })
+    const { result } = renderActions(freshOptions())
+    await act(async () => {
+      await result.current.onSubmit({ message: "unrelated", image: "" })
+    })
+
+    expect(order.slice(0, 2)).toEqual(["reset", "fence"])
+    expect(h1.saveHistory).toHaveBeenCalledOnce()
+    expect(load.mock.calls[0][0]).toMatchObject({ historyId: "new-local" })
+    expect(load.mock.calls[0][0].serverChatId).toBeFalsy()
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const sent = JSON.stringify(h1.wire.mock.calls[0][0].messages)
+    expect(sent).toContain("unrelated")
+    expect(sent).not.toContain("old question")
+    expect(sent).not.toContain("same answer")
+    // Nothing is admitted into the conversation the user left.
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(h1.capture).not.toHaveBeenCalled()
+  })
+
+  it("leaves a selection that is still loading in place and refuses the send without dispatching", async () => {
+    const loading = { ...h1.controller.getCurrent(), capture: null, status: "loading" }
+    const reset = vi.fn()
+    h1.controller = {
+      getCurrent: () => loading,
+      reset,
+      fence: () => () => true,
+      loadConversation: vi.fn(),
+      followResult: vi.fn(async () => true)
+    }
+    const { result } = renderActions(freshOptions())
+    await act(async () => {
+      await result.current.onSubmit({ message: "unrelated", image: "" })
+    })
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(h1.saveHistory).not.toHaveBeenCalled()
+  })
+
+  it("keeps the selection of a turn that addresses its conversation", async () => {
+    const reset = vi.fn()
+    h1.controller = { ...h1.controller, reset }
+    const { result } = renderActions({ ...ordinaryOptions(), serverChatId: "tracked-chat-1" })
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(JSON.stringify(h1.wire.mock.calls[0][0].messages)).toContain("old question")
+  })
 })
 
 it("a first-create acknowledgement after navigation never installs or dispatches into the new view", async () => {

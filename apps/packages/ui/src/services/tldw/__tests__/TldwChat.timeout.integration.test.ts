@@ -2,6 +2,7 @@ import i18n from "i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { chatRagMethods } from "../domains/chat-rag"
 import { TldwChatService } from "../TldwChat"
+import { tldwClient } from "../TldwApiClient"
 import { buildAssistantErrorContent, decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 vi.mock("wxt/browser", () => ({ browser: { runtime: {} } }))
@@ -35,12 +36,32 @@ const consume = async (service: TldwChatService, signal?: AbortSignal) => {
   }
 }
 
-const serveStream = (firstOutputMs?: number, finish = true) => {
+type StreamShape = {
+  /** Send an SSE comment every second (the backend's heartbeats are off by default). */
+  heartbeat?: boolean
+  /** Frames sent as soon as the response opens, before any model output. */
+  preamble?: string[]
+}
+
+/** What the real backend sends before the model's first token. */
+const BACKEND_PREAMBLE = [
+  'data: {"event":"tldw_metadata","conversation_id":"saved-chat","tldw_conversation_id":"saved-chat"}\n\n',
+  'event: stream_start\ndata: {"conversation_id":"saved-chat","model":"local-model"}\n\n'
+]
+
+const serveStream = (
+  firstOutputMs?: number,
+  finish = true,
+  { heartbeat: sendHeartbeat = true, preamble = [] }: StreamShape = {}
+) => {
   const encoder = new TextEncoder()
   const fetch = vi.fn(async (_url: string, init: RequestInit) => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        const heartbeat = setInterval(() => controller.enqueue(encoder.encode(": processing\n\n")), 1_000)
+        for (const frame of preamble) controller.enqueue(encoder.encode(frame))
+        const heartbeat = sendHeartbeat
+          ? setInterval(() => controller.enqueue(encoder.encode(": processing\n\n")), 1_000)
+          : undefined
         let output: ReturnType<typeof setTimeout> | undefined
         const cleanup = () => {
           clearInterval(heartbeat)
@@ -81,7 +102,7 @@ describe("Chat startup policy and diagnostics through browser transport", () => 
       apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000"
     })
   })
-  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
   it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
     "allows first visible output after 10 seconds with missing/invalid startup setting %s",
@@ -138,6 +159,60 @@ describe("Chat startup policy and diagnostics through browser transport", () => 
       detail: expect.stringMatching(/2.*seconds.*after visible output/)
     })
     expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  describe("CM-N1 (#3107): the first token waits for the startup timeout on a silent stream", () => {
+    it.each([
+      ["nothing", []],
+      ["only the backend's metadata frames", BACKEND_PREAMBLE]
+    ])("completes a 60 s first token when the server sends %s before it", async (_label, preamble) => {
+      const fetch = serveStream(60_000, true, { heartbeat: false, preamble })
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(await result).toEqual({ text: "Grounded answer", error: undefined })
+      expect(fetch).toHaveBeenCalledOnce()
+    })
+
+    it("applies the stream idle timeout between chunks once the first token has arrived", async () => {
+      const fetch = serveStream(1_000, false, { heartbeat: false, preamble: BACKEND_PREAMBLE })
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(1_000 + 29_999)
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const { text, error } = await result
+      expect(text).toBe("Grounded answer")
+      expect(error).toMatchObject({ name: "ChatStreamTimeoutError", phase: "idle", timeoutMs: 30_000 })
+    })
+
+    it("still fails a genuine hang past the startup timeout with a clear startup error", async () => {
+      const fetch = serveStream(undefined, true, { heartbeat: false, preamble: BACKEND_PREAMBLE })
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(119_999)
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const { error } = await result
+      expect(error).toMatchObject({ name: "ChatStreamTimeoutError", phase: "startup", timeoutMs: 120_000 })
+      expect(decodeChatErrorPayload(buildAssistantErrorContent("", error))).toMatchObject({
+        summary: "The model did not start responding in time.",
+        detail: expect.stringMatching(/120 seconds before any visible output/)
+      })
+      expect(fetch).toHaveBeenCalledOnce()
+    })
+
+    it("hands the web and extension transports a watchdog no shorter than the startup timeout", async () => {
+      // Both transports (direct fetch and the extension background port) take their
+      // byte-level idle timer only from this option, so one value covers both paths.
+      Object.assign(storage.get("tldwConfig")!, { chatStartupTimeoutMs: 90_000, chatStreamIdleTimeoutMs: 20_000 })
+      serveStream(10, true, { heartbeat: false })
+      const transport = vi.spyOn(tldwClient, "streamChatCompletion")
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(10)
+      expect(await result).toEqual({ text: "Grounded answer", error: undefined })
+      expect(transport).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ streamIdleTimeoutMs: 90_000 })
+      )
+    })
   })
 
   it("keeps an explicit Stop distinct from a startup timeout", async () => {
