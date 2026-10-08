@@ -105,7 +105,7 @@ assert all(item["kind"] != "chunk" for item in preview["snippets"])
 **Goal:** Small shared client and acceptance helpers retain immutable identity and resolve real version pins.
 **Success Criteria:** Same pending body retries; exact version/digest readback gates confirmation; requests stay owner-bound and abortable.
 **Tests:** Shared client and narrow capture helper tests.
-**Status:** Complete
+**Status:** In Progress
 
 ### Task 3: Scoped clients and capture acceptance helpers
 
@@ -135,6 +135,8 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 - [x] Read actual background proxy scope and Media version API; use exact schema types and standard Web Crypto. Do not add an abstraction layer or retry framework.
 - [x] Add RED behavioral tests for no extraction until called, abort/scope forwarding, trimmed/full/oversized extraction, immutable acceptance/UUID, descriptor/hash match, Note-vs-Media versions, partial/lost-response exact retry, wrong workspace/URL/owner/media, deleted pin and changed head.
 - [x] Implement and run GREEN; regenerate OpenAPI checked artifacts using repo scripts and verify drift; shared scoped lint/typechecks/hooks/self-review and commit. Report exact exported signatures/types for Task4.
+
+- [ ] Task3 fix1: admit only required capture and canonical readback path/method pairs through existing shared scoped transport inventory; prove direct and actual worker admission with real security guards, then independently review and resume CDP. Live Capture currently fails before HTTP on the omitted extraction route.
 
 ## Stage 4: Shared Research workflow and evidence retention
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
