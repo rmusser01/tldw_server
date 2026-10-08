@@ -135,7 +135,11 @@ export function useResearchWebCapture(workspaceId: string | null) {
         session.scope.release()
         throw reason
       }
-      if (session.scope.scopeKey !== session.owner)
+      const requestOwner = await getResearchWorkspaceOwner(
+        session.scope.requestScope
+      )
+      assertCurrent(session)
+      if (requestOwner !== session.owner)
         throw new Error("Capture account changed")
       const records = await readResearchWebCaptures(session.owner, workspaceId)
       assertCurrent(session)

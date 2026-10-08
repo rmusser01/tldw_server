@@ -1,3 +1,4 @@
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { KnowledgeNoteSource } from "./knowledge-note-provenance"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -238,12 +239,23 @@ export const buildKnowledgeQaWorkspacePrefill = (
 }
 
 /** Public account/server identity only; credentials never enter storage keys. */
-export const getResearchWorkspaceOwner = async (): Promise<string> => {
-  const config = await tldwClient.getConfig()
-  if (!config?.serverUrl || deriveScopedUserId(config) === "user:anonymous") {
+export const getResearchWorkspaceOwner = async (
+  requestScope?: ServicePromptRequestScope,
+): Promise<string> => {
+  // Project a verified request into the existing public recovery namespace;
+  // its credential-bound authority and lease remain on the request snapshot.
+  const config = requestScope?.config ?? (await tldwClient.getConfig())
+  const userId = requestScope?.userId
+  if (
+    !config?.serverUrl ||
+    deriveScopedUserId({ ...config, userId }) === "user:anonymous"
+  ) {
     throw new Error("Sign in before continuing in Research Workspace.")
   }
-  return buildChatSurfaceScopeKeyFromConfig({ ...config, apiKey: undefined })
+  return buildChatSurfaceScopeKeyFromConfig(
+    { ...config, apiKey: undefined },
+    { userId },
+  )
 }
 
 const assertPersistentStorage = () => {

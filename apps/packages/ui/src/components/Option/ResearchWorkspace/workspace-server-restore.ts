@@ -1,4 +1,5 @@
 import {
+  getResearchWorkspaceOwner,
   readResearchWebCaptures,
   retainResearchWebCapturePins,
 } from "@/utils/research-workspace-prefill";
@@ -218,7 +219,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
       return { ...source, status, readiness: authoritative.readiness };
     });
     const captureRecords = await readResearchWebCaptures(
-      scope.scopeKey,
+      await getResearchWorkspaceOwner(scope.requestScope),
       workspaceId,
     );
     assertCurrent();

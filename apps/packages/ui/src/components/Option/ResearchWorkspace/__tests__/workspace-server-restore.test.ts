@@ -6,12 +6,14 @@ const boundary = vi.hoisted(() => ({
   controller: new AbortController(),
   release: vi.fn(),
   scopeKey: "original-alice",
-  userId: "alice",
+  userId: "alice" as string | null,
+  captureOwner: "original-alice",
+  config: { serverUrl: "https://original.test", authMode: "multi-user" as "single-user" | "multi-user" },
 }));
 vi.mock("@/utils/research-workspace-prefill", async (original) => ({
   ...(await original<typeof import("@/utils/research-workspace-prefill")>()),
   readResearchWebCaptures: async (owner: string, workspace: string) =>
-    owner === "original-alice" && workspace === "original"
+    owner === boundary.captureOwner && workspace === "original"
       ? boundary.captures
       : [],
 }));
@@ -20,7 +22,7 @@ vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
     scopeKey: boundary.scopeKey,
     requestScope: {
-      config: { serverUrl: "https://original.test", authMode: "multi-user" },
+      config: boundary.config,
       userId: boundary.userId,
     },
     scopeSignal: boundary.controller.signal,
@@ -29,6 +31,7 @@ vi.mock("@/services/service-prompts", () => ({
   }),
 }));
 
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
 import { useWorkspaceStore } from "@/store/workspace";
 import {
   readMigratedResearchWorkspaceId,
@@ -80,6 +83,8 @@ beforeEach(() => {
   boundary.controller = new AbortController();
   boundary.scopeKey = "original-alice";
   boundary.userId = "alice";
+  boundary.config = { serverUrl: "https://original.test", authMode: "multi-user" };
+  boundary.captureOwner = buildChatSurfaceScopeKeyFromConfig(boundary.config, { userId: "alice" });
   boundary.release.mockReset();
   boundary.request
     .mockReset()
@@ -361,7 +366,14 @@ it("allows only an owned explicit source-history restore route", () => {
   expect(isServicePromptRequestPath("/api/v1/notes/owned%2Fforeign/provenance/restore", "POST")).toBe(false)
 })
 
-it("restores exact pins only onto matching owned server membership", async () => {
+it.each(["single-user", "multi-user"] as const)("restores exact pins from the unchanged public namespace for %s", async (mode) => {
+  boundary.config = { serverUrl: "https://original.test", authMode: mode };
+  boundary.userId = mode === "single-user" ? null : "alice";
+  const config = { ...boundary.config, apiKey: "synthetic-test-key" };
+  boundary.scopeKey = buildChatSurfaceScopeKeyFromConfig(config, { userId: boundary.userId });
+  boundary.captureOwner = buildChatSurfaceScopeKeyFromConfig({ ...config, apiKey: undefined }, { userId: boundary.userId });
+  if (mode === "single-user") expect(boundary.scopeKey).not.toBe(boundary.captureOwner);
+  localStorage.setItem(receiptKey, JSON.stringify({ ...JSON.parse(localStorage.getItem(receiptKey)!), serverScopeKey: boundary.scopeKey }));
   const pin = {
     clipId: "clip",
     requestedUrl: "https://example.org",
