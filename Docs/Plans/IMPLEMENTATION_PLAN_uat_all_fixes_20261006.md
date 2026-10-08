@@ -936,7 +936,7 @@ Composer Playground/shared + Model qualified unit committed locally58e468996a70e
 **Goal**: Exact qualified scoped patch independently reviewed and committed normally.
 **Success Criteria**: Preserve unrelated Sync WIP; no native/UAT status inferred from test doubles.
 **Tests**: Actual/staged review, normal hooks, index/commit equality.
-**Status**: In Progress
+**Status**: Complete
 
 
 #### Sidepanel setup smoke qualified; causal Send fixture next
@@ -1013,3 +1013,41 @@ Sidepanel source candidate2 completed local qualification: final UI readiness 3 
 
 ### Sidepanel actual-source review
 Independent seven-path actual-source review CLEAR with no actionable findings. Every changed hunk/new helper and test body, all15 original model scenarios and affected submit/slash/queue/metadata/publication/selector provenance reviewed. Five TS hashes matched and index empty. Five Sidepanel sub-stage status updates separately read back. Final staged review, normal scoped hooks and local commit remain; all43 real workflow acceptance remains open. Unrelated Sync/ADR work is excluded.
+
+### Shared message-editor acknowledgement
+**Goal**: Keep the edited text available until actual persistence acknowledges Save; preserve the current editor on rejection.
+**Success Criteria**: Deferred save remains visible; error retains draft/retry; duplicate work is prevented; late prior completion cannot close or alter a replacement editor; all actual callers return the existing save Promise.
+**Tests**: Actual EditMessageForm with deferred/rejected/synchronous callbacks, cancellation/replacement and IME; affected virtual timeline/message and edit-handler controls in both configured clients, types/lint/security as applicable.
+**Status**: In Progress
+
+#### Editor Stage 1: Causal failures and callers
+**Goal**: Trace the shared editor through each real save handler and demonstrate early-close/data-loss failures.
+**Success Criteria**: Original callbacks/storage/native-action guards remain; valid causal red uses the actual component.
+**Tests**: Deferred save, rejected save retained text/retry, duplicate action and replacement/close timing.
+**Status**: Complete
+
+#### Editor Stage 2: Existing acknowledgement boundary
+**Goal**: Await the existing persistence Promise and close only the owning operation; return that Promise through current callers.
+**Success Criteria**: Shared minimal fix, truthful errors and stable newer/cancelled editor lifecycle; no new store/protocol or relaxed native Edit-and-Send guard.
+**Tests**: Causal green and genuinely affected component/handler/timeline checks in both configurations.
+**Status**: Complete
+
+#### Editor Stage 3: Qualification and local commit
+**Goal**: Independently review and normally commit the exact qualified scoped fix.
+**Success Criteria**: Unrelated Sync/ADR bytes preserved; no local unit result counted as real43 UAT acceptance.
+**Tests**: Configured types/lint, actual+staged review, normal hooks and commit equality.
+**Status**: In Progress
+
+Sidepanel completion: actual+staged reviews CLEAR, normal scoped pre_commit0/1.512s and local commit b0a5ebc0eafe2f4487891ee648d8b370790d7a150/0.380s; exact reviewed staged/committed binary patch equal, index empty and unrelated11 patch unchanged. All43 real workflow acceptance remains open; no publication.
+
+#### Editor oracle review corrections
+Independent phase1 oracle review requires actual Message identity-boundary replacement rather than a synthetic key alone, and Send-first duplicate coverage. Existing Message error-recovery fixture will carry the real boundary regression; original assertions retained. Cancellation/reopen also covers an old save committing parent value while the new editor has a dirty draft. Own current acknowledged value projection remains a valid close. No production/test execution yet; source correction before first causal run.
+
+#### Editor causal baseline and first candidate
+Independent corrected oracle review CLEAR. Unchanged production baseline:7failed1passed29excluded/natural1/2.159s, exact source/test guards unchanged, stderr0. All seven fail after premature editor closure before controlled persistence acknowledgement; IME/Escape/synchronous control passed. Full native output recovered/released in memory. Secondary dirty/replacement interleavings remain asserted by the regressions, not individually claimed reproduced past the early-close failure. First minimal production candidate may await existing returned Promises, retain errors/draft, guard active editor identity and dirty incoming-value adoption. Existing unsupported Edit-and-Send/owner/storage/view fences remain. No new protocol/store; all43 real acceptance open.
+
+#### Editor causal green and static review
+Editor candidate1 scoped causal green: configured UI 8 passed/29 excluded, natural0/2.752s, exact guarded final source/test hashes unchanged and stderr0; full native JSON recovered/released in owned-process memory. Independent twelve-production-path review and narrow static correction review CLEAR. Final fourteen TS files parse0/no new lint findings; inherited message-types lint error/warnings and existing wholefile format flags remain identical, new test formatted. Existing Message original61 expectations retained. No real UAT/provider/native acceptance; all43 workflows remain open. Both client types and genuinely affected component/handler controls remain required.
+
+#### Editor affected checks and qualification
+Editor candidate1 local qualification: UI causal8passed/29excluded (2.752s), affected original Message29+timeline6=35passed/2newexcluded (3.817s); Web configured full editor/Message/timeline43unitcases passed (4.101s), not43UAT workflows. Existing stable-ID Save/error and two unsupported native-action guards3passed/130excluded per client (UI2.223s/Web2.191s). Final configured UItypes0/60.653s and normal Web npmtypecheck0/6.246s; first Web attempt was sandbox EPERM writing normal tsbuildinfo, then identical command with proper workspace permission succeeded, no compiler/source workaround. All outputs completely recovered/released; exact guarded14source/test hashes unchanged. Final TS parse0/no new lint findings; inherited message-types error/warnings and wholefile style flags unchanged. TS/prose-only BanditN/A. Independent production12 and narrow correction review CLEAR. All43 real workflow acceptance still open. Source-only legacy messageHandlers.edit.test.ts fixture uses removed updateMessageByIndex and expects unsupported user Edit-and-Send success; this later ADR067 action-protocol unit must address its real contract, no assertion/guard weakening or false qualification here. Editor Stage2Complete, Stage3InProgress pending actual/staged review/normalhooks/localcommit. No publication.

@@ -774,6 +774,57 @@ for (const initialPortraits of [true, false]) {
   )
 }
 
+it.each([true, false])(
+  "keeps a same-text replacement target after an old edit acknowledges, portraits=%s",
+  async (portraits) => {
+    const user = userEvent.setup()
+    storedPreferences.set("chatShowCharacterPortraits", portraits)
+    storedPreferences.set("userChatBubble", true)
+    let acknowledge!: (result: unknown) => void
+    const persisted = new Promise<unknown>((resolve) => {
+      acknowledge = resolve
+    })
+    void persisted.catch(() => undefined)
+    const submit = vi.fn(() => persisted)
+    const props = {
+      ...baseProps,
+      isBot: false,
+      role: "user" as const,
+      messageId: "target-A",
+      message: "Same message",
+      onEditFormSubmit: submit
+    }
+    try {
+      const view = render(<PlaygroundMessage {...props} />)
+      act(() =>
+        window.dispatchEvent(
+          new CustomEvent("tldw:edit-message", {
+            detail: { messageId: "target-A" }
+          })
+        )
+      )
+      await user.clear(screen.getByRole("textbox"))
+      await user.type(screen.getByRole("textbox"), "Older authored draft")
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+      expect(submit).toHaveBeenCalledExactlyOnceWith("Older authored draft", false, expect.any(Function), expect.any(Function))
+      expect(screen.getByRole("textbox")).toHaveValue("Older authored draft")
+
+      view.rerender(<PlaygroundMessage {...props} messageId="target-B" />)
+      expect(screen.getByRole("textbox")).toHaveValue("Same message")
+      await user.clear(screen.getByRole("textbox"))
+      await user.type(screen.getByRole("textbox"), "Replacement draft")
+      await act(async () => acknowledge({ status: "submitted" }))
+      expect(screen.getByRole("textbox")).toHaveValue("Replacement draft")
+    } finally {
+      await act(async () => {
+        acknowledge({ status: "submitted" })
+        await persisted
+      })
+      storedPreferences.clear()
+    }
+  }
+)
+
 // Keep the real parent, timeline, message and edit form together for reconciliation.
 const parentChat = vi.hoisted(() => ({
   messages: [] as Array<{
