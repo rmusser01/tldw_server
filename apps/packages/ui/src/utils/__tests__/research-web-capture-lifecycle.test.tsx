@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   confirm: vi.fn(),
   failStorage: false,
+  onStored: undefined as ((value: unknown) => void) | undefined,
+  status: vi.fn(),
+  sources: vi.fn(),
+  versions: vi.fn(),
+  version: vi.fn(),
   listeners: new Set<(changed: boolean) => void>()
 }))
 vi.mock("@/utils/safe-storage", () => ({
@@ -23,13 +28,18 @@ vi.mock("@/utils/safe-storage", () => ({
     set: async (key: string, value: unknown) => {
       if (mocks.failStorage) throw Error("storage full")
       mocks.values.set(key, structuredClone(value))
+      mocks.onStored?.(value)
     }
   })
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: async () => ({ serverUrl: mocks.owner }),
-    saveWebClip: (...args: unknown[]) => mocks.save(...args)
+    saveWebClip: (...args: unknown[]) => mocks.save(...args),
+    getWebClipStatus: mocks.status,
+    getWorkspaceSources: mocks.sources,
+    listMediaDocumentVersions: mocks.versions,
+    getMediaDocumentVersion: mocks.version
   }
 }))
 vi.mock("@/services/tldw/TldwMedia", () => ({
@@ -117,6 +127,7 @@ beforeEach(() => {
   })
   mocks.values.clear()
   mocks.failStorage = false
+  mocks.onStored = undefined
   mocks.owner = "alice"
   useWorkspaceStore.setState({
     workspaceId: "workspace",
@@ -329,5 +340,96 @@ it.each([true, false])(
         mocks.save.mock.calls[1][0].capture_metadata.web_capture_v1
           .content_sha256
       ).toBe(body.capture_metadata.web_capture_v1.content_sha256)
+  }
+)
+
+it.each(["complete accepted article", "newer changed article"])(
+  "retirement after the pin checkpoint restores exactly that version despite newer content: %s",
+  async (newerContent) => {
+    const actual = await vi.importActual<
+      typeof import("../research-web-capture")
+    >("../research-web-capture")
+    mocks.confirm.mockImplementation(actual.confirmWebCaptureAcceptance)
+    let newer = false
+    let body: Parameters<typeof actual.confirmWebCaptureAcceptance>[0]
+    const version = (number: number) => ({
+      media_id: 2,
+      version_number: number,
+      uuid:
+        number === 9
+          ? "11111111-1111-4111-8111-111111111111"
+          : "22222222-2222-4222-8222-222222222222",
+      created_at: "2026-10-07T00:00:00Z",
+      content: number === 9 ? "complete accepted article" : newerContent,
+      safe_metadata: {
+        source: "web_clipper",
+        clip_type: "article",
+        clip_id: body.clip_id,
+        workspace_id: "workspace",
+        source_url: body.source_url,
+        capture_metadata: body.capture_metadata
+      }
+    })
+    mocks.save.mockImplementation(async (accepted) => {
+      body = accepted
+    })
+    mocks.status.mockImplementation(async () => ({
+      clip_id: body.clip_id,
+      status: "saved",
+      note: { id: "canonical-note" },
+      workspace_placements: [
+        { workspace_id: "workspace", source_note_id: "canonical-note" }
+      ]
+    }))
+    mocks.sources.mockImplementation(async () => [
+      {
+        id: "web-clipper:" + body.clip_id,
+        workspace_id: "workspace",
+        media_id: 2,
+        url: body.source_url,
+        title: body.source_title,
+        added_at: "2026-10-07T00:00:00Z",
+        state: "queryable",
+        review_state: "needs_review"
+      }
+    ])
+    mocks.versions.mockImplementation(async () =>
+      newer ? [version(10), version(9)] : [version(9)]
+    )
+    mocks.version.mockImplementation(async (_id, number) => version(number))
+    const first = renderHook(() => useResearchWebCapture("workspace"))
+    act(() => first.result.current.open(original))
+    await act(async () => first.result.current.extract())
+    mocks.onStored = (value) => {
+      if (
+        Object.values(value as Record<string, { pin?: unknown }>).some(
+          (record) => record.pin
+        )
+      ) {
+        mocks.onStored = undefined
+        first.unmount()
+      }
+    }
+    await act(async () => first.result.current.save())
+    const [checkpoint] = await readResearchWebCaptures("alice", "workspace")
+    expect(checkpoint.pin?.versionNumber).toBe(9)
+    expect(checkpoint.attached).toBeUndefined()
+    expect(useWorkspaceStore.getState().sources).toEqual([original])
+    newer = true
+    const second = renderHook(() => useResearchWebCapture("workspace"))
+    act(() => second.result.current.open(original))
+    await waitFor(() =>
+      expect(second.result.current.pending?.pin).toEqual(checkpoint.pin)
+    )
+    await act(async () => second.result.current.save())
+    expect(second.result.current.error).toBeNull()
+    expect(useWorkspaceStore.getState().sources[1]?.webCapture).toEqual(
+      checkpoint.pin
+    )
+    const [attached] = await readResearchWebCaptures("alice", "workspace")
+    expect(attached.pin).toEqual(checkpoint.pin)
+    expect(attached.attached).toBe(true)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.extract).toHaveBeenCalledTimes(1)
   }
 )

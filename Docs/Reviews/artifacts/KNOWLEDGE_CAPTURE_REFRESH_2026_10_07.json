@@ -3,7 +3,7 @@
   "task6_base": "63a3abd7ff0e3ece0e82bb72f5eb7fdbb6532fec",
   "canonical_dev_baseline": "2c5f19d0328360d45bce99b8bae75ce252cc312f",
   "status": "DONE_WITH_CONCERNS",
-  "qualification": "Local implementation acceptance; independent Task6/whole-branch review, publication, human Change summary and updated-head CI/merge remain controller gates.",
+  "qualification": "Final I1/I2 shared-root repairs locally verified; one scoped rereview and subsequent current-artifact affected acceptance, publication, human Change summary and updated-head CI/merge remain controller gates. Earlier receipts retain their exact scope.",
   "receipts": [
     {
       "name": "backend",
@@ -1899,5 +1899,893 @@
         "sha256": "38967b42d83ea3010f7cd2d3d340974eab1263a0daaffc342418b55400126590"
       }
     ]
+  },
+  "final_review_fix_wave": {
+    "base": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+    "status": "DONE_WITH_CONCERNS",
+    "disposition": {
+      "I1": "Repaired at shared pre-Ask current-material guard; scoped rereview pending.",
+      "I2": "Repaired at confirmation and save lifecycle roots; scoped rereview pending.",
+      "M1": "Active TASK13532 owns both conditions: historical CSV cause unresolved; newly observed restore fixture cause proved and fixed with owning74 pass. Actual broad remains2249/1/2250 exit1 before fixture fix."
+    },
+    "production_inputs": {
+      "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+      "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce"
+    },
+    "current_input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+    "receipts": [
+      {
+        "name": "red-helper",
+        "exit_code": 1,
+        "fix_base": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "production_unchanged": true,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "299a66f6614814cbfdd9c7c055e88040229f7af0610e0e641a37263523c442ae",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "03bcf0766e077c3d18fdad059191b80dc03caa8241b47170b71413fefbe5059b",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c09b72822ee13f8574d96e769ab2aa8e2c1b0f3a6e38134224ea2aed150b43ce",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "f8a5f676a8251ac7aeaf22da43afbf12ffe19b5edd2fc1ce16ed917bcaee703e"
+        },
+        "input_sha256": "aa1e3c5b9c71684626091ecd8ca4233e912d525946b79e58fe60c9705ef1b1bb",
+        "log_sha256": "6b00b2bd449ac1e5283e27e47b9620af3a350818e870063f12ba0dac97d2e9c8",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/utils/__tests__/research-web-capture.test.ts",
+          "src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts"
+        ]
+      },
+      {
+        "name": "red-lifecycle",
+        "exit_code": 1,
+        "fix_base": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "production_unchanged": true,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "299a66f6614814cbfdd9c7c055e88040229f7af0610e0e641a37263523c442ae",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "03bcf0766e077c3d18fdad059191b80dc03caa8241b47170b71413fefbe5059b",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c09b72822ee13f8574d96e769ab2aa8e2c1b0f3a6e38134224ea2aed150b43ce",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "f8a5f676a8251ac7aeaf22da43afbf12ffe19b5edd2fc1ce16ed917bcaee703e"
+        },
+        "input_sha256": "aa1e3c5b9c71684626091ecd8ca4233e912d525946b79e58fe60c9705ef1b1bb",
+        "log_sha256": "1955109a860c879913aadaad91bc922df6d15f48ee002e1deaffcfe0a8d7fe65",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts"
+        ]
+      },
+      {
+        "name": "green-owning",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/utils/__tests__/research-web-capture.test.ts",
+          "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+          "src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 7,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "562b603a972cc9ee22c2ebdaceb841b47dbd084648341d5cdd0e4192b6363476",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "03bcf0766e077c3d18fdad059191b80dc03caa8241b47170b71413fefbe5059b",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "928fb82361b651906384bf087d5d7cd66017e97579849b3050a544a3a06d384d",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce"
+        },
+        "input_sha256": "ca34ef72baad499fa83af0db2c7360249127aa4a9e5981b99c58283c9d1f7395",
+        "log": "/private/tmp/knowledge-final-wave-green-owning.log",
+        "log_sha256": "44c96ac85a86f12e9717e6b844b32af3e88cd1a711939e5447be16c4ed60be32",
+        "summaries": [
+          " ❯ src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx (37 tests | 1 failed) 5390ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed | 2 passed (3)",
+          "      Tests  1 failed | 130 passed (131)"
+        ]
+      },
+      {
+        "name": "owning-final",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/utils/__tests__/research-web-capture.test.ts",
+          "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+          "src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx",
+          "src/utils/__tests__/research-workspace-prefill.test.ts",
+          "src/services/__tests__/background-proxy.web-clipper-scope.test.ts",
+          "src/services/__tests__/tldw-api-client.media-batch-actions.test.ts",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 7.584,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "9704a5c8aa821f8e0aa036e7d5b54ddac11c47e0816ffeea9e29d99bb0016297",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "0ae4e2c5df86d4897df0d11f4d9484bff23b7741f8841703e7523bcddd5df250",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "d1d4f4fa76b8fe48523a6b25e2c069f082079a2392f182e1c31af27f54e6d2c1",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "0a2eec260f76991505d031db57890778d24e541138f891b49af74acdc42059cb",
+        "log": "/private/tmp/knowledge-final-wave-owning-final.log",
+        "log_sha256": "f1a418a938bd2f4d24b152f3af6b96d55cc340dd6077f683ffa700932dac72b4",
+        "summaries": [
+          " Test Files  6 passed (6)",
+          "      Tests  218 passed (218)"
+        ]
+      },
+      {
+        "name": "current-owning",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/utils/__tests__/research-web-capture.test.ts",
+          "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+          "src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx",
+          "src/utils/__tests__/research-workspace-prefill.test.ts",
+          "src/services/__tests__/background-proxy.web-clipper-scope.test.ts",
+          "src/services/__tests__/tldw-api-client.media-batch-actions.test.ts",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 7.287,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-current-owning.log",
+        "log_sha256": "054277a665b8befd6d0a7706c80598935810fd31a7b37f2d1089211e4f7188b5",
+        "summaries": [
+          " Test Files  6 passed (6)",
+          "      Tests  218 passed (218)"
+        ]
+      },
+      {
+        "name": "default-helper",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/utils/__tests__/research-web-capture.test.ts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 0.819,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-default-helper.log",
+        "log_sha256": "735f93ad0020709e741508e866656aab3896bb045043c524413bebaff37fd2bb",
+        "summaries": [
+          " Test Files  1 passed (1)",
+          "      Tests  80 passed (80)"
+        ]
+      },
+      {
+        "name": "backend-current",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-c",
+          "import onnxruntime,pytest,sys; onnxruntime.disable_telemetry_events(); sys.exit(pytest.main(sys.argv[1:]))",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py",
+          "--override-ini",
+          "addopts=",
+          "-q",
+          "-rs"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 3.442,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "772d4aff31fe31be56804d0c3792e80e86a6064c000730a5171e028fa6ab67df",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "03bcf0766e077c3d18fdad059191b80dc03caa8241b47170b71413fefbe5059b",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "928fb82361b651906384bf087d5d7cd66017e97579849b3050a544a3a06d384d",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "bdd5d1f5d47a478f6d64dfb1f3360b608786a9c9423b2872f2ab32631aed2ea9"
+        },
+        "input_sha256": "d42783412785d903ee4ea02a0dd8157dbaad8cb94bd82214394c27b32611c157",
+        "log": "/private/tmp/knowledge-final-wave-backend-current.log",
+        "log_sha256": "98c07f6b8698d52d74f410a8cb645156732c134dffe3b1cac59bc616a31b7884",
+        "summaries": [
+          "system_log_buffer append failed: PermissionError",
+          "system_log_buffer append failed: PermissionError",
+          "system_log_buffer append failed: PermissionError",
+          "system_log_buffer append failed: PermissionError",
+          "system_log_buffer append failed: PermissionError",
+          "system_log_buffer append failed: PermissionError",
+          "2026-10-08 01:04:43.510 | DEBUG    | tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB:_connect:138 - TopicMonitoringDB pragma initialization failed",
+          "2026-10-08 01:04:43.519 | DEBUG    | tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB:_connect:138 - TopicMonitoringDB pragma initialization failed",
+          "system_log_buffer append failed: PermissionError",
+          "  /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv-uat-fixall-py312-20261007/lib/python3.12/site-packages/_pytest/cacheprovider.py:423: PytestCacheWarning: cache could not write path /Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/.pytest_cache/v/cache/lastfailed: [Errno 1] Operation not permitted: '/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/.pytest_cache/v/cache/lastfailed'",
+          "    config.cache.set(\"cache/lastfailed\", self.lastfailed)",
+          "1 failed, 43 warnings in 1.71s"
+        ]
+      },
+      {
+        "name": "backend-current-green",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-c",
+          "import onnxruntime,pytest,sys; onnxruntime.disable_telemetry_events(); sys.exit(pytest.main(sys.argv[1:]))",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py",
+          "--override-ini",
+          "addopts=",
+          "-q",
+          "-rs"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 2.475,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "9704a5c8aa821f8e0aa036e7d5b54ddac11c47e0816ffeea9e29d99bb0016297",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "0ae4e2c5df86d4897df0d11f4d9484bff23b7741f8841703e7523bcddd5df250",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "d1d4f4fa76b8fe48523a6b25e2c069f082079a2392f182e1c31af27f54e6d2c1",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "0a2eec260f76991505d031db57890778d24e541138f891b49af74acdc42059cb",
+        "log": "/private/tmp/knowledge-final-wave-backend-current-green.log",
+        "log_sha256": "a63eb4c84e21fad5dacd4916a1246d6713d7eb2c4f7d7cc1aad7b6dc8b1bc364",
+        "summaries": ["1 passed, 41 warnings in 1.25s"]
+      },
+      {
+        "name": "m1-owning",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx",
+          "--config",
+          "/private/tmp/knowledge-final-wave-m1-config.mts",
+          "--maxWorkers=1",
+          "--no-file-parallelism"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 9.001,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "562b603a972cc9ee22c2ebdaceb841b47dbd084648341d5cdd0e4192b6363476",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "03bcf0766e077c3d18fdad059191b80dc03caa8241b47170b71413fefbe5059b",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "49b066b0f1ce39f7fc20bdb2d003dc1ff66a61d40a5545dc5e42c4dc43a2fa74",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "928fb82361b651906384bf087d5d7cd66017e97579849b3050a544a3a06d384d",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce"
+        },
+        "input_sha256": "ca34ef72baad499fa83af0db2c7360249127aa4a9e5981b99c58283c9d1f7395",
+        "log": "/private/tmp/knowledge-final-wave-m1-owning.log",
+        "log_sha256": "f4d80baef8bc54ee28b6eddcc566b1bd4afbe9148c7575eb1e96101f15bff60f",
+        "summaries": [
+          " Test Files  1 passed (1)",
+          "      Tests  33 passed (33)"
+        ]
+      },
+      {
+        "name": "types-web-current",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/tldw-frontend",
+        "command": [
+          "node",
+          "node_modules/typescript/bin/tsc",
+          "--noEmit",
+          "--incremental",
+          "false"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 29.449,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-types-web-current.log",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "summaries": []
+      },
+      {
+        "name": "types-extension-current",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/extension",
+        "command": [
+          "node",
+          "node_modules/typescript/bin/tsc",
+          "--noEmit",
+          "-p",
+          "tsconfig.compile.json",
+          "--incremental",
+          "false"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 0.493,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-types-extension-current.log",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "summaries": []
+      },
+      {
+        "name": "style",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": ["node", "/private/tmp/knowledge-final-wave-style.mjs"],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 5.021,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-style.log",
+        "log_sha256": "0c8a3ad29d22b13176aa4ab2c0bc04ead0fcbcacd2c450854b1bf9f2e4b0c8fb",
+        "summaries": []
+      },
+      {
+        "name": "python-style",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-m",
+          "ruff",
+          "check",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 2,
+        "signal": null,
+        "seconds": 0.08,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-python-style.log",
+        "log_sha256": "371c42a95fe1155a79f2dbba142ba2169fe61595b417255c3ee2764b7655ef30",
+        "summaries": ["ruff failed"]
+      },
+      {
+        "name": "python-style-green",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-m",
+          "ruff",
+          "check",
+          "--no-cache",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 0.062,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-python-style-green.log",
+        "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "summaries": ["All checks passed!"]
+      },
+      {
+        "name": "black",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-m",
+          "black",
+          "--check",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 0.102,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-black.log",
+        "log_sha256": "1a56c7cd8457fd05d978cfbd139d7bfd86e86acaa9b57668e718ef8bccc0cf48",
+        "summaries": []
+      },
+      {
+        "name": "bandit",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-m",
+          "bandit",
+          "-r",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py",
+          "-f",
+          "json",
+          "-o",
+          "/private/tmp/knowledge-final-wave-bandit.json"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 0.114,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-bandit.log",
+        "log_sha256": "fe308a60a176a649ad4bf06a51e99f0ae70bc1f10c97b92870f0cf1d45eb5d4e",
+        "summaries": []
+      },
+      {
+        "name": "bandit-test-scope",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-m",
+          "bandit",
+          "-r",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py",
+          "-s",
+          "B101",
+          "-f",
+          "json",
+          "-o",
+          "/private/tmp/knowledge-final-wave-bandit-test-scope.json"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 0.085,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-bandit-test-scope.log",
+        "log_sha256": "8c98a66965abcfc3a8a24fe56ab11e6c26444e1e97c30700a29fb13b6122fc71",
+        "summaries": []
+      },
+      {
+        "name": "broad-current",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui/node_modules/.bin/vitest",
+          "run",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts",
+          "src/utils/__tests__/research-web-capture.test.ts",
+          "src/services/tldw/__tests__/TldwMedia.public-article.test.ts",
+          "src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+          "src/services/__tests__/web-clipper-client.test.ts",
+          "src/services/__tests__/tldw-api-client.workspace-api.test.ts",
+          "src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts",
+          "src/hooks/chat/__tests__/useChatActions.history-selection.test.tsx",
+          "src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+          "src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+          "src/components/Notes/__tests__/useNotesEditorState.saved-monitoring.test.tsx",
+          "src/components/Notes/__tests__/NotesManagerPage.stage10.ai-content-assist.test.tsx",
+          "src/components/Notes/__tests__/NotesManagerPage.stage12.recent-notes.test.tsx",
+          "src/components/Notes/__tests__/KnowledgeNoteHistory.test.tsx",
+          "src/utils/__tests__/knowledge-note-provenance.test.ts",
+          "src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+          "src/services/__tests__/background-proxy.test.ts",
+          "src/services/web-clipper/__tests__/analyze-handoff.test.ts",
+          "src/components/Sidepanel/Clipper/__tests__/WebClipperPanel.save-flow.test.tsx",
+          "src/routes/__tests__/sidepanel-chat.ownership.test.tsx",
+          "src/components/Option/ResearchWorkspace/__tests__",
+          "src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+          "src/utils/__tests__/research-workspace-prefill.test.ts",
+          "src/utils/__tests__/research-workspace-import.test.tsx",
+          "src/store/__tests__/workspace-bundle.test.ts",
+          "src/store/__tests__/workspace.test.ts",
+          "src/store/__tests__/workspace-scope.test.ts",
+          "src/store/__tests__/workspace.split-storage.test.ts",
+          "src/utils/__tests__/research-web-capture-owner.test.tsx",
+          "src/services/__tests__/background-proxy.web-clipper-scope.test.ts",
+          "src/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+          "src/entries/__tests__/background.effective-auth.test.ts",
+          "src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx",
+          "src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+          "--maxWorkers=1",
+          "--no-file-parallelism"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 325.233,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-broad-current.log",
+        "log_sha256": "e1b7e625f8a3f3a8bc26dc62719ab97093b7039b6e1e7c2b27f350030127b190",
+        "summaries": [
+          "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to B",
+          "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to A",
+          "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error",
+          "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error",
+          "stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn",
+          "     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  429ms",
+          "     ✓ clears default assistant modal state before failed reloads can reuse stale values  357ms",
+          " ❯ src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed) 3124ms",
+          "Stream completion failed: Model 'missing-model' is not available for provider 'ollama'. Select one of the server-advertised models for this provider.",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed | 98 passed (99)",
+          "      Tests  1 failed | 2249 passed (2250)"
+        ],
+        "environment": {
+          "DEBUG_PRINT_LIMIT": "50000"
+        },
+        "source_manifest_sha256": "419a348f7d8848099f1adc3f77445e8893122107cf777ea3545ab8ff14c4aba9",
+        "scope_manifest": "/private/tmp/knowledge-final-wave-broad-inputs.json",
+        "config_sha256": "8167d366619f045a8166d9e980b383be1c7fad9b276fb6eb50e92d6ab746db3d",
+        "previous_scope_receipt_sha256": "a41c069994b14887591ce32bfe1789447527f8f0471ba8ee723db73d34445b36",
+        "source_changes_after_run": [
+          {
+            "path": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx",
+            "broad_input_sha256": "f95eca9a441f635bced30804474ef3e36a884568295f8eabd57e2ea91ab16e8a",
+            "current_sha256": "4efaa6d50318ba4c9e749d6e9df077c0e0bc545fba49c9f3566d70d2f481879f"
+          }
+        ]
+      },
+      {
+        "name": "restore-named",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx",
+          "-t",
+          "restores migrated server identity and sources before creating a workspace on reload",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 2.978,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx": "f95eca9a441f635bced30804474ef3e36a884568295f8eabd57e2ea91ab16e8a"
+        },
+        "input_sha256": "db86b3c6cc50399ffa9f26e7b4d48d383713db57fb2ee7ec007ef2ad214ac3c4",
+        "log": "/private/tmp/knowledge-final-wave-restore-named.log",
+        "log_sha256": "a1652263a5c3986e5a5ebba580cdcab0f5111e52f6978283605bf86c0894babc",
+        "summaries": [
+          " ❯ src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed | 37 skipped) 1106ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  1 failed | 37 skipped (38)"
+        ]
+      },
+      {
+        "name": "restore-diagnosis",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx",
+          "-t",
+          "restores migrated server identity and sources before creating a workspace on reload",
+          "--config",
+          "/private/tmp/knowledge-final-wave-restore-config.mts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 0.679,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx": "f95eca9a441f635bced30804474ef3e36a884568295f8eabd57e2ea91ab16e8a"
+        },
+        "input_sha256": "db86b3c6cc50399ffa9f26e7b4d48d383713db57fb2ee7ec007ef2ad214ac3c4",
+        "log": "/private/tmp/knowledge-final-wave-restore-diagnosis.log",
+        "log_sha256": "befa1f6d995f38e0491f6e6b996bb21fa632702f0e806768576a93187b0249f2",
+        "summaries": [" Test Files  1 failed (1)", "      Tests  no tests"]
+      },
+      {
+        "name": "restore-diagnosis-corrected",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx",
+          "-t",
+          "restores migrated server identity and sources before creating a workspace on reload",
+          "--config",
+          "/private/tmp/knowledge-final-wave-restore-config.mts"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 1,
+        "signal": null,
+        "seconds": 2.715,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx": "f95eca9a441f635bced30804474ef3e36a884568295f8eabd57e2ea91ab16e8a"
+        },
+        "input_sha256": "db86b3c6cc50399ffa9f26e7b4d48d383713db57fb2ee7ec007ef2ad214ac3c4",
+        "log": "/private/tmp/knowledge-final-wave-restore-diagnosis-corrected.log",
+        "log_sha256": "fe507f83459d07df60256de4b219cbf71f8a297e5a1566f19afca732e186b725",
+        "summaries": [
+          " ❯ src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx (38 tests | 1 failed | 37 skipped) 1097ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  1 failed | 37 skipped (38)"
+        ]
+      },
+      {
+        "name": "restore-owning-green",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/apps/packages/ui",
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx",
+          "src/components/Option/ResearchWorkspace/__tests__/workspace-server-restore.test.ts",
+          "--config",
+          "/private/tmp/capture-refresh-task5-dedupe-vitest.mts",
+          "--maxWorkers=1",
+          "--no-file-parallelism"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 4.333,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx": "4efaa6d50318ba4c9e749d6e9df077c0e0bc545fba49c9f3566d70d2f481879f",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "8e13731e10671feda4ee3954e23f5744f20c667e9210b22fd300b159b212ef8a",
+        "log": "/private/tmp/knowledge-final-wave-restore-owning-green.log",
+        "log_sha256": "3878c9efe25fe7370273010dbf041233a165d18f8714cbd9531db21de71a2f44",
+        "summaries": [
+          " Test Files  2 passed (2)",
+          "      Tests  74 passed (74)"
+        ]
+      },
+      {
+        "name": "style-with-restore-fixture",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": ["node", "/private/tmp/knowledge-final-wave-style.mjs"],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 5.822,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx": "4efaa6d50318ba4c9e749d6e9df077c0e0bc545fba49c9f3566d70d2f481879f",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "8e13731e10671feda4ee3954e23f5744f20c667e9210b22fd300b159b212ef8a",
+        "log": "/private/tmp/knowledge-final-wave-style-with-restore-fixture.log",
+        "log_sha256": "9f591d4b0609db91d50c638170d1f18175f7cd50fe691f0af2c98627cb64cf8d",
+        "summaries": []
+      },
+      {
+        "name": "hooks",
+        "cwd": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+        "command": [
+          "python",
+          "-m",
+          "pre_commit",
+          "run",
+          "--files",
+          "apps/packages/ui/src/utils/research-web-capture.ts",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py",
+          "Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md",
+          "Docs/Reviews/artifacts/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.json",
+          "backlog/tasks/task-13530 - Complete-remaining-Knowledge-validation-and-quality-follow-ups.md",
+          "backlog/tasks/task-13530.1 - Complete-explicit-external-web-source-capture-and-refresh-for-Research.md",
+          "backlog/tasks/task-13532 - Diagnose-broad-run-Research-literature-export-readiness-failure.md"
+        ],
+        "head": "f1c4c5bb6333ee3c8e0ba2979857ccb1ce16d023",
+        "exit_code": 0,
+        "signal": null,
+        "seconds": 1.541,
+        "inputs": {
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx": "e3f63ab60bedfd4f3acd261413f05b6742997cca1b016ad890ac20ca13f64626",
+          "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx": "9861926c03d4fc19fe2b19ca92dd8c39b69d1ec5b4b851263eff534ca08b0d2a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-lifecycle.test.tsx": "bb97cf01e71f4f518dad5d3676c3a82038ad54055b4e99254d86daf6c4f3d53a",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture-owner.test.tsx": "8d34ce8e39db7019d4e39ee186d452fd4f1f472476726c7303e23e18189cfa89",
+          "apps/packages/ui/src/utils/__tests__/research-web-capture.test.ts": "4bb7b77e3b6b8d5b2c38923633dc564dbc9111eb2a101d35322f83596219c2eb",
+          "apps/packages/ui/src/utils/research-web-capture.ts": "c1228d5df9c2f1882fbb5639445f4753bd328c622ae0d67aa9db5d5dbfab54aa",
+          "apps/packages/ui/src/utils/use-research-web-capture.ts": "2c527afaa09e62aaf42b3e073c2903b759498d9754d285353d5eef0a769941ce",
+          "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py": "d9ebb62119c43b67fb8592e1c65aa5bf099f985104b0aaedf3327636be7eef0f"
+        },
+        "input_sha256": "809c6e15c2dacc1e2a7f844a556cbb803d0bd15d912084d256203e7e0f86f72c",
+        "log": "/private/tmp/knowledge-final-wave-hooks.log",
+        "log_sha256": "5171a5453e748db5d3f793c9120475961fd2440120778aa858daaae9dc3fffae",
+        "summaries": []
+      }
+    ],
+    "scope": "218 current owning UI cases, default helper80, one real SQLite deletion/current Media/FTS/chunk characterization. Both client type commands exit0; extension compile config checks shell entrypoints with ambient shared-entry declarations, shared product graph is checked by WebUI tsc. No build/browser/runtime/public acquisition replay. Ruling26 one exact prior99-file broad scope:2249passed1failed/2250 exit1 before subsequent test-only restore fixture repair. Focused restore owning/neighbor74pass after repair; product unchanged, no second broad replay.",
+    "limits": [
+      "Current Media body comparison is not attestation of every independent/vector chunk; current RAG is not atomic or historical.",
+      "Prior built/native/browser artifacts predate this fix wave; current-artifact affected acceptance belongs to Task6 after scoped review.",
+      "Full UI2155/1/2156 exit1 and default React383/24/32 remain historical failures; current scoped native-resolution and default helper evidence do not replace them.",
+      "Public acquisition three429s and all existing hybrid-vector/numeric-citation/migrated-browser/native/assistive/device qualifications remain.",
+      "M1 exact broad missing-CSV cause not reproduced: bounded own file33passes, modal loading then exports observed; no timeout or assertion change.",
+      "The Ruling26 broad run is a failure2249/1/2250; restoring the proved store test-double shape afterward does not turn it into a whole-scope pass."
+    ],
+    "adr_assessment": "ADR required: no new record. Restore accepted ADR066, composing007/036/042/065; no durable policy/API/store/dependency change.",
+    "ruling26": {
+      "reason": "Changed shared capture paths and unresolved broad-only M1 justify one current affected broad replay of exact prior99-file argv/config, DEBUG_PRINT_LIMIT50000. No fixture/runtime/timeout changes during run.",
+      "broad": {
+        "tests": "2249 passed,1 failed/2250",
+        "files": "98 passed,1 failed/99",
+        "exit_code": 1,
+        "seconds": 325.233,
+        "log_sha256": "e1b7e625f8a3f3a8bc26dc62719ab97093b7039b6e1e7c2b27f350030127b190",
+        "source_manifest_sha256": "419a348f7d8848099f1adc3f77445e8893122107cf777ea3545ab8ff14c4aba9"
+      },
+      "csv": "Owning literature33 passes within broad; historical missing CSV cause remains unresolved under active TASK13532.",
+      "restore": "Exact migrated identity case fails in broad and alone; actual restore diagnostic reports useWorkspaceStore.getState is not a function. Corrected selector-only store test double with getState/current workspaceSnapshots. Existing assertions retained. Focused full owning38 + restore-neighbor36 =74 pass after fixture repair. Product inputs unchanged; no second broad replay or whole-scope green claim.",
+      "source_changes_after_broad": [
+        {
+          "path": "apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx",
+          "broad_input_sha256": "f95eca9a441f635bced30804474ef3e36a884568295f8eabd57e2ea91ab16e8a",
+          "current_sha256": "4efaa6d50318ba4c9e749d6e9df077c0e0bc545fba49c9f3566d70d2f481879f"
+        }
+      ]
+    }
   }
 }

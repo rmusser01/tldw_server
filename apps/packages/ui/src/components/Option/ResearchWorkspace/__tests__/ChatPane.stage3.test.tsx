@@ -577,6 +577,10 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       }
     ])
     mockMediaVersions.mockResolvedValue([originalVersion])
+    mockGetMediaDetails.mockResolvedValue({
+      media_id: 101,
+      content: { text: originalText }
+    })
     mockVersion.mockImplementation(async (mediaId, version) => {
       if (mediaId !== 101 || version !== 1) throw new Error("Wrong exact pin")
       return originalVersion
@@ -601,6 +605,28 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
   }
+
+  it("refuses Ask with no cached refusal after update then newest-version deletion", async () => {
+    const { store, source, originalVersion } = await setupRealCapture()
+    // DELETE exposes the original active row again, while current Media/FTS remains changed.
+    mockMediaVersions.mockResolvedValue([originalVersion])
+    mockGetMediaDetails.mockResolvedValue({
+      media_id: 101,
+      content: { text: "Later changed current article" }
+    })
+    expect(store.getState().sources[0].status).not.toBe("error")
+    renderChatPane()
+    sendQuestion()
+    await waitFor(() => expect(store.getState().selectedSourceIds).toEqual([]))
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(
+      screen.getAllByText(/Snapshot changed outside refresh/).length
+    ).toBeGreaterThan(0)
+    expect(store.getState().sources[0].statusDetails?.statusReason).toBe(
+      "capture_head_changed"
+    )
+    expect(store.getState().sources[0].webCapture).toBe(source.webCapture)
+  })
 
   it("keeps real-store stale refusal visible after authorized deselection", async () => {
     const { store, source } = await setupRealCapture()

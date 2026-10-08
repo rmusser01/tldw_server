@@ -11,14 +11,16 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   sources: vi.fn(),
   versions: vi.fn(),
-  version: vi.fn()
+  version: vi.fn(),
+  details: vi.fn()
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getWebClipStatus: mocks.status,
     getWorkspaceSources: mocks.sources,
     listMediaDocumentVersions: mocks.versions,
-    getMediaDocumentVersion: mocks.version
+    getMediaDocumentVersion: mocks.version,
+    getMediaDetails: mocks.details
   }
 }))
 const input = {
@@ -95,6 +97,7 @@ async function fixture() {
   mocks.sources.mockResolvedValue([source])
   mocks.versions.mockResolvedValue([version])
   mocks.version.mockResolvedValue(version)
+  mocks.details.mockResolvedValue({ media_id: 71, content: { text: version.content } })
   return { body, source, version, status }
 }
 describe("public article acceptance", () => {
@@ -471,3 +474,112 @@ it("retains the refresh identity and freezes destination before any save", async
   expect(body.capture_metadata.web_capture_v1.refresh_of).toBe(versionUuid)
   expect(Object.isFrozen(body.workspace)).toBe(true)
 })
+
+// Active version history and current retrieval content are separate read contracts.
+it("rejects current material left behind after the newest version is deleted", async () => {
+  const { body, source, version } = await fixture()
+  const { pin } = await confirmWebCaptureAcceptance(body, options, () => {})
+  const local = {
+    id: source.id,
+    mediaId: 71,
+    url: input.url,
+    webCapture: pin
+  } as WorkspaceSource
+  mocks.versions.mockResolvedValue([version])
+  mocks.details.mockResolvedValue({
+    media_id: 71,
+    content: { text: "Later changed article" }
+  })
+  await expect(
+    assertWebCaptureHeadCurrent(local, input.workspaceId, options)
+  ).rejects.toMatchObject({ sourceId: source.id })
+})
+it.each([
+  { media_id: 72, content: { text: "Café 🐎" } },
+  { media_id: 71, content: { text: null } },
+  { media_id: 71, content: { text: " Café 🐎 " } }
+])(
+  "rejects missing, foreign or nonexact current content %j",
+  async (detail) => {
+    const { body, source } = await fixture()
+    const { pin } = await confirmWebCaptureAcceptance(body, options, () => {})
+    mocks.details.mockResolvedValue(detail)
+    await expect(
+      assertWebCaptureHeadCurrent(
+        {
+          id: source.id,
+          mediaId: 71,
+          url: input.url,
+          webCapture: pin
+        } as WorkspaceSource,
+        input.workspaceId,
+        options
+      )
+    ).rejects.toThrow()
+  }
+)
+it.each(["Café 🐎", "Changed article"])(
+  "recovers the exact checkpoint despite a newer active version: %s",
+  async (content) => {
+    const { body, version } = await fixture()
+    const accepted = await confirmWebCaptureAcceptance(body, options, () => {})
+    const newer = {
+      ...version,
+      version_number: 10,
+      uuid: canonicalNoteId,
+      content
+    }
+    mocks.versions.mockResolvedValue([newer, version])
+    mocks.version.mockImplementation(async (_id, number) =>
+      number === 9 ? version : newer
+    )
+    const recovered = await confirmWebCaptureAcceptance(
+      body,
+      options,
+      () => {},
+      accepted.pin
+    )
+    expect(recovered.pin).toEqual(accepted.pin)
+    expect(mocks.version).toHaveBeenLastCalledWith(71, 9, options)
+  }
+)
+it("finds an older active matching acceptance before a pin exists", async () => {
+  const { body, version } = await fixture()
+  const newer = {
+    ...version,
+    version_number: 10,
+    uuid: canonicalNoteId,
+    content: "Changed article"
+  }
+  mocks.versions.mockResolvedValue([newer, version])
+  mocks.version.mockImplementation(async (_id, number) =>
+    number === 9 ? version : newer
+  )
+  expect(
+    (await confirmWebCaptureAcceptance(body, options, () => {})).pin
+      .versionNumber
+  ).toBe(9)
+})
+it.each(["missing", "uuid", "body", "404"])(
+  "never replaces an invalid checkpoint with a matching newer version: %s",
+  async (kind) => {
+    const { body, version } = await fixture()
+    const { pin } = await confirmWebCaptureAcceptance(body, options, () => {})
+    const newer = { ...version, version_number: 10, uuid: canonicalNoteId }
+    const old = {
+      ...version,
+      ...(kind === "uuid" ? { uuid: body.clip_id } : {}),
+      ...(kind === "body" ? { content: "Changed" } : {})
+    }
+    mocks.versions.mockResolvedValue(
+      kind === "missing" ? [newer] : [newer, old]
+    )
+    mocks.version.mockImplementation(async (_id, number) => {
+      if (number === 9 && kind === "404") throw Error("404")
+      return number === 9 ? old : newer
+    })
+    await expect(
+      confirmWebCaptureAcceptance(body, options, () => {}, pin)
+    ).rejects.toThrow()
+  }
+)

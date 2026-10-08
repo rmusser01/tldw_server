@@ -264,7 +264,8 @@ async function verifyVersion(
 export async function confirmWebCaptureAcceptance(
   body: WebClipperSaveRequest,
   options: ScopedRequestOptions,
-  assertCurrent: () => void
+  assertCurrent: () => void,
+  pin?: WebArticleCapturePin
 ): Promise<{ source: WorkspaceSourceApiResponse; pin: WebArticleCapturePin }> {
   const check = () => {
     assertScope(options)
@@ -307,18 +308,53 @@ export async function confirmWebCaptureAcceptance(
     options
   )
   check()
-  const head = versions.reduce<MediaDocumentVersion | undefined>(
-    (best, v) => (!best || v.version_number > best.version_number ? v : best),
-    undefined
+  // Recovery preserves its checkpoint; initial confirmation searches active history.
+  if (
+    pin &&
+    (pin.mediaId !== source.media_id ||
+      pin.clipId !== clipId ||
+      pin.requestedUrl !== descriptor.requested_url ||
+      pin.capturedAt !== descriptor.captured_at ||
+      pin.contentSha256 !== descriptor.content_sha256 ||
+      pin.refreshOf !== descriptor.refresh_of)
   )
-  if (!head) fail()
+    fail()
+  let accepted: MediaDocumentVersion | undefined
+  for (const version of versions) {
+    if (
+      pin &&
+      (version.version_number !== pin.versionNumber ||
+        version.uuid !== pin.versionUuid)
+    )
+      continue
+    try {
+      await verifyVersion(
+        version,
+        source.media_id,
+        clipId,
+        workspaceId,
+        descriptor,
+        text
+      )
+    } catch (reason) {
+      if (!(reason instanceof WebCaptureNotCurrentError) || pin) throw reason
+      continue
+    }
+    check()
+    accepted = version
+    break
+  }
+  if (!accepted) fail()
   const exact = await tldwClient.getMediaDocumentVersion(
     source.media_id,
-    head.version_number,
+    accepted.version_number,
     options
   )
   check()
-  if (exact.version_number !== head.version_number || exact.uuid !== head.uuid)
+  if (
+    exact.version_number !== accepted.version_number ||
+    exact.uuid !== accepted.uuid
+  )
     fail()
   await verifyVersion(
     exact,
@@ -389,6 +425,22 @@ export async function assertWebCaptureHeadCurrent(
       content_sha256: pin.contentSha256,
       refresh_of: pin.refreshOf
     })
+    assertScope(options)
+    // Deleting a version does not roll back Media.content (the current FTS body).
+    const current = await tldwClient.getMediaDetails(pin.mediaId, {
+      ...options,
+      include_content: true,
+      include_versions: false,
+      include_version_content: false
+    })
+    assertScope(options)
+    if (
+      current?.media_id !== pin.mediaId ||
+      typeof current.content?.text !== "string" ||
+      current.content.text !== head.content ||
+      (await sha256Text(current.content.text)) !== pin.contentSha256
+    )
+      fail()
     assertScope(options)
   } catch (reason) {
     if (reason instanceof WebCaptureNotCurrentError) reason.sourceId = source.id

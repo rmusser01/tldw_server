@@ -255,10 +255,12 @@ export function useResearchWebCapture(workspaceId: string | null) {
       const confirmed = await confirmWebCaptureAcceptance(
         session.pending.body,
         options,
-        () => assertCurrent(session)
+        () => assertCurrent(session),
+        session.pending.pin
       )
       const record = { ...session.pending, pin: confirmed.pin }
       await saveResearchWebCapture(record)
+      session.pending = record
       assertCurrent(session)
       const added: WorkspaceSource = {
         id: confirmed.source.id,
