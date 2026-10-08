@@ -84,6 +84,7 @@ const readCanonicalPathname = (path: unknown): string | null => {
   if (!pathname.startsWith("/") ||
     pathname.includes("\\") ||
     pathname.includes("//") ||
+    /[\t\r\n]/.test(pathname) ||
     /%(?:2e|2f|5c)/i.test(pathname) ||
     pathname.split("/").some((segment) => segment === "." || segment === "..")
   ) {

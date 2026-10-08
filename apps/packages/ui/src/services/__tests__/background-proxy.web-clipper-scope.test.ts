@@ -421,4 +421,25 @@ describe("public article capture through actual scoped direct transport", () => 
       expect(boundary.sendMessage).not.toHaveBeenCalled()
     }
   )
+
+  it.each(["\t", "\r", "\n"])(
+    "rejects raw URL-normalizing control %j before direct capture dispatch",
+    async (control) => {
+      for (const path of [
+        `/api/v1/workspaces/${control}../sources`,
+        `/api/v1/web-clipper/${control}..`,
+        `/api/v1/workspaces/ws/sources/${control}../preview`
+      ]) {
+        await expect(
+          bgRequest({
+            ...requestScopeFields(options().requestScope),
+            path: path as never,
+            method: "GET"
+          })
+        ).rejects.toThrow(/Service Prompt config/)
+        expect(boundary.fetch).not.toHaveBeenCalled()
+        expect(boundary.sendMessage).not.toHaveBeenCalled()
+      }
+    }
+  )
 })

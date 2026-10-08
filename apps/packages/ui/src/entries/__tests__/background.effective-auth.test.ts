@@ -1960,4 +1960,39 @@ describe("background effective extension auth", () => {
     }
   )
 
+  it.each(["\t", "\r", "\n"])(
+    "rejects raw URL-normalizing control %j before worker capture dispatch",
+    async (control) => {
+      for (const path of [
+        `/api/v1/workspaces/${control}../sources`,
+        `/api/v1/web-clipper/${control}..`,
+        `/api/v1/workspaces/ws/sources/${control}../preview`
+      ]) {
+        const fetchSpy = vi.fn(
+          async () =>
+            new Response(JSON.stringify({ capture: "unexpected" }), {
+              headers: { "content-type": "application/json" }
+            })
+        )
+        vi.stubGlobal("fetch", fetchSpy)
+        await expect(
+          sendRuntimeMessage({
+            type: "tldw:request",
+            payload: {
+              path,
+              method: "GET",
+              servicePromptConfig: {
+                serverUrl: "https://api.example.test",
+                authMode: "single-user",
+                authSource: "manual",
+                expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
+              }
+            }
+          })
+        ).resolves.toMatchObject({ ok: false, status: 400 })
+        expect(fetchSpy).not.toHaveBeenCalled()
+      }
+    }
+  )
+
 })
