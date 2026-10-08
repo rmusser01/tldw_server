@@ -1,5 +1,4 @@
 import { canonicalWikilinkNoteId } from "@/components/Notes/wikilinks"
-import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { createNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
 import {
@@ -47,7 +46,10 @@ import {
   loadServicePromptSnapshot,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
-import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import {
+  requestScopeFields,
+  servicePromptAuthorityKey,
+} from "@/services/tldw/domains/service-prompts";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
@@ -743,6 +745,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     const controller = new AbortController()
     saveControllerRef.current = controller
     let acknowledged = false;
+    let rejectedOperationCleared = false;
+    let attemptedOperation: typeof pendingSaveRef.current = null;
     let scope: ServicePromptSnapshot | undefined
     let noteId = draft.id
     const operationPrefix = `surface:quick-notes:${JSON.stringify([workspaceId, draftWorkspaceTag])}:`;
@@ -795,9 +799,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         scope.requestScope.config.serverUrl,
         ownerId,
       );
-      const authorityId = deriveConnectionAuthorityId(
-        scope.requestScope.config,
-      );
+      const authorityId = servicePromptAuthorityKey(scope.requestScope);
       const scopedFields = requestScopeFields(scope.requestScope)
       const request = { ...scopedFields, abortSignal: scope.scopeSignal }
       const persistedKeywords = buildPersistedKeywords(
@@ -1099,6 +1101,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             "Could not retain the note recovery pointer in this Workspace. Retry after storage is available.",
           );
       }
+      attemptedOperation = pending;
       const saved = await bgRequest<NoteListItem>({ ...request, path: pending.path, method: pending.method, headers: { ...request.headers, ...pending.headers }, body: pending.body })
       if (!isCurrent()) return
       const latest = useWorkspaceStore.getState().currentNote
@@ -1192,16 +1195,36 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       await loadWorkspaceNotes({ request, isCurrent })
     } catch (error: any) {
       if (!isCurrent()) return
-      if (isDefinitiveWriteRejection(error) && pendingSaveRef.current) {
-        const pending = pendingSaveRef.current
+      if (isDefinitiveWriteRejection(error) && attemptedOperation) {
+        const pending = attemptedOperation;
         try {
-          await retireSurfaceOfflineDraft(pending.authorityScope, pending.entry.key, pending.entry.pendingWrite!.key)
-          if (!isCurrent()) return
-          pendingSaveRef.current = null
+          await retireSurfaceOfflineDraft(
+            pending.authorityScope,
+            pending.entry.key,
+            pending.entry.pendingWrite!.key,
+          );
+          rejectedOperationCleared = true;
+          if (!isCurrent()) return;
+          pendingSaveRef.current = null;
         } catch {
-          messageApi.error("Could not retire the rejected note operation on this device. Retry before changing the draft.")
-          return
+          messageApi.error(
+            "Could not retire the rejected note operation on this device. Retry before changing the draft.",
+          );
+          return;
         }
+      }
+      if (recovery) {
+        messageApi.error(
+          isNotesProvenancePolicyUnavailable(error)
+            ? t(
+                "playground:studio.sourceHistoryUnavailable",
+                NOTES_PROVENANCE_UNAVAILABLE_MESSAGE,
+              )
+            : rejectedOperationCleared
+              ? "The previous save was rejected and its retained operation cleared. Save your current draft when ready."
+              : "The previous save could not be confirmed. Retry the same previous save.",
+        );
+        return;
       }
       // A policy-blocked receipt remains uncertain and must retain its key/body.
       if (isNotesProvenancePolicyUnavailable(error)) {

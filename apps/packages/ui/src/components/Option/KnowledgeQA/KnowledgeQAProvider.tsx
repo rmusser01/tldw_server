@@ -1,4 +1,4 @@
-import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
+import { servicePromptAuthorityKey } from "@/services/tldw/domains/service-prompts";
 import {
   createNotesGraphAuthorityScope,
   useNotesGraphAuthorityScope,
@@ -1798,7 +1798,7 @@ function OwnedKnowledgeQAProvider({
       : null;
   const notesAuthorityId =
     notesAuthorityScope && authority.snapshot
-      ? deriveConnectionAuthorityId(authority.snapshot.requestScope.config)
+      ? servicePromptAuthorityKey(authority.snapshot.requestScope)
       : null;
   const storageScopeKey = authority.snapshot
     ? getKnowledgeQaStorageScopeKey(authority.snapshot.requestScope) : null
