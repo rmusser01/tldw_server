@@ -175,6 +175,8 @@ assertCurrent()
 
 - [x] Task4 fix2: repair live single-user public-owner/request-scope identity mismatch without changing recovery namespace or verified authority; cover real identity builders and owner/credential retirement, then independent scoped review and real CDP capture verification. Task6 found same-owner Capture account changed before HTTP at6210798ef5.
 
+- [x] Task4 fix3: publish proven captured-head refusal before synchronous real-store deselection, retain the refusal through generic readiness and verified matching-pin canonical rehydrate from available display state; transient errors remain retryable and tombstoned state is not revived. Final88 affected tests/both types/scoped checks and independent three-finding re-review pass at9234163cf3; Task6 affected CDP proof remains.
+
 ### Task 5: Clarify Notes editing-state wording and qualify panel analysis
 
 **Associated task:** TASK-13512 (already In Progress).
