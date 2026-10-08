@@ -221,7 +221,7 @@ export const useMessageOption = (
   } = useCompareMode({ historyId, forceEnabled: opts.forceCompareEnabled });
 
   const currentChatModelSettings = useStoreChatModelSettings();
-  const { selectedModel, setSelectedModel, selectedModelIsLoading } =
+  const { selectedModel, setSelectedModel, retrySelectedModelSave, selectedModelIsLoading } =
     useSelectedModel();
   const [selectedAssistant, setSelectedAssistant, assistantSelectionMeta] = useSelectedAssistant(null);
   const selectedCharacter = React.useMemo(
@@ -632,6 +632,7 @@ export const useMessageOption = (
     selectedModel,
     selectedModelIsLoading,
     setSelectedModel,
+    retrySelectedModelSave,
     chatMode,
     setChatMode,
     isEmbedding,

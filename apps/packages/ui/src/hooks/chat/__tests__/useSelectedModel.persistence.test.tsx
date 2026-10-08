@@ -96,6 +96,68 @@ describe("explicit model persistence with multiple actual hook owners", () => {
     );
     expect(view.result.current.observed[0]).toBe(nextModel);
   });
+  it("retries a failed device write without publishing another model selection", async () => {
+    const view = mount();
+    await ready(view);
+    let failed = true;
+    const { writes } = recordWrites(() => failed);
+    await act(async () => { await view.result.current.first.setSelectedModel(nextModel).catch(() => undefined); });
+    const revision = useStoreMessageOption.getState().selectedModelRevision;
+    failed = false;
+    await act(async () => { await view.result.current.first.retrySelectedModelSave(); });
+    expect({ revision: useStoreMessageOption.getState().selectedModelRevision, writes, stored: window.localStorage.getItem("selectedModel") })
+      .toEqual({ revision, writes: [JSON.stringify(nextModel), JSON.stringify(nextModel)], stored: JSON.stringify(nextModel) });
+  });
+
+  it("does not adopt a reentrant same-model selection's revision for a hidden retry", async () => {
+    const view = mount();
+    await ready(view);
+    let attempts = 0;
+    const { writes, error } = recordWrites(() => ++attempts === 1);
+    let armed = true;
+    let newer!: Promise<void>;
+    const unsubscribe = useStoreMessageOption.subscribe(state => {
+      if (armed && state.selectedModel === nextModel) {
+        armed = false;
+        newer = view.result.current.second.setSelectedModel(nextModel);
+      }
+    });
+    try {
+      let outcomes!: PromiseSettledResult<void>[];
+      await act(async () => {
+        const older = view.result.current.first.setSelectedModel(nextModel);
+        outcomes = await Promise.allSettled([older, newer]);
+      });
+      expect({ writes, newer: outcomes[1], stored: window.localStorage.getItem("selectedModel") })
+        .toEqual({ writes: [JSON.stringify(nextModel)], newer: { status: "rejected", reason: error }, stored: JSON.stringify(oldModel) });
+    } finally { unsubscribe(); }
+  });
+
+  it("keeps the newer model durable when an older storage preparation resolves last", async () => {
+    const view = mount();
+    await ready(view);
+    const held = deferred<string>();
+    const originalGet = Storage.prototype.get;
+    let reads = 0;
+    vi.spyOn(Storage.prototype, "get").mockImplementation(function (this: Storage, key: string) {
+      if (key === "selectedModel" && ++reads === 1) return held.promise as Promise<never>;
+      return originalGet.call(this, key) as Promise<never>;
+    });
+    let first!: Promise<void>;
+    let newer!: Promise<void>;
+    act(() => { first = view.result.current.first.setSelectedModel(nextModel); });
+    await waitFor(() => expect(reads).toBe(1));
+    act(() => { newer = view.result.current.second.setSelectedModel("openai:latest-model"); });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      held.resolve(oldModel);
+      await Promise.all([first, newer]);
+    });
+    expect({ active: useStoreMessageOption.getState().selectedModel, stored: window.localStorage.getItem("selectedModel") })
+      .toEqual({ active: "openai:latest-model", stored: JSON.stringify("openai:latest-model") });
+  });
+
   it("does not start a sibling write while the explicit storage preparation is held", async () => {
     const view = mount();
     await ready(view);

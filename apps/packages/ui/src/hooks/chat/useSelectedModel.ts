@@ -19,6 +19,24 @@ export const normalizeSelectedModel = (
   return trimmed.length > 0 ? trimmed : null;
 };
 
+// ponytail: serialize this document's model writes; use a browser lock if
+// preferences need ordered writes across independent windows (TASK-13549).
+let selectedModelWrites: Promise<void> = Promise.resolve();
+const persistSelectedModel = (
+  value: string | null,
+  revision: number,
+  write: (value: string | null) => Promise<void>,
+): Promise<void> => {
+  const pending = selectedModelWrites.then(() => {
+    const current = useStoreMessageOption.getState();
+    if (current.selectedModelRevision !== revision ||
+      normalizeSelectedModel(current.selectedModel) !== value) return;
+    return write(value);
+  });
+  selectedModelWrites = pending.catch(() => undefined);
+  return pending;
+};
+
 /**
  * Consolidated model selection hook.
  *
@@ -29,6 +47,7 @@ export const normalizeSelectedModel = (
  */
 export const useSelectedModel = () => {
   const selectedModelFromStore = useStoreMessageOption((s) => s.selectedModel);
+  const selectedModelRevision = useStoreMessageOption((s) => s.selectedModelRevision);
   const selectedModelStorageHandled = useStoreMessageOption(
     (s) => s.selectedModelStorageHandled,
   );
@@ -62,10 +81,16 @@ export const useSelectedModel = () => {
           ? nextOrUpdater(selectedModel)
           : nextOrUpdater;
       const normalized = normalizeSelectedModel(resolved);
+      const revision = useStoreMessageOption.getState().selectedModelRevision + 1;
       setSelectedModelInStore(normalized, { storageHandled: true });
-      return setStoredSelectedModel(normalized);
+      return persistSelectedModel(normalized, revision, setStoredSelectedModel);
     },
     [selectedModel, setSelectedModelInStore, setStoredSelectedModel],
+  );
+
+  const retrySelectedModelSave = React.useCallback(
+    () => persistSelectedModel(selectedModel, selectedModelRevision, setStoredSelectedModel),
+    [selectedModel, selectedModelRevision, setStoredSelectedModel],
   );
 
   // Sync effect: hydrate store from storage or push store to storage
@@ -87,10 +112,11 @@ export const useSelectedModel = () => {
     }
 
     if (normalizedStoreModel !== normalizedStoredModel) {
+      const revision = current.selectedModelRevision + 1;
       setSelectedModelInStore(normalizedStoreModel, { storageHandled: true });
       // Explicit writes return their rejection to the caller. Hydration sync is
       // best effort and must not create an unhandled background rejection.
-      void setStoredSelectedModel(normalizedStoreModel).catch(() => undefined);
+      void persistSelectedModel(normalizedStoreModel, revision, setStoredSelectedModel).catch(() => undefined);
     }
   }, [
     selectedModelFromStore,
@@ -104,6 +130,7 @@ export const useSelectedModel = () => {
   return {
     selectedModel,
     setSelectedModel,
+    retrySelectedModelSave,
     selectedModelIsLoading: selectedModelStorageMeta.isLoading,
   };
 };

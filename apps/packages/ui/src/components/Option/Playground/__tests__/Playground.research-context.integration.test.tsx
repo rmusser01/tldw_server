@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Playground } from "../Playground"
 import { useStoreMessageOption } from "@/store/option"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
+import { settingsTestOwner } from "@/services/__tests__/chat-settings-fixture"
+import type { NativeHistoryOwnerV1 } from "@/services/chat-history-selection"
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -90,11 +92,13 @@ const mobileViewportState = vi.hoisted(() => ({
 
 const historySelectionState = vi.hoisted(() => ({
   controller: null as ReturnType<typeof useHistorySelection> | null,
+  owner: null as NativeHistoryOwnerV1 | null,
   status: "idle",
   forkCandidate: null,
   forkSettings: null,
   settingsMode: () => "ordinary" as const,
-  getCurrent: () => ({ status: "idle", owner: null, capture: null }),
+  getCurrent: () => ({ status: "idle", owner: historySelectionState.owner, capture: null }),
+  getSignal: () => undefined,
   getStoredReference: () => null,
   canAutomaticallyLoad: () => false,
   fence: () => () => true
@@ -534,7 +538,8 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => !mobileViewportState.value
 }))
 
-vi.mock("@/services/chat-settings", () => ({
+vi.mock("@/services/chat-settings", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(),
   syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
   applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
@@ -580,6 +585,10 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     historySelectionState.controller = null
+    historySelectionState.owner = {
+      kind: "native", conversation_id: "chat-1", owner_key: "declared-research-owner",
+      request_scope: settingsTestOwner.requestScope, validate_lease: () => true
+    }
     window.history.replaceState({}, "", "/chat")
     mobileViewportState.value = false
     artifactsState.value.isOpen = false
@@ -941,6 +950,8 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
 
     messageOptionState.value.serverChatId = "chat-2"
+    historySelectionState.owner = { ...historySelectionState.owner!, conversation_id: "chat-2" }
+    useStoreMessageOption.setState({ serverChatId: "chat-2" })
     view.rerender(<Playground />)
     await waitFor(() =>
       expect(screen.getByTestId("playground-form")).toHaveAttribute(
@@ -962,6 +973,7 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
 
     messageOptionState.value.historyId = "history-2"
+    useStoreMessageOption.setState({ historyId: "history-2" })
     view.rerender(<Playground />)
     await waitFor(() =>
       expect(screen.getByTestId("playground-form")).toHaveAttribute(
@@ -1002,6 +1014,45 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
   })
 
+  it("does not publish a restored attachment after synchronous New retires its source", async () => {
+    let release!: (value: unknown) => void
+    chatSettingsState.syncChatSettingsForServerChat.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    render(<Playground />)
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    await act(async () => {
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      release({ deepResearchAttachment: buildPersistedAttachment("retired", "Old private research") })
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+  })
+
+  it("does not revive research removed in the same chat while restore is held", async () => {
+    let release!: (value: unknown) => void
+    chatSettingsState.syncChatSettingsForServerChat.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    chatSettingsState.applyChatSettingsPatch.mockImplementation(() => new Promise(() => {}))
+    render(<Playground />)
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    fireEvent.click(screen.getByRole("button", { name: "Attach run 1" }))
+    await waitFor(() => expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "run_1"))
+    fireEvent.click(screen.getByRole("button", { name: "Remove attached research" }))
+    await act(async () => release({ deepResearchAttachment: buildPersistedAttachment("old", "Removed research") }))
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+  })
+
+  it("does not attach a held follow-up after the user removes research in the same chat", async () => {
+    let release!: (bundle: Record<string, unknown>) => void
+    researchClientMocks.getResearchBundle.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Attach run 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    fireEvent.click(screen.getByRole("button", { name: "Remove attached research" }))
+    await act(async () => release({ question: "Retired follow-up", outline: { sections: [] }, claims: [] }))
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+    expect(storeOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalled()
+  })
+
   it("auto-restores persisted attached research context and bounded history for saved chats", async () => {
     chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue({
       updatedAt: "2026-03-08T20:10:00Z",
@@ -1035,10 +1086,10 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
       "data-history-run-ids",
       "run_hist_1,run_hist_2"
     )
-    expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith({
-      historyId: "history-1",
-      serverChatId: "chat-1"
-    })
+    expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith(expect.objectContaining({
+      historyId: "history-1", serverChatId: "chat-1",
+      requestScope: settingsTestOwner.requestScope, validate_lease: expect.any(Function)
+    }))
   })
 
   it("auto-restores the pinned attachment when a saved chat has no active attachment", async () => {
@@ -1419,7 +1470,10 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
 
     messageOptionState.value.serverChatId = "chat-2"
+    historySelectionState.owner = { ...historySelectionState.owner!, conversation_id: "chat-2" }
+    useStoreMessageOption.setState({ serverChatId: "chat-2" })
     messageOptionState.value.historyId = "history-2"
+    useStoreMessageOption.setState({ historyId: "history-2" })
     view.rerender(<Playground />)
 
     await waitFor(() =>

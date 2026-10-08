@@ -235,7 +235,7 @@ class ConversationStore:
             return False
 
     def get_conversation_settings(self, conversation_id: str) -> dict[str, Any] | None:
-        """Fetch wrapped settings for a conversation if present."""
+        """Fetch settings, returning None only for a missing row; raise on read failure."""
         try:
             self._ensure_conversation_settings_table()
             if self._db.backend_type == BackendType.SQLITE:
@@ -261,7 +261,9 @@ class ConversationStore:
                 settings_version = row["settings_version"]
                 last_modified = row["last_modified"]
 
-            settings = json.loads(settings_json) if settings_json else {}
+            settings = json.loads(settings_json)
+            if not isinstance(settings, dict):
+                raise CharactersRAGDBError("Stored conversation settings must be an object")
             return {
                 "settings": settings,
                 "settings_version": settings_version,
@@ -269,7 +271,7 @@ class ConversationStore:
             }
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"get_conversation_settings failed for {conversation_id}: {exc}")
-            return None
+            raise CharactersRAGDBError("Failed to read conversation settings") from exc
 
     def _normalize_conversation_state(self, state: str | None) -> str:
         if state is None:

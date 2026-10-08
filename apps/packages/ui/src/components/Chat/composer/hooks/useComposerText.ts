@@ -822,7 +822,10 @@ export function useComposerText(
     draftSaved,
     draftReady,
     draftOwnerVerificationState: verificationState,
-    retryDraftOwnerVerification: retryVerification,
+    retryDraftOwnerVerification: () => {
+      retryVerification()
+      historySelection?.draftAccount?.retryVerification()
+    },
     draftOwnerKey: ownerKey,
     isDraftOwnerCurrent: isCurrent,
     clearDraft,

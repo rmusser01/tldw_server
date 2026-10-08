@@ -81,6 +81,18 @@ const mountQueue = (prepare = async () => {}, connected = true, complete: (guard
   return { ...hook, dispatched }
 }
 
+// Readiness/restore pauses saved requests for explicit Run (TASK-13454.9).
+const runSavedQueue = async (hook: ReturnType<typeof mountQueue>) => {
+  await waitFor(() => expect(hook.result.current.metadata.isReady).toBe(true))
+  expect(hook.dispatched).toEqual([])
+  expect(useStoreMessageOption.getState().queuedMessages[0]).toMatchObject({
+    id: "queue-original", clientRequestId: "original-client", conversationId: "saved-chat",
+    promptText: "Queued private request", status: "blocked", attemptCount: 0
+  })
+  // Do not await a held preflight or completion inside act.
+  act(() => { void hook.result.current.queue.handleRunNextQueuedRequest() })
+}
+
 describe("saved sidepanel conversation readiness", () => {
   it("does not rerender metadata for streamed message updates while retaining readiness updates", async () => {
     const state = useStoreMessageOption.getState()
@@ -113,6 +125,7 @@ describe("saved sidepanel conversation readiness", () => {
     const hook = phase === "preflight"
       ? mountQueue(() => pending.promise)
       : mountQueue(undefined, true, () => pending.promise)
+    await runSavedQueue(hook)
     await waitFor(() => expect(useStoreMessageOption.getState().queuedMessages[0].status).toBe("sending"))
     if (phase === "completion") await waitFor(() => expect(hook.dispatched).toHaveLength(1))
     hook.unmount()
@@ -136,7 +149,7 @@ describe("saved sidepanel conversation readiness", () => {
     await waitFor(() => expect(useStoreMessageOption.getState().queuedMessages).toEqual([]))
   })
 
-  it("holds automatic and manual queue replay until the canonical Character is ready", async () => {
+  it("requires explicit Run after canonical Character readiness recovers", async () => {
     const read = held<typeof characterChat>()
     io.getChat.mockReturnValue(read.promise)
     const hook = mountQueue()
@@ -147,9 +160,10 @@ describe("saved sidepanel conversation readiness", () => {
     })
     expect(hook.dispatched).toEqual([])
     expect(useStoreMessageOption.getState().queuedMessages[0]).toMatchObject({
-      id: "queue-original", clientRequestId: "original-client", status: "queued", promptText: "Queued private request"
+      id: "queue-original", clientRequestId: "original-client", status: "blocked", attemptCount: 0, promptText: "Queued private request"
     })
     await act(async () => { read.resolve(characterChat) })
+    await runSavedQueue(hook)
     await waitFor(() => expect(hook.dispatched).toHaveLength(1))
     expect(hook.dispatched[0]).toMatchObject({ actor: ["character", "42"], item: { id: "queue-original", clientRequestId: "original-client" } })
     expect(useStoreMessageOption.getState().queuedMessages).toEqual([])
@@ -158,14 +172,18 @@ describe("saved sidepanel conversation readiness", () => {
   })
 
   it("retains a failed metadata queue and retries the same request once details recover", async () => {
-    const originalQueue = useStoreMessageOption.getState().queuedMessages
     io.getChat.mockRejectedValueOnce(new Error("secret transport failure"))
     const hook = mountQueue()
     await waitFor(() => expect(hook.result.current.metadata.failed).toBe(true))
     expect(hook.dispatched).toEqual([])
     expect(useStoreMessageOption.getState().serverChatLoadError).not.toContain("secret")
-    expect(useStoreMessageOption.getState().queuedMessages).toEqual(originalQueue)
+    expect(useStoreMessageOption.getState().queuedMessages).toHaveLength(1)
+    expect(useStoreMessageOption.getState().queuedMessages[0]).toMatchObject({
+      id: "queue-original", clientRequestId: "original-client", promptText: "Queued private request",
+      status: "blocked", attemptCount: 0
+    })
     await act(async () => { hook.result.current.metadata.retryMetadata() })
+    await runSavedQueue(hook)
     await waitFor(() => expect(hook.dispatched).toHaveLength(1))
     expect(hook.dispatched[0]).toMatchObject({ item: { clientRequestId: "original-client", promptText: "Queued private request" } })
   })
@@ -178,6 +196,7 @@ describe("saved sidepanel conversation readiness", () => {
     await waitFor(() => expect(io.getPersonaProfile).toHaveBeenCalled())
     expect(hook.dispatched).toEqual([])
     await act(async () => { profile.resolve({ id: "persona-1", name: "Owned Persona" }) })
+    await runSavedQueue(hook)
     await waitFor(() => expect(hook.dispatched).toHaveLength(1))
     expect(hook.dispatched[0]).toMatchObject({ actor: ["persona", "persona-1"] })
   })
@@ -203,6 +222,7 @@ describe("saved sidepanel conversation readiness", () => {
   it.each(["unmount", "account", "conversation"])("refuses a queued preflight completed after %s", async (boundary) => {
     const preparation = held<void>()
     const hook = mountQueue(() => preparation.promise)
+    await runSavedQueue(hook)
     await waitFor(() => expect(useStoreMessageOption.getState().queuedMessages[0].status).toBe("sending"))
     if (boundary === "unmount") hook.unmount()
     await act(async () => {
@@ -220,6 +240,7 @@ describe("saved sidepanel conversation readiness", () => {
   it("keeps new local and successfully restored plain conversations usable", async () => {
     io.getChat.mockResolvedValue({ id: "saved-chat", title: "Plain" })
     const saved = mountQueue()
+    await runSavedQueue(saved)
     await waitFor(() => expect(saved.dispatched).toHaveLength(1))
     expect(saved.dispatched[0]).toMatchObject({ actor: [null, null] })
     saved.unmount()

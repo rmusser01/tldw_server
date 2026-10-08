@@ -11,8 +11,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConfigProvider, Form, Input } from "antd"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
-import { useActorStore } from "@/store/actor"
+import { useActorEditorPrefs, useActorStore } from "@/store/actor"
 import {
   HistorySelectionContext,
   useHistorySelection,
@@ -609,6 +610,28 @@ describe.each(["actor", "model"] as const)(
       await waitFor(() => expect(view.close).toHaveBeenCalledWith(false))
     })
 
+    it("stops after a synchronous publication retires the initiating account", async () => {
+      let current = true
+      io.accountCurrent = () => current
+      io.values.set("actorSettings:server:scene-one", scene("Original scene."))
+      const view = mountEditor(kind)
+      const notes = await screen.findByLabelText("Scene notes")
+      fireEvent.change(notes, { target: { value: "Admitted scene." } })
+      const preview = useActorStore.getState().preview
+      const unsubscribe = useActorStore.subscribe(state => {
+        if (state.settings?.notes === "Admitted scene.") current = false
+      })
+      try {
+        fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        await waitFor(() => expect(io.set).toHaveBeenCalledTimes(1))
+        await act(async () => { await Promise.resolve() })
+        expect({ closed: view.close.mock.calls.length, preview: useActorStore.getState().preview })
+          .toEqual({ closed: 0, preview })
+      } finally {
+        unsubscribe()
+      }
+    })
+
     it("keeps known absence editable with existing defaults", async () => {
       mountEditor(kind)
       expect(await screen.findByLabelText("Scene notes")).toHaveValue("")
@@ -637,3 +660,111 @@ it("uses cached model defaults while freshly reading the scene if the model-sett
   expect(io.get).toHaveBeenCalledWith("actorSettings:server:scene-one")
   expect(screen.queryByRole("alert")).not.toBeInTheDocument()
 })
+
+
+it("stops model-default writes if scope publication retires the source", async () => {
+  let current = true
+  io.accountCurrent = () => current
+  useStoreChatModelSettings.getState().reset()
+  useStoreChatModelSettings.getState().setActiveSettingsScope("foreign:model")
+  const view = mountEditor("model")
+  const temperature = await screen.findByLabelText("Temperature")
+  fireEvent.change(temperature, { target: { value: "0.22" } })
+  const unsubscribe = useStoreChatModelSettings.subscribe(state => {
+    if (state.activeSettingsScope !== "foreign:model") current = false
+  })
+  try {
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(io.set).toHaveBeenCalledTimes(1))
+    await act(async () => { await Promise.resolve() })
+    expect({ closed: view.close.mock.calls.length, temperature: useStoreChatModelSettings.getState().temperature })
+      .toEqual({ closed: 0, temperature: undefined })
+  } finally {
+    unsubscribe()
+  }
+})
+
+it("does not apply a held Scene Director reset to a newly selected scene", async () => {
+  io.realActorEditor = true
+  useActorEditorPrefs.getState().setEditorMode("advanced")
+  io.values.set("actorSettings:server:scene-one", scene("Original scene."))
+  io.values.set("actorSettings:server:scene-two", scene("New scene."))
+  mountEditor("model")
+  fireEvent.click(await screen.findByRole("tab", { name: /scene director/i }))
+  fireEvent.click(await screen.findByRole("button", { name: "Reset for this chat" }))
+  const confirm = await screen.findByRole("button", { name: "Confirm", exact: true })
+  act(() => target("scene-two"))
+  await waitFor(() => expect(useActorStore.getState().settings?.notes).toBe("New scene."))
+  fireEvent.click(confirm)
+  expect(screen.getAllByLabelText("Scene notes").map(input => (input as HTMLInputElement).value))
+    .toEqual(["New scene."])
+}, 15_000)
+
+
+it("keeps Scene Director presets staged when Cancel is chosen", async () => {
+  io.realActorEditor = true
+  useActorEditorPrefs.getState().setEditorMode("advanced")
+  io.values.set("actorSettings:server:scene-one", scene("Original scene."))
+  const view = mountEditor("actor")
+  const preset = await screen.findByRole("button", { name: /slice of life/i })
+  const before = useActorStore.getState().settings
+  fireEvent.click(preset)
+  fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+  expect({ closed: view.close.mock.calls, scene: useActorStore.getState().settings, writes: io.set.mock.calls })
+    .toEqual({ closed: [[false]], scene: before, writes: [] })
+}, 15_000)
+
+it("keeps a newer Scene Director edit when a held character profile returns", async () => {
+  io.realActorEditor = true
+  useActorEditorPrefs.getState().setEditorMode("advanced")
+  io.values.set("actorSettings:server:scene-one", scene("Original scene."))
+  let release!: (value: ReturnType<typeof scene>) => void
+  const pending = new Promise<ReturnType<typeof scene>>(resolve => { release = resolve })
+  io.get.mockImplementation((key: string) => key === "actorProfile:character-one" ? pending : Promise.resolve(io.values.get(key)))
+  mountEditor("actor")
+  fireEvent.click(await screen.findByRole("button", { name: /apply.*default/i }))
+  await waitFor(() => expect(io.get).toHaveBeenCalledWith("actorProfile:character-one"))
+  fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+  const notes = await screen.findByLabelText("Scene notes")
+  fireEvent.change(notes, { target: { value: "Newer edit." } })
+  await act(async () => { release(scene("Old profile.")); await pending })
+  expect(notes).toHaveValue("Newer edit.")
+}, 15_000)
+
+
+it("keeps the standalone scene draft when dirty-close is cancelled", async () => {
+  io.values.set("actorSettings:server:scene-one", scene("Original scene."))
+  const view = mountEditor("actor")
+  const notes = await screen.findByLabelText("Scene notes")
+  fireEvent.change(notes, { target: { value: "Staged scene." } })
+  fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+  fireEvent.click(await screen.findByRole("button", { name: "Keep editing", exact: true }))
+  expect({ closed: view.close.mock.calls.length, notes: (notes as HTMLInputElement).value, writes: io.set.mock.calls })
+    .toEqual({ closed: 0, notes: "Staged scene.", writes: [] })
+})
+
+
+it.each(["actor", "model"] as const)("keeps a held %s scene Save unchanged when an older profile read returns", async kind => {
+  io.realActorEditor = true
+  useActorEditorPrefs.getState().setEditorMode("advanced")
+  io.values.set("actorSettings:server:scene-one", scene("Original scene."))
+  let releaseProfile!: (value: ReturnType<typeof scene>) => void
+  const profile = new Promise<ReturnType<typeof scene>>(resolve => { releaseProfile = resolve })
+  io.get.mockImplementation((key: string) => key === "actorProfile:character-one" ? profile : Promise.resolve(io.values.get(key)))
+  let releaseSave!: () => void
+  const saved = new Promise<void>(resolve => { releaseSave = resolve })
+  io.set.mockImplementationOnce(() => saved)
+  const view = mountEditor(kind)
+  if (kind === "model") fireEvent.click(await screen.findByRole("tab", { name: /scene director/i }))
+  fireEvent.click(await screen.findByRole("button", { name: /apply.*default/i }))
+  await waitFor(() => expect(io.get).toHaveBeenCalledWith("actorProfile:character-one"))
+  fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+  const notes = await screen.findByLabelText("Scene notes")
+  fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+  await waitFor(() => expect(io.set).toHaveBeenCalledTimes(1))
+  await act(async () => { releaseProfile(scene("Returned profile.")); await profile })
+  expect(notes).toHaveValue("Original scene.")
+  await act(async () => { releaseSave(); await saved })
+  await waitFor(() => expect(view.close).toHaveBeenCalledWith(false))
+  expect(useActorStore.getState().settings?.notes).toBe("Original scene.")
+}, 15_000)

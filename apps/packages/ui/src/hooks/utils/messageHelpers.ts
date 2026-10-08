@@ -42,7 +42,7 @@ export const createSaveMessageOnSuccess = (
   temporaryChat: boolean,
   setHistoryId: (id: string, options?: { preserveServerChatId?: boolean }) => void,
   options?: {
-    onServerConversationLinked?: (conversationId: string) => void
+    onServerConversationLinked?: (conversationId: string, payload: Parameters<typeof saveSuccess>[0], historyId: string | null) => void
   }
 ) => {
   return async (e: any): Promise<string | null> => {
@@ -67,7 +67,7 @@ export const createSaveMessageOnSuccess = (
         setHistoryId: resolvedSetHistoryId
       })
       if (conversationId.length > 0) {
-        options?.onServerConversationLinked?.(conversationId)
+        options?.onServerConversationLinked?.(conversationId, e, historyId)
       }
       return historyId
     } else {

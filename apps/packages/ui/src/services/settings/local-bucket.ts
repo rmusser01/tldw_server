@@ -1,4 +1,5 @@
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
+import { requirePersistentStorage } from "@/utils/persistent-storage"
 
 export type LocalRegistryRecord<T> = {
   value: T
@@ -20,7 +21,7 @@ export type LocalRegistryBucket<T> = {
   /** Fail-closed reads require an unpinned durable bucket and never delete unreadable records. */
   get: (key: string, options?: { failClosed?: boolean }) => Promise<LocalRegistryRecord<T> | null>
   /** Expected null claims absence; conditional writes require the existing Web Lock. */
-  set: (key: string, value: T, updatedAt?: number, expected?: LocalRegistryRecord<T> | null) => Promise<boolean>
+  set: (key: string, value: T, updatedAt?: number, expected?: LocalRegistryRecord<T> | null, validate_lease?: () => boolean) => Promise<boolean>
   remove: (key: string) => Promise<void>
   cleanup: () => Promise<number>
   buildKey: (key: string) => string
@@ -28,8 +29,12 @@ export type LocalRegistryBucket<T> = {
 
 const storage = createSafeStorage({ area: "local" })
 const hasDurableBackend = () => {
-  const backend = storage as typeof storage & { hasPersistentBackend?: boolean; hasExtensionApi?: boolean }
-  return backend.hasPersistentBackend !== false && backend.hasExtensionApi !== false
+  try {
+    requirePersistentStorage(storage)
+    return true
+  } catch {
+    return false
+  }
 }
 
 
@@ -139,12 +144,12 @@ export const createLocalRegistryBucket = <T>({
     }
   }
 
-  const set = async (key: string, value: T, updatedAt = Date.now(), expected?: LocalRegistryRecord<T> | null): Promise<boolean> => {
+  const set = async (key: string, value: T, updatedAt = Date.now(), expected?: LocalRegistryRecord<T> | null, validate_lease?: () => boolean): Promise<boolean> => {
     const storageKey = buildKey(key)
     try {
       const conditional = expected !== undefined
       const previous = conditional ? JSON.stringify(expected) : undefined
-      if (expected === null && (tabScoped || !hasDurableBackend())) return false
+      if (validate_lease?.() === false || (conditional && !hasDurableBackend()) || (expected === null && tabScoped)) return false
       if (conditional && tabScoped && readTab(storageKey) !== previous) return false
       const record = { value, updatedAt }
       pinTab(storageKey, JSON.stringify(record))
@@ -152,12 +157,14 @@ export const createLocalRegistryBucket = <T>({
       // Without Web Locks, retire only this exact pin; keep the durable source.
       if (conditional && (typeof navigator === "undefined" || !navigator.locks?.request)) return false
       return await withRecordLock(storageKey, async () => {
+        if (validate_lease?.() === false || (conditional && !hasDurableBackend())) return false
         if (conditional) {
           const current = await storage.get(storageKey)
+          if (validate_lease?.() === false || !hasDurableBackend()) return false
           if (expected === null ? current !== undefined : JSON.stringify(current ?? null) !== previous) return false
         }
         await storage.set(storageKey, record)
-        return hasDurableBackend()
+        return hasDurableBackend() && validate_lease?.() !== false
       })
     } catch {
       return false

@@ -401,11 +401,12 @@ export const useMessage = () => {
       if (guard) guard.publishHistoryId(id, () => setHistoryId(id, options));
       else setHistoryId(id, options);
     };
+  const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress;
   const saveSuccessForQueuedTurn = (guard?: QueuedDispatchGuard) => createSaveMessageOnSuccess(
     temporaryChat,
     historySetterForQueuedTurn(guard),
     {
-      onServerConversationLinked: (conversationId) => {
+      onServerConversationLinked: (conversationId, payload, linkedHistoryId) => {
         const publish = () => {
           setServerChatId(conversationId);
           setServerChatMetaLoaded(false);
@@ -415,9 +416,14 @@ export const useMessage = () => {
         else publish();
         if (!serverChatId) {
           void syncChatSettingsForServerChat({
-            historyId,
+            historyId: linkedHistoryId,
             serverChatId: conversationId,
             allowScratchFallback: true,
+            sourceDraftAddress: renderedSettingsDraft,
+            requestScope: payload.requestScope,
+            signal: payload.scopeSignal,
+            validate_lease: () => !payload.scopeSignal?.aborted && !payload.scopeInvalidatedSignal?.aborted &&
+              (guard ? guard.isSourceCurrent?.() === true : useStoreMessageOption.getState().serverChatId === conversationId),
           }).catch(() => {
             // Best-effort scratch-to-server settings reconciliation.
           });

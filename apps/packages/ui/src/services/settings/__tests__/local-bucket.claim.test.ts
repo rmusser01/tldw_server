@@ -86,6 +86,48 @@ describe("existing registry durable creation reservation boundary", () => {
     expect(write).not.toHaveBeenCalled()
   })
 
+  it("refuses an uncertified storage instance even when backend flags are missing", async () => {
+    vi.spyOn(PlasmoStorage.prototype, "hasPersistentBackend", "get").mockReturnValue(undefined as unknown as boolean)
+    const write = vi.spyOn(PlasmoStorage.prototype, "set")
+    await expect(bucket().get("intent", { failClosed: true })).rejects.toThrow()
+    expect(await bucket().set("intent", "DISPATCH", Date.now(), null)).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it("checks the captured lease after waiting for the record lock", async () => {
+    let release!: () => void
+    let entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    vi.stubGlobal("navigator", Object.create(window.navigator, { locks: { value: {
+      request: async (_key: string, operation: () => unknown) => { entered(); await held; return operation() }
+    } } }))
+    let current = true
+    const write = vi.spyOn(PlasmoStorage.prototype, "set")
+    const claim = bucket().set("intent", "DISPATCH", Date.now(), null, () => current)
+    await started
+    current = false
+    release()
+    expect(await claim).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it("checks the captured lease after an awaited comparison read", async () => {
+    let release!: () => void
+    let entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    vi.spyOn(PlasmoStorage.prototype, "get").mockImplementationOnce(async () => { entered(); await held; return undefined })
+    let current = true
+    const write = vi.spyOn(PlasmoStorage.prototype, "set")
+    const claim = bucket().set("intent", "DISPATCH", Date.now(), null, () => current)
+    await started
+    current = false
+    release()
+    expect(await claim).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+  })
+
   it("refuses lockless absence claims before any write", async () => {
     vi.stubGlobal("navigator", Object.create(window.navigator, { locks: { value: undefined } }))
     const write = vi.spyOn(PlasmoStorage.prototype, "set")

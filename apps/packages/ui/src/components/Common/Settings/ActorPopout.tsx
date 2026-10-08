@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Drawer, Form, Segmented, Skeleton, Switch } from "antd"
+import { Button, Drawer, Form, Modal, Segmented, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useStoreMessageOption } from "@/store/option"
@@ -38,14 +38,16 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const selectionSignal = historySelection?.getSignal()
   const captureSelectionFence = historySelection?.fence
   const [form] = Form.useForm()
-  const { settings, setSettings, preview, tokenCount, setPreviewAndTokens } =
+  const [modal, modalContextHolder] = Modal.useModal()
+  const editRevisionRef = React.useRef(0)
+  const baselineRef = React.useRef<{ settings: ActorSettings; fields: Record<string, unknown> } | null>(null)
+  const [settings, setSettingsState] = React.useState<ActorSettings | null>(null)
+  const [{ preview, tokenCount }, setPreviewState] = React.useState({ preview: "", tokenCount: 0 })
+  const { commitSettings, commitPreview } =
     useActorStore(
       (state) => ({
-        settings: state.settings,
-        setSettings: state.setSettings,
-        preview: state.preview,
-        tokenCount: state.tokenCount,
-        setPreviewAndTokens: state.setPreviewAndTokens
+        commitSettings: state.setSettings,
+        commitPreview: state.setPreviewAndTokens
       }),
       shallow
     )
@@ -100,9 +102,40 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   )
     viewRef.current = view
   const renderedView = viewRef.current
+  const loadedSource = loadedSourceRef.current
+  const isEditorCurrent = React.useCallback(() => !saveAttemptRef.current && viewRef.current === renderedView && Boolean(loadedSource?.()), [loadedSource, renderedView])
+  const captureEditGuard = React.useCallback(() => {
+    const revision = editRevisionRef.current
+    return () => isEditorCurrent() && editRevisionRef.current === revision
+  }, [isEditorCurrent])
+  const setSettings = React.useCallback((next: ActorSettings) => {
+    if (!isEditorCurrent()) return
+    editRevisionRef.current++
+    setSettingsState(next)
+  }, [isEditorCurrent])
+  const setPreviewAndTokens = React.useCallback((preview: string, tokenCount: number) => {
+    if (isEditorCurrent()) setPreviewState({ preview, tokenCount })
+  }, [isEditorCurrent])
+  const requestClose = () => {
+    if (saveAttemptRef.current || saving || viewRef.current !== renderedView) return
+    const baseline = baselineRef.current
+    const dirty = baseline && (JSON.stringify(settings) !== JSON.stringify(baseline.settings) ||
+      Object.entries(baseline.fields).some(([key, value]) => JSON.stringify(form.getFieldValue(key)) !== JSON.stringify(value)))
+    if (!dirty) return setOpen(false)
+    const canDiscard = captureEditGuard()
+    if (!canDiscard()) return
+    modal.confirm({
+      title: t("common:modelSettings.discardSceneTitle", "Discard unsaved scene settings?"),
+      content: t("common:modelSettings.discardSceneHelp", "Your staged scene edits will be discarded."),
+      okText: t("common:discard", "Discard"),
+      cancelText: t("common:keepEditing", "Keep editing"),
+      onOk: () => { if (canDiscard()) setOpen(false) }
+    })
+  }
 
   React.useEffect(() => {
     loadedSourceRef.current = null
+    baselineRef.current = null
     saveAttemptRef.current = null
     setSaving(false)
     setSaveError(false)
@@ -143,7 +176,9 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
         })
         if (!isCurrent()) return
         loadedSourceRef.current = isCurrent
-        setSettings(actor)
+        setSettingsState(actor)
+        commitSettings(actor)
+        if (!isCurrent()) return
         const fields: Record<string, unknown> = {
           actorEnabled: actor.isEnabled,
           actorNotes: actor.notes,
@@ -159,9 +194,14 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
           fields[`actor_key_${aspect.id}`] = aspect.key
         }
         form.resetFields()
+        if (!isCurrent()) return
         form.setFieldsValue(fields)
+        if (!isCurrent()) return
+        baselineRef.current = { settings: structuredClone(actor), fields: structuredClone(form.getFieldsValue(true)) }
         const text = buildActorPrompt(actor)
-        setPreviewAndTokens(text, estimateActorTokens(text))
+        setPreviewState({ preview: text, tokenCount: estimateActorTokens(text) })
+        commitPreview(text, estimateActorTokens(text))
+        if (!isCurrent()) return
       } catch {
         if (isCurrent()) setLoadError(true)
       } finally {
@@ -186,8 +226,8 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     selectionSignal,
     captureSelectionFence,
     accountIsCurrent,
-    setPreviewAndTokens,
-    setSettings
+    commitPreview,
+    commitSettings
   ])
 
   React.useEffect(() => {
@@ -196,9 +236,10 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
         window.clearTimeout(timeoutRef.current)
       }
     }
-  }, [])
+  }, [renderedView, settings])
 
   const recompute = React.useCallback(() => {
+    if (!isEditorCurrent()) return
     const base = settings ?? createDefaultActorSettings()
     const values = form.getFieldsValue()
 
@@ -206,18 +247,22 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
 
     const text = buildActorPrompt(next)
     setPreviewAndTokens(text, estimateActorTokens(text))
-  }, [form, setPreviewAndTokens, settings])
+  }, [form, isEditorCurrent, setPreviewAndTokens, settings])
 
   const debouncedRecompute = React.useMemo(() => {
     return () => {
-      if (timeoutRef.current !== undefined) {
-        window.clearTimeout(timeoutRef.current)
-      }
-      timeoutRef.current = window.setTimeout(() => {
+      if (!isEditorCurrent()) return
+      const revision = editRevisionRef.current
+      if (timeoutRef.current !== undefined) window.clearTimeout(timeoutRef.current)
+      const timer = window.setTimeout(() => {
+        if (timeoutRef.current !== timer || editRevisionRef.current !== revision || !isEditorCurrent()) return
+        timeoutRef.current = undefined
         recompute()
       }, 150)
+      timeoutRef.current = timer
     }
-  }, [recompute])
+  }, [isEditorCurrent, recompute])
+  React.useEffect(() => { recompute() }, [recompute])
 
   const handleSave = async (values: any) => {
     const isCurrent = loadedSourceRef.current
@@ -228,27 +273,34 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     )
       return
     const attempt = {}
+    const revision = editRevisionRef.current
+    const canCommit = () => saveAttemptRef.current === attempt &&
+      viewRef.current === renderedView && isCurrent() && editRevisionRef.current === revision
     saveAttemptRef.current = attempt
     setSaving(true)
     setSaveError(false)
     const next = buildActorSettingsFromForm(
       settings ?? createDefaultActorSettings(),
-      values
+      { ...form.getFieldsValue(true), ...values }
     )
     try {
       const { saveActorSettingsForChat } = await loadActorSettings()
-      if (!isCurrent()) return
+      if (!canCommit()) return
       const saved = await saveActorSettingsForChat({
         historyId,
         serverChatId,
         settings: next
       })
-      if (!isCurrent()) return
+      if (!canCommit()) return
       if (!saved) throw new Error("actor_settings_save_failed")
-      setSettings(next)
+      commitSettings(next)
+      if (!canCommit()) return
+      const text = buildActorPrompt(next)
+      commitPreview(text, estimateActorTokens(text))
+      if (!canCommit()) return
       setOpen(false)
     } catch {
-      if (isCurrent()) setSaveError(true)
+      if (canCommit()) setSaveError(true)
     } finally {
       if (saveAttemptRef.current === attempt) {
         saveAttemptRef.current = null
@@ -262,8 +314,9 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
       placement="right"
       size={420}
       open={open}
-      onClose={() => setOpen(false)}
+      onClose={requestClose}
       title={t("playground:composer.actorTitle", "Scene Director (Actor)")}>
+      {modalContextHolder}
       {personaChatActive ? (
         <div className="rounded-lg border border-border bg-surface2 p-4 text-sm text-text-muted">
           {t(
@@ -318,6 +371,7 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
           disabled={saving || !loadedSourceRef.current?.()}
           onFinish={handleSave}
           onValuesChange={(changed) => {
+            editRevisionRef.current++
             const keys = Object.keys(changed || {})
             const shouldUpdate = keys.some(
               (k) =>
@@ -382,6 +436,8 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
               form={form}
               settings={settings}
               setSettings={setSettings}
+              isCurrent={isEditorCurrent}
+              captureEditGuard={captureEditGuard}
               actorPreview={preview}
               actorTokenCount={tokenCount}
               onRecompute={recompute}

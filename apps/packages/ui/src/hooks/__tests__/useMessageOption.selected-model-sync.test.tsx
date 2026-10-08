@@ -12,12 +12,16 @@ const {
   lastUseChatActionsArgs,
   defaultRagSettings
 } = vi.hoisted(() => {
-  const setSelectedModelSpy = vi.fn((next: string | null) => {
+  const setSelectedModelSpy = vi.fn((next: string | null, options?: { storageHandled?: boolean }) => {
     state.selectedModel = next
+    state.selectedModelRevision++
+    state.selectedModelStorageHandled = options?.storageHandled === true
   })
 
   const state: Record<string, any> = {
     selectedModel: null,
+    selectedModelRevision: 0,
+    selectedModelStorageHandled: false,
     setSelectedModel: setSelectedModelSpy,
     webSearch: false,
     setWebSearch: vi.fn(),
@@ -300,6 +304,8 @@ describe("useMessageOption selected model sync", () => {
     storageSetCalls.length = 0
     lastUseChatActionsArgs.value = null
     storeState.selectedModel = null
+    storeState.selectedModelRevision = 0
+    storeState.selectedModelStorageHandled = false
     storeState.serverChatId = null
     storeState.serverChatAssistantKind = null
     storeState.serverChatAssistantId = null

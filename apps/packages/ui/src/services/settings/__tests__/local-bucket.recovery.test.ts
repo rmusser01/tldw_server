@@ -235,6 +235,8 @@ describe("nonmutating registry recovery enumeration", () => {
   })
 
   it("refuses a native no-op write when extension storage is absent", async () => {
+    // Native Plasmo has no WebUI backend certification getter.
+    vi.spyOn(PlasmoStorage.prototype, "hasPersistentBackend", "get").mockReturnValue(undefined as unknown as boolean)
     Object.defineProperty(PlasmoStorage.prototype, "hasExtensionApi", {
       configurable: true,
       value: false

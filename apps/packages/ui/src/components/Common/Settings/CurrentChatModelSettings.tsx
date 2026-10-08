@@ -1,4 +1,5 @@
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
+import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -94,6 +95,8 @@ type ActorFormValues = {
 type CurrentChatModelFormValues = Partial<ChatModelSettings> & ActorFormValues
 
 const CHAT_MODEL_SETTING_KEYS: ReadonlySet<keyof ChatModelSettings> = new Set([
+  "systemPrompt",
+  "thinking",
   "temperature",
   "topK",
   "topP",
@@ -140,85 +143,27 @@ export const CurrentChatModelSettings = ({
   settingsScope
 }: Props) => {
   const { t } = useTranslation("common")
+  const [modal, modalContextHolder] = Modal.useModal()
   const [form] = Form.useForm<CurrentChatModelFormValues>()
   const {
-    temperature,
-    topK,
-    topP,
-    keepAlive,
-    numCtx,
-    seed,
-    numGpu,
-    numPredict,
-    useMMap,
-    minP,
-    repeatLastN,
-    repeatPenalty,
-    useMlock,
-    tfsZ,
-    numKeep,
-    numThread,
-    reasoningEffort,
-    thinking,
-    historyMessageLimit,
-    historyMessageOrder,
-    slashCommandInjectionMode,
-    apiProvider,
-    extraHeaders,
-    extraBody,
-    llamaThinkingBudgetTokens: storeLlamaThinkingBudgetTokens,
-    llamaGrammarMode: storeLlamaGrammarMode,
-    llamaGrammarId: storeLlamaGrammarId,
-    llamaGrammarInline: storeLlamaGrammarInline,
-    llamaGrammarOverride: storeLlamaGrammarOverride,
-    jsonMode,
-    systemPrompt,
-    ocrLanguage,
-    updateSetting,
-    updateScopedSetting,
-    setActiveSettingsScope,
-    setOcrLanguage
-  } = useStoreChatModelSettings(
-    (state) => ({
-      temperature: state.temperature,
-      topK: state.topK,
-      topP: state.topP,
-      keepAlive: state.keepAlive,
-      numCtx: state.numCtx,
-      seed: state.seed,
-      numGpu: state.numGpu,
-      numPredict: state.numPredict,
-      useMMap: state.useMMap,
-      minP: state.minP,
-      repeatLastN: state.repeatLastN,
-      repeatPenalty: state.repeatPenalty,
-      useMlock: state.useMlock,
-      tfsZ: state.tfsZ,
-      numKeep: state.numKeep,
-      numThread: state.numThread,
-      reasoningEffort: state.reasoningEffort,
-      thinking: state.thinking,
-      historyMessageLimit: state.historyMessageLimit,
-      historyMessageOrder: state.historyMessageOrder,
-      slashCommandInjectionMode: state.slashCommandInjectionMode,
-      apiProvider: state.apiProvider,
-      extraHeaders: state.extraHeaders,
-      extraBody: state.extraBody,
-      llamaThinkingBudgetTokens: state.llamaThinkingBudgetTokens,
-      llamaGrammarMode: state.llamaGrammarMode,
-      llamaGrammarId: state.llamaGrammarId,
-      llamaGrammarInline: state.llamaGrammarInline,
-      llamaGrammarOverride: state.llamaGrammarOverride,
-      jsonMode: state.jsonMode,
-      systemPrompt: state.systemPrompt,
-      ocrLanguage: state.ocrLanguage,
-      updateSetting: state.updateSetting,
-      updateScopedSetting: state.updateScopedSetting,
-      setActiveSettingsScope: state.setActiveSettingsScope,
-      setOcrLanguage: state.setOcrLanguage
-    }),
-    shallow
-  )
+    apiProvider, ocrLanguage, updateSetting, updateScopedSetting,
+    setActiveSettingsScope, setOcrLanguage
+  } = useStoreChatModelSettings(state => ({
+    apiProvider: state.apiProvider,
+    ocrLanguage: state.ocrLanguage,
+    updateSetting: state.updateSetting,
+    updateScopedSetting: state.updateScopedSetting,
+    setActiveSettingsScope: state.setActiveSettingsScope,
+    setOcrLanguage: state.setOcrLanguage
+  }), shallow)
+  const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
+  const editRevisionRef = React.useRef(0)
+  const baselineRef = React.useRef<{
+    values: CurrentChatModelFormValues
+    actor: ActorSettings
+    ocrLanguage?: string
+  } | null>(null)
+  const [stagedOcrLanguage, setStagedOcrLanguage] = React.useState(ocrLanguage)
   const {
     historyId,
     selectedSystemPrompt,
@@ -226,6 +171,7 @@ export const CurrentChatModelSettings = ({
     removeUploadedFile,
     selectedModel,
     setSelectedModel,
+    retrySelectedModelSave,
     serverChatId,
     serverChatAssistantKind,
     serverChatPersonaMemoryMode,
@@ -248,6 +194,12 @@ export const CurrentChatModelSettings = ({
   const personaChatActive =
     serverChatAssistantKind === "persona" || selectedAssistant?.kind === "persona"
   const draftRevision = useStoreMessageOption((state) => state.chatDraftRevision)
+  const renderedModelRevision = useStoreMessageOption(state => state.selectedModelRevision)
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const restoreRevision = usePlaygroundSessionStore(
     (state) => state.restoreRevision
   )
@@ -257,9 +209,21 @@ export const CurrentChatModelSettings = ({
   const [readRevision, setReadRevision] = React.useState(0)
   const [saving, setSaving] = React.useState(false)
   const [saveError, setSaveError] = React.useState(false)
+  const [modelSaveError, setModelSaveError] = React.useState<{ value: string | null; revision: number; panel: object } | null>(null)
+  const [retryingModelSave, setRetryingModelSave] = React.useState(false)
+  const modelRetryRef = React.useRef<object | null>(null)
   const saveAttemptRef = React.useRef<object | null>(null)
   const readSourceRef = React.useRef<(() => boolean) | null>(null)
   const loadedSourceRef = React.useRef<(() => boolean) | null>(null)
+  const panelKey = JSON.stringify([
+    open, historyId, serverChatId, selectedCharacterId, personaChatActive,
+    draftRevision, restoreRevision, selectionRevision, readRevision, settingsScope
+  ])
+  const panel = { key: panelKey, selectionSignal, captureSelectionFence, accountIsCurrent }
+  const panelRef = React.useRef(panel)
+  if (Object.keys(panel).some(key => panel[key as keyof typeof panel] !== panelRef.current[key as keyof typeof panel]))
+    panelRef.current = panel
+  const renderedPanel = panelRef.current
   const viewKey = JSON.stringify([
     open,
     historyId,
@@ -269,7 +233,11 @@ export const CurrentChatModelSettings = ({
     draftRevision,
     restoreRevision,
     selectionRevision,
-    readRevision
+    readRevision,
+    selectedModel,
+    renderedModelRevision,
+    activeSettingsScope,
+    settingsScope
   ])
   const viewRef = React.useRef({
     key: viewKey,
@@ -292,30 +260,71 @@ export const CurrentChatModelSettings = ({
       revision: viewRef.current.revision + 1
     }
     loadedSourceRef.current = null
+    baselineRef.current = null
   }
   const renderedView = viewRef.current
   React.useEffect(() => {
     saveAttemptRef.current = null
+    modelRetryRef.current = null
+    setRetryingModelSave(false)
     setSaving(false)
     setSaveError(false)
   }, [renderedView])
 
-  const {
-    settings: actorSettings,
-    setSettings: setActorSettings,
-    preview: actorPreview,
-    tokenCount: actorTokenCount,
-    setPreviewAndTokens
-  } = useActorStore(
-    (state) => ({
-      settings: state.settings,
-      setSettings: state.setSettings,
-      preview: state.preview,
-      tokenCount: state.tokenCount,
-      setPreviewAndTokens: state.setPreviewAndTokens
-    }),
-    shallow
-  )
+  const { commitActorSettings, commitActorPreview } = useActorStore(state => ({
+    commitActorSettings: state.setSettings,
+    commitActorPreview: state.setPreviewAndTokens
+  }), shallow)
+  const [actorSettings, setActorSettingsState] = React.useState<ActorSettings | null>(null)
+  const [{ prompt: actorPreview, tokens: actorTokenCount }, setScenePreview] = React.useState({ prompt: "", tokens: 0 })
+  const loadedSource = loadedSourceRef.current
+  const isEditorCurrent = useCallback(() => !saveAttemptRef.current && mountedRef.current &&
+    viewRef.current === renderedView && Boolean(loadedSource?.()) &&
+    useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision,
+    [loadedSource, renderedView, renderedModelRevision])
+  const captureEditGuard = useCallback(() => {
+    const revision = editRevisionRef.current
+    return () => isEditorCurrent() && editRevisionRef.current === revision
+  }, [isEditorCurrent])
+  const setPreviewAndTokens = useCallback((prompt: string, tokens: number) => {
+    if (isEditorCurrent()) setScenePreview({ prompt, tokens })
+  }, [isEditorCurrent])
+  const setActorSettings = useCallback((next: ActorSettings) => {
+    if (!isEditorCurrent()) return
+    editRevisionRef.current++
+    setActorSettingsState(next)
+  }, [isEditorCurrent])
+  const isDirty = useCallback(() => {
+    const baseline = baselineRef.current
+    return Boolean(baseline && (
+      Object.entries(baseline.values).some(([key, value]) => JSON.stringify(form.getFieldValue(key as keyof CurrentChatModelFormValues)) !== JSON.stringify(value)) ||
+      JSON.stringify(actorSettings) !== JSON.stringify(baseline.actor) ||
+      stagedOcrLanguage !== baseline.ocrLanguage
+    ))
+  }, [actorSettings, form, stagedOcrLanguage])
+  const requestClose = useCallback(() => {
+    if (saveAttemptRef.current || saving || viewRef.current !== renderedView) return
+    const revision = editRevisionRef.current
+    const source = loadedSourceRef.current
+    const close = () => {
+      if (!saveAttemptRef.current && mountedRef.current && viewRef.current === renderedView &&
+        useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision &&
+        editRevisionRef.current === revision && (!source || source()))
+        setOpen(false)
+    }
+    if (!isDirty()) {
+      if (viewRef.current === renderedView) setOpen(false)
+      return
+    }
+    if (!source?.()) return
+    modal.confirm({
+      title: t("modelSettings.discardTitle", "Discard unsaved settings?"),
+      content: t("modelSettings.discardHelp", "Staged settings will be discarded. Model choices and conversation changes already applied remain in effect."),
+      okText: t("discard", "Discard"),
+      cancelText: t("keepEditing", "Keep editing"),
+      onOk: close
+    })
+  }, [isDirty, modal, renderedView, renderedModelRevision, saving, setOpen, t])
   const [newAspectTarget, setNewAspectTarget] =
     React.useState<ActorTarget>("user")
   const [newAspectName, setNewAspectName] = React.useState<string>("")
@@ -327,22 +336,23 @@ export const CurrentChatModelSettings = ({
   const llamaGrammarOverride = Form.useWatch("llamaGrammarOverride", form)
   const llamaExtraBody = Form.useWatch("extraBody", form)
 
-  const savePrompt = useCallback(
-    (value: string) => {
-      updateSetting("systemPrompt", value)
-    },
-    [updateSetting]
-  )
+  const savePrompt = useCallback((value: string) => {
+    if (!isEditorCurrent()) return
+    editRevisionRef.current++
+    form.setFieldValue("systemPrompt", value)
+  }, [form, isEditorCurrent])
 
   const resetSystemPrompt = useCallback(async () => {
-    const nextValue = await resolveSelectedSystemPromptContent(
-      selectedSystemPrompt
-    )
-    form.setFieldValue("systemPrompt", nextValue)
+    const revision = editRevisionRef.current
+    const source = loadedSourceRef.current
+    if (viewRef.current !== renderedView || !source?.()) return
+    const nextValue = await resolveSelectedSystemPromptContent(selectedSystemPrompt)
+    if (viewRef.current !== renderedView || !source() || editRevisionRef.current !== revision) return
     savePrompt(nextValue)
-  }, [form, savePrompt, selectedSystemPrompt])
+  }, [renderedView, savePrompt, selectedSystemPrompt])
 
   const recomputeActorPreview = useCallback(() => {
+    if (!isEditorCurrent()) return
     const values = form.getFieldsValue()
     const base = actorSettings ?? createDefaultActorSettings()
 
@@ -350,20 +360,23 @@ export const CurrentChatModelSettings = ({
 
     const preview = buildActorPrompt(next)
     setPreviewAndTokens(preview, estimateActorTokens(preview))
-  }, [actorSettings, form, setPreviewAndTokens])
+  }, [actorSettings, form, isEditorCurrent, setPreviewAndTokens])
 
   const timeoutRef = React.useRef<number | undefined>()
 
   const debouncedRecomputeActorPreview = React.useMemo(() => {
     return () => {
-      if (timeoutRef.current !== undefined) {
-        window.clearTimeout(timeoutRef.current)
-      }
-      timeoutRef.current = window.setTimeout(() => {
+      if (!isEditorCurrent()) return
+      const revision = editRevisionRef.current
+      if (timeoutRef.current !== undefined) window.clearTimeout(timeoutRef.current)
+      const timer = window.setTimeout(() => {
+        if (timeoutRef.current !== timer || editRevisionRef.current !== revision || !isEditorCurrent()) return
+        timeoutRef.current = undefined
         recomputeActorPreview()
       }, 150)
+      timeoutRef.current = timer
     }
-  }, [recomputeActorPreview])
+  }, [isEditorCurrent, recomputeActorPreview])
 
   React.useEffect(() => {
     return () => {
@@ -371,7 +384,7 @@ export const CurrentChatModelSettings = ({
         window.clearTimeout(timeoutRef.current)
       }
     }
-  }, [])
+  }, [renderedView, actorSettings])
 
   React.useEffect(() => {
     if (!open) return
@@ -383,11 +396,10 @@ export const CurrentChatModelSettings = ({
 
   const { data: composerModels = EMPTY_CHAT_MODELS, isLoading: modelsLoading } = useChatModelCatalog(open)
 
-  const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
   const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
   const selectedSelection = useMemo(
-    () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
-    [apiProvider, composerModels, selectedModel, activeSettingsScope, scopedApiProvider]
+    () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: settingsScope?.trim() || activeSettingsScope, providerOverride: scopedApiProvider }),
+    [apiProvider, composerModels, selectedModel, activeSettingsScope, scopedApiProvider, settingsScope]
   )
 
   const saveSettings = useCallback(
@@ -400,6 +412,15 @@ export const CurrentChatModelSettings = ({
         (!personaChatActive && !isCurrent?.())
       )
         return false
+      if (useStoreMessageOption.getState().selectedModelRevision !== renderedModelRevision) return false
+      const editRevision = editRevisionRef.current
+      const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+      const source = captureChatDraftSource(() => selectionIsCurrent() &&
+        !selectionSignal?.aborted && (accountIsCurrent?.() ?? true))
+      const canPublish = () => mountedRef.current && panelRef.current === renderedPanel &&
+        source.isCurrent() && editRevisionRef.current === editRevision &&
+        useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision
+      const canCommit = () => viewRef.current === renderedView && canPublish() && Boolean(isCurrent?.())
       const latestSettingsState = useStoreChatModelSettings.getState()
       const explicitSettingsScope =
         typeof settingsScope === "string" && settingsScope.trim()
@@ -420,45 +441,58 @@ export const CurrentChatModelSettings = ({
         }
       ).settingsScope
 
+      const base = actorSettings ?? createDefaultActorSettings()
+      const next: ActorSettings = buildActorSettingsFromForm(base, values)
+
+      if (!personaChatActive) {
+        const { saveActorSettingsForChat } = await loadActorSettings()
+        if (!canCommit()) return false
+        const saved = await saveActorSettingsForChat({
+          historyId,
+          serverChatId,
+          settings: next
+        })
+        if (!canCommit()) return false
+        if (!saved) throw new Error("actor_settings_save_failed")
+      }
+      if (!canCommit()) return false
       if (targetSettingsScope) {
         setActiveSettingsScope(targetSettingsScope)
       }
 
-      Object.keys(values).forEach((key) => {
-        if (!isChatModelSettingKey(key)) return
+      for (const key of Object.keys(values)) {
+        if (!canPublish()) return false
+        if (!isChatModelSettingKey(key)) continue
         const normalizedValue = normalizeCurrentChatModelSettingValue(
           key,
           values[key]
         )
         if (targetSettingsScope) {
           updateScopedSetting(targetSettingsScope, key, normalizedValue)
-          return
-        }
-        updateSetting(key, normalizedValue)
-      })
-
-      const base = actorSettings ?? createDefaultActorSettings()
-      const next: ActorSettings = buildActorSettingsFromForm(base, values)
-
-      if (!personaChatActive) {
-        const { saveActorSettingsForChat } = await loadActorSettings()
-        if (!isCurrent?.()) return false
-        const saved = await saveActorSettingsForChat({
-          historyId,
-          serverChatId,
-          settings: next
-        })
-        if (!isCurrent()) return false
-        if (!saved) throw new Error("actor_settings_save_failed")
+        } else updateSetting(key, normalizedValue)
       }
-      setActorSettings(next)
+
+      if (!canPublish()) return false
+      if (isOCREnabled && stagedOcrLanguage) setOcrLanguage(stagedOcrLanguage)
+      if (!canPublish()) return false
+      commitActorSettings(next)
+      if (!canPublish()) return false
+      const preview = buildActorPrompt(next)
+      commitActorPreview(preview, estimateActorTokens(preview))
+      if (!canPublish()) return false
+      baselineRef.current = { values: structuredClone(form.getFieldsValue(true)), actor: next, ocrLanguage: stagedOcrLanguage }
+      setOpen(false)
       return true
     },
     [
       actorSettings,
       accountIsCurrent,
+      captureSelectionFence,
+      selectionSignal,
       open,
       renderedView,
+      renderedPanel,
+      renderedModelRevision,
       historyId,
       personaChatActive,
       serverChatId,
@@ -466,104 +500,100 @@ export const CurrentChatModelSettings = ({
       composerModels,
       selectedModel,
       setActiveSettingsScope,
-      setActorSettings,
+      commitActorSettings,
+      commitActorPreview,
+      form,
+      isOCREnabled,
+      stagedOcrLanguage,
+      setOcrLanguage,
       updateScopedSetting,
-      updateSetting
+      updateSetting,
+      setOpen
     ]
   )
 
-  const handleModelChange = useCallback((value: string) => {
-    const state = useStoreChatModelSettings.getState()
-    const nextScope = resolveModelSelectorSelection(composerModels, value, state.apiProvider, {
-      scope: state.activeSettingsScope,
-      providerOverride: state.activeSettingsScope ? state.scopedSettingsByModelKey[state.activeSettingsScope]?.apiProvider : undefined
-    }).settingsScope
-    if (nextScope !== state.activeSettingsScope) {
+  const handleModelChange = useCallback((selection: string | null | undefined) => {
+    const value = normalizeSelectedModel(selection)
+    if (saving || !isEditorCurrent()) return
+    const revision = editRevisionRef.current
+    const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+    const source = captureChatDraftSource(() => selectionIsCurrent() && (accountIsCurrent?.() ?? true))
+    const canSelect = () => mountedRef.current && panelRef.current === renderedPanel &&
+      editRevisionRef.current === revision && source.isCurrent() &&
+      useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision
+    const change = () => {
+      if (!isEditorCurrent() || !canSelect()) return
+      const state = useStoreChatModelSettings.getState()
+      const nextScope = resolveModelSelectorSelection(composerModels, value, state.apiProvider, {
+        scope: state.activeSettingsScope,
+        providerOverride: state.activeSettingsScope ? state.scopedSettingsByModelKey[state.activeSettingsScope]?.apiProvider : undefined
+      }).settingsScope
       state.setActiveSettingsScope(nextScope)
-      const nextSettings = useStoreChatModelSettings.getState().getEffectiveSettings(nextScope)
-      const nextValues: Partial<ChatModelSettings> = Object.fromEntries([...CHAT_MODEL_SETTING_KEYS].map(key => [key, nextSettings[key]]))
-      form.setFieldsValue(nextValues)
+      if (!canSelect()) return
+      setModelSaveError(null)
+      let write: unknown
+      try { write = setSelectedModel(value) }
+      catch (error) { write = Promise.reject(error) }
+      const writtenRevision = renderedModelRevision + 1
+      void Promise.resolve(write).catch(() => {
+        const current = useStoreMessageOption.getState()
+        if (mountedRef.current && panelRef.current === renderedPanel && source.isCurrent() &&
+          current.selectedModelRevision === writtenRevision && current.selectedModel === value)
+          setModelSaveError({ value, revision: writtenRevision, panel: renderedPanel })
+      })
     }
-    setSelectedModel(value)
-  }, [composerModels, form, setSelectedModel])
+    if (!isDirty()) return change()
+    modal.confirm({
+      title: t("modelSettings.switchTitle", "Discard staged settings and switch model?"),
+      content: t("modelSettings.switchHelp", "Switching applies immediately and reloads model defaults and the saved scene. Your unsaved form edits will be discarded."),
+      okText: t("modelSettings.switchAction", "Discard and switch"),
+      cancelText: t("keepEditing", "Keep editing"),
+      onOk: change
+    })
+  }, [accountIsCurrent, captureSelectionFence, composerModels, isDirty, isEditorCurrent, modal, renderedPanel, renderedModelRevision, saving, setSelectedModel, t])
+
+  const retryModelSave = useCallback(async () => {
+    const receipt = modelSaveError
+    if (!receipt || modelRetryRef.current || !isEditorCurrent()) return
+    const source = loadedSourceRef.current
+    const isCurrent = () => mountedRef.current && panelRef.current === receipt.panel &&
+      Boolean(source?.()) && useStoreMessageOption.getState().selectedModelRevision === receipt.revision &&
+      normalizeSelectedModel(useStoreMessageOption.getState().selectedModel) === receipt.value
+    if (!isCurrent()) return
+    const attempt = {}
+    modelRetryRef.current = attempt
+    setRetryingModelSave(true)
+    try {
+      await retrySelectedModelSave()
+      if (isCurrent()) setModelSaveError(current => current === receipt ? null : current)
+    } catch {
+      // The existing exact device receipt remains available for another Retry.
+    } finally {
+      if (modelRetryRef.current === attempt) {
+        modelRetryRef.current = null
+        if (mountedRef.current) setRetryingModelSave(false)
+      }
+    }
+  }, [isEditorCurrent, modelSaveError, retrySelectedModelSave])
 
   const handleLlamaControlChange = useCallback(
     (key: keyof ChatModelSettings, value: number | string | undefined) => {
+      if (!isEditorCurrent()) return
+      editRevisionRef.current++
       form.setFieldValue(key, value)
     },
-    [form]
+    [form, isEditorCurrent]
   )
 
-  const buildBaseValues = useCallback(
-    (data?: ModelConfigData | null, promptFallback?: string) => ({
-      temperature: temperature ?? data?.temperature,
-      topK: topK ?? data?.topK,
-      topP: topP ?? data?.topP,
-      keepAlive: keepAlive ?? data?.keepAlive,
-      numCtx: numCtx ?? data?.numCtx,
-      seed,
-      numGpu: numGpu ?? data?.numGpu,
-      numPredict: numPredict ?? data?.numPredict,
-      systemPrompt: systemPrompt ?? promptFallback ?? "",
-      useMMap: useMMap ?? data?.useMMap,
-      minP: minP ?? data?.minP,
-      repeatLastN: repeatLastN ?? data?.repeatLastN,
-      repeatPenalty: repeatPenalty ?? data?.repeatPenalty,
-      useMlock: useMlock ?? data?.useMlock,
-      tfsZ: tfsZ ?? data?.tfsZ,
-      numKeep: numKeep ?? data?.numKeep,
-      numThread: numThread ?? data?.numThread,
-      reasoningEffort,
-      thinking,
-      historyMessageLimit,
-      historyMessageOrder,
-      slashCommandInjectionMode,
-      apiProvider,
-      extraHeaders,
-      extraBody,
-      llamaThinkingBudgetTokens:
-        storeLlamaThinkingBudgetTokens ?? data?.llamaThinkingBudgetTokens,
-      llamaGrammarMode: storeLlamaGrammarMode ?? data?.llamaGrammarMode,
-      llamaGrammarId: storeLlamaGrammarId ?? data?.llamaGrammarId,
-      llamaGrammarInline: storeLlamaGrammarInline ?? data?.llamaGrammarInline,
-      llamaGrammarOverride:
-        storeLlamaGrammarOverride ?? data?.llamaGrammarOverride,
-      jsonMode
-    }),
-    [
-      temperature,
-      topK,
-      topP,
-      keepAlive,
-      numCtx,
-      seed,
-      numGpu,
-      numPredict,
-      systemPrompt,
-      useMMap,
-      minP,
-      repeatLastN,
-      repeatPenalty,
-      useMlock,
-      tfsZ,
-      numKeep,
-      numThread,
-      reasoningEffort,
-      thinking,
-      historyMessageLimit,
-      historyMessageOrder,
-      slashCommandInjectionMode,
-      apiProvider,
-      extraHeaders,
-      extraBody,
-      storeLlamaThinkingBudgetTokens,
-      storeLlamaGrammarMode,
-      storeLlamaGrammarId,
-      storeLlamaGrammarInline,
-      storeLlamaGrammarOverride,
-      jsonMode
-    ]
-  )
+  const buildBaseValues = useCallback((data?: ModelConfigData | null, promptFallback?: string) => {
+    const effective = useStoreChatModelSettings.getState().getEffectiveSettings(selectedSelection.settingsScope)
+    const values = Object.fromEntries([...CHAT_MODEL_SETTING_KEYS].map(key => [key, effective[key]])) as Partial<ChatModelSettings>
+    if (data) for (const key of CHAT_MODEL_SETTING_KEYS) {
+      if (values[key] === undefined && key in data)
+        Object.assign(values, { [key]: data[key as keyof ModelConfigData] })
+    }
+    return { ...values, systemPrompt: effective.systemPrompt ?? promptFallback ?? "" }
+  }, [selectedSelection.settingsScope])
 
   const { isLoading, isFetching, isError } = useQuery({
     queryKey: ["fetchModelConfig2", viewKey, renderedView.revision],
@@ -622,8 +652,11 @@ export const CurrentChatModelSettings = ({
       if (!actor) actor = createDefaultActorSettings()
       loadedSourceRef.current = isCurrent
       if (!cachedModelConfig) client.setQueryData(modelConfigKey, data)
-      if (isOCREnabled && ocrLang) setOcrLanguage(ocrLang)
-      setActorSettings(actor)
+      const nextOcrLanguage = ocrLang || ocrLanguage
+      setStagedOcrLanguage(nextOcrLanguage)
+      setActorSettingsState(actor)
+      commitActorSettings(actor)
+      if (!isCurrent()) throw new Error("stale_selection")
 
       const actorFields: Record<string, any> = {
         actorEnabled: actor.isEnabled,
@@ -640,13 +673,16 @@ export const CurrentChatModelSettings = ({
         actorFields[`actor_key_${aspect.id}`] = aspect.key
       }
 
-      form.setFieldsValue({
-        ...baseValues,
-        ...actorFields
-      })
+      form.resetFields()
+      if (!isCurrent()) throw new Error("stale_selection")
+      form.setFieldsValue({ ...baseValues, ...actorFields })
+      if (!isCurrent()) throw new Error("stale_selection")
+      baselineRef.current = { values: structuredClone(form.getFieldsValue(true)), actor, ocrLanguage: nextOcrLanguage }
 
       const preview = buildActorPrompt(actor)
-      setPreviewAndTokens(preview, estimateActorTokens(preview))
+      setScenePreview({ prompt: preview, tokens: estimateActorTokens(preview) })
+      commitActorPreview(preview, estimateActorTokens(preview))
+      if (!isCurrent()) throw new Error("stale_selection")
       return data
     },
     enabled: open && !selectedCharacterMeta.isLoading,
@@ -789,9 +825,12 @@ export const CurrentChatModelSettings = ({
               modelOptions={modelOptions}
               modelsLoading={modelsLoading}
               isOCREnabled={isOCREnabled}
-              ocrLanguage={ocrLanguage}
+              ocrLanguage={stagedOcrLanguage}
               ocrLanguages={ocrLanguages}
-              onOcrLanguageChange={(value) => setOcrLanguage(value)}
+              onOcrLanguageChange={(value) => {
+                editRevisionRef.current++
+                setStagedOcrLanguage(value)
+              }}
             />
           )
         },
@@ -838,6 +877,8 @@ export const CurrentChatModelSettings = ({
                   form={form}
                   actorSettings={actorSettings}
                   setActorSettings={setActorSettings}
+                  isCurrent={isEditorCurrent}
+                  captureEditGuard={captureEditGuard}
                   actorPreview={actorPreview}
                   actorTokenCount={actorTokenCount}
                   onRecompute={recomputeActorPreview}
@@ -860,8 +901,7 @@ export const CurrentChatModelSettings = ({
       modelOptions,
       modelsLoading,
       isOCREnabled,
-      ocrLanguage,
-      setOcrLanguage,
+      stagedOcrLanguage,
       useDrawer,
       selectedSystemPrompt,
       savePrompt,
@@ -877,6 +917,8 @@ export const CurrentChatModelSettings = ({
       providerOptions,
       actorSettings,
       setActorSettings,
+      isEditorCurrent,
+      captureEditGuard,
       actorPreview,
       actorTokenCount,
       personaChatActive,
@@ -888,11 +930,14 @@ export const CurrentChatModelSettings = ({
   )
 
   const sceneUnavailable = isError || !(accountIsCurrent?.() ?? true)
-  const sceneReady =
-    personaChatActive || (!isFetching && Boolean(loadedSourceRef.current?.()))
+  const sceneReady = !isFetching && Boolean(loadedSourceRef.current?.())
   const renderBody = () => {
     return (
       <>
+        {modalContextHolder}
+        <p className="mb-3 text-xs text-text-subtle">
+          {t("modelSettings.scopeHelp", "Model and Advanced parameters are defaults for the selected model. Save applies staged defaults and scene edits to future turns. API/model choices apply immediately; conversation controls save separately to this chat.")}
+        </p>
         {sceneUnavailable ? (
           <div className="space-y-2">
             <p role="alert">
@@ -920,6 +965,18 @@ export const CurrentChatModelSettings = ({
                 )}
               </p>
             )}
+          </div>
+        ) : null}
+        {modelSaveError?.revision === renderedModelRevision && modelSaveError.panel === renderedPanel ? (
+          <div className="space-y-2">
+            <p role="alert">
+              {modelSaveError.value === null
+                ? t("modelSettings.modelDeviceClearError", "Model selection is cleared, but it could not be saved on this device. Retry model save to keep it cleared after reopening.")
+                : t("modelSettings.modelDeviceSaveError", "Model choice is active, but it could not be saved on this device. Retry model save to keep this choice after reopening.")}
+            </p>
+            <Button loading={retryingModelSave} disabled={saving || !sceneReady} onClick={() => void retryModelSave()}>
+              {t("modelSettings.retryModelSave", "Retry model save")}
+            </Button>
           </div>
         ) : null}
         {saveError ? (
@@ -950,16 +1007,10 @@ export const CurrentChatModelSettings = ({
               setSaving(true)
               setSaveError(false)
               try {
-                const saved = await saveSettings({
+                await saveSettings({
                   ...form.getFieldsValue(true),
                   ...values
                 })
-                if (
-                  saved &&
-                  viewRef.current === renderedView &&
-                  (personaChatActive || isCurrent?.())
-                )
-                  setOpen(false)
               } catch {
                 if (
                   viewRef.current === renderedView &&
@@ -974,6 +1025,7 @@ export const CurrentChatModelSettings = ({
               }
             }}
             onValuesChange={(changedValues) => {
+              editRevisionRef.current++
               const keys = Object.keys(changedValues || {})
               const shouldUpdate = keys.some(
                 (k) =>
@@ -1012,6 +1064,9 @@ export const CurrentChatModelSettings = ({
                 />
               </div>
               <div className="mt-4 border-t border-border pt-4">
+                <Button disabled={saving} onClick={() => setOpen(false)}>
+                  {t("cancel", "Cancel")}
+                </Button>
                 <button
                   type="submit"
                   aria-busy={saving}
@@ -1034,7 +1089,7 @@ export const CurrentChatModelSettings = ({
       <Drawer
         placement="right"
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={requestClose}
         size={500}
         title={t("currentChatModelSettings")}>
         {renderBody()}
@@ -1046,8 +1101,8 @@ export const CurrentChatModelSettings = ({
     <Modal
       title={t("currentChatModelSettings")}
       open={open}
-      onOk={() => setOpen(false)}
-      onCancel={() => setOpen(false)}
+      onOk={requestClose}
+      onCancel={requestClose}
       footer={null}>
       {renderBody()}
     </Modal>

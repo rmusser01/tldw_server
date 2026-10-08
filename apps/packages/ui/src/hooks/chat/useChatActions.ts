@@ -608,6 +608,7 @@ export const useChatActions = ({
 }: UseChatActionsOptions) => {
   const historySelection = useHistorySelectionContext()
   const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision
+  const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress
   const renderedContinuationFence = historySelection?.fence()
   const actionsMountedRef = React.useRef(false)
   React.useLayoutEffect(() => {
@@ -1057,6 +1058,10 @@ export const useChatActions = ({
           historyId: historyKey,
           serverChatId: payloadConversationId,
           allowScratchFallback: true,
+          sourceDraftAddress: renderedSettingsDraft,
+          requestScope: payload?.requestScope,
+          signal: scopeSignal,
+          validate_lease: () => !scopeSignal?.aborted && !scopeInvalidatedSignal?.aborted && sourceIsCurrent(),
           ...(scope ? { scope } : {})
         })
       } catch {

@@ -1,3 +1,5 @@
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
   findForkCandidate,
   loadForkOperations,
@@ -1300,7 +1302,9 @@ export function useHistorySelection(
     getCurrent
   }
 }
-export type HistorySelectionController = ReturnType<typeof useHistorySelection>
+export type HistorySelectionController = ReturnType<typeof useHistorySelection> & {
+  draftAccount?: { requestScope: ServicePromptRequestScope | null; isCurrent: () => boolean; retryVerification: () => void }
+}
 
 export const HistorySelectionContext =
   createContext<HistorySelectionController | null>(null)
@@ -1387,9 +1391,10 @@ function HistorySelectionOwner({
   ...options
 }: Parameters<typeof useHistorySelection>[0] & { children?: ReactNode }) {
   const selection = useHistorySelection(options)
+  const draftAccount = useChatDraftOwner(() => {})
   return createElement(
     HistorySelectionContext.Provider,
-    { value: selection },
+    { value: { ...selection, draftAccount } },
     children
   )
 }

@@ -96,7 +96,8 @@ vi.mock("../playground-features", () => ({
     ) : null
 }))
 
-vi.mock("antd", () => ({
+vi.mock("antd", async (importOriginal) => ({
+  Modal: (await importOriginal<typeof import("antd")>()).Modal,
   Drawer: ({
     open,
     title,
@@ -924,6 +925,7 @@ describe("RolePlaySetupDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }))
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledTimes(2)
+    expect(onApply).toHaveBeenCalledOnce()
   })
 
   it("does not publish a held scene after the drawer closes and reopens", async () => {
@@ -989,6 +991,7 @@ describe("RolePlaySetupDrawer", () => {
     expect(screen.getByLabelText("Scene notes")).toHaveValue("Keep my edited scene after detachment")
     fireEvent.click(screen.getByRole("button", { name: "Apply" }))
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(onApply).toHaveBeenCalledOnce()
     expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenLastCalledWith(expect.objectContaining({
       settings: expect.objectContaining({ notes: "Keep my edited scene after detachment" })
     }))
@@ -1022,6 +1025,37 @@ describe("RolePlaySetupDrawer", () => {
     await act(async () => { release(false); await pending })
     expect(screen.getByLabelText("Scene notes")).toHaveValue("New context scene")
     expect(props.onClose).not.toHaveBeenCalled()
+  })
+
+  it("stops the accepted scene publication tail when its actor write retires the owner", async () => {
+    let current = true
+    const onClose = vi.fn()
+    const guard = () => () => current
+    renderDrawer({ onApply: async () => true, captureApplyGuard: guard, onClose })
+    await screen.findByText(/1 detail/)
+    const preview = useActorStore.getState().preview
+    const unsubscribe = useActorStore.subscribe(state => { if (state.settings) current = false })
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+      await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledOnce())
+      await act(async () => { await Promise.resolve() })
+      expect({ closed: onClose.mock.calls.length, preview: useActorStore.getState().preview }).toEqual({ closed: 0, preview })
+    } finally { unsubscribe() }
+  })
+
+  it("ignores a discard confirmation admitted for an older scene", async () => {
+    const onClose = vi.fn()
+    const props = { open: true, beforeState, historyId: "history-1", serverChatId: "server-1", onClose, onApply: async () => true }
+    const view = render(<RolePlaySetupDrawer {...props} />)
+    await screen.findByText(/1 detail/)
+    fireEvent.change(screen.getByLabelText("Scene notes"), { target: { value: "Older staged edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Close drawer" }))
+    const discard = await screen.findByRole("button", { name: "Discard", exact: true })
+    act(() => useStoreMessageOption.setState({ historyId: "history-2", serverChatId: "server-2" }))
+    view.rerender(<RolePlaySetupDrawer {...props} historyId="history-2" serverChatId="server-2" />)
+    await waitFor(() => expect(screen.getByLabelText("Scene notes")).toHaveValue("The room smells like ozone."))
+    fireEvent.click(discard)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
 })

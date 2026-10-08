@@ -213,6 +213,8 @@ describe("conversation setup identity", () => {
           screen.getByRole("button", { name: action, exact: true }),
         );
 
+      if (action !== "Cancel") await user.click(await screen.findByRole("button", { name: "Discard", exact: true }));
+
       await waitFor(() =>
         expect(
           screen.getByRole("button", { name: "Setup trigger" }),
@@ -230,6 +232,19 @@ describe("conversation setup identity", () => {
       );
     },
   );
+
+  it.each(["Escape", "Close"])("retains the staged roleplay setup when %s dismissal is cancelled", async action => {
+    const { onApply, onClose } = renderDrawer();
+    const user = await choosePersona();
+    const notes = screen.getByRole("textbox", { name: "Scene notes" });
+    await user.type(notes, " retained draft");
+    if (action === "Escape") await user.keyboard("{Escape}");
+    else await user.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await user.click(await screen.findByRole("button", { name: "Keep editing", exact: true }));
+    expect(notes).toHaveValue("Original scene retained draft");
+    expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona");
+    expect({ closed: onClose.mock.calls.length, applied: onApply.mock.calls.length, writes: mocks.saveScene.mock.calls.length }).toEqual({ closed: 0, applied: 0, writes: 0 });
+  });
 
   it("closes the nested Persona picker first when Escape is pressed in search", async () => {
     const { onClose } = renderDrawer();
@@ -268,6 +283,7 @@ describe("conversation setup identity", () => {
       const user = await choosePersona();
       await user.click(screen.getByRole("textbox", { name: "Scene notes" }));
       await user.keyboard("{Escape}");
+      await user.click(await screen.findByRole("button", { name: "Discard", exact: true }));
       await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
       expect(onApply).not.toHaveBeenCalled();
       expect(mocks.setSelectedAssistant).not.toHaveBeenCalled();
@@ -320,8 +336,39 @@ describe("conversation setup identity", () => {
     await user.click(
       await screen.findByRole("button", { name: "Apply", exact: true }),
     );
-    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(mocks.saveScene).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries an edited scene without applying the accepted identity again", async () => {
+    mocks.saveScene.mockResolvedValueOnce(false);
+    const { onApply, onClose } = renderDrawer();
+    const user = await choosePersona();
+    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await screen.findByRole("alert");
+    fireEvent.change(screen.getByRole("textbox", { name: "Scene notes" }), {
+      target: { value: "Corrected scene" },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(mocks.saveScene).toHaveBeenLastCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ notes: "Corrected scene" }),
+    }));
+  });
+
+  it("applies a changed identity proposal after a partial scene failure", async () => {
+    mocks.saveScene.mockResolvedValueOnce(false);
+    const { onApply, onClose } = renderDrawer();
+    const user = await choosePersona();
+    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Clear identity", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onApply).toHaveBeenCalledTimes(2);
+    expect(onApply).toHaveBeenLastCalledWith(expect.objectContaining({ clearIdentity: true }), expect.anything());
   });
 
   it("keeps the saved scene untouched when applying the other settings fails", async () => {

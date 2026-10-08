@@ -983,6 +983,9 @@ export const useServerChatLoader = ({
                   historyId: null,
                   serverChatId,
                   scope,
+                  requestScope: snapshot!.requestScope,
+                  signal: snapshot!.scopeSignal,
+                  validate_lease: canCommitCurrentLoad,
                   allowScratchFallback: false
                 })
               } catch {
@@ -1214,6 +1217,10 @@ export const useServerChatLoader = ({
                   await syncChatSettingsForServerChat({
                     historyId: localHistoryId,
                     serverChatId,
+                    scope,
+                    requestScope: snapshot.requestScope,
+                    signal: snapshot.scopeSignal,
+                    validate_lease: canCommitCurrentLoad,
                     allowScratchFallback: false
                   })
                 } catch {

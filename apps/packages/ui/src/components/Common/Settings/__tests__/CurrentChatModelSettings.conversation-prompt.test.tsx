@@ -1,8 +1,9 @@
 import React from "react"
-import { ConfigProvider } from "antd"
+import { ConfigProvider, Modal } from "antd"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
 import type { BaseMessage } from "@/types/messages"
 import { readFileSync } from "node:fs"
@@ -12,6 +13,8 @@ import { useStoreMessageOption } from "@/store/option"
 import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
 import { getAllModelSettings } from "@/services/model-settings"
+import { saveActorSettingsForChat } from "@/services/actor-settings"
+import { resolveSelectedSystemPromptContent } from "@/components/Common/system-prompt-utils"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useActorStore } from "@/store/actor"
 import { buildCockpitProviderRouteSummary } from "@/components/Option/Playground/playground-cockpit-summaries"
@@ -23,6 +26,8 @@ const inputs = vi.hoisted(() => ({
   selectedModel: "tldw:/models/gemma.gguf",
   otherProviderFirst: false,
   realModelSelection: false,
+  modelWrite: null as null | (() => Promise<void>),
+  accountCurrent: vi.fn(() => true),
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -40,7 +45,11 @@ vi.mock("@/hooks/useMessageOption", () => ({
     selectedModel: inputs.realModelSelection ? core.selectedModel : inputs.selectedModel,
     uploadedFiles: [],
     removeUploadedFile: vi.fn(),
-    setSelectedModel: inputs.realModelSelection ? core.setSelectedModel : vi.fn(),
+    setSelectedModel: inputs.realModelSelection ? (value: string | null) => {
+      core.setSelectedModel(normalizeSelectedModel(value))
+      return inputs.modelWrite?.()
+    } : vi.fn(),
+    retrySelectedModelSave: () => inputs.modelWrite?.() ?? Promise.resolve(),
     setServerChatState: vi.fn(),
     setServerChatTopic: vi.fn(),
     setServerChatVersion: vi.fn(),
@@ -51,7 +60,7 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [inputs.character, vi.fn(), { isLoading: false }],
 }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null],
+  useSelectedAssistant: () => [null, vi.fn(), { isCurrent: inputs.accountCurrent }],
 }))
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
@@ -78,8 +87,8 @@ vi.mock("@/services/actor-settings", () => ({
   saveActorSettingsForChat: vi.fn(async () => true),
 }))
 vi.mock("@/components/Common/system-prompt-utils", () => ({
-  resolveSelectedSystemPromptContent: async (id?: string | null) =>
-    id ? "Selected template instructions" : "",
+  resolveSelectedSystemPromptContent: vi.fn(async (id?: string | null) =>
+    id ? "Selected template instructions" : ""),
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -158,6 +167,7 @@ const mountSettings = async (
 }
 
 describe("Conversation prompt editor through real model settings Save", () => {
+  afterEach(() => Modal.destroyAll())
   beforeEach(() => {
     inputs.selectedSystemPrompt = null
     inputs.character = null
@@ -165,6 +175,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
     inputs.selectedModel = "tldw:/models/gemma.gguf"
     inputs.otherProviderFirst = false
     inputs.realModelSelection = false
+    inputs.modelWrite = null
+    inputs.accountCurrent.mockReset().mockReturnValue(true)
     useStoreChatModelSettings.getState().reset()
     useStoreChatModelSettings
       .getState()
@@ -177,6 +189,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
       .getState()
       .setActiveSettingsScope(route.providerRouteLabel)
     useActorStore.setState({ settings: null })
+    vi.mocked(saveActorSettingsForChat).mockReset().mockResolvedValue(true)
+    vi.mocked(resolveSelectedSystemPromptContent).mockReset().mockImplementation(async id => id ? "Selected template instructions" : "")
   })
 
   it.each(["inferred", "explicit"])(
@@ -188,9 +202,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
           : undefined
       const { editor, close } = await mountSettings(scope)
       fireEvent.change(editor, { target: { value: instruction } })
-      expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
-        instruction,
-      )
+      expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
       fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
       await waitFor(() => expect(close).toHaveBeenCalledWith(false))
       expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
@@ -198,6 +210,73 @@ describe("Conversation prompt editor through real model settings Save", () => {
       )
     },
   )
+
+  it("stages prompt edits and cancels without changing live model defaults", async () => {
+    const { editor, close } = await mountSettings()
+    const before = useStoreChatModelSettings.getState().systemPrompt
+    fireEvent.change(editor, { target: { value: instruction } })
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(before)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    expect(close).toHaveBeenCalledWith(false)
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(before)
+    expect(saveActorSettingsForChat).not.toHaveBeenCalled()
+  })
+
+  it("keeps model defaults unchanged when scene Save fails and retries the staged proposal", async () => {
+    vi.mocked(saveActorSettingsForChat).mockResolvedValueOnce(false)
+    const { editor, close } = await mountSettings()
+    const before = useStoreChatModelSettings.getState().systemPrompt
+    fireEvent.change(editor, { target: { value: instruction } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be saved/i)
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(before)
+    expect(close).not.toHaveBeenCalled()
+    expect(editor).toHaveValue(instruction)
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
+    expect(saveActorSettingsForChat).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(["edit", "model"])("does not publish a held prompt Reset after a newer %s", async change => {
+    inputs.selectedSystemPrompt = "template-1"
+    inputs.realModelSelection = true
+    useStoreMessageOption.getState().setSelectedModel(inputs.selectedModel)
+    const { editor } = await mountSettings()
+    let release!: (value: string) => void
+    const pending = new Promise<string>(resolve => { release = resolve })
+    vi.mocked(resolveSelectedSystemPromptContent).mockReturnValueOnce(pending)
+    fireEvent.click(screen.getByRole("button", { name: "Reset to template" }))
+    if (change === "edit") fireEvent.change(editor, { target: { value: "Newer draft" } })
+    else act(() => useStoreMessageOption.getState().setSelectedModel("openai:replacement"))
+    await act(async () => { release("Old reset result"); await pending })
+    expect(editor).not.toHaveValue("Old reset result")
+    expect(useStoreChatModelSettings.getState().systemPrompt).not.toBe("Old reset result")
+  })
+
+  it("keeps edits when dirty-close admission is cancelled", async () => {
+    const { editor, close } = await mountSettings()
+    fireEvent.change(editor, { target: { value: instruction } })
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+    expect((await screen.findAllByText("Discard unsaved settings?")).length).toBeGreaterThan(0)
+    expect(close).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing", exact: true }))
+    await waitFor(() => expect(screen.queryAllByText("Discard unsaved settings?")).toHaveLength(0))
+    expect(editor).toHaveValue(instruction)
+    expect(close).not.toHaveBeenCalled()
+  })
+
+  it("does not discard a newer edit when an older dirty-close question is accepted", async () => {
+    const { editor, close } = await mountSettings()
+    fireEvent.change(editor, { target: { value: instruction } })
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+    await screen.findAllByText("Discard unsaved settings?")
+    fireEvent.change(editor, { target: { value: "Newer draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Discard", exact: true }))
+    await waitFor(() => expect(screen.queryAllByText("Discard unsaved settings?")).toHaveLength(0))
+    expect(editor).toHaveValue("Newer draft")
+    expect(close).not.toHaveBeenCalled()
+  })
 
   it("keeps a raw model prompt through catalog arrival, reordering and real Save", async () => {
     useStoreChatModelSettings.getState().reset()
@@ -249,7 +328,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     expect(useStoreMessageOption.getState().selectedModel).toBe("openai:/models/gemma.gguf")
     expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe("openai:/models/gemma.gguf")
     expect(useStoreChatModelSettings.getState().getEffectiveSettings("llamacpp:/models/gemma.gguf")).toMatchObject({ systemPrompt: "KEEP A", temperature: 0.2 })
-    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.6")
+    expect(await screen.findByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.6")
     expect(validateNativeCharacterConfiguration({ temporary: false, clientToolCount: 0, settings: {}, model: useStoreMessageOption.getState().selectedModel! })).toMatchObject({ provider: "openai", model: "/models/gemma.gguf" })
     fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
     fireEvent.change(await screen.findByPlaceholderText("Enter System Prompt"), { target: { value: instruction } })
@@ -260,6 +339,111 @@ describe("Conversation prompt editor through real model settings Save", () => {
     expect(useStoreChatModelSettings.getState().getEffectiveSettings("llamacpp:/models/gemma.gguf")).toMatchObject({ systemPrompt: "KEEP A", temperature: 0.2 })
     expect(useStoreChatModelSettings.getState().temperature).toBe(0.6)
   }, 10000)
+
+  it("does not change model if its scope publication retires the initiating account", async () => {
+    inputs.realModelSelection = true
+    inputs.otherProviderFirst = true
+    useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
+    useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
+    await mountSettings()
+    const unsubscribe = useStoreChatModelSettings.subscribe(state => {
+      if (state.activeSettingsScope === "openai:/models/gemma.gguf") inputs.accountCurrent.mockReturnValue(false)
+    })
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+      fireEvent.mouseDown(screen.getByRole("combobox"))
+      fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
+      expect(useStoreMessageOption.getState().selectedModel).toBe("llamacpp:/models/gemma.gguf")
+    } finally { unsubscribe() }
+  }, 10_000)
+
+  it("reports an active model choice whose device save fails", async () => {
+    inputs.realModelSelection = true
+    inputs.otherProviderFirst = true
+    const write = vi.fn().mockRejectedValueOnce(new Error("device unavailable")).mockResolvedValue(undefined)
+    inputs.modelWrite = write
+    useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
+    useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
+    await mountSettings()
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/model choice is active.*could not be saved on this device/i)
+    expect(useStoreMessageOption.getState().selectedModel).toBe("openai:/models/gemma.gguf")
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry model save" })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "Retry model save" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+    expect(write).toHaveBeenCalledTimes(2)
+  }, 10_000)
+
+  it("retries only the failed model device write and retains newer staged edits", async () => {
+    inputs.realModelSelection = true
+    inputs.otherProviderFirst = true
+    const write = vi.fn().mockRejectedValueOnce(new Error("device unavailable")).mockResolvedValue(undefined)
+    inputs.modelWrite = write
+    useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
+    useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
+    await mountSettings()
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
+    await screen.findByRole("alert")
+    const temperature = await screen.findByLabelText("modelSettings.form.temperature.label")
+    fireEvent.change(temperature, { target: { value: "0.31" } })
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
+    const prompt = await screen.findByPlaceholderText("Enter System Prompt")
+    fireEvent.change(prompt, { target: { value: "Newer staged instructions" } })
+    const revision = useStoreMessageOption.getState().selectedModelRevision
+    fireEvent.click(screen.getByRole("button", { name: "Retry model save" }))
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(2))
+    expect({ revision: useStoreMessageOption.getState().selectedModelRevision, prompt: (prompt as HTMLInputElement).value })
+      .toEqual({ revision, prompt: "Newer staged instructions" })
+    expect(screen.queryByRole("button", { name: "Discard and switch" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.31")
+  }, 15_000)
+
+  it("reports and retries a failed model Clear without reviving the previous choice", async () => {
+    inputs.realModelSelection = true
+    const write = vi.fn().mockRejectedValueOnce(new Error("device unavailable")).mockResolvedValue(undefined)
+    inputs.modelWrite = write
+    useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
+    useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
+    await mountSettings()
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    const select = screen.getByRole("combobox").closest(".ant-select")!
+    fireEvent.mouseDown(select.querySelector(".ant-select-clear")!)
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be saved on this device/i)
+    expect(useStoreMessageOption.getState().selectedModel).toBeNull()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry model save" })).toBeEnabled())
+    const revision = useStoreMessageOption.getState().selectedModelRevision
+    fireEvent.click(screen.getByRole("button", { name: "Retry model save" }))
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(2))
+    expect([useStoreMessageOption.getState().selectedModel, useStoreMessageOption.getState().selectedModelRevision]).toEqual([null, revision])
+  }, 15_000)
+
+  it("does not publish an old model device error after model selection ABA", async () => {
+    inputs.realModelSelection = true
+    inputs.otherProviderFirst = true
+    let reject!: (error: Error) => void
+    const pending = new Promise<void>((_, rejectPromise) => { reject = rejectPromise })
+    inputs.modelWrite = () => pending
+    useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
+    useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
+    await mountSettings()
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
+    await screen.findByLabelText("modelSettings.form.temperature.label")
+    await act(async () => {
+      const state = useStoreMessageOption.getState()
+      state.setSelectedModel("llamacpp:/models/gemma.gguf")
+      state.setSelectedModel("openai:/models/gemma.gguf")
+    })
+    await screen.findByLabelText("modelSettings.form.temperature.label")
+    await act(async () => { reject(new Error("old device failure")); await pending.catch(() => undefined) })
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  }, 10_000)
 
   it("opens the cockpit's owned alias scope and keeps its prompt through real Save", async () => {
     inputs.selectedModel = "llama_cpp:/models/gemma.gguf"
@@ -372,6 +556,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
         )
         expected = template ? "Selected template instructions" : ""
         await waitFor(() => expect(first.editor).toHaveValue(expected))
+        fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        await waitFor(() => expect(useStoreChatModelSettings.getState().systemPrompt).toBe(expected))
       } else if (state === "owner-changed") {
         act(() =>
           window.dispatchEvent(new Event("tldw:auth-principal-changed")),
@@ -526,10 +712,10 @@ describe("Conversation prompt editor through real model settings Save", () => {
   })
 
   it.each([null, "template-1"])(
-    "shows the reset value in the editor and active settings (template=%s)",
+    "stages the reset value until Save (template=%s)",
     async (template) => {
       inputs.selectedSystemPrompt = template
-      const { editor } = await mountSettings()
+      const { editor, close } = await mountSettings()
       fireEvent.change(editor, { target: { value: instruction } })
       fireEvent.click(
         screen.getByRole("button", {
@@ -541,9 +727,10 @@ describe("Conversation prompt editor through real model settings Save", () => {
           template ? "Selected template instructions" : "",
         ),
       )
-      expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
-        template ? "Selected template instructions" : "",
-      )
+      expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(close).toHaveBeenCalledWith(false))
+      expect(useStoreChatModelSettings.getState().systemPrompt).toBe(template ? "Selected template instructions" : "")
     },
   )
 
@@ -563,11 +750,9 @@ describe("Conversation prompt editor through real model settings Save", () => {
         }),
       )
       const resetValue = template ? "Selected template instructions" : ""
-      await waitFor(() =>
-        expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
-          resetValue,
-        ),
-      )
+      await waitFor(() => expect(editor).toHaveValue(resetValue))
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(useStoreChatModelSettings.getState().systemPrompt).toBe(resetValue))
       act(() =>
         useStoreChatModelSettings
           .getState()
@@ -675,7 +860,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
     await waitFor(() => expect(close).toHaveBeenCalledWith(false))
-    expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe("")
     expect(
       Object.values(
         useStoreChatModelSettings.getState().scopedSettingsByModelKey,
@@ -700,9 +885,9 @@ describe("Conversation prompt editor through real model settings Save", () => {
     await waitFor(() =>
       expect(editor).toHaveValue("Selected template instructions"),
     )
-    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
-      "Selected template instructions",
-    )
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(useStoreChatModelSettings.getState().systemPrompt).toBe("Selected template instructions"))
     expect(inputs.character?.id).toBe("testbot")
   })
 })

@@ -495,7 +495,11 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
     captureListener.current?.(capture)
   } })
   return (
-    <HistorySelectionContext.Provider value={selection}>
+    <HistorySelectionContext.Provider value={{ ...selection, draftAccount: {
+      requestScope: owner.snapshot.requestScope,
+      isCurrent: owner.isCurrent,
+      retryVerification: () => {}
+    } }}>
       <SidepanelSendGateContext.Provider value={sendGate}>
         <SidepanelChatContent owner={owner} sendGate={sendGate} captureListener={captureListener} />
       </SidepanelSendGateContext.Provider>

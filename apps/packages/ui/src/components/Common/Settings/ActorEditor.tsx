@@ -28,7 +28,7 @@ import {
 } from "@/types/actor"
 import { useActorWorldBooks } from "@/hooks/useActorWorldBooks"
 import { ActorTokens } from "@/components/Common/Settings/ActorTokens"
-import { buildActorDictionaryTokens } from "@/utils/actor"
+import { buildActorDictionaryTokens, buildActorSettingsFromForm } from "@/utils/actor"
 const Markdown = React.lazy(() => import("@/components/Common/Markdown"))
 import { ACTOR_PRESETS, applyActorPresetById } from "@/data/actor-presets"
 import type { ActorPresetId } from "@/data/actor-presets"
@@ -50,6 +50,8 @@ type Props = {
   form: FormInstance
   settings: ActorSettings | null
   setSettings: (next: ActorSettings) => void
+  isCurrent: () => boolean
+  captureEditGuard: () => () => boolean
   actorPreview: string
   actorTokenCount: number
   onRecompute: () => void
@@ -68,6 +70,8 @@ export const ActorEditor: React.FC<Props> = ({
   form,
   settings,
   setSettings,
+  isCurrent,
+  captureEditGuard,
   actorPreview,
   actorTokenCount,
   onRecompute,
@@ -81,6 +85,7 @@ export const ActorEditor: React.FC<Props> = ({
 }) => {
   const isSimpleMode = editorMode === "simple"
   const { t } = useTranslation(["playground", "common"])
+  const [modal, modalContextHolder] = Modal.useModal()
   const {
     worldBooks,
     worldBooksLoading,
@@ -112,13 +117,15 @@ export const ActorEditor: React.FC<Props> = ({
     const contentEl = bladeContentRefs.current[activeBlade]
     if (!contentEl) return
     // Wait for DOM to update, then focus first focusable element
-    requestAnimationFrame(() => {
+    const frame = requestAnimationFrame(() => {
+      if (!isCurrent()) return
       const focusable = contentEl.querySelector<HTMLElement>(
         'input:not([disabled]), select:not([disabled]), button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       )
       focusable?.focus()
     })
-  }, [activeBlade])
+    return () => cancelAnimationFrame(frame)
+  }, [activeBlade, isCurrent])
 
   React.useEffect(() => {
     if (isSimpleMode && activeBlade === "placement") {
@@ -127,16 +134,16 @@ export const ActorEditor: React.FC<Props> = ({
   }, [activeBlade, isSimpleMode])
 
   React.useEffect(() => {
-    if (!settings) return
+    if (!settings || !isCurrent()) return
     for (const aspect of settings.aspects || []) {
       if (aspect.source === "lore" && aspect.lorebookId) {
         void loadEntriesForWorldBook(aspect.lorebookId)
       }
     }
-  }, [loadEntriesForWorldBook, settings])
+  }, [isCurrent, loadEntriesForWorldBook, settings])
 
   React.useEffect(() => {
-    if (!settings) return
+    if (!settings || !isCurrent()) return
     if (!worldBooks || worldBooksLoading) return
 
     const worldBookIds = new Set(worldBooks.map((wb) => wb.id))
@@ -197,9 +204,11 @@ export const ActorEditor: React.FC<Props> = ({
         ...base,
         aspects: nextAspects
       })
+      if (!isCurrent()) return
       onRecompute()
     }
 
+    if (!isCurrent()) return
     setLoreWarnings((prev) => {
       const prevKeys = Object.keys(prev)
       const nextKeys = Object.keys(nextWarnings)
@@ -215,6 +224,7 @@ export const ActorEditor: React.FC<Props> = ({
     })
   }, [
     entriesByWorldBook,
+    isCurrent,
     onRecompute,
     setSettings,
     settings,
@@ -225,21 +235,22 @@ export const ActorEditor: React.FC<Props> = ({
 
   const handleRemoveAspect = React.useCallback(
     (aspectId: string) => {
-      if (!settings) return
+      if (!settings || !isCurrent()) return
       const next: ActorSettings = {
         ...settings,
         aspects: (settings.aspects || []).filter((a) => a.id !== aspectId)
       }
       setSettings(next)
+      if (!isCurrent()) return
       form.setFieldsValue({ [`actor_${aspectId}`]: undefined })
       onRecompute()
     },
-    [form, onRecompute, setSettings, settings]
+    [form, isCurrent, onRecompute, setSettings, settings]
   )
 
   const handleAddAspect = React.useCallback(() => {
     const name = newAspectName.trim()
-    if (!settings || !name) return
+    if (!settings || !name || !isCurrent()) return
 
     const target: ActorTarget = newAspectTarget || "user"
     const baseSlug = name
@@ -274,12 +285,14 @@ export const ActorEditor: React.FC<Props> = ({
     }
 
     setSettings(next)
+    if (!isCurrent()) return
     form.setFieldsValue({ [`actor_${id}`]: "" })
     form.setFieldsValue({ [`actor_key_${id}`]: key })
     setNewAspectName("")
     onRecompute()
   }, [
     form,
+    isCurrent,
     newAspectName,
     newAspectTarget,
     onRecompute,
@@ -329,6 +342,7 @@ export const ActorEditor: React.FC<Props> = ({
       )
 
       const handleSourceChange = (nextSource: ActorSource) => {
+        if (!isCurrent()) return
         const base = settings ?? createDefaultActorSettings()
         const aspects = (base.aspects || []).map((a) =>
           a.id === aspect.id
@@ -348,10 +362,11 @@ export const ActorEditor: React.FC<Props> = ({
           ...base,
           aspects
         })
-        onRecompute()
+        if (isCurrent()) onRecompute()
       }
 
       const handleWorldBookChange = (worldBookId: string) => {
+        if (!isCurrent()) return
         const id = worldBookId || ""
         const base = settings ?? createDefaultActorSettings()
         const aspects = (base.aspects || []).map((a) =>
@@ -367,6 +382,7 @@ export const ActorEditor: React.FC<Props> = ({
           ...base,
           aspects
         })
+        if (!isCurrent()) return
         if (id) {
           void loadEntriesForWorldBook(id)
         }
@@ -377,6 +393,7 @@ export const ActorEditor: React.FC<Props> = ({
       }
 
       const handleEntryChange = (entryId: string) => {
+        if (!isCurrent()) return
         const id = entryId || ""
         const base = settings ?? createDefaultActorSettings()
         const aspects = (base.aspects || []).map((a) =>
@@ -391,6 +408,7 @@ export const ActorEditor: React.FC<Props> = ({
           ...base,
           aspects
         })
+        if (!isCurrent()) return
 
         if (!loreWorldBookId) {
           return
@@ -413,6 +431,8 @@ export const ActorEditor: React.FC<Props> = ({
       }
 
       const handleKeyChange = (val: string) => {
+        const canApply = captureEditGuard()
+        if (!canApply()) return
         const currentKey = aspect.key || ""
         const candidate = (val || "").trim() || currentKey
         const fallbackKey = currentKey || `${aspect.target}_aspect`
@@ -456,7 +476,7 @@ export const ActorEditor: React.FC<Props> = ({
             )
         )
         if (existingKeys.has(normalized)) {
-          Modal.error({
+          modal.error({
             title: t(
               "playground:actor.keyCollisionTitle",
               "Actor key already in use"
@@ -466,13 +486,13 @@ export const ActorEditor: React.FC<Props> = ({
               "Another aspect already uses this key. Keys must be unique per chat."
             ),
             onOk: () => {
-              form.setFieldsValue({ [keyFieldName]: currentKey })
+              if (canApply()) form.setFieldsValue({ [keyFieldName]: currentKey })
             }
           })
           return
         }
 
-        Modal.confirm({
+        modal.confirm({
           title: t(
             "playground:actor.keyChangeTitle",
             "Change Actor token key?"
@@ -488,6 +508,7 @@ export const ActorEditor: React.FC<Props> = ({
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (!canApply()) return
             const base = settings ?? createDefaultActorSettings()
             const aspects = (base.aspects || []).map((a) =>
               a.id === aspect.id ? { ...a, key: normalized } : a
@@ -496,10 +517,10 @@ export const ActorEditor: React.FC<Props> = ({
               ...base,
               aspects
             })
-            form.setFieldsValue({ [keyFieldName]: normalized })
+            if (isCurrent()) form.setFieldsValue({ [keyFieldName]: normalized })
           },
           onCancel: () => {
-            form.setFieldsValue({ [keyFieldName]: currentNormalized })
+            if (canApply()) form.setFieldsValue({ [keyFieldName]: currentNormalized })
           }
         })
       }
@@ -652,6 +673,9 @@ export const ActorEditor: React.FC<Props> = ({
       entriesByWorldBook,
       entriesLoading,
       form,
+      captureEditGuard,
+      isCurrent,
+      modal,
       isSimpleMode,
       loadEntriesForWorldBook,
       loreWarnings,
@@ -782,6 +806,7 @@ export const ActorEditor: React.FC<Props> = ({
 
   return (
     <div className="space-y-3">
+      {modalContextHolder}
       <div className="space-y-2">
         {renderBladeHeader(
           "aspects",
@@ -876,10 +901,11 @@ export const ActorEditor: React.FC<Props> = ({
                   key={preset.id}
                   type="button"
                   onClick={() => {
-                    if (!settings) return
+                    if (!settings || !isCurrent()) return
                     const base = settings ?? createDefaultActorSettings()
                     const next = applyActorPresetById(base, preset.id)
                     setSettings(next)
+                    if (!isCurrent()) return
                     setSelectedPreset(preset.id)
                     const fieldValues: Record<string, any> = {
                       actorNotes: next.notes ?? ""
@@ -913,21 +939,25 @@ export const ActorEditor: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      Modal.confirm({
+                      const canApply = captureEditGuard()
+                      if (!canApply()) return
+                      modal.confirm({
                         title: t(
                           "playground:actor.resetConfirmTitle",
                           "Reset Actor settings?"
                         ),
                         content: t(
-                          "playground:actor.resetConfirmBody",
-                          "This will clear all configured aspects, notes, and placement settings for this chat. This action cannot be undone."
+                          "playground:actor.resetStagedHelp",
+                          "This resets the staged aspects, notes, and placement. Save applies the reset; Cancel keeps your saved scene."
                         ),
                         okText: t("common:confirm", "Confirm"),
                         cancelText: t("common:cancel", "Cancel"),
                         okButtonProps: { danger: true },
                         onOk: () => {
+                          if (!canApply()) return
                           const base = createDefaultActorSettings()
                           setSettings(base)
+                          if (!isCurrent()) return
                           const fieldValues: Record<string, any> = {
                             actorEnabled: base.isEnabled,
                             actorNotes: base.notes ?? "",
@@ -955,16 +985,16 @@ export const ActorEditor: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!settings) return
+                      if (!settings || !isCurrent()) return
                       const characterId = selectedCharacter?.id
-                      if (!characterId) return
+                      const canSave = captureEditGuard()
+                      if (!characterId || !canSave()) return
+                      const proposal = buildActorSettingsFromForm(settings, form.getFieldsValue(true))
                       const { saveActorProfileForCharacter } = await import(
                         "@/services/actor-settings"
                       )
-                      await saveActorProfileForCharacter({
-                        characterId,
-                        settings
-                      })
+                      if (!canSave()) return
+                      await saveActorProfileForCharacter({ characterId, settings: proposal })
                     }}
                     disabled={!selectedCharacter?.id}
                     className="inline-flex items-center justify-center rounded-md border border-border-strong px-2 py-1 text-xs text-text hover:bg-surface2 disabled:opacity-50">
@@ -978,13 +1008,16 @@ export const ActorEditor: React.FC<Props> = ({
                     type="button"
                     onClick={async () => {
                       const characterId = selectedCharacter?.id
-                      if (!characterId) return
+                      const canApply = captureEditGuard()
+                      if (!characterId || !canApply()) return
                       const {
                         getActorProfileForCharacter
                       } = await import("@/services/actor-settings")
+                      if (!canApply()) return
                       const profile = await getActorProfileForCharacter(characterId)
-                      if (!profile) return
+                      if (!profile || !canApply()) return
                       setSettings(profile)
+                      if (!isCurrent()) return
                       const fieldValues: Record<string, any> = {
                         actorNotes: profile.notes ?? "",
                         actorNotesGmOnly: profile.notesGmOnly ?? false,

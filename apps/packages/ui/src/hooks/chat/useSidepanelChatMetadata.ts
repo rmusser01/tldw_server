@@ -14,6 +14,7 @@ const METADATA_FAILURE = "Conversation details could not be loaded. Retry before
 const METADATA_WAITING = "Waiting for conversation details before sending queued requests."
 
 export type QueuedDispatchGuard = (() => void) & {
+  isSourceCurrent?: () => boolean
   publishServerChatId: (id: string | null, publish: (id: string | null) => void) => void
   publishHistoryId: (id: string | null, publish: (id: string | null) => void) => void
 }
@@ -181,6 +182,7 @@ export const useSidepanelChatMetadata = (
       revision = lifetime.current.revision
     }
     return Object.assign(assertCurrent, {
+      isSourceCurrent: () => { try { assertOwner(); return true } catch { return false } },
       publishServerChatId: (id: string | null, publish: (id: string | null) => void) => {
         publishIdentity("serverChatId", id, publish)
       },

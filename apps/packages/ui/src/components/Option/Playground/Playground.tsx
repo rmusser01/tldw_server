@@ -1,3 +1,4 @@
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
 import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
@@ -117,7 +118,6 @@ import {
   type TimelineActionDetail,
 } from "@/utils/timeline-actions";
 import {
-  applyChatSettingsPatch,
   syncChatSettingsForServerChat,
 } from "@/services/chat-settings";
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog";
@@ -374,7 +374,7 @@ export const Playground = () => {
 const PlaygroundContent = () => {
   const historySelection = useHistorySelectionContext()!;
   const researchDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
-  const renderedResearchFence = historySelection.fence();
+  const renderedResearchFence = React.useMemo(() => historySelection.fence(), [historySelection]);
   const followUpMountedRef = React.useRef(false);
   const followUpAttemptRef = React.useRef<object | null>(null);
   React.useLayoutEffect(() => {
@@ -392,6 +392,7 @@ const PlaygroundContent = () => {
     useComposerDockHeight()
 
   const [droppedFiles, setDroppedFiles] = React.useState<File[]>([]);
+  const researchAttachmentIntentRef = React.useRef(0);
   const [attachedResearchContext, setAttachedResearchContext] =
     React.useState<AttachedResearchContext | null>(null);
   const [attachedResearchContextBaseline, setAttachedResearchContextBaseline] =
@@ -540,7 +541,6 @@ const PlaygroundContent = () => {
     isProcessing,
     isSearchingInternet,
     selectedCharacter,
-    setSelectedCharacter,
     assistantSelectionMeta,
     compareMode,
     compareFeatureEnabled,
@@ -712,6 +712,8 @@ const PlaygroundContent = () => {
     historyLength: history.length,
   });
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
+  const { updateSettings: updateOrdinarySettings, target: ordinarySettingsTarget } = useChatSettingsRecord({ historyId: stableHistoryId, serverChatId });
+  const { settingsMode: historySettingsMode, forkSettings: historyForkSettings } = historySelection;
   const showStarterDeck =
     messages.length === 0 &&
     history.length === 0 &&
@@ -1396,41 +1398,30 @@ const PlaygroundContent = () => {
           deepResearchPinnedAttachment: pinned ? toPersistedDeepResearchAttachment(pinned) : null,
           deepResearchAttachmentHistory: history.map(entry => toPersistedDeepResearchAttachment(entry, entry.attached_at))};
         if (settingsMode === "fork") {await historySelection.updateForkSettings(patch); return;}
-        await applyChatSettingsPatch({
-          historyId: stableHistoryId,
-          serverChatId,
-          patch: {
-            deepResearchAttachment: context
-              ? toPersistedDeepResearchAttachment(context)
-              : null,
-            deepResearchPinnedAttachment: pinned
-              ? toPersistedDeepResearchAttachment(pinned)
-              : null,
-            deepResearchAttachmentHistory: history.map((entry) =>
-              toPersistedDeepResearchAttachment(entry, entry.attached_at),
-            ),
-          },
-        });
+        await updateOrdinarySettings(patch);
       } catch {
         // Attachment persistence is best-effort and should never block chat use.
       }
     },
-    [serverChatId, stableHistoryId, historySelection],
+    [serverChatId, stableHistoryId, historySelection, updateOrdinarySettings],
   );
 
   React.useEffect(() => {
-    if (!playgroundReady || !serverChatId || historySelection.settingsMode(serverChatId) === "pending") {
+    if (!playgroundReady || !serverChatId || historySettingsMode(serverChatId) === "pending") {
       return;
     }
     let cancelled = false;
     const threadKey = `${serverChatId}::${stableHistoryId ?? ""}`;
+    const attachmentRevision = researchAttachmentIntentRef.current;
+    const source = captureChatDraftSource(() => !cancelled &&
+      researchAttachmentIntentRef.current === attachmentRevision && renderedResearchFence());
 
     const restorePersistedAttachment = async () => {
       try {
-        const settings = historySelection.settingsMode(serverChatId) === "fork"
-          ? historySelection.forkSettings
-          : await syncChatSettingsForServerChat({historyId: stableHistoryId, serverChatId});
-        if (cancelled || previousThreadRef.current !== threadKey) {
+        const settings = historySettingsMode(serverChatId) === "fork"
+          ? historyForkSettings
+          : await syncChatSettingsForServerChat({ ...ordinarySettingsTarget, validate_lease: source.isCurrent });
+        if (!source.isCurrent() || cancelled || previousThreadRef.current !== threadKey) {
           return;
         }
         const restoredAttachment = settings?.deepResearchAttachment
@@ -1469,10 +1460,11 @@ const PlaygroundContent = () => {
     return () => {
       cancelled = true;
     };
-  }, [playgroundReady, serverChatId, stableHistoryId, historySelection.status, historySelection.forkCandidate, historySelection.forkSettings]);
+  }, [playgroundReady, serverChatId, stableHistoryId, historySelection.status, historySelection.forkCandidate, historyForkSettings, historySettingsMode, renderedResearchFence, ordinarySettingsTarget]);
 
   const handleAttachResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       const nextState = setAttachedResearchContextActive({
         active: attachedResearchContext,
         baseline: attachedResearchContextBaseline,
@@ -1503,11 +1495,14 @@ const PlaygroundContent = () => {
     async (target: ResearchFollowUpTarget) => {
       const attempt = {};
       followUpAttemptRef.current = attempt;
+      let attachmentRevision = researchAttachmentIntentRef.current;
       const source = captureChatDraftSource(() => followUpMountedRef.current &&
-        followUpAttemptRef.current === attempt && renderedResearchFence() &&
+        followUpAttemptRef.current === attempt &&
+        researchAttachmentIntentRef.current === attachmentRevision && renderedResearchFence() &&
         useStoreMessageOption.getState().chatDraftRevision === researchDraftRevision &&
         routeLocationKeyRef.current === routeLocationKey);
       if (!source.isQuickPromptCurrent()) return;
+      attachmentRevision = ++researchAttachmentIntentRef.current;
       if (attachedResearchContext?.run_id !== target.run_id) {
         try {
           await tldwClient.initialize().catch(() => null);
@@ -1517,6 +1512,8 @@ const PlaygroundContent = () => {
           handleAttachResearchContext(
             deriveAttachedResearchContext(bundle, target.run_id, target.query),
           );
+          // Accept only this synchronous attachment publication, never a newer intent.
+          attachmentRevision++;
         } catch {
           // Keep prompt preparation available even if bundle reload fails.
         }
@@ -1536,6 +1533,7 @@ const PlaygroundContent = () => {
 
   const handleApplyAttachedResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       setAttachedResearchContext(context);
       void persistAttachedResearchContext(
         context,
@@ -1551,6 +1549,7 @@ const PlaygroundContent = () => {
   );
 
   const handleResetAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const resetContext = resetAttachedResearchContext(
       attachedResearchContextBaseline,
     );
@@ -1568,6 +1567,7 @@ const PlaygroundContent = () => {
   ]);
 
   const handleRemoveAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const cleared = clearAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1593,6 +1593,7 @@ const PlaygroundContent = () => {
 
   const handleSelectAttachedResearchContextHistory = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       const nextState = setAttachedResearchContextActive({
         active: attachedResearchContext,
         baseline: attachedResearchContextBaseline,
@@ -1620,6 +1621,7 @@ const PlaygroundContent = () => {
   );
 
   const handlePinAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const nextState = pinAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1645,6 +1647,7 @@ const PlaygroundContent = () => {
 
   const handlePinAttachedResearchContextHistory = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       const nextState = pinAttachedResearchContext({
         active: attachedResearchContext,
         baseline: attachedResearchContextBaseline,
@@ -1672,6 +1675,7 @@ const PlaygroundContent = () => {
   );
 
   const handleUnpinAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const nextState = unpinAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1696,6 +1700,7 @@ const PlaygroundContent = () => {
   ]);
 
   const handleRestorePinnedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const nextState = restorePinnedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -2609,23 +2614,19 @@ const PlaygroundContent = () => {
   const clearAssistantFromCockpit = React.useCallback(async () => {
     const settingsMode = historySelection.settingsMode(serverChatId);
     if (settingsMode === "pending") return;
-    const forkChild = settingsMode === "fork";
-    const current = historySelection.fence();
-    if (forkChild) {
-      try {
-        await historySelection.updateForkSettings({ assistantOverlay: null });
-      } catch {
-        return;
-      }
-      if (!current()) return;
+    const source = captureChatDraftSource(() => renderedResearchFence());
+    const current = source.isCurrent;
+    try {
+      // Acknowledge the captured original target before intentional detach resets its identity.
+      await updateOrdinarySettings({ assistantOverlay: null });
+    } catch {
+      return;
     }
-    await setSelectedAssistant(null);
-    if (forkChild && !current()) return;
-    await setSelectedCharacter(null);
-    if (forkChild && !current()) return;
-    // Resetting selection is part of the intentional detach; keep the remaining state changes synchronous.
-    if (forkChild) clearPersistedSession();
-    else await clearPersistedSession();
+    if (!current()) return;
+    if (!await setSelectedAssistant(null, { isCurrent: current }) || !current()) return;
+    // Character selection derives from the same acknowledged assistant store.
+    // The accepted own reset and identity publication are synchronous.
+    clearPersistedSession();
     setServerChatCharacterId(null);
     setServerChatAssistantKind(null);
     setServerChatAssistantId(null);
@@ -2635,27 +2636,20 @@ const PlaygroundContent = () => {
     setCharacterModeIntentActive(false);
     void setChatWorkflowMode("standard");
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-    if (!forkChild) await applyChatSettingsPatch({
-      historyId: stableHistoryId,
-      serverChatId,
-      patch: {
-        assistantOverlay: null,
-      },
-    }).catch(() => undefined);
   }, [
     historySelection,
+    updateOrdinarySettings,
+    renderedResearchFence,
     clearPersistedSession,
     serverChatId,
     setChatWorkflowMode,
     setSelectedAssistant,
-    setSelectedCharacter,
     setServerChatId,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,
     setServerChatMetaLoaded,
     setServerChatPersonaMemoryMode,
-    stableHistoryId,
   ]);
   const inspectAssistantFromCockpit = React.useCallback(() => {
     if (selectedAssistant?.kind === "persona") {

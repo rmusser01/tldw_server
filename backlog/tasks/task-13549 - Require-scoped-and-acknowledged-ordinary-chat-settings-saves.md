@@ -1,0 +1,62 @@
+---
+id: TASK-13549
+title: Require scoped and acknowledged ordinary chat settings saves
+status: In Progress
+labels:
+- chat
+- ux
+- settings
+- persistence
+dependencies:
+- TASK-13456
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Repair ordinary chat settings GET/PUT/cache and editor commitment at their shared roots: failed reads cannot trigger overwrite, failed or mismatched writes cannot look saved, owner/workspace/view lifetimes fence mutations, and partial Retry resumes unresolved work without changing global model defaults. Preserve existing fork/local and character capability refusal protocols.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Server settings failures and malformed acknowledgements never return a success-shaped record or overwrite after a failed GET; authoritative empty GET is distinct from failed lookup.
+- [ ] #2 Settings transport, cache and editor publications use captured owner/workspace/request scope and current H1/view leases, including valid intentional detach.
+- [ ] #3 Separate device/server outcomes and exact pending patches support unresolved-only Retry, receipt races and read-back reconciliation without overwriting unrelated remote fields.
+- [ ] #4 Conversation-supported editor fields and Apply/Cancel/dirty behavior leave provider-model defaults and another chat unchanged; live/default-only controls identify their actual scope.
+- [ ] #5 Causal storage, owner/view ABA, ACK/partial retry and actual editor controls pass with both client types, static/security checks, two independent reviews and bounded native evidence.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Accepted master Stage3 and root-cause authorization. Remote dev2c5f19d0328360d45bce99b8bae75ce252cc312f included in HEAD5191a7566e. Duplicate settings ACK searches find only master. ID max remote13530/open13526/local13548. Start shared failure/receipt seam first, then captured ownership/cache and caller/editor integration; task stays open until all scoped criteria verified. ADR assessment forthcoming against existing ownership/local-bucket decisions; no generic outbox or new activation authority.
+Initial ADR assessment: shared failure/receipt validation enforces existing ADR049/050 ownership and persistence rules, no new ADR for that guard repair. Before a new durable envelope/authority schema is introduced, re-assess against ADR README; reuse existing native owner, request scope and local-bucket CAS. Plan: Docs/Design/IMPLEMENTATION_PLAN_chat_scoped_settings_ack_13549.md. Existing server GET200 settings:{} is authoritative absence;404 belongs to unavailable conversation. Preserve source on all failure/unknown outcomes.
+Stage1: extension persistent-client controls pass 4/4 with vitest.extension.config.ts; default web alias is not installed Plasmo evidence. Matching-ID 200+{} is authoritative absence; failed GET is retained failure. Added malformed-GET and exact-edited-patch causal checks; exact-patch red reproduces unrelated cached setting submission. Backend already merges keys transactionally, so reuse that boundary. No new API or capability.
+ADR assessment refined by both independent reviewers: derived qualified cache keys enforce ADR049. The ordinary save receipt is a private exact-intent/reconciliation projection under the approved D7 settings design, with explicit Retry only, no credential storage, background replay, server receipt protocol or inferred native capability. ADR050 is a persistence precedent, not an ordinary-settings capability. Reused existing local-bucket CAS and added a live lease inside its lock; canonical native/draft caches use the same local durable primitive. Local-history settings guards/fork delegation remain separate.
+Independent Stage1/2 reviewers identified concurrency, keyed presentation, render-to-live callback entry, detach continuation, legacy schema, clock LWW, null-deletion Retry and local memory-map deletion gaps. Root repairs implemented with existing platform lock/owner/source/storage mechanisms and causal controls; shared settings acknowledgement36 and bucket29 checks pass, real storage-hook warm-key/stale-entry4 pass. Existing integration fixtures now model matching scoped owners and known-empty settings. Stage3 editor/scene/dictionary/metadata/sampling and final client/static/native evidence remain open; no all-ten completion claim.
+Stage3 started alongside remaining Stage2 integration checks. Actual drawer partial-save tests now require one identity/behavior application across same-proposal scene Retry, including accepted detachment and scene-only edits; changed identity proposal still needs a new Apply. Existing drawer lifetime/source guards remain required. Sibling startup preview has the same root and remains in scope.
+2026-10-08 continuation: refreshed origin/dev remains 2c5f19d0328360d45bce99b8bae75ce252cc312f and is included in HEAD. Actual SQLite/Postgres strict settings-reader/GET controls reproduce 26 false-absence failures before the shared fix and pass 40/40 afterward, including true absence, valid empty/populated documents, rollback and idle-connection controls. Bandit touched Python scope reports two unchanged B608 findings outside the edited reader and expected test assertions B101; no finding in the changed reader (HEAD baseline also has the same two B608 sites). Current editor dirty-close 2/2 passes with context-aware AntD confirmation; initial failures were ambiguous duplicate titles/static-modal motion in fixtures, not a missing admission. Three causal synchronous publication controls now pass after captured panel/H1/account/draft/session/model-revision tail fences; actual held Actor reset reproduces old callback overwriting a newer scene. Standalone Actor preset Cancel leaks live settings and held profile/newer edit plus implicit dirty-close remain under active repair. Conversation Apply/metadata/dictionary/native sampler and final integration/static/native reviews are still open; no all-ten completion claim.
+2026-10-08 editor review checkpoint: full Current/standalone scene suites passed 90/90 and both client type gates passed before the next review repairs. Five initial causal failures plus the corrected actual-portal Clear failure reproduced: profile reads could stage during held scene Save; model Retry followed discard/model-switch intent; Clear undefined mismatched canonical null; older storage preparation overwrote the newest model preference. Seven causal positive checks now pass after live busy admission, independent owning-Save completion, device-only retry, canonical-null receipts, and serialized shared-document model writes. Both client types passed. Logs: /private/tmp/chat-settings-ack-13549-editor-review-red.log, /private/tmp/chat-settings-ack-13549-clear-red.log, /private/tmp/chat-settings-ack-13549-editor-review-green.log. No native/browser/packaged claim. Drawer publication and dirty dismissal, conversation Apply/metadata/sampling, dictionary callers and broad final gates remain open.
+2026-10-08 incremental checkpoint: shared settings readers, owner-qualified projection/private receipts, editor busy/dirty admission, canonical-null model choices and device-only Retry are implemented. Serialized shared-document model writes also capture the expected revision before synchronous publication; the reentrant control and all 11 shared model checks pass. Drawer now guards staged controls, implicit dirty dismissal and each accepted publication tail; its 45 actual unit/identity controls pass. Current model editor46 and scene recovery48 are included in the 27-suite615 passing checkpoint. Nine older sidepanel assertions expected automatic replay after metadata recovery; fixtures now follow accepted TASK-13454.9 explicit Run while retaining request ID/client ID/raw text/attempt0 and held ownership controls. The model-sync double now implements actual revision/storageHandled state; no production queue policy was weakened.
+
+The additional Playground integration fixture needed real shared exports and explicit captured native owner/request scope. A qualified new held-restore control then reproduced a real old attachment publication after synchronous New (research-tail-red2); the original source continuation guard fixes it and all 24 research controls pass. The legacy history-control counterexample remains it.fails and is not a positive native acceptance claim. Relevant logs: /private/tmp/chat-settings-ack-13549-checkpoint-final.log (615), checkpoint-final2.log (same27 suites pass; 23 initial research mock failures), research-final.log (24 research plus one expected-failure history counterexample), checkpoint-web-types3.log and checkpoint-extension-types3.log (both exit0), checkpoint-lint3.json (40 authored TS files; no added findings), backend-read-green.log (40 SQLite/Postgres controls). Actual extension-storage checks passed4/4 separately; Python Bandit matches HEAD's two B608 sites outside the changed reader plus expected test assertions. No Python changes followed that scan.
+
+Stage3 remains open: conversation Apply/Cancel/parent dirty integration, explicit metadata version/ACK semantics and removal of the feedback unversioned fallback, truthful default/unsupported field scope, native saved sampler/int participants, scoped dictionary assignment and bounded native evidence are still required. Existing task13160/13532 and the parent retain native behavior/Resume, profile ownership, packaged/physical/AT/participant and all-ten acceptance limits. No PR/push/merge or browser/package verification is claimed. Latest remote dev remains2c5f19d0328360d45bce99b8bae75ce252cc312f and is included in this isolated branch. ADR049/059 and the accepted behavior-snapshot decision govern these repairs; honoring existing server expected_version is corrective CAS use, not a new durable protocol.
+Final checkpoint review additionally identified same-chat attachment intent retirement. Two qualified controls reproduce a late initial restore reviving research after Attach/Remove and a held follow-up reattaching after Remove; both fail before the local intent fence and pass afterward. One component-local monotonic intent revision covers the existing nine attachment commands. Follow-up accepts exactly its own synchronous attachment publication, retaining current successful preparation and all existing New/H1/command guards. All26 actual research integration controls pass (/private/tmp/chat-settings-ack-13549-research-intent-{red,green}.log). The initial unedited fixture run that skipped all tests is excluded from causal evidence. The source reviewers cleared prior scoped receipts/lifetime/detach deltas; final same-chat intent repair review is requested. Conversation settings/native/dictionary and all-ten acceptance remain open.
+Both independent source reviewers clear this incremental checkpoint, including final same-chat research intent admission. Final WebUI/extension type logs checkpoint-*-types4.log exit0; authored lint comparison across40 TS files has no added findings. Current task/plan remain In Progress for the next supported conversation/metadata/native/dictionary slice.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->

@@ -13,12 +13,17 @@ import {
   ConversationContextSettings,
   DeepResearchAttachment
 } from "@/types/chat-session-settings"
-import type { ChatScope } from "@/types/chat-scope"
+import { toChatScopeParams, type ChatScope } from "@/types/chat-scope"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { chatDraftAddressKey, type ChatDraftAddress } from "@/utils/chat-draft-address"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { createLocalRegistryBucket, type LocalRegistryRecord } from "./settings/local-bucket"
 
 const storage = createSafeStorage()
 const localChatSettingsStorage = createSafeStorage({ area: "local" })
 export const chatSettingsStorageForKey = (chatKey: string) =>
-  chatKey.startsWith("local:") ? localChatSettingsStorage : storage
+  chatKey.startsWith("local:") || isQualifiedSettingsKey(chatKey) ? localChatSettingsStorage : storage
 const MAX_CHAT_SETTINGS_BYTES = 200_000
 const MAX_DEEP_RESEARCH_ATTACHMENT_CLAIMS = 5
 const MAX_DEEP_RESEARCH_ATTACHMENT_UNRESOLVED_QUESTIONS = 5
@@ -65,6 +70,9 @@ const CHAT_SETTINGS_OPTIONAL_KEYS = [
   "authorNotePosition",
   "characterMemoryById",
   "chatGenerationOverride",
+  "generationOverrides",
+  "turnTakingMode",
+  "participantCharacterIds",
   "conversationContext",
   "chat_dictionary_ids",
   "summary",
@@ -75,14 +83,58 @@ const CHAT_SETTINGS_OPTIONAL_KEYS = [
 export const getChatSettingsStorageKey = (chatKey: string) =>
   `chatSettings:${chatKey}`
 
-export const resolveChatSettingsKey = (params: {
+export type ChatSettingsTarget = {
   historyId: string | null
   serverChatId: string | null
-}): string => {
-  const { historyId, serverChatId } = params
-  if (serverChatId) return `server:${serverChatId}`
-  if (historyId) return `local:${historyId}`
+  requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
+  draftAddress?: ChatDraftAddress | null
+  signal?: AbortSignal
+  validate_lease?: () => boolean
+}
+const isQualifiedSettingsKey = (key: string) => key.startsWith("server:owned:") || key.startsWith("draft:owned:")
+const qualifiedSettingsAddress = (target: ChatSettingsTarget) => target.requestScope
+  ? JSON.stringify([serverChatMirrorOwnerKey({ requestScope: target.requestScope }), toChatScopeParams(target.scope)])
+  : null
+
+export const resolveChatSettingsKey = (target: ChatSettingsTarget): string => {
+  const owner = qualifiedSettingsAddress(target)
+  if (target.serverChatId) return owner ? `server:owned:${owner}:${encodeURIComponent(target.serverChatId)}` : `unqualified:${target.serverChatId}`
+  if (target.historyId) return `local:${target.historyId}`
+  if (owner && target.draftAddress?.kind === "fresh") {
+    return `draft:owned:${qualifiedSettingsAddress({ ...target, scope: target.draftAddress.scope })}:${chatDraftAddressKey(target.draftAddress)}`
+  }
   return "scratch"
+}
+
+// These are private device projections. They neither grant native capability nor replay in the background.
+const settingsCache = createLocalRegistryBucket<ChatSettingsRecord | null>({ prefix: "chatSettings:" })
+type SettingsSave = {
+  version: 1
+  destination: string
+  operation_id: string
+  status: "pending" | "acknowledged" | "settled" | "rejected"
+  intent: Record<string, unknown>
+  patch: Record<string, unknown>
+  serverSettings?: ChatSettingsRecord | null
+}
+const settingsSaves = createLocalRegistryBucket<SettingsSave>({ prefix: "tldw:chatSettingsSaves:v1:" })
+const assertSettingsCurrent = (target: ChatSettingsTarget) => {
+  if (target.signal?.aborted || target.validate_lease?.() === false) throw createServicePromptScopeChangedError()
+  if ((target.serverChatId || !target.historyId) && (!target.requestScope || !target.validate_lease ||
+      (!target.serverChatId && target.draftAddress?.kind !== "fresh"))) throw new Error("chat_settings_owner_unavailable")
+}
+const settingsRequestOptions = (target: ChatSettingsTarget) => ({
+  requestScope: target.requestScope,
+  ...(target.scope ? { scope: target.scope } : {}),
+  ...(target.signal ? { signal: target.signal } : {})
+})
+const readQualifiedSettings = async (chatKey: string) => {
+  const record = await settingsCache.get(chatKey, { failClosed: true })
+  if (record && record.value !== null && (!isRecord(record.value) ||
+      !Number.isInteger(record.value.schemaVersion) || record.value.schemaVersion < 1 ||
+      typeof record.value.updatedAt !== "string" || !coerceSettings(record.value))) throw new Error("chat_settings_cache_invalid")
+  return record
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -353,6 +405,14 @@ const coerceSettings = (raw: any): ChatSettingsRecord | null => {
     schemaVersion,
     updatedAt
   }
+  if (hasOwn(raw, "generationOverrides") && raw.generationOverrides !== null && !isRecord(raw.generationOverrides))
+    delete next.generationOverrides
+  if (hasOwn(raw, "turnTakingMode") && raw.turnTakingMode !== "single" && raw.turnTakingMode !== "round_robin")
+    delete next.turnTakingMode
+  if (hasOwn(raw, "participantCharacterIds") && (!Array.isArray(raw.participantCharacterIds) ||
+    !raw.participantCharacterIds.every((id: unknown) =>
+      typeof id === "string" ? Boolean(id.trim()) : typeof id === "number" && Number.isSafeInteger(id) && id > 0)))
+    delete next.participantCharacterIds
   normalizeConversationContextMirrors(next, raw)
   if (Object.prototype.hasOwnProperty.call(raw, "assistantOverlay")) {
     if (raw.assistantOverlay === null) {
@@ -424,27 +484,14 @@ export const normalizeChatSettingsRecord = (
   raw: any
 ): ChatSettingsRecord | null => coerceSettings(raw)
 
-const isMissingRemoteChatSettingsError = (error: unknown): boolean => {
-  const candidate = error as {
-    status?: unknown
-    response?: { status?: unknown }
-    details?: { status?: unknown }
-  } | null
-  const status = Number(
-    candidate?.status ??
-      candidate?.response?.status ??
-      candidate?.details?.status
-  )
-  if (Number.isFinite(status) && Math.trunc(status) === 404) {
-    return true
+const requireServerSettingsResponse = (
+  serverChatId: string,
+  response: unknown
+): Record<string, unknown> => {
+  if (!isRecord(response) || response.conversation_id !== serverChatId || !isRecord(response.settings)) {
+    throw new Error("chat_settings_ack_invalid")
   }
-
-  const message = error instanceof Error ? error.message : String(error || "")
-  return (
-    /\b404\b/i.test(message) ||
-    /chat\s+settings.*not\s+found/i.test(message) ||
-    /not\s+found.*chat\s+settings/i.test(message)
-  )
+  return response.settings
 }
 
 const toEpoch = (value: string | undefined): number => {
@@ -603,6 +650,12 @@ const buildPatchedChatSettingsInput = (
     ...patch,
     schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
     updatedAt: new Date().toISOString()
+  }
+
+  for (const key of ["conversationContext", "chatGenerationOverride", "generationOverrides"] as const) {
+    const base = key === "chatGenerationOverride" && !isRecord(existing?.chatGenerationOverride)
+      ? existing?.generationOverrides : existing?.[key]
+    if (isRecord(patch[key]) && isRecord(base)) next[key] = { ...base, ...patch[key] }
   }
 
   if (Object.prototype.hasOwnProperty.call(patch, "assistantOverlay")) {
@@ -839,17 +892,20 @@ const writeLocalChatSettings = async (
   })
 }
 
-export const getChatSettingsForKey = async (
-  chatKey: string
-): Promise<ChatSettingsRecord | null> => {
+const readChatSettingsForKey = async (chatKey: string): Promise<ChatSettingsRecord | null> => {
+  if (isQualifiedSettingsKey(chatKey)) return coerceSettings((await readQualifiedSettings(chatKey))?.value)
+  const key = getChatSettingsStorageKey(chatKey)
+  if (chatKey.startsWith("local:")) await ensureLocalChatSettingsBaseline(chatKey.slice(6))
+  const settingsStorage = chatSettingsStorageForKey(chatKey)
+  requirePersistentStorage(settingsStorage)
+  const stored = await settingsStorage.get<ChatSettingsRecord | undefined>(key)
+  requireSettingsRecord(stored)
+  return coerceSettings(stored)
+}
+
+export const getChatSettingsForKey = async (chatKey: string): Promise<ChatSettingsRecord | null> => {
   try {
-    const key = getChatSettingsStorageKey(chatKey)
-    if (chatKey.startsWith("local:"))
-      await ensureLocalChatSettingsBaseline(chatKey.slice(6))
-    const stored = await chatSettingsStorageForKey(chatKey).get<
-      ChatSettingsRecord | undefined
-    >(key)
-    return coerceSettings(stored)
+    return await readChatSettingsForKey(chatKey)
   } catch (error) {
     console.error("Failed to load chat settings", error)
     return null
@@ -861,6 +917,7 @@ export const saveChatSettingsForKey = async (
   settings: ChatSettingsRecord
 ): Promise<boolean> => {
   try {
+    if (isQualifiedSettingsKey(chatKey)) throw new Error("chat_settings_owner_unavailable")
     const key = getChatSettingsStorageKey(chatKey)
     const payload = normalizeChatSettingsRecord({
       ...settings,
@@ -876,7 +933,10 @@ export const saveChatSettingsForKey = async (
     }
     if (chatKey.startsWith("local:"))
       await writeLocalChatSettings(chatKey.slice(6), key, boundedPayload)
-    else await storage.set(key, boundedPayload)
+    else {
+      requirePersistentStorage(storage)
+      await storage.set(key, boundedPayload)
+    }
     return true
   } catch (error) {
     console.error("Failed to save chat settings", error)
@@ -884,167 +944,185 @@ export const saveChatSettingsForKey = async (
   }
 }
 
-export const getChatSettingsForChat = async (params: {
-  historyId: string | null
-  serverChatId: string | null
-}): Promise<ChatSettingsRecord | null> => {
-  const chatKey = resolveChatSettingsKey(params)
-  return await getChatSettingsForKey(chatKey)
+export const getChatSettingsForChat = async (params: ChatSettingsTarget): Promise<ChatSettingsRecord | null> => {
+  return await getChatSettingsForKey(resolveChatSettingsKey(params))
 }
 
-export const saveChatSettingsForChat = async (params: {
-  historyId: string | null
-  serverChatId: string | null
-  settings: ChatSettingsRecord
-}): Promise<boolean> => {
-  const chatKey = resolveChatSettingsKey(params)
-  return await saveChatSettingsForKey(chatKey, params.settings)
+export const saveChatSettingsForChat = async (params: ChatSettingsTarget & { settings: ChatSettingsRecord }): Promise<boolean> => {
+  return await saveChatSettingsForKey(resolveChatSettingsKey(params), params.settings)
 }
 
-export const syncChatSettingsForServerChat = async (params: {
-  historyId: string | null
-  serverChatId: string | null
-  allowScratchFallback?: boolean
-  scope?: ChatScope
-}): Promise<ChatSettingsRecord | null> => {
-  const {
-    historyId,
-    serverChatId,
-    allowScratchFallback = false,
-    scope
-  } = params
-  if (!serverChatId) return null
-  const scopeOptions = scope ? { scope } : undefined
-
-  const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
-  const localKey = resolveChatSettingsKey({ historyId, serverChatId: null })
-  const scratchKey = resolveChatSettingsKey({
-    historyId: null,
-    serverChatId: null
+const saveAcknowledgedServerSettings = async (
+  target: ChatSettingsTarget,
+  settings: ChatSettingsRecord | null,
+  expected: LocalRegistryRecord<ChatSettingsRecord | null> | null
+) => {
+  assertSettingsCurrent(target)
+  const saved = await settingsCache.set(resolveChatSettingsKey(target), settings, Date.now(), expected, () => {
+    assertSettingsCurrent(target)
+    return true
   })
-
-  const localForServer = await getChatSettingsForKey(serverKey)
-  const localFromHistory = historyId
-    ? await getChatSettingsForKey(localKey)
-    : null
-  const localFromScratch =
-    allowScratchFallback && !localForServer && !localFromHistory
-      ? await getChatSettingsForKey(scratchKey)
-      : null
-  const usedScratchFallback = Boolean(localFromScratch)
-  const localSettings = localForServer || localFromHistory || localFromScratch
-
-  await tldwClient.initialize().catch(() => null)
-
-  let remoteSettings: ChatSettingsRecord | null = null
-  try {
-    const res = await tldwClient.getChatSettings(serverChatId, scopeOptions)
-    remoteSettings = coerceSettings(res.settings)
-  } catch (error) {
-    if (!isMissingRemoteChatSettingsError(error)) {
-      console.warn("Failed to fetch server chat settings", error)
-    }
-  }
-
-  if (!remoteSettings && localSettings) {
-    try {
-      const res = await tldwClient.updateChatSettings(
-        serverChatId,
-        localSettings,
-        scopeOptions
-      )
-      const synced = coerceSettings(res.settings) || localSettings
-      await saveChatSettingsForKey(serverKey, synced)
-      if (usedScratchFallback) {
-        await storage.remove(getChatSettingsStorageKey(scratchKey))
-      }
-      return synced
-    } catch (error) {
-      console.warn("Failed to push local chat settings", error)
-      return localSettings
-    }
-  }
-
-  if (remoteSettings && !localSettings) {
-    await saveChatSettingsForKey(serverKey, remoteSettings)
-    return remoteSettings
-  }
-
-  const merged = mergeChatSettings(localSettings, remoteSettings)
-  if (!merged) return null
-
-  if (remoteSettings && areEquivalentChatSettings(merged, remoteSettings)) {
-    await saveChatSettingsForKey(serverKey, merged)
-    return merged
-  }
-
-  const mergedTime = toEpoch(merged.updatedAt)
-  const remoteTime = toEpoch(remoteSettings?.updatedAt)
-
-  if (mergedTime >= remoteTime) {
-    try {
-      await tldwClient.updateChatSettings(serverChatId, merged, scopeOptions)
-    } catch (error) {
-      console.warn("Failed to reconcile chat settings to server", error)
-    }
-  }
-
-  await saveChatSettingsForKey(serverKey, merged)
-  if (usedScratchFallback) {
-    await storage.remove(getChatSettingsStorageKey(scratchKey))
-  }
-  return merged
+  assertSettingsCurrent(target)
+  if (!saved) throw Object.assign(new Error("chat_settings_device_save_failed"), { serverChatId: target.serverChatId, serverSettings: settings })
+  return settings
 }
 
-export const applyChatSettingsPatch = async (params: {
-  historyId: string | null
-  serverChatId: string | null
+export const syncChatSettingsForServerChat = async (target: ChatSettingsTarget & {
+  allowScratchFallback?: boolean
+  sourceDraftAddress?: ChatDraftAddress | null
+}): Promise<ChatSettingsRecord | null> => {
+  if (!target.serverChatId) return null
+  assertSettingsCurrent(target)
+  const chatKey = resolveChatSettingsKey(target)
+  const before = await readQualifiedSettings(chatKey)
+  assertSettingsCurrent(target)
+  await tldwClient.initialize()
+  assertSettingsCurrent(target)
+  const raw = requireServerSettingsResponse(target.serverChatId, await tldwClient.getChatSettings(target.serverChatId, settingsRequestOptions(target)))
+  assertSettingsCurrent(target)
+  const remote = Object.keys(raw).length ? coerceSettings(raw) : null
+  if (Object.keys(raw).length && !remote) throw new Error("chat_settings_ack_invalid")
+  await saveAcknowledgedServerSettings(target, remote, before)
+  // Only an explicit first binding may copy its captured fresh draft. Bare-ID caches and local mirrors never become native authority.
+  if (!remote && target.allowScratchFallback && target.sourceDraftAddress?.kind === "fresh") {
+    const draftTarget = { ...target, historyId: null, serverChatId: null, draftAddress: target.sourceDraftAddress }
+    const source = await readQualifiedSettings(resolveChatSettingsKey(draftTarget))
+    assertSettingsCurrent(target)
+    if (source?.value) return await applyChatSettingsPatch({ ...target, patch: source.value })
+  }
+  return remote
+}
+
+const settingsSubset = (value: Record<string, unknown>, shape: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.keys(shape).filter(key => (hasOwn(value, key) || (shape[key] === null && ["deepResearchAttachment", "deepResearchPinnedAttachment"].includes(key))) && !["schemaVersion", "updatedAt"].includes(key)).map(key => [key,
+    isRecord(shape[key]) && isRecord(value[key]) ? settingsSubset(value[key], shape[key]) : hasOwn(value, key) ? value[key] : null
+  ]))
+const sameSettingsIntent = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+  JSON.stringify(normalizeComparableChatSettingsValue(a)) === JSON.stringify(normalizeComparableChatSettingsValue(b))
+const requireSettingsSave = (record: LocalRegistryRecord<SettingsSave> | null, destination: string) => {
+  if (!record) return null
+  const value = record.value
+  if (!isRecord(value) || value.version !== 1 || value.destination !== destination ||
+      typeof value.operation_id !== "string" || !value.operation_id ||
+      !["pending", "acknowledged", "settled", "rejected"].includes(value.status) || !isRecord(value.intent) || !isRecord(value.patch) ||
+      (value.status !== "pending" && !(value.status === "rejected" && value.serverSettings === null) && !coerceSettings(value.serverSettings))) throw new Error("chat_settings_pending_invalid")
+  return record
+}
+
+const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   patch: Partial<ChatSettingsRecord>
 }): Promise<ChatSettingsRecord | null> => {
-  const { historyId, serverChatId, patch } = params
-  const chatKey = resolveChatSettingsKey({ historyId, serverChatId })
-  const existing = await getChatSettingsForKey(chatKey)
-  const patchedInput = buildPatchedChatSettingsInput(existing, patch)
-  const normalized = normalizeChatSettingsRecord(patchedInput)
-  const assistantOverlayPatched = Object.prototype.hasOwnProperty.call(
-    patch,
-    "assistantOverlay"
-  )
-  const next =
-    normalized ||
-    ({
-      schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
-      updatedAt: new Date().toISOString()
-    } as ChatSettingsRecord)
-
-  if (
-    normalized &&
-    assistantOverlayPatched &&
-    patch.assistantOverlay !== null &&
-    existing?.assistantOverlay !== undefined &&
-    normalized.assistantOverlay === undefined
-  ) {
-    next.assistantOverlay = existing.assistantOverlay
+  assertSettingsCurrent(target)
+  const chatKey = resolveChatSettingsKey(target)
+  const cacheBefore = isQualifiedSettingsKey(chatKey) ? await readQualifiedSettings(chatKey) : null
+  const local = cacheBefore?.value ?? (isQualifiedSettingsKey(chatKey) ? null : await readChatSettingsForKey(chatKey))
+  assertSettingsCurrent(target)
+  let existing = local
+  let previous: LocalRegistryRecord<SettingsSave> | null = null
+  if (target.serverChatId) {
+    previous = requireSettingsSave(await settingsSaves.get(chatKey, { failClosed: true }), chatKey)
+    assertSettingsCurrent(target)
+    await tldwClient.initialize()
+    assertSettingsCurrent(target)
+    const raw = requireServerSettingsResponse(target.serverChatId, await tldwClient.getChatSettings(target.serverChatId, settingsRequestOptions(target)))
+    assertSettingsCurrent(target)
+    existing = Object.keys(raw).length ? coerceSettings(raw) : null
+    if (Object.keys(raw).length && !existing) throw new Error("chat_settings_ack_invalid")
   }
-
-  const saved = await saveChatSettingsForKey(chatKey, next)
-  if (!saved) {
-    return null
-  }
-
-  if (!serverChatId) {
+  const normalized = normalizeChatSettingsRecord(buildPatchedChatSettingsInput(existing, target.patch))
+  if (!normalized) throw new Error("chat_settings_patch_invalid")
+  if (hasOwn(target.patch, "assistantOverlay") && target.patch.assistantOverlay !== null &&
+      existing?.assistantOverlay !== undefined && normalized.assistantOverlay === undefined) normalized.assistantOverlay = existing.assistantOverlay
+  const next = enforceChatSettingsSize(normalized)
+  if (!next) throw new Error("chat_settings_size_exceeded")
+  if (!target.serverChatId) {
+    if (!isQualifiedSettingsKey(chatKey)) {
+      if (!await saveChatSettingsForKey(chatKey, next)) throw new Error("chat_settings_device_save_failed")
+      assertSettingsCurrent(target)
+      return next
+    }
+    assertSettingsCurrent(target)
+    const saved = await settingsCache.set(chatKey, next, Date.now(), cacheBefore, () => { assertSettingsCurrent(target); return true })
+    assertSettingsCurrent(target)
+    if (!saved) throw new Error("chat_settings_device_save_failed")
     return next
   }
-
-  await tldwClient.initialize().catch(() => null)
-  try {
-    const res = await tldwClient.updateChatSettings(serverChatId, next)
-    const synced = normalizeChatSettingsRecord(res.settings) || next
-    const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
-    await saveChatSettingsForKey(serverKey, synced)
-    return synced
-  } catch (error) {
-    console.warn("Failed to update server chat settings", error)
-    return next
+  const input = next as unknown as Record<string, unknown>
+  const intent = settingsSubset(input, target.patch as Record<string, unknown>)
+  if (!Object.keys(intent).length) throw new Error("chat_settings_patch_invalid")
+  const patch: Record<string, unknown> = { schemaVersion: next.schemaVersion }
+  for (const key of Object.keys(intent)) patch[key] = input[key]
+  if (hasOwn(target.patch, "chat_dictionary_ids") || (isRecord(target.patch.conversationContext) && hasOwn(target.patch.conversationContext, "chat_dictionary_ids"))) {
+    patch.chat_dictionary_ids = next.chat_dictionary_ids
+    patch.conversationContext = next.conversationContext
   }
+  const sameIntent = previous && sameSettingsIntent(previous.value.intent, intent)
+  if (previous && ["pending", "acknowledged"].includes(previous.value.status) && !sameIntent) {
+    throw Object.assign(new Error("chat_settings_pending_changed"), { pendingPatch: previous.value.intent })
+  }
+  const retry = sameIntent && previous && ["pending", "acknowledged"].includes(previous.value.status)
+  const alreadyApplied = sameIntent && previous?.value.status !== "rejected" && existing && sameSettingsIntent(settingsSubset(existing as unknown as Record<string, unknown>, intent), intent)
+  if (retry && previous.value.status === "acknowledged" && !alreadyApplied) throw new Error("chat_settings_changed_after_acknowledgement")
+  let pending = previous
+  if (!retry || !alreadyApplied) {
+    const value: SettingsSave = { version: 1, destination: chatKey, operation_id: retry ? previous.value.operation_id : crypto.randomUUID(), status: "pending", intent, patch }
+    const updatedAt = Date.now()
+    if (!await settingsSaves.set(chatKey, value, updatedAt, previous, () => { assertSettingsCurrent(target); return true })) {
+      assertSettingsCurrent(target)
+      throw new Error("chat_settings_pending_changed")
+    }
+    pending = { value, updatedAt }
+  }
+  assertSettingsCurrent(target)
+  let synced = existing
+  if (!alreadyApplied) {
+    let response: unknown
+    try {
+      response = await tldwClient.updateChatSettings(target.serverChatId, patch, settingsRequestOptions(target))
+    } catch (cause) {
+      assertSettingsCurrent(target)
+      // This endpoint's 413/422 validation paths precede persistence or roll back
+      // their transaction. Transport and server errors retain an unknown outcome.
+      if (isRecord(cause) && [413, 422].includes(cause.status as number) && pending) {
+        if (!await settingsSaves.set(chatKey, { ...pending.value, status: "rejected", serverSettings: existing }, Date.now(), pending, () => { assertSettingsCurrent(target); return true })) {
+          assertSettingsCurrent(target)
+          throw new Error("chat_settings_device_save_failed", { cause })
+        }
+        assertSettingsCurrent(target)
+        throw Object.assign(new Error("chat_settings_server_rejected", { cause }), { serverSettings: existing, pendingPatch: intent })
+      }
+      throw Object.assign(new Error("chat_settings_server_unconfirmed", { cause }), { pendingPatch: intent })
+    }
+    assertSettingsCurrent(target)
+    synced = coerceSettings(requireServerSettingsResponse(target.serverChatId, response))
+    if (!synced) throw new Error("chat_settings_ack_invalid")
+  }
+  if (!synced || !pending) throw new Error("chat_settings_ack_invalid")
+  if (!sameSettingsIntent(settingsSubset(synced as unknown as Record<string, unknown>, intent), intent)) {
+    await settingsSaves.set(chatKey, { ...pending.value, status: "rejected", serverSettings: synced }, Date.now(), pending, () => { assertSettingsCurrent(target); return true })
+    assertSettingsCurrent(target)
+    throw Object.assign(new Error("chat_settings_ack_mismatch"), { serverChatId: target.serverChatId, serverSettings: synced, pendingPatch: intent })
+  }
+  const value: SettingsSave = { ...pending.value, status: "acknowledged", serverSettings: synced }
+  const acknowledged: LocalRegistryRecord<SettingsSave> = { value, updatedAt: Date.now() }
+  if (!await settingsSaves.set(chatKey, value, acknowledged.updatedAt, pending, () => { assertSettingsCurrent(target); return true })) {
+    assertSettingsCurrent(target)
+    throw Object.assign(new Error("chat_settings_device_save_failed"), { serverChatId: target.serverChatId, serverSettings: synced })
+  }
+  await saveAcknowledgedServerSettings(target, synced, cacheBefore)
+  if (!await settingsSaves.set(chatKey, { ...value, status: "settled" }, Date.now(), acknowledged, () => { assertSettingsCurrent(target); return true })) {
+    assertSettingsCurrent(target)
+    throw Object.assign(new Error("chat_settings_device_save_failed"), { serverChatId: target.serverChatId, serverSettings: synced })
+  }
+  assertSettingsCurrent(target)
+  return synced
+}
+
+export const applyChatSettingsPatch = async (target: ChatSettingsTarget & { patch: Partial<ChatSettingsRecord> }): Promise<ChatSettingsRecord | null> => {
+  const captured = { ...target, patch: structuredClone(target.patch), scope: target.scope ? { ...target.scope } : undefined }
+  assertSettingsCurrent(captured)
+  if (!captured.serverChatId) return await applyCapturedChatSettingsPatch(captured)
+  if (typeof navigator === "undefined" || !navigator.locks?.request) throw new Error("chat_settings_device_save_unavailable")
+  // The existing platform lock serializes read/compose/PUT, not just its device receipt.
+  return await navigator.locks.request(`tldw:chatSettingsSave:${resolveChatSettingsKey(captured)}`, () => applyCapturedChatSettingsPatch(captured))
 }
