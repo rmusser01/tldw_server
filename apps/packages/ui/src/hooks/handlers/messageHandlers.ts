@@ -1,4 +1,6 @@
 import i18n from "i18next"
+import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
+
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
 import type { UploadedFile } from "@/db"
@@ -33,6 +35,14 @@ import type { NotificationInstance } from "antd/es/notification/interface"
 import { chatSubmitSkipped, chatSubmitSubmitted, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 import { useStoreMessageOption, type ChatHistory, type Message } from "~/store/option"
+
+const editIssueDescription = (issue: unknown) => {
+  const copy = getMessageEditFeedback(issue)
+  const translated = i18n.t(`common:${copy.key}`, copy.fallback)
+  return typeof translated === "string" && translated.trim()
+    ? translated
+    : copy.fallback
+}
 
 /** Derive provider display history from the same visible identities after a successful mutation. */
 export const historyFromVisibleMessages = (messages: Message[]): ChatHistory =>
@@ -277,7 +287,7 @@ export const createEditMessage = (options: {
       const error = new Error(`unsupported_history_edit_and_send:${target.id}`)
       options.notification?.error({
         message: "Message action unavailable",
-        description: error.message
+        description: editIssueDescription(error)
       })
       throw error
     }
@@ -322,8 +332,7 @@ export const createEditMessage = (options: {
           return chatSubmitSkipped("stale_selection")
         options.notification?.error({
           message: "Message edit failed",
-          description:
-            error instanceof Error ? error.message : "message_edit_failed"
+          description: editIssueDescription(error)
         })
         throw error
       }
@@ -351,8 +360,7 @@ export const createEditMessage = (options: {
       if (current())
         options.notification?.error({
           message: "Message edit failed",
-          description:
-            error instanceof Error ? error.message : "message_edit_failed"
+          description: editIssueDescription(error)
         })
       throw error
     }

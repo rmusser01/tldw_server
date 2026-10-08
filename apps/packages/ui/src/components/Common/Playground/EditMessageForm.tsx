@@ -4,6 +4,9 @@ import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
 import { isFirefoxTarget } from "@/config/platform"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { Button } from "@/components/Common/Button"
+import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 
 type Props = {
   value: string
@@ -18,6 +21,7 @@ type Props = {
 }
 
 export const EditMessageForm = (props: Props) => {
+  const selection = useHistorySelectionContext()
   const composing = React.useRef(false)
   const mounted = React.useRef(true)
   const attempt = React.useRef<object | null>(null)
@@ -26,6 +30,14 @@ export const EditMessageForm = (props: Props) => {
   const expectedAcknowledgement = React.useRef<string | null>(null)
   const [pending, setPending] = React.useState(false)
   const [feedback, setFeedback] = React.useState<string | null>(null)
+  const copyAttempt = React.useRef<{ isCurrent: () => boolean } | null>(null)
+  const [copying, setCopying] = React.useState(false)
+  const [copyFeedback, setCopyFeedback] = React.useState<{
+    text: string
+    inputRevision: number
+    sourceRevision: number
+    isSourceCurrent: () => boolean
+  } | null>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const feedbackId = React.useId()
   const { t } = useTranslation("common")
@@ -53,21 +65,82 @@ export const EditMessageForm = (props: Props) => {
     return () => {
       mounted.current = false
       attempt.current = null
+      copyAttempt.current = null
     }
   }, [])
 
-  const changedMessage = t(
-    "editMessage.changed",
-    "This message changed while you were editing. Your edited text is kept. Copy it, then cancel and reopen the message to review the latest version."
-  )
-  const failedSave = t(
-    "editMessage.failed",
-    "Your edit could not be confirmed. Your edited text is kept. Try saving again."
-  )
+  React.useEffect(() => {
+    if (copyAttempt.current && !copyAttempt.current.isCurrent()) {
+      copyAttempt.current = null
+      setCopying(false)
+    }
+    if (
+      copyFeedback &&
+      (copyFeedback.inputRevision !== form.getRevision() ||
+        copyFeedback.sourceRevision !== source.current.revision ||
+        !copyFeedback.isSourceCurrent())
+    )
+      setCopyFeedback(null)
+  })
+
+  const issueMessage = (issue: unknown) => {
+    const copy = getMessageEditFeedback(issue)
+    return t(copy.key, copy.fallback)
+  }
+  const changedMessage = issueMessage({ reason: "message_changed" })
   const close = () => {
     attempt.current = null
+    copyAttempt.current = null
     setPending(false)
+    setCopying(false)
+    setCopyFeedback(null)
     props.onClose()
+  }
+
+  const copySource = captureChatDraftSource(selection?.fence())
+  const copyEdit = async () => {
+    if (copyAttempt.current || !copySource.isCurrent()) return
+    const inputRevision = form.getRevision(),
+      sourceRevision = source.current.revision
+    const currentCopy: { isCurrent: () => boolean } = {
+      isCurrent: () =>
+        mounted.current &&
+        copyAttempt.current === currentCopy &&
+        form.getRevision() === inputRevision &&
+        source.current.revision === sourceRevision &&
+        copySource.isCurrent()
+    }
+    const isCurrent = currentCopy.isCurrent
+    copyAttempt.current = currentCopy
+    setCopying(true)
+    setCopyFeedback(null)
+    try {
+      // Authored edits copy verbatim; saved-reply preferences may strip markup.
+      await navigator.clipboard.writeText(form.getValues().message)
+      if (isCurrent())
+        setCopyFeedback({
+          inputRevision,
+          sourceRevision,
+          isSourceCurrent: copySource.isCurrent,
+          text: t("editMessage.copied", "Edit copied")
+        })
+    } catch {
+      if (isCurrent())
+        setCopyFeedback({
+          inputRevision,
+          sourceRevision,
+          isSourceCurrent: copySource.isCurrent,
+          text: t(
+            "editMessage.copyFailed",
+            "Copy failed. Select your edited text and use your browser's Copy command."
+          )
+        })
+    } finally {
+      if (mounted.current && copyAttempt.current === currentCopy) {
+        copyAttempt.current = null
+        setCopying(false)
+      }
+    }
   }
 
   const save = async (isSend: boolean) => {
@@ -90,7 +163,8 @@ export const EditMessageForm = (props: Props) => {
         (source.current.revision === originalSource.revision ||
           (source.current.revision === originalSource.revision + 1 &&
             source.current.value === value))
-      const isCurrent = () => isOriginCurrent() && form.getRevision() === revision
+      const isCurrent = () =>
+        isOriginCurrent() && form.getRevision() === revision
       const outcome = props.onSumbit(value, isSend, isCurrent, isOriginCurrent)
       const asynchronous =
         outcome !== null &&
@@ -119,16 +193,16 @@ export const EditMessageForm = (props: Props) => {
             result.status === "submitted"
           ))
       ) {
-        setFeedback(failedSave)
+        setFeedback(issueMessage(result))
         return
       }
       baseline.current = source.current.revision
       expectedAcknowledgement.current =
         unchangedSource && originalSource.value !== value ? value : null
-      if (form.getRevision() === revision) props.onClose()
-    } catch {
+      if (form.getRevision() === revision) close()
+    } catch (error) {
       if (mounted.current && attempt.current === currentAttempt)
-        setFeedback(failedSave)
+        setFeedback(issueMessage(error))
     } finally {
       if (mounted.current && attempt.current === currentAttempt) {
         attempt.current = null
@@ -183,6 +257,19 @@ export const EditMessageForm = (props: Props) => {
           {alert}
         </p>
       )}
+      {!pending && copying && (
+        <p role="status" className="text-sm text-text-muted">
+          {t("editMessage.copying", "Copying edit...")}
+        </p>
+      )}
+      {!pending &&
+        copyFeedback?.inputRevision === form.getRevision() &&
+        copyFeedback?.sourceRevision === source.current.revision &&
+        copyFeedback.isSourceCurrent() && (
+          <p role="status" className="text-sm text-text-muted">
+            {copyFeedback.text}
+          </p>
+        )}
       <div
         className={`mt-2 flex w-full flex-wrap gap-2 ${props.isBot ? "justify-end" : "justify-between"}`}>
         {!props.isBot && (
@@ -194,6 +281,17 @@ export const EditMessageForm = (props: Props) => {
             }}
             ariaLabel={t("save")}>
             {t("save")}
+          </Button>
+        )}
+        {alert && !pending && (
+          <Button
+            variant="outline"
+            disabled={copying}
+            onClick={() => {
+              void copyEdit()
+            }}
+            ariaLabel={t("editMessage.copy", "Copy edit")}>
+            {t("editMessage.copy", "Copy edit")}
           </Button>
         )}
         <div className="flex gap-2">

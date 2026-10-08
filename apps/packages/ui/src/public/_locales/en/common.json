@@ -153,10 +153,49 @@
     "message": "Edit message"
   },
   "editMessage_failed": {
-    "message": "Your edit could not be confirmed. Your edited text is kept. Try saving again."
+    "message": "We could not confirm whether your edit was saved. Your edited text is kept. Copy it, then cancel and reload this conversation to check the saved message before saving again."
   },
   "editMessage_changed": {
-    "message": "This message changed while you were editing. Your edited text is kept. Copy it, then cancel and reopen the message to review the latest version."
+    "message": "The saved message has changed. Your edited text is kept. Copy it, then cancel and reload this conversation to review the latest version."
+  },
+  "editMessage_busy": {
+    "message": "A reply is still in progress. Your edited text is kept. Wait for it to finish, then save your edit."
+  },
+  "editMessage_scope": {
+    "message": "The server or signed-in account changed. Your edited text is kept. Copy it, then return to the intended server and account and reload this conversation."
+  },
+  "editMessage_unsupported": {
+    "message": "This conversation does not support this edit action yet. Your edited text is kept. Copy it before cancelling."
+  },
+  "editMessage_payload": {
+    "message": "Only non-empty plain-text messages can be saved here. Your edited text is kept. Copy it before cancelling."
+  },
+  "editMessage_sync": {
+    "message": "Your sync setup does not support editing saved messages yet. Your edited text is kept. Copy it before cancelling."
+  },
+  "editMessage_retired": {
+    "message": "The conversation or edited text changed during this save. Your edited text is kept. Review the current message before saving again."
+  },
+  "editMessage_setup": {
+    "message": "Your edited text is kept. Review the conversation setup, then try Save & Send again."
+  },
+  "editMessage_unavailable": {
+    "message": "The saved message is unavailable in this conversation. Your edited text is kept. Copy it, then cancel and reload this conversation to review its current messages."
+  },
+  "editMessage_access": {
+    "message": "This account or connection cannot access the saved message. Your edited text is kept. Copy it, then check your server connection and sign-in and reload this conversation."
+  },
+  "editMessage_copy": {
+    "message": "Copy edit"
+  },
+  "editMessage_copied": {
+    "message": "Edit copied"
+  },
+  "editMessage_copying": {
+    "message": "Copying edit..."
+  },
+  "editMessage_copyFailed": {
+    "message": "Copy failed. Select your edited text and use your browser's Copy command."
   },
   "submit": {
     "message": "Submit"

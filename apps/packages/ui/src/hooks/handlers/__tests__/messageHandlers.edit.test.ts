@@ -469,3 +469,46 @@ it("native character edit admits matching backend sender-role metadata without r
   expect(setMessages).not.toHaveBeenCalled()
   expect(setHistory).not.toHaveBeenCalled()
 })
+
+
+it.each(["conflict", "unsupported"])(
+  "edit notifications use safe recovery for %s",
+  async (kind) => {
+    const notify = { error: vi.fn() }
+    const failure = Object.assign(
+      new Error("/api/v1/messages/private-id secret-token-value"),
+      { status: 409 }
+    )
+    const setMessages = vi.fn(),
+      setHistory = vi.fn(),
+      onSubmit = vi.fn()
+    const edit = createEditMessage({
+      messages: [{ id: "u", isBot: false, name: "You", message: "Original" }],
+      history: [],
+      historyId: "chat",
+      setMessages,
+      setHistory,
+      onSubmit,
+      validateBeforeSubmitFn: () => true,
+      mutate: async () => {
+        throw failure
+      },
+      notification: notify as any
+    })
+    await expect(
+      edit(0, "Retained edit", true, kind === "unsupported")
+    ).rejects.toThrow()
+    expect(notify.error).toHaveBeenCalledOnce()
+    expect(notify.error.mock.calls[0][0].description).toMatch(
+      kind === "conflict"
+        ? /saved message has changed/i
+        : /does not support this edit action/i
+    )
+    expect(notify.error.mock.calls[0][0].description).not.toMatch(
+      /unsupported_|private-id|secret-token|api\/v1/
+    )
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  }
+)

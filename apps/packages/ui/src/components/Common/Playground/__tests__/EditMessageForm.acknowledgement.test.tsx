@@ -163,7 +163,7 @@ it("a changed canonical message preserves the authored edit and blocks an unrevi
   fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
   expect(submit).not.toHaveBeenCalled()
   expect(view.close).not.toHaveBeenCalled()
-  expect(screen.getByRole("alert")).toHaveTextContent("message changed")
+  expect(screen.getByRole("alert")).toHaveTextContent(/saved message has changed/i)
 })
 
 it("one in-flight attempt prevents repeated submit before a render", async () => {
@@ -251,7 +251,7 @@ it("canonical edit/undo cannot certify an old held acknowledgement", async () =>
   })
   expect(view.close).not.toHaveBeenCalled()
   expect(view.editor).toHaveValue("Exact authored edit  \n")
-  expect(screen.getByRole("alert")).toHaveTextContent("message changed")
+  expect(screen.getByRole("alert")).toHaveTextContent(/saved message has changed/i)
 })
 
 it("an external canonical transition retires an expected delayed acknowledgement", async () => {
@@ -267,11 +267,11 @@ it("an external canonical transition retires an expected delayed acknowledgement
   view.rerender(
     <EditMessageForm {...view.props} value="External canonical update" />
   )
-  expect(screen.getByRole("alert")).toHaveTextContent("message changed")
+  expect(screen.getByRole("alert")).toHaveTextContent(/saved message has changed/i)
   view.rerender(
     <EditMessageForm {...view.props} value={"Exact authored edit  \n"} />
   )
-  expect(screen.getByRole("alert")).toHaveTextContent("message changed")
+  expect(screen.getByRole("alert")).toHaveTextContent(/saved message has changed/i)
   fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
   expect(submit).toHaveBeenCalledOnce()
   expect(view.close).not.toHaveBeenCalled()
