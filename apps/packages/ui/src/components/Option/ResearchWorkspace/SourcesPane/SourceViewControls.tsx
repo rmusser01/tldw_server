@@ -779,11 +779,17 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
               }}
               onPressEnter={() => void submit()}
             />
-            {nameTouched && nameInvalid && (
-              <p id={nameErrorId} role="alert" className="text-xs text-error">
-                Name must contain between 1 and 120 characters.
-              </p>
-            )}
+            {/* Keep the footer still when pointer-down blurs an invalid name. */}
+            <p
+              id={nameErrorId}
+              role="alert"
+              className="text-xs text-error"
+              style={{
+                visibility: nameTouched && nameInvalid ? "visible" : "hidden"
+              }}
+            >
+              Name must contain between 1 and 120 characters.
+            </p>
             {controller.serializationIssues.length > 0 && (
               <ul role="alert" className="space-y-1 text-xs text-error">
                 {controller.serializationIssues.map((issue) => (

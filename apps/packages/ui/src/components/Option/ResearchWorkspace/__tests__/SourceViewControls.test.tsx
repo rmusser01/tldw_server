@@ -177,6 +177,40 @@ describe("SourceViewControls", () => {
     vi.clearAllMocks()
   })
 
+  it("reserves hidden validation text and exposes it only for an invalid touched name", async () => {
+    const model = controller()
+    render(<Harness model={model} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    await waitFor(() => expect(dialog).toBeVisible())
+    const input = within(dialog).getByRole("textbox", { name: "View name" })
+    const save = within(dialog).getByRole("button", { name: "Save" })
+    const feedback = within(dialog).getByText(/Name must contain between 1 and 120/)
+    expect(feedback).not.toBeVisible()
+    expect(within(dialog).queryByRole("alert")).toBeNull()
+    expect(input).not.toHaveAttribute("aria-describedby")
+    expect(input).toHaveAttribute("aria-invalid", "false")
+    expect(save).toBeDisabled()
+
+    fireEvent.blur(input)
+    expect(within(dialog).getByRole("alert")).toBe(feedback)
+    expect(feedback).toBeVisible()
+    expect(input).toHaveAccessibleDescription(feedback.textContent ?? "")
+    for (const value of ["   ", "x".repeat(121)]) {
+      fireEvent.change(input, { target: { value } })
+      expect(input).toHaveAttribute("aria-invalid", "true")
+      expect(save).toBeDisabled()
+      expect(within(dialog).getByRole("alert")).toBe(feedback)
+    }
+    fireEvent.change(input, { target: { value: "x".repeat(120) } })
+    expect(feedback).not.toBeVisible()
+    expect(within(dialog).queryByRole("alert")).toBeNull()
+    expect(input).toHaveAttribute("aria-invalid", "false")
+    expect(input).not.toHaveAttribute("aria-describedby")
+    expect(save).toBeEnabled()
+    expect(model.createView).not.toHaveBeenCalled()
+  })
+
   it("renders fixed-order grouped built-ins and saved views and applies them by keyboard", async () => {
     const user = userEvent.setup()
     const model = controller()
