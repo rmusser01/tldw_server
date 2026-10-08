@@ -1,13 +1,27 @@
-import { readSurfaceOfflineDraftQueue, retainSurfaceOfflineDraft } from "@/components/Notes/notes-manager-utils"
-import { createNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
-import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
-import { Storage as PlasmoStorage } from "@plasmohq/storage"
-vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
-import type { BgRequestInit } from "@/services/background-proxy"
-import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QuickNotesSection } from "../StudioPane/QuickNotesSection"
+import {
+  readSurfaceOfflineDraftQueue,
+  retainSurfaceOfflineDraft,
+} from "@/components/Notes/notes-manager-utils";
+import { createNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope";
+import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events";
+import { Storage as PlasmoStorage } from "@plasmohq/storage";
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
+);
+import type { BgRequestInit } from "@/services/background-proxy";
+import React from "react";
+import { Modal } from "antd";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QuickNotesSection } from "../StudioPane/QuickNotesSection";
 import { useWorkspaceStore, buildWorkspaceSnapshot } from "@/store/workspace";
 import type { WorkspaceNote } from "@/types/workspace"
 
@@ -94,7 +108,13 @@ const writes = () =>
 const beginSave = async (boundary: "GET" | "PUT" | "POST") => {
   const gate = deferred()
   const initial = draft()
-  if (boundary === "POST") initial.id = undefined
+  if (boundary === "POST") {
+    initial.id = undefined;
+    const queueId = crypto.randomUUID();
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce(queueId)
+      .mockReturnValueOnce(noteId);
+  }
   if (boundary === "PUT") initial.version = 3
   useWorkspaceStore.setState({ currentNote: initial })
   mocks.request.mockImplementation(async (request: BgRequestInit) => {
@@ -159,7 +179,25 @@ function changeContext(change: string) {
   }
 }
 beforeEach(() => {
-  vi.clearAllMocks()
+  const tails = new Map<string, Promise<unknown>>();
+  vi.stubGlobal(
+    "navigator",
+    Object.create(window.navigator, {
+      locks: {
+        value: {
+          request: (key: string, operation: () => unknown) => {
+            const next = (tails.get(key) ?? Promise.resolve()).then(operation);
+            tails.set(
+              key,
+              next.catch(() => undefined),
+            );
+            return next;
+          },
+        },
+      },
+    }),
+  );
+  vi.clearAllMocks();
   window.localStorage.clear();
   mocks.serverUrl = "https://research-a.example"
   mocks.userId = "alice"
@@ -263,11 +301,14 @@ describe("Quick Notes save ownership across requests and acknowledgment", () => 
         title: "Newer title",
         content: "Newer body",
         keywords: ["newer"],
-        isDirty: true
-      })
-      expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument()
-      fireEvent.click(screen.getByRole("button", { name: /^(Save|Update)$/ }))
-      await waitFor(() => expect(writes()).toHaveLength(2))
+        pendingNoteWriteKey: expect.stringContaining(
+          'surface:quick-notes:["workspace-a","workspace:a"]:',
+        ),
+        isDirty: true,
+      });
+      expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^(Save|Update)$/ }));
+      await waitFor(() => expect(writes()).toHaveLength(2));
       expect(writes()[1][0]).toMatchObject({
         path: `/api/v1/notes/${noteId}`,
         method: "PUT",
@@ -451,14 +492,17 @@ it.each([
       const attempts = writes().length
       if (attempts === 1) throw new Error("Lost acknowledgment")
       if (attempts === 2)
-        throw Object.assign(new Error(message), { status, details: { detail } })
-      return { ...request.body, id: noteId, version: 1 }
-    })
-    render(<QuickNotesSection />)
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(writes()).toHaveLength(2))
+        throw Object.assign(new Error(message), {
+          status,
+          details: { detail },
+        });
+      return { ...request.body, id: request.body.id, version: 1 };
+    });
+    render(<QuickNotesSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(writes()).toHaveLength(2));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled()
     )
@@ -748,30 +792,46 @@ it("publishes the canonical create identity before collapse interrupts asynchron
   useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } })
   const notes = new Map<string, Record<string, unknown>>()
   mocks.request.mockImplementation(async (request: BgRequestInit) => {
-    if (request.path.includes("/search/")) return []
-    const id = String(request.body.id || crypto.randomUUID())
-    const saved = { ...request.body, id, version: 1 }
-    notes.set(id, saved)
-    return saved
-  })
-  const gate = deferred()
-  const remove = PlasmoStorage.prototype.remove
-  const retiring = vi.spyOn(PlasmoStorage.prototype, "remove").mockImplementation(async function(key) {
-    await gate.promise
-    return remove.call(this, key)
-  })
-  render(<CollapsibleQuickNotes />)
-  fireEvent.click(screen.getByRole("button", { name: "Save" }))
-  await waitFor(() => expect(retiring).toHaveBeenCalled())
-  expect(useWorkspaceStore.getState().currentNote.id).toBe(writes()[0][0].body.id)
-  fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
-  await act(async () => { gate.resolve(); await gate.promise })
-  retiring.mockRestore()
-  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }))
-  expect(document.body.contains(await screen.findByRole("button", { name: "Update" }))).toBe(true)
-  expect(notes.size).toBe(1)
-})
-
+    if (request.path.includes("/search/")) return [];
+    const id = String(request.body.id || crypto.randomUUID());
+    const saved = { ...request.body, id, version: 1 };
+    notes.set(id, saved);
+    return saved;
+  });
+  const gate = deferred();
+  const set = PlasmoStorage.prototype.set;
+  const retiring = vi
+    .spyOn(PlasmoStorage.prototype, "set")
+    .mockImplementation(async function (key, value) {
+      if (value?.value?.metadata?.quickNotesAcceptedKey) await gate.promise;
+      return set.call(this, key, value);
+    });
+  render(<CollapsibleQuickNotes />);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(
+      retiring.mock.calls.some(
+        ([, value]) => value?.value?.metadata?.quickNotesAcceptedKey,
+      ),
+    ).toBe(true),
+  );
+  expect(useWorkspaceStore.getState().currentNote.id).toBe(
+    writes()[0][0].body.id,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+  await act(async () => {
+    gate.resolve();
+    await gate.promise;
+  });
+  retiring.mockRestore();
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
+  expect(
+    document.body.contains(
+      await screen.findByRole("button", { name: "Update" }),
+    ),
+  ).toBe(true);
+  expect(notes.size).toBe(1);
+});
 
 it.each(["base-path", "org", "auth-source"])(
   "refuses retained Quick Notes adoption after a same-owner %s service change",
@@ -1131,15 +1191,24 @@ it.each(["newer", "cleared", "replaced", "authority", "workspace", "multiple"])(
         method: "POST",
       });
       expect(writes()[1][0].abortSignal).not.toBe(writes()[0][0].abortSignal);
-      await waitFor(async () =>
-        expect(
-          Object.keys(
-            await readSurfaceOfflineDraftQueue(
-              createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
-            ),
+      await waitFor(async () => {
+        const rows = Object.values(
+          await readSurfaceOfflineDraftQueue(
+            createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
           ),
-        ).toHaveLength(0),
-      );
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          noteId: writes()[0][0].body.id,
+          baseVersion: 1,
+          metadata: {
+            quickNotesAcceptedKey: writes()[0][0].headers["Idempotency-Key"],
+            quickNotesDirty: false,
+          },
+        });
+        expect(rows[0].pendingWrite).toBeUndefined();
+        expect(rows[0].metadata?.quickNotesAuthorityId).toBeTruthy();
+      });
       expect(receipts.size).toBe(1);
     }
     expect(useWorkspaceStore.getState().currentNote).toBe(liveDraft);
@@ -1629,9 +1698,20 @@ it("keeps a migrated acknowledged new create recoverable until explicit previous
   await waitFor(() => expect(mocks.open).toHaveBeenCalled());
   const recovery = render(mocks.open.mock.calls.at(-1)![0].content);
   fireEvent.click(screen.getByRole("button", { name: "Retry previous save" }));
-  await waitFor(async () =>
-    expect(await readSurfaceOfflineDraftQueue(owner)).toEqual({}),
-  );
+  await waitFor(async () => {
+    const rows = Object.values(await readSurfaceOfflineDraftQueue(owner));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      noteId: writes()[0][0].body.id,
+      baseVersion: 1,
+      metadata: {
+        quickNotesAcceptedKey: writes()[0][0].headers["Idempotency-Key"],
+        quickNotesDirty: false,
+      },
+    });
+    expect(rows[0].pendingWrite).toBeUndefined();
+    expect(rows[0].metadata?.quickNotesAuthorityId).toBeTruthy();
+  });
   expect(writes()[1][0]).toMatchObject({
     body: writes()[0][0].body,
     headers: writes()[0][0].headers,
@@ -1708,4 +1788,445 @@ it("keeps the durable create operation through migrated in-memory UUID edits and
     screen.getByRole("button", { name: "Retry previous save" }),
   ).toBeTruthy();
   recovery.unmount();
+});
+
+afterEach(() => {
+  Modal.destroyAll();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+it("recovers later local text after a tombstoned reload through explicit retry and dirty resume", async () => {
+  localStorage.setItem(
+    "tldw:research-workspace:migration:tombstone:workspace-a",
+    JSON.stringify({
+      legacyWorkspaceId: "workspace-a",
+      serverWorkspaceId: "workspace-a",
+      migrationId: "migration-a",
+      contentRetained: false,
+      deletedAt: "2026-10-08T00:00:00Z",
+    }),
+  );
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
+  const serverSnapshot = buildWorkspaceSnapshot(useWorkspaceStore.getState());
+  const owner = createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId);
+  const gate = deferred();
+  const serverNotes = new Map<string, unknown>();
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return [];
+    if (request.method === "POST") {
+      serverNotes.set(String(request.body.id), request.body);
+      if (writes().length === 1) {
+        await gate.promise;
+        throw new Error("Lost response");
+      }
+      return { ...request.body, id: request.body.id, version: 2 };
+    }
+    if (request.method === "PUT") throw { status: 409 };
+    return {
+      id: [...serverNotes.keys()][0],
+      title: "Remote newer",
+      content: "Remote version 3",
+      version: 3,
+    };
+  });
+  render(<CollapsibleQuickNotes />);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  fireEvent.change(screen.getByLabelText("Note title"), {
+    target: { value: "Later local title" },
+  });
+  fireEvent.change(screen.getByLabelText("Note content"), {
+    target: { value: "Later local body" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+  await act(async () => {
+    gate.resolve();
+    await gate.promise;
+  });
+  await waitFor(async () =>
+    expect(
+      Object.values(await readSurfaceOfflineDraftQueue(owner))[0],
+    ).toMatchObject({
+      title: "Later local title",
+      content: "Later local body",
+      pendingWrite: { body: writes()[0][0].body },
+    }),
+  );
+  await act(async () => {
+    await useWorkspaceStore.persist.rehydrate();
+  });
+  act(() => {
+    useWorkspaceStore.getState().restoreServerWorkspace(serverSnapshot);
+    useWorkspaceStore.getState().clearCurrentNote();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
+  const retry = await screen.findByRole("button", {
+    name: "Retry previous save",
+  });
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  fireEvent.click(retry);
+  const resume = await screen.findByRole("button", {
+    name: "Resume local unsaved draft",
+  });
+  expect(useWorkspaceStore.getState().currentNote.content).toBe("");
+  expect(writes()[1][0]).toMatchObject({
+    method: "POST",
+    body: writes()[0][0].body,
+    headers: writes()[0][0].headers,
+  });
+  expect(serverNotes.size).toBe(1);
+  fireEvent.click(resume);
+  await waitFor(() =>
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: [...serverNotes.keys()][0],
+      title: "Later local title",
+      content: "Later local body",
+      version: 2,
+      isDirty: true,
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Update" }));
+  await waitFor(() => expect(writes()).toHaveLength(3));
+  expect(writes()[2][0].headers["expected-version"]).toBe("2");
+  await waitFor(() =>
+    expect(
+      mocks.open.mock.calls.some(
+        ([entry]) => entry.key === "workspace-note-version-conflict",
+      ),
+    ).toBe(true),
+  );
+  const rejected = Object.values(await readSurfaceOfflineDraftQueue(owner))[0];
+  expect(rejected).toMatchObject({
+    content: "Later local body",
+    noteId: [...serverNotes.keys()][0],
+    baseVersion: 2,
+    metadata: {
+      quickNotesRejectedKey: writes()[2][0].headers["Idempotency-Key"],
+      quickNotesDirty: true,
+    },
+  });
+  expect(rejected.pendingWrite).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+  await act(async () => {
+    await useWorkspaceStore.persist.rehydrate();
+  });
+  act(() => {
+    useWorkspaceStore.getState().restoreServerWorkspace(serverSnapshot);
+    useWorkspaceStore.getState().clearCurrentNote();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Resume local unsaved draft" }),
+  );
+  await waitFor(() =>
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      content: "Later local body",
+      version: 2,
+      isDirty: true,
+    }),
+  );
+});
+
+it("retains edits made during delayed ACK checkpoint readback without an absent-row window", async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
+  const owner = createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId);
+  const gate = deferred();
+  let entered = false;
+  let accepted = false;
+  const get = PlasmoStorage.prototype.get;
+  const delayed = vi
+    .spyOn(PlasmoStorage.prototype, "get")
+    .mockImplementation(async function (key: string) {
+      const value = await get.call(this, key);
+      if (
+        accepted &&
+        key.startsWith("tldw:notesOfflineDraftQueue:v1:") &&
+        !entered
+      ) {
+        entered = true;
+        await gate.promise;
+      }
+      return value;
+    });
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return [];
+    accepted = true;
+    return { ...request.body, id: request.body.id, version: 2 };
+  });
+  render(<QuickNotesSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(entered).toBe(true));
+  fireEvent.change(screen.getByLabelText("Note content"), {
+    target: { value: "Edited during ACK readback" },
+  });
+  await act(async () => {
+    gate.resolve();
+    await gate.promise;
+  });
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled());
+  delayed.mockRestore();
+  await waitFor(async () =>
+    expect(
+      Object.values(await readSurfaceOfflineDraftQueue(owner))[0],
+    ).toMatchObject({
+      content: "Edited during ACK readback",
+      noteId: writes()[0][0].body.id,
+      baseVersion: 2,
+    }),
+  );
+  expect(
+    Object.values(await readSurfaceOfflineDraftQueue(owner))[0].pendingWrite,
+  ).toBeUndefined();
+});
+
+it("confirms dirty saved-note selection before requesting or replacing the current draft", async () => {
+  mocks.request.mockImplementation(async (request: BgRequestInit) =>
+    request.path.includes("/search/")
+      ? [
+          {
+            id: otherId,
+            title: "Saved chip",
+            content: "Canonical body",
+            version: 3,
+            keywords: ["workspace:a"],
+          },
+        ]
+      : {
+          id: otherId,
+          title: "Saved chip",
+          content: "Canonical body",
+          version: 3,
+        },
+  );
+  render(<QuickNotesSection />);
+  fireEvent.click(await screen.findByRole("button", { name: "Saved chip" }));
+  expect(useWorkspaceStore.getState().currentNote.content).toBe(
+    "Original draft body",
+  );
+  expect(
+    mocks.request.mock.calls.filter(
+      ([request]) => request.path === `/api/v1/notes/${otherId}`,
+    ),
+  ).toHaveLength(0);
+  const confirm = await screen.findByRole("dialog");
+  expect(confirm.textContent).toContain("Unsaved Changes");
+  fireEvent.click(screen.getByRole("button", { name: "OK" }));
+  await waitFor(() =>
+    expect(useWorkspaceStore.getState().currentNote.id).toBe(otherId),
+  );
+});
+
+it.each([
+  "server",
+  "account",
+  "workspace-return",
+  "note-return",
+  "clear-then-type",
+  "edit",
+])("rejects a late saved-note GET after %s changes", async (change) => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), isDirty: false } });
+  const gate = deferred();
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/"))
+      return [{ id: otherId, title: "Saved chip", keywords: ["workspace:a"] }];
+    await gate.promise;
+    return {
+      id: otherId,
+      title: "Saved chip",
+      content: "Canonical body",
+      version: 3,
+    };
+  });
+  render(<QuickNotesSection />);
+  fireEvent.click(await screen.findByRole("button", { name: "Saved chip" }));
+  await waitFor(() =>
+    expect(
+      mocks.request.mock.calls.some(
+        ([request]) => request.path === `/api/v1/notes/${otherId}`,
+      ),
+    ).toBe(true),
+  );
+  act(() => {
+    if (change === "edit")
+      useWorkspaceStore.getState().updateNoteContent("Later text");
+    else changeContext(change);
+  });
+  const expected = useWorkspaceStore.getState().currentNote;
+  await act(async () => {
+    gate.resolve();
+    await gate.promise;
+  });
+  expect(useWorkspaceStore.getState().currentNote).toBe(expected);
+});
+
+it.each([
+  "server",
+  "account",
+  "workspace-return",
+  "note-return",
+  "clear-then-type",
+  "edit",
+])(
+  "rejects a late explicit conflict reload after %s changes",
+  async (change) => {
+    useWorkspaceStore.setState({ currentNote: { ...draft(), version: 2 } });
+    const gate = deferred();
+    let readCount = 0;
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return [];
+      if (request.method === "PUT")
+        throw { status: 409, message: "version conflict" };
+      if (++readCount > 1) await gate.promise;
+      return { ...draft(), content: "Remote newer", version: 3 };
+    });
+    render(<QuickNotesSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() =>
+      expect(
+        mocks.open.mock.calls.some(
+          ([entry]) => entry.key === "workspace-note-version-conflict",
+        ),
+      ).toBe(true),
+    );
+    const message = render(
+      mocks.open.mock.calls.find(
+        ([entry]) => entry.key === "workspace-note-version-conflict",
+      )![0].content,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest" }));
+    await waitFor(() => expect(readCount).toBe(2));
+    act(() => {
+      if (change === "edit")
+        useWorkspaceStore.getState().updateNoteContent("Later text");
+      else changeContext(change);
+    });
+    const expected = useWorkspaceStore.getState().currentNote;
+    await act(async () => {
+      gate.resolve();
+      await gate.promise;
+    });
+    expect(useWorkspaceStore.getState().currentNote).toBe(expected);
+    message.unmount();
+  },
+);
+
+it.each(["cancel", "workspace", "account", "clear", "confirm"])(
+  "keeps explicit local draft resume separate from a dirty replacement through %s",
+  async (boundary) => {
+    const { servicePromptAuthorityKey } =
+      await import("@/services/tldw/domains/service-prompts");
+    const { loadServicePromptSnapshot } =
+      await import("@/services/service-prompts");
+    const { checkpointQuickNotesOfflineDraft } =
+      await import("@/components/Notes/notes-manager-utils");
+    const scope = await loadServicePromptSnapshot([]);
+    const authorityId = servicePromptAuthorityKey(scope.requestScope);
+    scope.release();
+    const owner = createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId);
+    const entry = {
+      key: 'surface:quick-notes:["workspace-a","workspace:a"]:retained-a',
+      noteId: null,
+      baseVersion: null,
+      title: "Retained title",
+      content: "Later retained text",
+      keywords: [],
+      metadata: {
+        quickNotesAuthorityId: authorityId,
+        quickNotesWorkspaceId: "workspace-a",
+        quickNotesWorkspaceTag: "workspace:a",
+      },
+      backlinkConversationId: null,
+      backlinkMessageId: null,
+      updatedAt: "2026-10-08T00:00:00Z",
+      syncState: "queued" as const,
+      lastError: null,
+      pendingWrite: {
+        authorityId,
+        key: "retained-key",
+        body: {
+          id: noteId,
+          title: "Old",
+          content: "Old body",
+          keywords: ["workspace:a"],
+        },
+        expectedVersion: null,
+      },
+    };
+    await retainSurfaceOfflineDraft(owner, entry);
+    await checkpointQuickNotesOfflineDraft(
+      owner,
+      entry.key,
+      "retained-key",
+      () => null,
+      { id: noteId, version: 2 },
+    );
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+        deletedAt: "2026-10-08T00:00:00Z",
+      }),
+    );
+    useWorkspaceStore.getState().clearCurrentNote();
+    mocks.request.mockResolvedValue([]);
+    let confirmation: Parameters<typeof Modal.confirm>[0] | undefined;
+    vi.spyOn(Modal, "confirm").mockImplementation((config) => {
+      confirmation = config;
+      return { destroy: vi.fn(), update: vi.fn() };
+    });
+    render(<QuickNotesSection />);
+    await screen.findByRole("button", { name: "Resume local unsaved draft" });
+    fireEvent.change(screen.getByLabelText("Note content"), {
+      target: { value: "Unrelated replacement" },
+    });
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      content: "Unrelated replacement",
+      isDirty: true,
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Resume local unsaved draft" }),
+    );
+    expect(confirmation?.title).toBe("Unsaved Changes");
+    if (
+      boundary === "workspace" ||
+      boundary === "account" ||
+      boundary === "clear"
+    )
+      act(() => changeContext(boundary));
+    const expected = useWorkspaceStore.getState().currentNote;
+    if (boundary !== "cancel")
+      await act(async () => {
+        await confirmation?.onOk?.();
+      });
+    if (boundary === "confirm")
+      expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+        id: noteId,
+        version: 2,
+        content: "Later retained text",
+        isDirty: true,
+      });
+    else expect(useWorkspaceStore.getState().currentNote).toBe(expected);
+    expect(writes()).toHaveLength(0);
+  },
+);
+
+it("reports missing record-lock persistence and dispatches no unsafe save", async () => {
+  vi.stubGlobal(
+    "navigator",
+    Object.create(window.navigator, { locks: { value: undefined } }),
+  );
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
+  mocks.request.mockResolvedValue([]);
+  render(<QuickNotesSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(mocks.error).toHaveBeenCalledWith(
+      expect.stringContaining("Could not retain the current local note draft"),
+    ),
+  );
+  expect(writes()).toHaveLength(0);
 });

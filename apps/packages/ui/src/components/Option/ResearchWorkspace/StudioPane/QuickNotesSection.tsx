@@ -3,6 +3,9 @@ import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { createNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
 import {
   readSurfaceOfflineDraftQueue,
+  checkpointQuickNotesOfflineDraft,
+  quickNotesDraftMatchesWrite,
+  isQuickNotesRetainedDraft,
   retainSurfaceOfflineDraft,
   retireSurfaceOfflineDraft,
   type OfflineDraftEntry
@@ -310,10 +313,13 @@ interface QuickNotesSectionProps {
 export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse }) => {
   const { t } = useTranslation(["playground", "common"])
   const [messageApi, contextHolder] = message.useMessage()
+  const messageApiRef = useRef(messageApi)
+  messageApiRef.current = messageApi
 
   // Store state
   const currentNote = useWorkspaceStore((s) => s.currentNote)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
+  const activeWorkspaceId = useWorkspaceStore((s) => s.workspaceId)
   const noteFocusTarget = useWorkspaceStore((s) => s.noteFocusTarget)
 
   // Store actions
@@ -328,6 +334,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   // Local state
   const [isSaving, setIsSaving] = useState(false)
   const saveControllerRef = useRef<AbortController | null>(null)
+  const readControllerRef = useRef<AbortController | null>(null)
   const pendingSaveRef = useRef<{
     authorityScope: string;
     entry: OfflineDraftEntry;
@@ -340,6 +347,155 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     body: Record<string, unknown>;
     headers: Record<string, string>;
   } | null>(null);
+  const draftBindingRef = useRef<{
+    authorityScope: string;
+    authorityId: string;
+    key: string;
+    pendingKey: string;
+    workspaceId: string | null;
+    workspaceTag: string;
+    noteId: typeof currentNote.id;
+    active: boolean;
+    latest: typeof currentNote;
+  } | null>(null);
+  const [recoverableDrafts, setRecoverableDrafts] = useState<
+    OfflineDraftEntry[]
+  >([]);
+  const [recoveryRevision, setRecoveryRevision] = useState(0);
+  const draftSnapshot = (
+    binding: NonNullable<typeof draftBindingRef.current>,
+  ) =>
+    binding.active
+      ? {
+          title: binding.latest.title,
+          content: binding.latest.content,
+          keywords: binding.latest.keywords,
+          isDirty: binding.latest.isDirty,
+          metadata: {
+            ...knowledgeNoteHead(binding.latest),
+            pendingKnowledgeProvenance:
+              binding.latest.pendingKnowledgeProvenance,
+            quickNotesAuthorityId: binding.authorityId,
+            quickNotesWorkspaceId: binding.workspaceId,
+            quickNotesWorkspaceTag: binding.workspaceTag,
+          },
+        }
+      : null;
+  const flushBoundDraft = useCallback(() => {
+    const binding = draftBindingRef.current;
+    if (!binding?.active) return Promise.resolve(null);
+    return checkpointQuickNotesOfflineDraft(
+      binding.authorityScope,
+      binding.key,
+      binding.pendingKey,
+      () => draftSnapshot(binding),
+    ).catch(() => {
+      messageApiRef.current.error(
+        "Could not retain the current local note draft on this device. Keep the editor open and retry after storage is available.",
+      );
+      return null;
+    });
+  }, []);
+  useEffect(() => {
+    const stop = useWorkspaceStore.subscribe((state) => {
+      const binding = draftBindingRef.current;
+      if (!binding?.active) return;
+      if (
+        state.workspaceId !== binding.workspaceId ||
+        state.workspaceTag !== binding.workspaceTag ||
+        state.currentNote.id !== binding.noteId ||
+        state.currentNote.pendingNoteWriteKey !== binding.key
+      ) {
+        binding.active = false;
+        draftBindingRef.current = null;
+        return;
+      }
+      binding.latest = state.currentNote;
+      void flushBoundDraft();
+    });
+    const stopOwner = watchChatAccountChanges((invalidated) => {
+      if (!invalidated) return;
+      if (draftBindingRef.current) draftBindingRef.current.active = false;
+      draftBindingRef.current = null;
+      setRecoverableDrafts([]);
+      setRecoveryRevision((value) => value + 1);
+    });
+    const flush = () => {
+      void flushBoundDraft();
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      flush();
+      stop();
+      stopOwner();
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [flushBoundDraft]);
+
+  const blankDraft =
+    !currentNote.id && !currentNote.title && !currentNote.content;
+  useEffect(() => {
+    if (
+      !blankDraft ||
+      !activeWorkspaceId ||
+      !hasResearchWorkspaceMigrationTombstone(activeWorkspaceId)
+    )
+      return;
+    const controller = new AbortController();
+    const stopOwner = watchChatAccountChanges((invalidated) => {
+      if (invalidated) controller.abort();
+    });
+    void (async () => {
+      const scope = await loadServicePromptSnapshot([], {
+        signal: controller.signal,
+      });
+      try {
+        const user =
+          scope.requestScope.userId == null
+            ? await tldwAuth.getCurrentUser()
+            : null;
+        const ownerId =
+          scope.requestScope.userId ?? (user?.is_active ? user.id : null);
+        if (ownerId == null) return;
+        const authority = servicePromptAuthorityKey(scope.requestScope);
+        const queue = await readSurfaceOfflineDraftQueue(
+          createNotesGraphAuthorityScope(
+            scope.requestScope.config.serverUrl,
+            ownerId,
+          ),
+        );
+        if (
+          controller.signal.aborted ||
+          scope.scopeSignal.aborted ||
+          scope.scopeInvalidatedSignal.aborted
+        )
+          return;
+        const prefix = `surface:quick-notes:${JSON.stringify([activeWorkspaceId, workspaceTag])}:`;
+        setRecoverableDrafts(
+          Object.values(queue).filter(
+            (entry) =>
+              entry.key.startsWith(prefix) &&
+              (entry.pendingWrite?.authorityId === authority ||
+                (isQuickNotesRetainedDraft(entry) &&
+                  entry.metadata?.quickNotesAuthorityId === authority &&
+                  entry.metadata.quickNotesDirty)),
+          ),
+        );
+      } finally {
+        scope.release();
+      }
+    })().catch(() => {
+      if (!controller.signal.aborted)
+        messageApiRef.current.error(
+          "Could not read retained local notes on this device.",
+        );
+    });
+    return () => {
+      controller.abort();
+      stopOwner();
+    };
+  }, [activeWorkspaceId, workspaceTag, blankDraft, recoveryRevision]);
+
   const [showSavedIndicator, setShowSavedIndicator] = useState(false)
   const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
@@ -381,6 +537,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     return () => {
       clearSavedIndicatorTimer()
       saveControllerRef.current?.abort()
+      readControllerRef.current?.abort()
     }
   }, [clearSavedIndicatorTimer])
 
@@ -626,92 +783,178 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     searchNotes()
   }
 
-  // Handle note selection
-  const handleSelectNote = useCallback(async (note: NoteListItem) => {
-    try {
-      // Fetch full note details
-      const fullNote = await bgRequest<NoteListItem>({
-        path: `/api/v1/notes/${note.id}` as AllowedPath,
-        method: "GET"
-      })
-      hideSavedIndicator()
-      loadNote(serializeNoteForEditor(fullNote))
-      setIsLoadModalOpen(false)
-      messageApi.success(
-        t("playground:studio.noteLoaded", "Note loaded")
-      )
-    } catch (error) {
-      messageApi.error(
-        t("playground:studio.loadNoteError", "Failed to load note")
-      )
-    }
-  }, [hideSavedIndicator, loadNote, messageApi, serializeNoteForEditor, t])
+  const readCurrentNoteDetails = useCallback(
+    async (
+      id: string | number,
+      expected: ReturnType<typeof useWorkspaceStore.getState>,
+      apply: (note: NoteListItem) => void,
+    ) => {
+      const unchanged = () => {
+        const state = useWorkspaceStore.getState();
+        return (
+          state.currentNote === expected.currentNote &&
+          state.workspaceId === expected.workspaceId &&
+          state.workspaceTag === expected.workspaceTag
+        );
+      };
+      if (!unchanged()) return;
+      readControllerRef.current?.abort();
+      const controller = new AbortController();
+      readControllerRef.current = controller;
+      const stopDraft = useWorkspaceStore.subscribe(() => {
+        if (!unchanged()) controller.abort();
+      });
+      const stopOwner = watchChatAccountChanges((invalidated) => {
+        if (invalidated) controller.abort();
+      });
+      let scope: ServicePromptSnapshot | undefined;
+      try {
+        scope = await loadServicePromptSnapshot([], {
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted || scope.scopeInvalidatedSignal.aborted)
+          return;
+        const note = await bgRequest<NoteListItem>({
+          ...requestScopeFields(scope.requestScope),
+          abortSignal: scope.scopeSignal,
+          path: `/api/v1/notes/${encodeURIComponent(String(id))}` as AllowedPath,
+          method: "GET",
+        });
+        if (
+          !unchanged() ||
+          controller.signal.aborted ||
+          scope.scopeSignal.aborted ||
+          scope.scopeInvalidatedSignal.aborted
+        )
+          return;
+        apply(note);
+      } catch (error) {
+        if (!controller.signal.aborted) throw error;
+      } finally {
+        stopDraft();
+        stopOwner();
+        scope?.release();
+      }
+    },
+    [],
+  );
+
+  // Confirmation and its eventual GET both belong to the exact draft being replaced.
+  const handleSelectNote = useCallback(
+    (note: NoteListItem) => {
+      const expected = useWorkspaceStore.getState();
+      const select = async () => {
+        try {
+          await readCurrentNoteDetails(note.id, expected, (fullNote) => {
+            hideSavedIndicator();
+            loadNote(serializeNoteForEditor(fullNote));
+            setIsLoadModalOpen(false);
+            messageApi.success(
+              t("playground:studio.noteLoaded", "Note loaded"),
+            );
+          });
+        } catch {
+          messageApi.error(
+            t("playground:studio.loadNoteError", "Failed to load note"),
+          );
+        }
+      };
+      if (expected.currentNote.isDirty)
+        Modal.confirm({
+          title: t("playground:studio.unsavedChanges", "Unsaved Changes"),
+          content: "Replace the current unsaved draft with the saved note?",
+          onOk: select,
+        });
+      else void select();
+    },
+    [
+      hideSavedIndicator,
+      loadNote,
+      messageApi,
+      readCurrentNoteDetails,
+      serializeNoteForEditor,
+      t,
+    ],
+  );
 
   const handleReloadLatestAfterConflict = useCallback(async () => {
-    if (!currentNote.id) return
-
+    const expected = useWorkspaceStore.getState();
+    if (!expected.currentNote.id) return;
     const localDraft = {
-      title: currentNote.title.trim(),
-      content: currentNote.content.trim(),
-      keywords: [...currentNote.keywords]
-    }
+      title: expected.currentNote.title.trim(),
+      content: expected.currentNote.content.trim(),
+      keywords: [...expected.currentNote.keywords],
+    };
 
     try {
-      const latest = await bgRequest<NoteListItem>({
-        path: `/api/v1/notes/${currentNote.id}` as AllowedPath,
-        method: "GET"
-      })
+      await readCurrentNoteDetails(
+        expected.currentNote.id,
+        expected,
+        (latest) => {
+          const latestForEditor = serializeNoteForEditor(latest);
+          const latestKeywords = normalizeKeywords(
+            latestForEditor.keywords || [],
+          );
+          const mergedKeywords = normalizeKeywords([
+            ...latestKeywords,
+            ...localDraft.keywords,
+          ]);
 
-      const latestForEditor = serializeNoteForEditor(latest)
-      const latestKeywords = normalizeKeywords(latestForEditor.keywords || [])
-      const mergedKeywords = normalizeKeywords([
-        ...latestKeywords,
-        ...localDraft.keywords
-      ])
+          const titleChanged =
+            localDraft.title.length > 0 &&
+            localDraft.title !== latestForEditor.title.trim();
+          const contentChanged =
+            localDraft.content.length > 0 &&
+            localDraft.content !== latestForEditor.content.trim();
+          const keywordsChanged = localDraft.keywords.some(
+            (keyword) =>
+              !latestKeywords.some((existing) =>
+                isKeywordMatch(existing, keyword),
+              ),
+          );
 
-      const titleChanged =
-        localDraft.title.length > 0 && localDraft.title !== latestForEditor.title.trim()
-      const contentChanged =
-        localDraft.content.length > 0 &&
-        localDraft.content !== latestForEditor.content.trim()
-      const keywordsChanged = localDraft.keywords.some(
-        (keyword) =>
-          !latestKeywords.some((existing) => isKeywordMatch(existing, keyword))
-      )
+          const draftBlock = `## Local Draft (Unsaved)\n\n${localDraft.content}`;
+          const mergedContent = contentChanged
+            ? latestForEditor.content.trim()
+              ? `${latestForEditor.content.trim()}\n\n---\n\n${draftBlock}`
+              : draftBlock
+            : latestForEditor.content;
 
-      const draftBlock = `## Local Draft (Unsaved)\n\n${localDraft.content}`
-      const mergedContent = contentChanged
-        ? latestForEditor.content.trim()
-          ? `${latestForEditor.content.trim()}\n\n---\n\n${draftBlock}`
-          : draftBlock
-        : latestForEditor.content
-
-      hideSavedIndicator()
-      setCurrentNote({
-        ...knowledgeNoteHead(latestForEditor),
-        id: latestForEditor.id,
-        title: titleChanged ? localDraft.title : latestForEditor.title,
-        content: mergedContent,
-        keywords: mergedKeywords,
-        version: latestForEditor.version,
-        isDirty: titleChanged || contentChanged || keywordsChanged
-      })
-      setKeywordsInput(mergedKeywords.join(", "))
-      messageApi.success(
-        t(
-          "playground:studio.noteReloadedWithDraft",
-          "Loaded latest note and preserved your unsaved draft."
-        )
-      )
+          hideSavedIndicator();
+          setCurrentNote({
+            ...knowledgeNoteHead(latestForEditor),
+            id: latestForEditor.id,
+            title: titleChanged ? localDraft.title : latestForEditor.title,
+            content: mergedContent,
+            keywords: mergedKeywords,
+            version: latestForEditor.version,
+            isDirty: titleChanged || contentChanged || keywordsChanged,
+          });
+          setKeywordsInput(mergedKeywords.join(", "));
+          messageApi.success(
+            t(
+              "playground:studio.noteReloadedWithDraft",
+              "Loaded latest note and preserved your unsaved draft.",
+            ),
+          );
+        },
+      );
     } catch (error) {
       messageApi.error(
         t(
           "playground:studio.reloadLatestFailed",
-          "Failed to load the latest note version."
-        )
-      )
+          "Failed to load the latest note version.",
+        ),
+      );
     }
-  }, [currentNote, hideSavedIndicator, messageApi, serializeNoteForEditor, setCurrentNote, t])
+  }, [
+    hideSavedIndicator,
+    messageApi,
+    readCurrentNoteDetails,
+    serializeNoteForEditor,
+    setCurrentNote,
+    t,
+  ]);
 
   // Save one captured draft under one owner through version lookup and write.
   const handleSave = async (recovery?: { key: string; workspaceId: string | null; workspaceTag: string | null }) => {
@@ -1024,6 +1267,9 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           keywords: [...draft.keywords],
           metadata: {
             ...knowledgeNoteHead(draft),
+            quickNotesAuthorityId: authorityId,
+            quickNotesWorkspaceId: workspaceId,
+            quickNotesWorkspaceTag: draftWorkspaceTag,
             pendingKnowledgeProvenance: draft.pendingKnowledgeProvenance,
           },
           backlinkConversationId: null,
@@ -1062,6 +1308,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           "The retained note operation belongs to a different service authority. Restore that connection before retrying.",
         );
       if (!recovery) pendingSaveRef.current = pending;
+      pending.entry.metadata = {
+        ...pending.entry.metadata,
+        quickNotesAuthorityId: authorityId,
+        quickNotesWorkspaceId: workspaceId,
+        quickNotesWorkspaceTag: draftWorkspaceTag,
+      };
       await retainSurfaceOfflineDraft(authorityScope, pending.entry);
       if (!isCurrent()) return;
       if (!recovery) operationKey = pending.entry.key;
@@ -1074,6 +1326,22 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           ...useWorkspaceStore.getState().currentNote,
           pendingNoteWriteKey: operationKey,
         });
+      if (!recovery) {
+        draftBindingRef.current = {
+          authorityScope,
+          authorityId,
+          key: pending.entry.key,
+          pendingKey: pending.entry.pendingWrite!.key,
+          workspaceId,
+          workspaceTag: draftWorkspaceTag,
+          noteId: useWorkspaceStore.getState().currentNote.id,
+          active: true,
+          latest: useWorkspaceStore.getState().currentNote,
+        };
+        if (!(await flushBoundDraft()))
+          throw new Error("Could not retain the current note draft safely.");
+        if (!isCurrent()) return;
+      }
       const canonicalUpdateBound =
         canonicalNoteId &&
         canonicalWikilinkNoteId(pending.entry.noteId) === canonicalNoteId &&
@@ -1111,12 +1379,15 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       }
       if (recovery) {
         acknowledged = true;
-        await retireSurfaceOfflineDraft(
+        const retained = await checkpointQuickNotesOfflineDraft(
           authorityScope,
           pending.entry.key,
           pending.entry.pendingWrite!.key,
+          () => null,
+          saved,
         );
         if (!isCurrent()) return;
+        setRecoverableDrafts(retained?.metadata?.quickNotesDirty ? [retained] : []);
         pendingSaveRef.current = null;
         messageApi.open({
           type: "success",
@@ -1139,13 +1410,18 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       // The acknowledgment may assign the first canonical ID to this draft.
       noteId = saved.id
       pending.noteId = saved.id;
-      const unchanged =
-        latest.title === pending.draft.title &&
-        latest.content === pending.draft.content &&
-        JSON.stringify(latest.keywords) ===
-          JSON.stringify(pending.draft.keywords) &&
-        JSON.stringify(latest.pendingKnowledgeProvenance) ===
-          JSON.stringify(pending.draft.pendingKnowledgeProvenance);
+      if (draftBindingRef.current) draftBindingRef.current.noteId = saved.id;
+      const unchanged = quickNotesDraftMatchesWrite(
+        {
+          ...latest,
+          metadata: {
+            ...knowledgeNoteHead(latest),
+            quickNotesWorkspaceTag: draftWorkspaceTag,
+            pendingKnowledgeProvenance: latest.pendingKnowledgeProvenance,
+          },
+        },
+        pending.body,
+      );
       if (unchanged) {
         setCurrentNote({
           ...serializeNoteForEditor({
@@ -1167,7 +1443,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             ? { pendingKnowledgeProvenance: undefined }
             : {}),
           id: saved.id,
-          version: Math.max(latest.version || 0, saved.version || 0),
+          version: saved.version,
           ...((saved.knowledge_provenance_version || 0) >=
           (latest.knowledge_provenance_version || 0)
             ? knowledgeNoteHead(saved)
@@ -1203,16 +1479,17 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             "Could not retain the accepted note identity in this Workspace. Retry the same saved operation.",
           );
       }
-      await retireSurfaceOfflineDraft(
+      const binding = draftBindingRef.current;
+      await checkpointQuickNotesOfflineDraft(
         authorityScope,
         pending.entry.key,
         pending.entry.pendingWrite!.key,
+        () => (binding ? draftSnapshot(binding) : null),
+        saved,
       );
       if (!isCurrent()) return;
-      operationKey = undefined;
       pendingSaveRef.current = null;
       const acknowledgedDraft = useWorkspaceStore.getState().currentNote;
-      setCurrentNote({ ...acknowledgedDraft, pendingNoteWriteKey: undefined });
       if (!acknowledgedDraft.isDirty) showSavedIndicatorTemporarily();
       messageApi.success(
         draft.id
@@ -1314,6 +1591,116 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       }
     }
   }
+
+  const handleResumeLocalDraft = (key: string) => {
+    const expected = useWorkspaceStore.getState();
+    const resume = async () => {
+      const current = useWorkspaceStore.getState();
+      if (
+        current.currentNote !== expected.currentNote ||
+        current.workspaceId !== expected.workspaceId ||
+        current.workspaceTag !== expected.workspaceTag
+      )
+        return;
+      const controller = new AbortController();
+      readControllerRef.current?.abort();
+      readControllerRef.current = controller;
+      const stop = watchChatAccountChanges((invalidated) => {
+        if (invalidated) controller.abort();
+      });
+      const stopDraft = useWorkspaceStore.subscribe((state) => {
+        if (
+          state.currentNote !== expected.currentNote ||
+          state.workspaceId !== expected.workspaceId ||
+          state.workspaceTag !== expected.workspaceTag
+        )
+          controller.abort();
+      });
+      let scope: ServicePromptSnapshot | undefined;
+      try {
+        scope = await loadServicePromptSnapshot([], {
+          signal: controller.signal,
+        });
+        const user =
+          scope.requestScope.userId == null
+            ? await tldwAuth.getCurrentUser()
+            : null;
+        const ownerId =
+          scope.requestScope.userId ?? (user?.is_active ? user.id : null);
+        if (ownerId == null)
+          throw new Error("Verify your account before resuming a note.");
+        const authorityScope = createNotesGraphAuthorityScope(
+          scope.requestScope.config.serverUrl,
+          ownerId,
+        );
+        const authorityId = servicePromptAuthorityKey(scope.requestScope);
+        const entry = (await readSurfaceOfflineDraftQueue(authorityScope))[key];
+        if (
+          controller.signal.aborted ||
+          scope.scopeSignal.aborted ||
+          scope.scopeInvalidatedSignal.aborted
+        )
+          return;
+        if (
+          !isQuickNotesRetainedDraft(entry) ||
+          !entry.metadata?.quickNotesDirty ||
+          entry.metadata.quickNotesAuthorityId !== authorityId ||
+          entry.metadata.quickNotesWorkspaceId !== expected.workspaceId ||
+          entry.metadata.quickNotesWorkspaceTag !== expected.workspaceTag
+        )
+          throw new Error(
+            "The retained local draft no longer matches this Workspace and service.",
+          );
+        if (draftBindingRef.current) draftBindingRef.current.active = false;
+        draftBindingRef.current = null;
+        stopDraft();
+        const resumed = {
+          ...knowledgeNoteHead(entry.metadata),
+          id: entry.noteId!,
+          title: entry.title,
+          content: entry.content,
+          keywords: [...entry.keywords],
+          version: entry.baseVersion!,
+          isDirty: true,
+          pendingNoteWriteKey: key,
+          pendingKnowledgeProvenance: entry.metadata.pendingKnowledgeProvenance,
+        };
+        setCurrentNote(resumed);
+        setKeywordsInput(resumed.keywords.join(", "));
+        draftBindingRef.current = {
+          authorityScope,
+          authorityId,
+          key,
+          pendingKey:
+            entry.metadata.quickNotesAcceptedKey ||
+            entry.metadata.quickNotesRejectedKey,
+          workspaceId: expected.workspaceId,
+          workspaceTag: expected.workspaceTag,
+          noteId: resumed.id,
+          active: true,
+          latest: resumed,
+        };
+        setRecoverableDrafts([]);
+      } catch {
+        if (!controller.signal.aborted)
+          messageApi.error(
+            "Could not resume the retained local draft. Restore its Workspace and service and retry.",
+          );
+      } finally {
+        stop();
+        stopDraft();
+        scope?.release();
+      }
+    };
+    if (expected.currentNote.isDirty)
+      Modal.confirm({
+        title: t("playground:studio.unsavedChanges", "Unsaved Changes"),
+        content:
+          "Replace the current unsaved draft with the retained local draft?",
+        onOk: resume,
+      });
+    else void resume();
+  };
 
   // Handle clear
   const clearNoteWithUndo = () => {
@@ -1664,6 +2051,27 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           </div>
         )}
       </div>
+
+      {recoverableDrafts.map((entry) => (
+        <Button
+          key={entry.key}
+          size="small"
+          disabled={isSaving}
+          onClick={() => {
+            if (entry.pendingWrite)
+              void handleSave({
+                key: entry.key,
+                workspaceId: activeWorkspaceId,
+                workspaceTag,
+              });
+            else handleResumeLocalDraft(entry.key);
+          }}
+        >
+          {entry.pendingWrite
+            ? "Retry previous save"
+            : "Resume local unsaved draft"}
+        </Button>
+      ))}
 
       {/* Save button */}
       {(currentNote.content.trim() || currentNote.title.trim() || currentNote.isDirty) && (

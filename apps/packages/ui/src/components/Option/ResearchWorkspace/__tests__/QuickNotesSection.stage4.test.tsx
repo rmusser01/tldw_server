@@ -3,11 +3,17 @@ vi.mock(
   () =>
     import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
 );
-import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
-import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QuickNotesSection } from "../StudioPane/QuickNotesSection"
+import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
+import React from "react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QuickNotesSection } from "../StudioPane/QuickNotesSection";
 
 const {
   mockBgRequest,
@@ -154,8 +160,20 @@ vi.mock("antd", async () => {
 })
 
 describe("QuickNotesSection Stage 4 layout and export", () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.stubGlobal(
+      "navigator",
+      Object.create(window.navigator, {
+        locks: {
+          value: {
+            request: (_key: string, operation: () => unknown) =>
+              Promise.resolve().then(operation),
+          },
+        },
+      }),
+    );
+    vi.clearAllMocks();
     workspaceStoreState.currentNote = {
       id: 7,
       title: "My Study Note",

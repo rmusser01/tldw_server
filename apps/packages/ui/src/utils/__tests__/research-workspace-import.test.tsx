@@ -15,13 +15,13 @@ import {
   renderHook,
   screen,
   waitFor,
-} from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel"
-import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions"
-import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
-import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace"
-import { useWorkspaceStore } from "@/store/workspace"
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel";
+import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions";
+import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag";
+import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace";
+import { useWorkspaceStore } from "@/store/workspace";
 import {
   buildKnowledgeQaWorkspacePrefill,
   consumeResearchWorkspacePrefill,
@@ -209,18 +209,37 @@ const payload = () =>
       },
       { id: "7", content: "Native excerpt", metadata: { source_type: "pdf" } },
     ],
-  })
+  });
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
-  mocks.navigate.mockReset()
-  mocks.persistent = true
-  mocks.multiUser = false
-  mocks.owner = "alice"
-  mocks.values.clear()
-  mocks.upload.mockReset()
-  mocks.details.mockReset()
-  mocks.request.mockReset().mockResolvedValue({})
-  mocks.sourceNoteIds.clear()
-  mocks.sourceNoteIds.add("note-uuid")
+  const tails = new Map<string, Promise<unknown>>();
+  vi.stubGlobal(
+    "navigator",
+    Object.create(window.navigator, {
+      locks: {
+        value: {
+          request: (key: string, operation: () => unknown) => {
+            const next = (tails.get(key) ?? Promise.resolve()).then(operation);
+            tails.set(
+              key,
+              next.catch(() => undefined),
+            );
+            return next;
+          },
+        },
+      },
+    }),
+  );
+  mocks.navigate.mockReset();
+  mocks.persistent = true;
+  mocks.multiUser = false;
+  mocks.owner = "alice";
+  mocks.values.clear();
+  mocks.upload.mockReset();
+  mocks.details.mockReset();
+  mocks.request.mockReset().mockResolvedValue({});
+  mocks.sourceNoteIds.clear();
+  mocks.sourceNoteIds.add("note-uuid");
   mocks.sourceNoteRequest
     .mockReset()
     .mockImplementation(async (request: BgRequestInit) => ({
