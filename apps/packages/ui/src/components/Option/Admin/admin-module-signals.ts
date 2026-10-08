@@ -156,8 +156,13 @@ const isNotConfiguredError = (reason: unknown): boolean => {
 // visit (#2896).
 const loggedSignalFailures = new Set<string>()
 
-/** The connection target the cached admin queries were fetched against. */
-let lastSignalTarget: string | null = null
+/** The connection target the cached admin queries were fetched against.
+ *  Starts at a sentinel no real target can equal, so the session's first
+ *  signal load also drops the cache (pages may already have populated it
+ *  against a previous server before the overview ever ran). */
+const NO_SIGNAL_TARGET_LOADED = Symbol("no-admin-signal-target-loaded")
+let lastSignalTarget: string | typeof NO_SIGNAL_TARGET_LOADED =
+  NO_SIGNAL_TARGET_LOADED
 
 const currentSignalTarget = (): string => {
   try {
@@ -173,10 +178,12 @@ const currentSignalTarget = (): string => {
  * Drop every cached admin query when the connection target changed since the
  * last signal load: cached stats/roles/permissions belong to the previous
  * server and must not be served against the new one (the overview reloads
- * signals on exactly this transition).
+ * signals on exactly this transition). The sentinel initialization also
+ * covers the first load of a session, where the target has never been
+ * recorded yet — removeQueries on an empty cache is a no-op.
  */
 const dropAdminQueriesIfTargetChanged = (target: string): void => {
-  if (lastSignalTarget !== null && lastSignalTarget !== target) {
+  if (lastSignalTarget !== target) {
     getAdminQueryClient().removeQueries({ queryKey: adminKeys.all })
   }
   lastSignalTarget = target

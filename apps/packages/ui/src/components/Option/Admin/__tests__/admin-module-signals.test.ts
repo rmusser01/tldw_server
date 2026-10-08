@@ -189,4 +189,41 @@ describe("loadAdminModuleSignals", () => {
     })
     expect(signals["/admin/server"].state).toBe("healthy")
   })
+
+  it("drops a pre-existing admin cache on the session's first signals load (B-S4 fix1)", async () => {
+    // Fresh module instances so the target bookkeeping is back to its
+    // session-start sentinel and the admin query client is pristine.
+    vi.resetModules()
+    const { getAdminQueryClient: getFreshAdminQueryClient } = await import(
+      "../AdminQueryProvider"
+    )
+    const { loadAdminModuleSignals: freshLoadAdminModuleSignals } = await import(
+      "../admin-module-signals"
+    )
+
+    // Prime the shared cache the way the admin pages would against server A
+    // (setQueryData marks the entry fresh), before the overview has ever
+    // loaded signals.
+    const primedClient = getFreshAdminQueryClient()
+    primedClient.setQueryData(["admin", "system-stats"], {
+      users: { total: 99 }
+    })
+
+    // First signals load of the session — e.g. after the user switched to
+    // server B without ever visiting the overview on A — must drop the
+    // primed entry instead of serving it.
+    const signals = await freshLoadAdminModuleSignals()
+
+    // Detail comes from the refetched mock (3 users), not the primed 99,
+    // and the probe actually hit the endpoint.
+    expect(signals["/admin/server"]).toEqual({
+      state: "healthy",
+      detail: "3 users"
+    })
+    expect(apiMock.getSystemStats).toHaveBeenCalledTimes(1)
+    // The primed entry was replaced by the refetched data.
+    expect(primedClient.getQueryData(["admin", "system-stats"])).toEqual({
+      users: { total: 3 }
+    })
+  })
 })
