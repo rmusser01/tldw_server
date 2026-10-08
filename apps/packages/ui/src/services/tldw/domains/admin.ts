@@ -356,7 +356,13 @@ export const adminMethods = {
     return await bgRequest<any>({ path: `/api/v1/admin/orgs${query}`, method: "GET" })
   },
 
-  async listOrgMembers(orgId: number, params?: { role?: string; status?: string }): Promise<any> {
+  // `limit`/`offset` page server-side; the backend returns a plain array
+  // today, so callers must treat a missing total as "unknown" (see
+  // OrgsTeamsPage's fallback-total paging).
+  async listOrgMembers(
+    orgId: number,
+    params?: { role?: string; status?: string; limit?: number; offset?: number }
+  ): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/members${query}`, method: "GET" })
   },
@@ -395,12 +401,19 @@ export const adminMethods = {
     })
   },
 
-  async listTeams(orgId: number): Promise<any> {
-    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/teams`, method: "GET" })
+  // `limit`/`offset` page server-side; same missing-total caveat as
+  // listOrgMembers above.
+  async listTeams(orgId: number, params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/teams${query}`, method: "GET" })
   },
 
-  async listTeamMembers(teamId: number): Promise<any> {
-    return await bgRequest<any>({ path: `/api/v1/admin/teams/${teamId}/members`, method: "GET" })
+  // The current backend ignores paging params here (returns the full list),
+  // but they are sent so server-side paging works once the endpoint adopts
+  // limit/offset like its siblings.
+  async listTeamMembers(teamId: number, params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({ path: `/api/v1/admin/teams/${teamId}/members${query}`, method: "GET" })
   },
 
   async addTeamMember(teamId: number, payload: { user_id: number; role?: string }): Promise<any> {

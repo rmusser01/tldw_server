@@ -57,6 +57,26 @@ interface TeamMember {
   role: string
 }
 
+// ── Server-side paging helpers ──
+
+// The orgs/teams endpoints return either a plain array (today's backend for
+// members/teams) or an {items, total} envelope. Normalize the rows...
+const extractRows = (result: any, ...keys: string[]): any[] => {
+  if (Array.isArray(result)) return result
+  for (const key of keys) {
+    if (Array.isArray(result?.[key])) return result[key]
+  }
+  return []
+}
+
+// ...and derive a usable antd total. When the server reports no total, keep a
+// phantom next page while the current page is full (offset + rows + 1) so
+// operators can keep paging through plain-array responses.
+const pageTotal = (result: any, rows: any[], pageSize: number, offset: number): number => {
+  if (typeof result?.total === "number") return result.total
+  return offset + rows.length + (rows.length >= pageSize ? 1 : 0)
+}
+
 // ── Org Members Sub-Table ──
 
 const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
@@ -66,18 +86,30 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addForm] = Form.useForm()
   const [adding, setAdding] = useState(false)
+  // Server-side paging: the roster no longer needs to arrive in one response.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  // Guards against out-of-order responses: only the latest page load may
+  // commit state (rapid page clicks race otherwise).
+  const loadSeqRef = useRef(0)
 
   const loadMembers = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     setLoading(true)
     try {
-      const result = await tldwClient.listOrgMembers(orgId)
-      setMembers(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.members ?? [])
+      const offset = (page - 1) * pageSize
+      const result = await tldwClient.listOrgMembers(orgId, { limit: pageSize, offset })
+      if (seq !== loadSeqRef.current) return
+      const rows = extractRows(result, "items", "data", "members")
+      setMembers(rows)
+      setTotal(pageTotal(result, rows, pageSize, offset))
     } catch {
       // silently handled by parent guard
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [orgId])
+  }, [orgId, page, pageSize])
 
   useEffect(() => {
     void loadMembers()
@@ -194,7 +226,17 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
         columns={columns}
         rowKey="user_id"
         loading={loading}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          hideOnSinglePage: true,
+          showTotal: (tot) => t("settings:adminOrgs.paginationTotal", "Total {{total}} items", { total: tot }),
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          }
+        }}
         size="small"
       />
       <Modal
@@ -233,18 +275,30 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addForm] = Form.useForm()
   const [adding, setAdding] = useState(false)
+  // Server-side paging (the backend honors these once the endpoint adopts
+  // limit/offset like its siblings; phantom totals bridge plain arrays).
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  // Out-of-order guard, same rationale as OrgMembersTable.
+  const loadSeqRef = useRef(0)
 
   const loadMembers = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     setLoading(true)
     try {
-      const result = await tldwClient.listTeamMembers(teamId)
-      setMembers(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.members ?? [])
+      const offset = (page - 1) * pageSize
+      const result = await tldwClient.listTeamMembers(teamId, { limit: pageSize, offset })
+      if (seq !== loadSeqRef.current) return
+      const rows = extractRows(result, "items", "data", "members")
+      setMembers(rows)
+      setTotal(pageTotal(result, rows, pageSize, offset))
     } catch {
       // silently handled
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [teamId])
+  }, [teamId, page, pageSize])
 
   useEffect(() => {
     void loadMembers()
@@ -354,7 +408,17 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
         columns={columns}
         rowKey="user_id"
         loading={loading}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          hideOnSinglePage: true,
+          showTotal: (tot) => t("settings:adminOrgs.paginationTotal", "Total {{total}} items", { total: tot }),
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          }
+        }}
         size="small"
       />
       <Modal
@@ -392,18 +456,29 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
+  // Server-side paging, mirroring OrgMembersTable.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  // Out-of-order guard, same rationale as OrgMembersTable.
+  const loadSeqRef = useRef(0)
 
   const loadTeams = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     setLoading(true)
     try {
-      const result = await tldwClient.listTeams(orgId)
-      setTeams(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.teams ?? [])
+      const offset = (page - 1) * pageSize
+      const result = await tldwClient.listTeams(orgId, { limit: pageSize, offset })
+      if (seq !== loadSeqRef.current) return
+      const rows = extractRows(result, "items", "data", "teams")
+      setTeams(rows)
+      setTotal(pageTotal(result, rows, pageSize, offset))
     } catch {
       // silently handled
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [orgId])
+  }, [orgId, page, pageSize])
 
   useEffect(() => {
     void loadTeams()
@@ -459,7 +534,17 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
         columns={teamColumns}
         rowKey="id"
         loading={loading}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          hideOnSinglePage: true,
+          showTotal: (tot) => t("settings:adminOrgs.paginationTotal", "Total {{total}} items", { total: tot }),
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          }
+        }}
         size="small"
         expandable={{
           expandedRowRender: (team: Team) => <TeamMembersTable teamId={team.id} />
@@ -491,6 +576,7 @@ const OrgsTeamsPage: React.FC = () => {
   const [orgs, setOrgs] = useState<Org[]>([])
   const [orgsLoading, setOrgsLoading] = useState(false)
   const [searchText, setSearchText] = useState("")
+  const [orgsTotal, setOrgsTotal] = useState<number | null>(null)
 
   const [createOrgModalOpen, setCreateOrgModalOpen] = useState(false)
   const [createOrgForm] = Form.useForm()
@@ -510,6 +596,7 @@ const OrgsTeamsPage: React.FC = () => {
       if (search) params.search = search
       const result = await tldwClient.listOrgs(params)
       setOrgs(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.organizations ?? [])
+      setOrgsTotal(typeof result?.total === "number" ? result.total : null)
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
@@ -620,6 +707,26 @@ const OrgsTeamsPage: React.FC = () => {
           </Space>
         }
       >
+        {/* Bounded snapshot disclosure (oversight-page pattern): the orgs list
+            stays at limit:100 until full server pagination lands; say so when
+            the server holds more instead of implying completeness. */}
+        {(orgsTotal != null && orgsTotal > orgs.length) || orgs.length >= 100 ? (
+          <span
+            style={{
+              display: "inline-block",
+              marginBottom: 8,
+              color: "var(--color-text-secondary, #888)",
+              fontSize: "0.85rem"
+            }}
+          >
+            {orgsTotal != null && orgsTotal > orgs.length
+              ? t("settings:adminOrgs.showingOf", "Showing {{shown}} of {{total}}", {
+                  shown: orgs.length,
+                  total: orgsTotal
+                })
+              : t("settings:adminOrgs.showingFirst100", "Showing first 100")}
+          </span>
+        ) : null}
         <Table
           dataSource={orgs}
           columns={orgColumns}

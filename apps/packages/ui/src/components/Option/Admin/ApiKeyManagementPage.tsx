@@ -48,34 +48,62 @@ const ApiKeyManagementPage: React.FC = () => {
   const [newKeyRevealed, setNewKeyRevealed] = useState(true)
 
   const initialLoadRef = useRef(false)
+  // Guards against out-of-order responses: only the latest load may commit
+  // state, so a slow earlier search can't clobber a faster recent one.
+  const usersLoadSeqRef = useRef(0)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const markAdminGuardFromError = useCallback((err: any) => {
     const guardState = deriveAdminGuardFromError(err)
     if (guardState) setAdminGuard(guardState)
   }, [])
 
-  // Load users for the selector
-  const loadUsers = useCallback(async () => {
+  // Load users for the selector (first 20; remote search reaches the rest)
+  const loadUsers = useCallback(async (search?: string) => {
+    const seq = ++usersLoadSeqRef.current
     setUsersLoading(true)
     setUsersError(null)
     try {
-      const result = await tldwClient.listAdminUsers({ limit: 100 })
+      const result = await tldwClient.listAdminUsers({
+        limit: 20,
+        ...(search ? { search } : {})
+      })
+      if (seq !== usersLoadSeqRef.current) return
       const loaded = result.users || []
       setUsers(loaded)
       // Single-user servers have exactly one account — select it directly
       // instead of asking the operator to search for themselves.
-      if (loaded.length === 1) {
+      if (!search && loaded.length === 1) {
         setSelectedUserId((current) => current ?? loaded[0].id)
       }
     } catch (err) {
+      if (seq !== usersLoadSeqRef.current) return
       markAdminGuardFromError(err)
       setUsersError(
         sanitizeAdminErrorMessage(err, t("settings:adminApiKeys.usersLoadFailed", "Failed to load the user list."))
       )
     } finally {
-      setUsersLoading(false)
+      if (seq === usersLoadSeqRef.current) setUsersLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [markAdminGuardFromError, t])
+
+  // Remote search so accounts beyond the first 20 stay reachable on large
+  // servers; the Select filters nothing locally (filterOption={false}).
+  const handleUserSearch = useCallback(
+    (term: string) => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      searchTimerRef.current = setTimeout(() => {
+        void loadUsers(term.trim() || undefined)
+      }, 300)
+    },
+    [loadUsers]
+  )
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [])
 
   // Load API keys for selected user
   const loadKeys = useCallback(async (userId: number) => {
@@ -330,7 +358,8 @@ const ApiKeyManagementPage: React.FC = () => {
             loading={usersLoading}
             value={selectedUserId}
             onChange={(val) => setSelectedUserId(val)}
-            optionFilterProp="label"
+            onSearch={handleUserSearch}
+            filterOption={false}
             options={users.map((u: any) => ({
               value: u.id,
               label: `${u.username} (${u.email || t("settings:adminApiKeys.noEmail", "no email")})`,

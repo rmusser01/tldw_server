@@ -318,6 +318,13 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
         <Button icon={<ReloadOutlined />} onClick={loadSubscriptions} loading={loading}>
           {t("common:refresh", "Refresh")}
         </Button>
+        {/* Bounded snapshot (limit:100) — full server pagination waits on a
+            truthful total; disclose the truncation instead of hiding it. */}
+        <span
+          style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+        >
+          {t("settings:adminBilling.showingFirst100Subscriptions", "Showing first 100 subscriptions")}
+        </span>
       </div>
 
       <Table
@@ -428,7 +435,14 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       <div style={{ marginBottom: 16 }}>
         <Button icon={<ReloadOutlined />} onClick={loadEvents} loading={loading}>
           {t("common:refresh", "Refresh")}
-        </Button>
+        </Button>{" "}
+        {/* Bounded snapshot (limit:100) — same truncation disclosure as
+            subscriptions; full pagination waits on a truthful total. */}
+        <span
+          style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+        >
+          {t("settings:adminBilling.showingFirst100Events", "Showing first 100 events")}
+        </span>
       </div>
 
       <Table

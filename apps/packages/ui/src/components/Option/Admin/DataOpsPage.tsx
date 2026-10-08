@@ -713,6 +713,15 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
             </Form.Item>
           </Form>
         </div>
+        {/* Bounded snapshot (limit:100) — full server pagination waits on a
+            truthful total; disclose the truncation instead of hiding it. */}
+        <div style={{ marginBottom: 8 }}>
+          <span
+            style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+          >
+            {t("settings:adminDataOps.showingFirst100Dsrs", "Showing first 100 requests")}
+          </span>
+        </div>
         <Table
           dataSource={dsrs}
           columns={dsrColumns}
