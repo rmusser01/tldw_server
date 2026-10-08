@@ -353,8 +353,7 @@ export function ConversationTab({
   onStateChange,
   serverChatTopic,
   onTopicChange,
-  onVersionChange,
-  onPersonaMemoryModeChange
+  onVersionChange
 }: ConversationTabProps) {
   const numericFieldId = React.useId()
   const { t } = useTranslation(["common", "playground"])
@@ -858,21 +857,6 @@ export function ConversationTab({
     }
   }
 
-  const handlePersonaMemoryModeChange = async (value: string) => {
-    const nextMode = value === "read_write" ? "read_write" : "read_only"
-    onPersonaMemoryModeChange?.(nextMode)
-    if (!serverChatId) return
-    try {
-      const updated = await tldwClient.updateChat(serverChatId, {
-        persona_memory_mode: nextMode
-      })
-      onVersionChange(getUpdateChatVersion(updated))
-      queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
-    } catch (error: unknown) {
-      handleAsyncError(error)
-    }
-  }
-
   const previewSettingsFingerprint = React.useMemo(
     () =>
       JSON.stringify({
@@ -940,12 +924,12 @@ export function ConversationTab({
   return (
     <div className="space-y-4">
       <Form.Item
-        help={t("common:modelSettings.form.systemPrompt.help", {
+        help={t("common:modelSettings.conversation.modelDefaultPromptHelp", {
           defaultValue:
-            "Applies persistently to this conversation and overrides the selected system prompt template until you reset it."
+            "Saved with model settings. Applies to chats using this model; conversation Apply does not save it."
         })}
-        label={t("common:modelSettings.form.systemPrompt.label", {
-          defaultValue: "Conversation System Prompt"
+        label={t("common:modelSettings.conversation.modelDefaultPromptLabel", {
+          defaultValue: "Model default system prompt"
         })}>
         <div className="space-y-1">
           <Form.Item name="systemPrompt" noStyle>
@@ -1006,6 +990,9 @@ export function ConversationTab({
               )}
             </span>
           </div>
+          <p className="mb-2 text-xs text-text-muted">
+            {t("playground:composer.attachments.immediateRemoval", "Attachment removal takes effect immediately.")}
+          </p>
           <div className="space-y-2 max-h-32 overflow-y-auto">
             {uploadedFiles.map((file) => (
               <div
@@ -1039,6 +1026,8 @@ export function ConversationTab({
                   </div>
                 </div>
                 <button
+                  type="button"
+                  aria-label={`${t("common:removeFile", "Remove file")}: ${file.filename}`}
                   onClick={() => onRemoveFile(file.id)}
                   className="rounded p-1 text-danger hover:bg-danger/10 hover:text-danger">
                   <X className="h-4 w-4" />
@@ -1074,29 +1063,14 @@ export function ConversationTab({
             "Read-only keeps persona memory available for context without writing new durable memories from this chat."
           )}
         >
-          <Select
-            data-testid="persona-memory-mode-select"
-            value={personaMemoryModeValue}
-            options={[
-              {
-                value: "read_only",
-                label: t(
-                  "playground:composer.personaMemoryMode.readOnly",
-                  "Read only"
-                )
-              },
-              {
-                value: "read_write",
-                label: t(
-                  "playground:composer.personaMemoryMode.readWrite",
-                  "Read + write"
-                )
-              }
-            ]}
-            onChange={(value) => {
-              void handlePersonaMemoryModeChange(String(value))
-            }}
-          />
+          <output data-testid="persona-memory-mode-value">
+            {personaMemoryModeValue === "read_write"
+              ? t("playground:composer.personaMemoryMode.readWrite", "Read + write")
+              : t("playground:composer.personaMemoryMode.readOnly", "Read only")}
+          </output>
+          <p className="mt-1 text-xs text-text-muted">
+            {t("playground:composer.personaMemoryMode.unsupportedEdit", "This server cannot change persona memory mode here.")}
+          </p>
         </Form.Item>
       ) : null}
 

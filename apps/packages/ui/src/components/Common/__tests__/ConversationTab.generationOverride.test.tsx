@@ -122,6 +122,22 @@ describe("ConversationTab generation override controls", () => {
       />
     )
 
+  it("identifies the system prompt as a model default with its separate save action", () => {
+    renderConversationTab()
+    expect(screen.getByText("Model default system prompt")).toBeInTheDocument()
+    expect(screen.getByText("Saved with model settings. Applies to chats using this model; conversation Apply does not save it.")).toBeInTheDocument()
+  })
+
+  it("labels immediate attachment removal and keeps it out of form submission", () => {
+    const onRemoveFile = vi.fn()
+    renderConversationTab({ uploadedFiles: [{ id: "file-1", filename: "notes.txt", size: 1024 }], onRemoveFile })
+    const remove = screen.getByRole("button", { name: "Remove file: notes.txt" })
+    expect(remove).toHaveAttribute("type", "button")
+    expect(screen.getByText("Attachment removal takes effect immediately.")).toBeInTheDocument()
+    fireEvent.click(remove)
+    expect(onRemoveFile).toHaveBeenCalledWith("file-1")
+  })
+
   it("persists enabled chat generation override", async () => {
     renderConversationTab()
 
