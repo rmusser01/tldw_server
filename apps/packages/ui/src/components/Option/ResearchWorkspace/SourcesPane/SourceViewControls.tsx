@@ -84,8 +84,14 @@ const isFocusable = (element: HTMLElement | null): element is HTMLElement => {
   return true
 }
 
-const restoreOverlayFocus = (invoker: HTMLElement | null) => {
+const restoreOverlayFocus = (
+  invoker: HTMLElement | null,
+  canRestore: () => boolean = () => true
+) => {
   window.setTimeout(() => {
+    if (!canRestore()) return
+    const focused = document.activeElement as HTMLElement | null
+    if (isFocusable(focused) && focused !== invoker) return
     if (isFocusable(invoker)) {
       invoker.focus()
       return
@@ -405,10 +411,10 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   const pendingFocusRestoreRef = React.useRef<{
     token: number
     invoker: HTMLElement | null
+    generation: number
   } | null>(null)
   const focusRestoreSequenceRef = React.useRef(0)
   const lastRestoredFocusTokenRef = React.useRef(0)
-  const [focusRestoreToken, setFocusRestoreToken] = React.useState(0)
 
   const close = React.useCallback(
     (restoreFocus = true) => {
@@ -418,29 +424,49 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         const token = focusRestoreSequenceRef.current
         pendingFocusRestoreRef.current = {
           token,
-          invoker: activeRequest.invoker
+          invoker:
+            activeRequest.generation === controller.generation
+              ? activeRequest.invoker
+              : null,
+          generation: controller.generation
         }
-        setFocusRestoreToken(token)
       }
       setActiveRequest(null)
       setName("")
       setNameTouched(false)
     },
-    [activeRequest]
+    [activeRequest, controller.generation]
   )
 
-  React.useEffect(() => {
+  const restoreClosedOverlayFocus = () => {
     const pending = pendingFocusRestoreRef.current
     if (
       !pending ||
-      pending.token !== focusRestoreToken ||
+      activeRequest ||
+      pending.generation !== controller.generation ||
       pending.token <= lastRestoredFocusTokenRef.current
     ) {
       return
     }
     lastRestoredFocusTokenRef.current = pending.token
-    restoreOverlayFocus(pending.invoker)
-  }, [focusRestoreToken])
+    restoreOverlayFocus(
+      pending.invoker,
+      () => pendingFocusRestoreRef.current === pending
+    )
+  }
+
+  React.useLayoutEffect(
+    () => () => {
+      pendingFocusRestoreRef.current = null
+    },
+    []
+  )
+
+  React.useLayoutEffect(() => {
+    if (pendingFocusRestoreRef.current?.generation !== controller.generation) {
+      pendingFocusRestoreRef.current = null
+    }
+  }, [controller.generation])
 
   React.useLayoutEffect(() => {
     if (!request || handledRequestIdRef.current === request.id) return
@@ -449,10 +475,14 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       request.generation !== controller.generation ||
       !controller.available
     ) {
-      restoreOverlayFocus(request.invoker)
+      restoreOverlayFocus(
+        request.invoker,
+        () => handledRequestIdRef.current === request.id
+      )
       onRequestHandled()
       return
     }
+    pendingFocusRestoreRef.current = null
     setActiveRequest(request)
     announcementAtOpenRef.current = controller.announcement
     mutationCycleObservedRef.current = false
@@ -687,6 +717,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         destroyOnHidden
         focusable={{ focusTriggerAfterClose: false }}
         afterOpenChange={(open) => {
+          if (!open) restoreClosedOverlayFocus()
           if (open && activeRequest?.kind === "save" && !duplicate) {
             window.setTimeout(() => inputRef.current?.focus(), 0)
           }

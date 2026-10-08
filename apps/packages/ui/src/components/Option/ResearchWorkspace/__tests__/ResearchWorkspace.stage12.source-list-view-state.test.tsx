@@ -679,12 +679,24 @@ describe("ResearchWorkspace source list view state", () => {
     expect(invokers).toHaveLength(2)
     await user.click(invokers[0]!)
     expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
+    let closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
     await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
+    expect(invokers[0]).not.toHaveFocus()
+    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
+    fireEvent.animationEnd(closingDialog)
+    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(invokers[0]))
 
     await user.click(invokers[1]!)
     expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
+    closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
     await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
+    expect(invokers[1]).not.toHaveFocus()
+    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
+    fireEvent.animationEnd(closingDialog)
+    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(invokers[1]))
   })
 
@@ -789,8 +801,14 @@ describe("ResearchWorkspace source list view state", () => {
     const sourcesTab = screen.getByRole("tab", { name: /Sources/ })
     await user.click(screen.getByRole("tab", { name: /Chat/ }))
     expect(screen.queryByRole("button", { name: "Save source view" })).not.toBeInTheDocument()
+    const closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
     await user.click(screen.getByRole("button", { name: "Cancel" }))
 
+    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
+    expect(sourcesTab).not.toHaveFocus()
+    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
+    fireEvent.animationEnd(closingDialog)
+    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(sourcesTab))
   })
 

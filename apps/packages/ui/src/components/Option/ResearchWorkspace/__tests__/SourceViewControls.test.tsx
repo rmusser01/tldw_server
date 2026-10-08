@@ -669,6 +669,173 @@ describe("SourceViewControls", () => {
     await waitFor(() => expect(focusFallback).toHaveFocus())
   })
 
+  it.each([
+    {
+      label: "Replace",
+      viewName: "My PDFs",
+      actionName: "Replace saved view My PDFs",
+      announcement: "Saved view replaced.",
+      method: "replaceView" as const
+    },
+    {
+      label: "Replace missing row",
+      viewName: "My PDFs",
+      actionName: "Replace saved view My PDFs",
+      announcement: "Saved view no longer exists.",
+      method: "replaceView" as const
+    },
+    {
+      label: "Reset",
+      viewName: "Old view",
+      actionName: "Reset saved view Old view",
+      announcement: "Saved view reset.",
+      method: "resetView" as const
+    }
+  ])(
+    "restores $label fallback only after native closing motion completes",
+    async (testCase) => {
+      const user = userEvent.setup()
+      const mutation = vi.fn().mockResolvedValue(undefined)
+      // Unlike compatibility tests above, keep the real Modal/CSSMotion enabled.
+      const nativeHarness = (
+        model: SourceSavedViewsController,
+        showControls = true
+      ) => (
+        <>
+          <Harness model={model} showControls={showControls} />
+          {testCase.label === "Replace missing row" && (
+            <SourceViewControls
+              controller={model}
+              sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+              onApplySourceListViewState={vi.fn()}
+              onOpenOverlay={vi.fn()}
+            />
+          )}
+        </>
+      )
+      const { rerender } = rtlRender(
+        nativeHarness(controller({ [testCase.method]: mutation }))
+      )
+      await user.click(
+        screen.getAllByRole("button", { name: "Source views" })[0]!
+      )
+      await openSavedViewCommands(user, testCase.viewName)
+      const invoker = screen.getByRole("menuitem", { name: testCase.actionName })
+      await user.click(invoker)
+      const dialog = await screen.findByRole("dialog")
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-appear-active")
+      )
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() =>
+        expect(dialog.className).not.toContain("ant-zoom-appear")
+      )
+      const submit = within(dialog).getByRole("button", {
+        name: testCase.method === "replaceView" ? "Replace" : "Reset"
+      })
+      await user.click(submit)
+      expect(mutation).toHaveBeenCalledTimes(1)
+      expect(dialog).toBeInTheDocument() // Promise resolution is not server acknowledgment.
+      rerender(
+        nativeHarness(
+          controller({
+            busy: true,
+            mutation: "replace",
+            [testCase.method]: mutation
+          })
+        )
+      )
+      fireEvent.keyDown(dialog, {
+        key: "Escape",
+        code: "Escape",
+        keyCode: 27,
+        which: 27
+      })
+      expect(dialog).toBeInTheDocument()
+      // Remove the actual invoking pane/menu, retaining a current visible fallback.
+      rerender(
+        nativeHarness(
+          controller({
+            [testCase.method]: mutation,
+            announcement: testCase.announcement
+          }),
+          false
+        )
+      )
+      expect(invoker.isConnected).toBe(false)
+      const fallback =
+        testCase.label === "Replace missing row"
+          ? screen.getByRole("button", { name: "Source views" })
+          : screen.getByRole("complementary", { name: "Sources" })
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-leave-active")
+      )
+      expect(fallback).not.toHaveFocus()
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      await waitFor(() => expect(fallback).toHaveFocus())
+    }
+  )
+
+  it.each(["outside destination", "later dialog", "later generation"])(
+    "respects %s focus authority during native closing motion",
+    async (authority) => {
+      const initial = controller()
+      const { rerender } = rtlRender(
+        <>
+          <Harness model={initial} />
+          <button>Outside destination</button>
+        </>
+      )
+      const invoker = screen.getByRole("button", { name: "Save source view" })
+      fireEvent.click(invoker)
+      const dialog = await screen.findByRole("dialog")
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-appear-active")
+      )
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() =>
+        expect(dialog.className).not.toContain("ant-zoom-appear")
+      )
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-leave-active")
+      )
+      const outside = screen.getByRole("button", { name: "Outside destination" })
+      if (authority === "later generation") {
+        rerender(
+          <>
+            <Harness model={controller({ generation: 4 })} />
+            <button>Outside destination</button>
+          </>
+        )
+      }
+      if (authority === "later dialog") {
+        fireEvent.click(invoker)
+        const input = await screen.findByRole("textbox", { name: "View name" })
+        input.focus()
+        await waitFor(() =>
+          expect(dialog.className).toContain("ant-zoom-enter-active")
+        )
+        fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(dialog)
+        await waitFor(() => expect(dialog.className).not.toContain("ant-zoom"))
+        expect(input).toHaveFocus()
+        expect(dialog).toBeInTheDocument()
+      } else {
+        if (authority === "outside destination") outside.focus()
+        fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(dialog)
+        await waitFor(() => expect(dialog).not.toBeInTheDocument())
+        expect(invoker).not.toHaveFocus()
+        if (authority === "outside destination") expect(outside).toHaveFocus()
+      }
+    }
+  )
+
   it("closes a duplicate replacement dialog when PATCH reports the row missing", async () => {
     const user = userEvent.setup()
     const createView = vi.fn().mockResolvedValue(undefined)
