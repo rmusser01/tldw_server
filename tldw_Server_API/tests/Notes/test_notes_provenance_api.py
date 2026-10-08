@@ -600,7 +600,10 @@ def test_inactive_receipt_rejects_retry_with_provenance_removed(client, monkeypa
     assert len(client.get(BASE + "/").json()["notes"]) == 1
 
 
-def test_inactive_rest_receipt_rolls_back_organization_then_replays_after_reopen(client, chacha_db, monkeypatch):
+@pytest.mark.parametrize("sourced", [False, True], ids=["plain", "sourced"])
+def test_inactive_rest_receipt_rolls_back_organization_then_replays_after_reopen(
+    client, chacha_db, monkeypatch, sourced
+):
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
     monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
@@ -619,6 +622,9 @@ def test_inactive_rest_receipt_rolls_back_organization_then_replays_after_reopen
         "keywords": ["Atomic"],
         "folder_paths": ["Atomic"],
     }
+    if not sourced:
+        body.pop("knowledge_provenance")
+        body.pop("expected_provenance_version")
     headers = {"Idempotency-Key": "rollback-reopen"}
     assert client.post(BASE + "/", json=body, headers=headers).status_code == 500
     assert chacha_db.count_notes() == 0
@@ -723,11 +729,15 @@ def test_lost_retained_restore_ack_uses_original_parent_child_pair(api):
     assert client.post(path + "/provenance/restore", json=body, headers=headers).json() == first.json()
 
 
-def test_inactive_owner_receipts_and_created_ids_are_independent(client, chacha_db, monkeypatch):
+@pytest.mark.parametrize("sourced", [False, True], ids=["plain", "sourced"])
+def test_inactive_owner_receipts_and_created_ids_are_independent(client, chacha_db, monkeypatch, sourced):
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
     monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
     body = {"title": "Owner", "content": "Body", "knowledge_provenance": PAYLOAD, "expected_provenance_version": 0}
+    if not sourced:
+        body.pop("knowledge_provenance")
+        body.pop("expected_provenance_version")
     headers = {"Idempotency-Key": "same-key-for-each-owner"}
     first = client.post(BASE + "/", json=body, headers=headers)
     assert first.status_code == 201, first.text
@@ -963,3 +973,99 @@ def test_reads_fence_committed_child_ahead_of_rolled_back_applied_head(client, s
     assert current["content"] == "Later body"
     assert current["knowledge_provenance"] == payload
     assert (current["version"], current["knowledge_provenance_version"]) == (2, 3)
+
+
+@pytest.mark.parametrize("sourced", [False, True], ids=["plain", "sourced"])
+@pytest.mark.parametrize("organized", [False, True], ids=["bare", "organized"])
+def test_inactive_keyed_create_replays_original_ack_after_edit(client, chacha_db, monkeypatch, sourced, organized):
+    from uuid import uuid4
+
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    body = {"id": str(uuid4()), "title": "Original", "content": "Original body"}
+    if sourced:
+        body.update(knowledge_provenance=PAYLOAD, expected_provenance_version=0)
+    if organized:
+        body.update(keywords=["Original"], folder_paths=["Original"])
+    headers = {"Idempotency-Key": "plain-or-sourced-create"}
+    first = client.post(BASE + "/", json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    immediate = client.post(BASE + "/", json=body, headers=headers)
+    assert immediate.status_code == 201, immediate.text
+    assert immediate.json() == first.json()
+    changed = client.put(BASE + "/" + body["id"], json={"content": "Later body"}, headers={"expected-version": "1"})
+    assert changed.status_code == 200, changed.text
+    replay = client.post(BASE + "/", json=body, headers=headers)
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == first.json()
+    assert chacha_db.get_note_by_id(body["id"])["version"] == 2
+    assert chacha_db.get_note_by_id(body["id"])["content"] == "Later body"
+    assert chacha_db.count_notes() == 1
+    conflict = client.post(BASE + "/", json={**body, "content": "Altered request"}, headers=headers)
+    assert conflict.status_code == 409, conflict.text
+    other_key = client.post(BASE + "/", json=body, headers={"Idempotency-Key": "other-create-key"})
+    assert other_key.status_code == 409, other_key.text
+    assert chacha_db.count_notes() == 1
+
+
+def test_inactive_unkeyed_plain_create_keeps_duplicate_id_conflict(client, monkeypatch):
+    from uuid import uuid4
+
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    body = {"id": str(uuid4()), "title": "Plain", "content": "Body"}
+    assert client.post(BASE + "/", json=body).status_code == 201
+    assert client.post(BASE + "/", json=body).status_code == 409
+
+
+@pytest.mark.parametrize("method", ["put", "patch"])
+@pytest.mark.parametrize("organized", [False, True])
+def test_inactive_keyed_plain_update_replays_exact_ack(client, chacha_db, monkeypatch, method, organized):
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    saved = client.post(BASE + "/", json={"title": "Plain", "content": "Before"}).json()
+    path = BASE + "/" + saved["id"]
+    body = {"content": "Accepted"}
+    if organized:
+        body.update(keywords=["Accepted"], folder_paths=["Accepted"])
+    headers = {"expected-version": "1", "Idempotency-Key": "plain-update"}
+    first = getattr(client, method)(path, json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    retry = getattr(client, method)(path, json=body, headers=headers)
+    assert retry.status_code == 200, retry.text
+    assert retry.json() == first.json()
+    assert client.put(path, json={"content": "Later"}, headers={"expected-version": "2"}).status_code == 200
+    assert getattr(client, method)(path, json=body, headers=headers).json() == first.json()
+    assert chacha_db.get_note_by_id(saved["id"])["version"] == 3
+    assert chacha_db.get_note_by_id(saved["id"])["content"] == "Later"
+    assert chacha_db.count_notes() == 1
+    assert getattr(client, method)(path, json={**body, "content": "Altered"}, headers=headers).status_code == 409
+    assert getattr(client, method)(path, json=body, headers={**headers, "expected-version": "3"}).status_code == 409
+
+
+@pytest.mark.parametrize("route", ["bulk", "import"])
+def test_inactive_keyed_plain_batch_replays_exact_ack(client, chacha_db, monkeypatch, route):
+    from uuid import uuid4
+
+    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    row = {"id": str(uuid4()), "title": "Plain batch", "content": "Original", "keywords": ["Atomic"]}
+    body = (
+        {"notes": [row]}
+        if route == "bulk"
+        else {"duplicate_strategy": "create_copy", "items": [{"format": "json", "content": json.dumps(row)}]}
+    )
+    path = BASE + "/" + route
+    headers = {"Idempotency-Key": "plain-batch"}
+    first = client.post(path, json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["failed_count"] == 0
+    retry = client.post(path, json=body, headers=headers)
+    assert retry.status_code == 200, retry.text
+    assert retry.json() == first.json(), retry.text
+    assert chacha_db.count_notes() == 1
+    changed_row = {**row, "content": "Altered request"}
+    changed_body = (
+        {"notes": [changed_row]}
+        if route == "bulk"
+        else {"duplicate_strategy": "create_copy", "items": [{"format": "json", "content": json.dumps(changed_row)}]}
+    )
+    conflict = client.post(path, json=changed_body, headers=headers)
+    assert conflict.json()["failed_count"] == 1, conflict.text
+    assert chacha_db.count_notes() == 1

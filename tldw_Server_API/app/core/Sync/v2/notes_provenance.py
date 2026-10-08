@@ -1,7 +1,7 @@
 """Canonical Knowledge history capture, pair projection, and bounded enrollment.
 
-API callers use ``capture_note_with_provenance`` or insert
-``provenance_step`` immediately after their core note step. Expected versions
+API callers use ``plan_compound_note`` to insert ``provenance_step``
+immediately after their core note step. Expected versions
 are independent; zero means absent. Retrying the same request key reuses the
 complete durable manifest. Omitted provenance uses the ordinary core path.
 """
@@ -32,7 +32,7 @@ from .notes_provenance_contract import (
 )
 
 if TYPE_CHECKING:
-    from .server_origin_batch import ServerOriginBatchResult, ServerOriginMutationStep
+    from .server_origin_batch import ServerOriginMutationStep
     from .service import SyncV2Service
     from .store import SyncV2Store
 
@@ -228,79 +228,6 @@ def provenance_step(
         base_object_revision=expected_version or None,
         base_object_hash=head.payload_hash if head else None,
         routing_metadata={"restore_intent": True} if restore else {},
-    )
-
-
-def capture_note_with_provenance(
-    *,
-    service: SyncV2Service,
-    note_db: CharactersRAGDB,
-    user_id: str,
-    note_id: str,
-    note_payload: Mapping[str, object],
-    expected_note_version: int,
-    provenance: Mapping[str, object],
-    expected_provenance_version: int,
-    idempotency_key: str,
-    source: str,
-    restore: bool = False,
-) -> ServerOriginBatchResult:
-    """Save a complete pair with independent expected versions and durable retry identity."""
-    from .server_origin_batch import (
-        ServerOriginMutationStep,
-        capture_server_origin_mutation_batch,
-        load_server_origin_mutation_batch_manifest,
-    )
-
-    dataset = ensure_notes_provenance_ready(service=service, note_db=note_db, user_id=user_id, required_note_id=note_id)
-    payload = validate_notes_note_upsert_payload(note_payload)
-    value = validate_notes_provenance_payload(provenance)
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            [note_id, payload, value, expected_note_version, expected_provenance_version, restore],
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    existing = load_server_origin_mutation_batch_manifest(
-        service=service, dataset_id=dataset.dataset_id, source=source, idempotency_key=idempotency_key
-    )
-    if existing is not None:
-        if any(step.routing_metadata.get("notes_provenance_request") != fingerprint for step in existing):
-            raise SyncStoreError("notes_provenance_idempotency_conflict")
-        return capture_server_origin_mutation_batch(
-            service=service, user_id=user_id, steps=existing, source=source, idempotency_key=idempotency_key
-        )
-    if type(expected_note_version) is not int or expected_note_version < 0:
-        raise SyncStoreError("notes_note_expected_version_invalid")
-    parent = service.store.get_current_head(dataset.dataset_id, "notes.note", note_id)
-    if (parent.object_revision if parent else 0) != expected_note_version:
-        raise SyncStoreError("notes_note_version_conflict")
-    steps = [
-        ServerOriginMutationStep(
-            domain="notes.note",
-            operation="upsert",
-            object_id=note_id,
-            payload=payload,
-            object_revision=expected_note_version + 1,
-            base_object_revision=expected_note_version or None,
-            base_object_hash=parent.payload_hash if parent else None,
-        ),
-        provenance_step(
-            service=service,
-            dataset=dataset,
-            note_id=note_id,
-            payload=value,
-            expected_version=expected_provenance_version,
-            restore=restore,
-        ),
-    ]
-    steps = [
-        replace(step, routing_metadata={**step.routing_metadata, "notes_provenance_request": fingerprint})
-        for step in steps
-    ]
-    return capture_server_origin_mutation_batch(
-        service=service, user_id=user_id, steps=steps, source=source, idempotency_key=idempotency_key
     )
 
 

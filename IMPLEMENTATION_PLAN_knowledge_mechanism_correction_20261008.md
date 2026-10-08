@@ -27,7 +27,7 @@ Task2 review fix round2: reuse the existing quick-ingest captured request-scope 
 **Goal**: Repair migrated source restore when local capture checkpoints disappear using existing owned clip/version readbacks.
 **Success Criteria**: Accepted source retains exact validated pin; ambiguous/missing known capture evidence surfaces unavailable instead of current-source downgrade. Ordinary source handling remains compatible; latest active alone cannot identify accepted evidence.
 **Tests**: Existing research-web-capture restore/readback/current-material and ChatPane captured-source guards; checkpoint deletion and version metadata mutation cases.
-**Status**: In Progress (implementation and scoped verification complete; independent Task3 review pending)
+**Status**: Complete (Task3 fix round1 independently approved at f5ef878cba081bdc91c98c642ce1267af3023a6f)
 
 Task3 restores unique exact canonical capture history through existing owned WebClipper status and Media version APIs, retaining same-owner pins/refusals and refusing damaged or ambiguous evidence without latest fallback. Proven cross-context owner-map loss is corrected with the existing per-record storage pattern and adapter readback; legacy reads and immutable retry bodies remain compatible. Actual installed Plasmo and WebUI shim boundaries are tested separately. Verification: shared UI 329/329; WebUI 246/246; canonical client types pass; touched standalone types add zero diagnostics; lint zero errors/zero added warnings; Bandit finds zero applicable Python LOC. Private report: `.superpowers/sdd/IMPLEMENTATION_PLAN_knowledge_mechanism_correction_20261008/task-3-report.md`. Completely erased historical metadata remains indistinguishable from an older ordinary clip without other known evidence; concurrent conflicting writes to the same clip ID are not a new CAS contract. Task4/5 backend and acknowledgement issues remain separate in the ledger.
 
@@ -37,7 +37,9 @@ Task3 review fix round1: successful exact recovery now drops only the retained `
 **Goal**: Restore governed canonical scraper backend selection, bound preflight, consolidate HTTPX stream overlap, remove unused provenance writer and complete strict capabilities discovery.
 **Success Criteria**: Shared curl/HTTPX meet public profile before backend overrides/refusals are removed. Real optional curl validation covers env isolation, DNS pinning, identity/compression/size bounds, cookies, redirect and cleanup. Lifecycle tests use production compound plan; discovery exposes existing strict contract.
 **Tests**: Public capture/preflight/central HTTP/egress tests, actual curl controlled transport, Notes/Sync lifecycle/capabilities and relevant owner/version API tests. Bandit on touched Python.
-**Status**: Not Started
+**Status**: In Progress (Task4 implementation verified; normal commit and independent review checkpoint)
+
+Task4 restores bounded canonical curl/HTTPX through the existing shared transport, fixes keyed plain Notes create/update/import/bulk receipt replay, removes the unused provenance writer, and advertises the strict generated provenance schema. Actual curl floor/latest, Notes/Sync/Workspace, owner/RLS/lifecycle, and normal HTTP caller checks pass in their recorded scopes. Ruff is clean; Black changed-range qualification for six pre-existing unformatted files and nine external websearch skips remain explicit. Existing ADR026/031/034/042/059/065/066 govern; historical acceptedADR065 drift is recorded, not rewritten. Full commands, RED failures, adapter evidence, security results, and qualifications: `.superpowers/sdd/IMPLEMENTATION_PLAN_knowledge_mechanism_correction_20261008/task-4-report.md`. Stage4 completion awaits independent review; Stage5 live integration is separate.
 
 ## Stage 5: Integrated verification and accurate closeout
 **Goal**: Verify the integrated correction, publish reuse evidence and update all associated Backlog tasks including13514.

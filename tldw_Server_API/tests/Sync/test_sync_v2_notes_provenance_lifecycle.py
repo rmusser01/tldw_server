@@ -71,20 +71,48 @@ def env(tmp_path, request, monkeypatch):
 
 
 def save(env, *, expected=0, core_expected=0, payload=PAYLOAD, content="Body", key="save"):
-    from tldw_Server_API.app.core.Sync.v2.notes_provenance import capture_note_with_provenance
+    from tldw_Server_API.app.core.Notes.organization_capture import (
+        compound_note_request_fingerprint,
+        plan_compound_note,
+    )
+    from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import NotesOrganizationCoordinator
 
     service, db = env
-    return capture_note_with_provenance(
-        service=service,
-        note_db=db,
-        user_id="alice",
+    coordinator = NotesOrganizationCoordinator(service=service, note_db=db, user_id="alice")
+    note_payload = {**NOTE, "content": content}
+    fingerprint = compound_note_request_fingerprint(
+        coordinator,
+        operation="note.create",
         note_id="note",
-        note_payload={**NOTE, "content": content},
-        expected_note_version=core_expected,
+        note_fields=note_payload,
+        keywords=None,
+        folder_paths=None,
+        expected_version=core_expected,
         provenance=payload,
         expected_provenance_version=expected,
-        idempotency_key=key,
+    )
+    plan = coordinator.replay_request_plan(
         source="test",
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+        result_domain="notes.note",
+        require_organization=False,
+    )
+    if plan is None:
+        plan = plan_compound_note(
+            coordinator,
+            note_id="note",
+            note_payload=note_payload,
+            keywords=None,
+            folder_paths=None,
+            request_key=key,
+            request_fingerprint=fingerprint,
+            provenance=payload,
+            expected_provenance_version=expected,
+            expected_note_version=core_expected,
+        )
+    return capture_server_origin_mutation_batch(
+        service=service, user_id="alice", steps=plan.steps, source="test", idempotency_key=key
     )
 
 
@@ -1069,3 +1097,51 @@ def test_ready_profile_required_parent_bootstrap_resumes_exact_source(env, monke
     assert result.envelopes[0].base_server_cursor == source_head.server_cursor
     assert db.get_note_by_id("note")["version"] == 10
     assert save(env, core_expected=9).fully_applied
+
+
+def test_capabilities_publish_strict_provenance_payload_and_lifecycle(env):
+    from tldw_Server_API.app.core.Sync.v2.models import DEFAULT_M1_ENCRYPTION_POLICY
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import MAX_PROVENANCE_BYTES, NotesProvenancePayload
+
+    service, _ = env
+    schema = service.capabilities().domain_schemas["notes.provenance"]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == DEFAULT_M1_ENCRYPTION_POLICY
+    assert schema["upsert"] == NotesProvenancePayload.model_json_schema()
+    assert schema["tombstone"] == schema["upsert"]
+    assert schema["upsert"]["additionalProperties"] is False
+    assert all(value["additionalProperties"] is False for value in schema["upsert"]["$defs"].values())
+    assert schema["constraints"]["max_canonical_utf8_bytes"] == MAX_PROVENANCE_BYTES
+    assert schema["constraints"]["max_portable_encoded_characters"] == MAX_PROVENANCE_BYTES
+    assert schema["constraints"]["text_length_unit"] == "utf16_code_units"
+    assert schema["constraints"]["parent_id"] == "object_id"
+    assert schema["constraints"]["requires_current_base"] is True
+    assert schema["constraints"]["enrollment_readiness"] == "notes_provenance_v1"
+    assert schema["constraints"]["object_hash"] == "sha256:canonical_json({payload,deleted})"
+    assert schema["restore"] == {
+        "operation": "upsert",
+        "routing_metadata": {"restore_intent": True},
+        "requires_current_base": True,
+        "requires_active_parent": True,
+    }
+
+
+def test_capabilities_http_response_exposes_provenance_schema(env):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.api.v1.endpoints import sync as endpoint
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import NotesProvenancePayload
+
+    service, _ = env
+    app = FastAPI()
+    app.include_router(endpoint.router, prefix="/api/v1/sync/v2")
+    app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id="alice")
+    app.dependency_overrides[endpoint.get_sync_v2_service] = lambda: service
+    with TestClient(app) as http:
+        response = http.get("/api/v1/sync/v2/capabilities")
+    assert response.status_code == 200, response.text
+    assert "notes.provenance" in response.json()["domains"]
+    assert response.json()["domain_schemas"]["notes.provenance"]["upsert"] == NotesProvenancePayload.model_json_schema()

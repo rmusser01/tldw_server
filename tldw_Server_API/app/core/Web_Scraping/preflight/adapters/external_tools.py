@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Security.egress import public_url_policy_active
 from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as _asyncio_timeout
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
@@ -270,6 +271,9 @@ class GuardedExternalToolProbe:
                 "External tool probing is disabled.",
             )
 
+        # This subprocess API has no pinned DNS, credential isolation, or body bound.
+        if public_url_policy_active():
+            raise ProbeUnavailable()
         try:
             executable = self._which("wafw00f")
         except Exception:  # noqa: BLE001 - dependency inspection is optional
