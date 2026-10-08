@@ -140,7 +140,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
 **Success Criteria:** Explicit UI actions, honest extraction/version labels, no accidental save, retained original evidence and safe retirement/recovery.
 **Tests:** SourcesPane and capture workflow, prefill/provenance/import/export/restore tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Integrate capture and refresh in Research
 
@@ -175,7 +175,7 @@ assertCurrent()
 
 **Associated task:** TASK-13512 (already In Progress).
 
-**Files:** Shared `components/Notes/hooks/useNotesEditorState.tsx`, English Notes locale strings and owning AI-assist/backlink/source-history tests. Existing extension chat integration tests and report only unless a reproducible root cause requires a minimal shared fix.
+**Files:** Shared `components/Notes/hooks/useNotesEditorState.tsx`, English Notes locale strings and owning AI-assist/backlink/source-history tests. Existing extension chat integration tests, sidepanel-chat handoff catch and English feedback for intentional selected-history rejection; model adapter only if an observed reproducible root cause requires a minimal shared fix.
 
 **Interfaces:** No new API, capture metadata field, Notes provenance wire change or inferred capture tag. The editor's `editProvenance` describes editing mode/last AI assist; an unknown origin cannot be called “Typed manually.” Authoritative Knowledge history/chat backlink labels remain governed by their existing contracts.
 
@@ -186,16 +186,22 @@ t('option:notesSearch.editingManual', { defaultValue: 'Editing: Manual' })
 t('option:notesSearch.latestAssistPrefix', { defaultValue: 'Latest AI assist' })
 ```
 
-- [ ] Record this refinement in TASK13512 with backlog-py before code edits. Read actual editor state/history/backlink branches and owning tests.
-- [ ] Add/run RED tests that a reopened captured/ordinary unknown-origin Note does not claim manual authorship, while recorded assist and authoritative Knowledge/chat source history retain correct independent meaning. Use existing current fixtures and assertions.
-- [ ] Implement the minimal truthful wording above rather than adding an origin lookup/store based on editable tags. Run Notes AI-assist, backlink and source-history suites GREEN; scoped lint/types/hooks/self-review, commit with TASK13512 and report exact evidence.
-- [ ] In the integrated CDP run, investigate the previously qualified direct-panel Stream completion failed using actual request status/cause and current built artifact. If reproducible, trace all callers, write RED regression and implement a minimal shared root fix only within existing chat contracts, then verify/review. If native launch evidence cannot be obtained with CDP, document the qualification; never fake onClicked or claim a renderer handoff proves native launch.
+- [x] Record this refinement in TASK13512 with backlog-py before code edits. Read actual editor state/history/backlink branches and owning tests.
+- [x] Add/run RED tests that a reopened captured/ordinary unknown-origin Note does not claim manual authorship, while recorded assist and authoritative Knowledge/chat source history retain correct independent meaning. Use existing current fixtures and assertions.
+- [x] Implement the minimal truthful wording above rather than adding an origin lookup/store based on editable tags. Run Notes AI-assist, backlink and source-history suites GREEN; scoped lint/types/hooks/self-review, commit with TASK13512 and report exact evidence.
+- [x] In the integrated CDP run, investigate the previously qualified direct-panel Stream completion failed using actual request status/cause and current built artifact. If reproducible, trace all callers, write RED regression and implement a minimal shared root fix only within existing chat contracts, then verify/review. If native launch evidence cannot be obtained with CDP, document the qualification; never fake onClicked or claim a renderer handoff proves native launch.
+
+- [x] Preserve ADR049 selected-history admission; for Clipper handoff rejection at the existing catch, show translated actionable New Chat guidance while retaining current tab and pending handoff. Add behavioral RED/GREEN for pending recovery, owner/retirement, and no duplicate dispatch. Diagnose the actual legacy analysis adapter separately from successful ordinary chat SSE; do not infer a Clipper pass from that different pipeline.
+
+- [x] Repair the confirmed empty-prompt root in existing application.getPrompt for WEB_CLIPPER_ANALYZE_MESSAGE_TYPE using existing DEFAULT_CUSTOM_PROMPT; retain unknown/custom behavior and transport validation. Bind the existing transient pending Analyze record to producer verified serverChatMirrorOwnerKey, normalize unowned requests fail closed, and fence current owner/origin/view before dispatch and post-await retirement/notification. Preserve saved clips and conditional replacement identity; add actual producer/normalizer/same-owner, cross-account/origin and retired same-ID replacement RED/GREEN, then verify rebuilt real transport/SSE. No new wire API, persistence subsystem or history authority.
+
+Task5 verification: qualified native-resolution407/407; default383passed24failed+32errors remains qualified. Both types/Chrome build/manual hooks pass; zero new lint diagnostics (inherited1error71warnings). Actual built Clipper save200→singlecompletions200/SSEsuccess/DONE verified and pending retired; independent spec+quality review approved49701beaec. Native/spoken/device/participant evidence remains open.
 
 ## Stage 5: Integrated verification and accurate tracking
 **Goal:** Reviewable feature evidence and honest remaining followups.
 **Success Criteria:** Owning test/type/build/security gates pass; CDP confirms both clients; tasks and ADR accurately describe implemented behavior and outstanding human/device checks.
 **Tests:** Integrated backend/sharedUI tests, builds, OpenAPI drift, lint, Bandit, pre-commit, CDP workflows.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 6: Verify and reconcile workstream
 
