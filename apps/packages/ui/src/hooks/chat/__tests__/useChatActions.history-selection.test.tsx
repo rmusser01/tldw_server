@@ -45,6 +45,7 @@ const {
 
 const messageStoreState = vi.hoisted(() => ({
   draftFields: null as (() => Record<string, unknown>) | null,
+  editRows: null as (() => unknown[]) | null,
   value: {
     selectedModel: "deepseek-chat" as string | null,
     toolChoice: "auto" as "auto" | "none" | "required",
@@ -150,12 +151,28 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", async original => {
+vi.mock("@/store/option", async (original) => {
   const actual = await original<typeof import("@/store/option")>()
-  return { ...actual, useStoreMessageOption: Object.assign(
-    (select: (state: ReturnType<typeof actual.useStoreMessageOption.getState>) => unknown) => actual.useStoreMessageOption(select),
-    { getState: () => ({ ...actual.useStoreMessageOption.getState(), ...messageStoreState.value, ...messageStoreState.draftFields?.() }) }
-  ) }
+  return {
+    ...actual,
+    useStoreMessageOption: Object.assign(
+      (
+        select: (
+          state: ReturnType<typeof actual.useStoreMessageOption.getState>
+        ) => unknown
+      ) => actual.useStoreMessageOption(select),
+      {
+        getState: () => ({
+          ...actual.useStoreMessageOption.getState(),
+          ...messageStoreState.value,
+          ...messageStoreState.draftFields?.(),
+          ...(messageStoreState.editRows
+            ? { messages: messageStoreState.editRows() }
+            : {})
+        })
+      }
+    )
+  }
 })
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
@@ -486,6 +503,7 @@ const makeController = () => {
 afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
+  messageStoreState.editRows = null
   nativeChatId = "tracked-chat-1"
   h1.connected = false
   h1.recover.mockReset()
@@ -566,14 +584,29 @@ it("edits an ordinary local message while the mounted history controller is idle
   const options = {
     ...ordinaryOptions(),
     serverChatId: null,
-    messages: [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+    messages: [
+      { id: "plain-message", isBot: false, message: "old", sources: [] }
+    ]
   }
+  messageStoreState.editRows = () => options.messages
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => {
-    await result.current.editMessage(0, "edited", false, false)
+    expect(await result.current.editMessage(0, "edited", false, false)).toEqual(
+      { status: "submitted" }
+    )
   })
+  expect(options.setMessages).toHaveBeenCalledWith([
+    expect.objectContaining({ id: "plain-message", message: "edited" })
+  ])
+  expect(
+    options.setHistory.mock.calls
+      .at(-1)![0]
+      .map((row: { content: string }) => row.content)
+  ).toEqual(["edited"])
   expect(helpers.updateMessageById).toHaveBeenCalledWith(
-    "history-character", "plain-message", "edited"
+    "history-character",
+    "plain-message",
+    "edited"
   )
 })
 
@@ -2312,6 +2345,7 @@ describe("selected-history mutations", () => {
       messages: visible,
       historyId: "history-1"
     }
+    messageStoreState.editRows = () => options.messages
     const { result } = renderHook(() => useChatActions(options as any))
     await act(async () => {
       await result.current.editMessage(2, "edited", false, false)
@@ -2365,6 +2399,7 @@ describe("selected-history mutations", () => {
       messages: visible,
       historyId: "history-1"
     }
+    messageStoreState.editRows = () => options.messages
     const { result } = renderHook(() => useChatActions(options as any))
     options.setMessages.mockClear()
     const editing = result.current.editMessage(2, "edited", false, false)
@@ -2452,6 +2487,7 @@ it("native plain edit/delete reject before any mutation or display change", asyn
     serverChatId: nativeChatId,
     messages: visible
   }
+  messageStoreState.editRows = () => options.messages
   const { result } = renderHook(() => useChatActions(options as any))
   options.setMessages.mockClear()
   await expect(
@@ -2705,6 +2741,7 @@ it.each(["missing", "unavailable", "mismatch"])(
       serverChatId: null,
       historyId: "history-1"
     }
+    messageStoreState.editRows = () => options.messages
     const hook = renderHook(() => useChatActions(options as any))
     options.setMessages.mockClear()
     await expect(
@@ -4336,5 +4373,61 @@ it.each(["H1", "input", "edit-undo"])(
     mounted.snapshot.release()
     mounted.hook.unmount()
     mounted.selection.unmount()
+  }
+)
+
+
+it.each(["history-epoch", "new-draft", "same-id-restore"])(
+  "a retained ordinary idle edit refuses %s before another render",
+  async (retirement) => {
+    const helpers = await import("@/db/dexie/helpers")
+    const actual =
+      await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    const sessions = await import("@/store/playground-session")
+    const state = h1.controller.getCurrent()
+    state.status = "idle"
+    state.owner = null
+    state.view = null
+    let epoch = 0
+    h1.controller.fence = () => {
+      const token = epoch
+      return () => epoch === token
+    }
+    const options = {
+      ...ordinaryOptions(),
+      serverChatId: null,
+      messages: [
+        {
+          id: "idle",
+          name: "You",
+          isBot: false,
+          message: "Original idle row",
+          sources: []
+        }
+      ]
+    }
+    messageStoreState.editRows = () => options.messages
+    const hook = renderHook(() => useChatActions(options as any))
+    const retained = hook.result.current.editMessage
+    options.setMessages.mockClear()
+    options.setHistory.mockClear()
+    if (retirement === "history-epoch") epoch++
+    else if (retirement === "new-draft")
+      actual.useStoreMessageOption.setState({
+        chatDraftRevision:
+          actual.useStoreMessageOption.getState().chatDraftRevision + 1
+      })
+    else
+      sessions.usePlaygroundSessionStore.setState({
+        restoreRevision:
+          sessions.usePlaygroundSessionStore.getState().restoreRevision + 1
+      })
+    expect(await retained(0, "Obsolete edit", true, false)).toEqual({
+      status: "skipped",
+      reason: "stale_selection"
+    })
+    expect(helpers.updateMessageById).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(options.setHistory).not.toHaveBeenCalled()
   }
 )

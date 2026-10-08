@@ -1,6 +1,6 @@
 import i18n from "i18next"
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
-import { getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
 import type { UploadedFile } from "@/db"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
 import {
@@ -27,13 +27,13 @@ import type { ForkRequestV1, ForkResultV1 } from "@/types/history-selection"
 import { isGreetingMessageType } from "@/utils/character-greetings"
 import { isImageGenerationMessageType } from "@/utils/image-generation-chat"
 import type { NotificationInstance } from "antd/es/notification/interface"
-import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { chatSubmitSkipped, chatSubmitSubmitted, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 import { type ChatHistory, type Message } from "~/store/option"
 
 /** Derive provider display history from the same visible identities after a successful mutation. */
 export const historyFromVisibleMessages = (messages: Message[]): ChatHistory =>
-  messages
+  excludeLocalRagDiagnostics(messages)
     .filter(
       (message) =>
         !isGreetingMessageType(message.messageType) &&
@@ -186,28 +186,32 @@ export const createRegenerateLastMessage = ({
   }
 }
 
-export const createEditMessage =
-  (options: {
-    messages: Message[]
-    history: ChatHistory
-    setMessages: (messages: Message[]) => void
-    setHistory: (history: ChatHistory) => void
-    historyId: string | null
-    validateBeforeSubmitFn: () => boolean
-    onSubmit: (params: any) => Promise<unknown>
-    captureViewFence?: () => () => boolean
-    mutate?: (target: Message, content: string) => Promise<void>
-    notification?: NotificationInstance
-  }) =>
-  async (index: number, message: string, isHuman: boolean, isSend: boolean) => {
+export const createEditMessage = (options: {
+  messages: Message[]
+  getMessages?: () => Message[]
+  history: ChatHistory
+  setMessages: (messages: Message[]) => void
+  setHistory: (history: ChatHistory) => void
+  historyId: string | null
+  validateBeforeSubmitFn: () => boolean
+  onSubmit: (params: any) => Promise<unknown>
+  captureViewFence?: () => () => boolean
+  mutate?: (target: Message, content: string) => Promise<void>
+  notification?: NotificationInstance
+}) => {
+  const current = options.captureViewFence?.() ?? (() => true)
+  return async (
+    index: number,
+    message: string,
+    isHuman: boolean,
+    isSend: boolean
+  ): Promise<ChatSubmitResult> => {
+    if (!current()) return chatSubmitSkipped("stale_selection")
     const target = options.messages[index]
     if (!target?.id) throw new Error("missing_message")
-    // Capture the stable action boundary synchronously. Unsupported forms must not choose/truncate.
-    const boundary = { kind: "before_message", message_id: target.id } as const
+    // Unsupported forms must not choose/truncate or mutate the captured stable target.
     if (isHuman && isSend) {
-      const error = new Error(
-        `unsupported_history_edit_and_send:${boundary.message_id}`
-      )
+      const error = new Error(`unsupported_history_edit_and_send:${target.id}`)
       options.notification?.error({
         message: "Message action unavailable",
         description: error.message
@@ -216,25 +220,42 @@ export const createEditMessage =
     }
     if (!options.historyId && !options.mutate)
       throw new Error("temporary_history_unavailable")
-    const current = options.captureViewFence?.() ?? (() => true)
+    const before = options.getMessages?.() ?? options.messages
+    const candidates = before.filter((row) => row.id === target.id)
+    if (candidates.length !== 1 || candidates[0].message !== target.message)
+      return chatSubmitSkipped("message_changed")
     try {
       if (options.mutate) await options.mutate(target, message)
       else await updateMessageById(options.historyId!, target.id, message)
     } catch (error) {
-      options.notification?.error({
-        message: "Message edit failed",
-        description:
-          error instanceof Error ? error.message : "message_edit_failed"
-      })
+      if (current())
+        options.notification?.error({
+          message: "Message edit failed",
+          description:
+            error instanceof Error ? error.message : "message_edit_failed"
+        })
       throw error
     }
-    if (!current()) return
-    const updated = options.messages.map((row) =>
+    if (!current()) return chatSubmitSkipped("stale_selection")
+    const visible = options.getMessages?.() ?? options.messages
+    const currentTargets = visible.filter((row) => row.id === target.id)
+    if (
+      currentTargets.length !== 1 ||
+      (currentTargets[0].message !== target.message &&
+        currentTargets[0].message !== message)
+    )
+      return chatSubmitSkipped("message_changed")
+    const updated = visible.map((row) =>
       row.id === target.id ? { ...row, message } : row
     )
     options.setMessages(updated)
+    if (!current()) return chatSubmitSkipped("stale_selection")
     options.setHistory(historyFromVisibleMessages(updated))
+    return current()
+      ? chatSubmitSubmitted()
+      : chatSubmitSkipped("stale_selection")
   }
+}
 
 export const createBranchMessage =
   (options: {

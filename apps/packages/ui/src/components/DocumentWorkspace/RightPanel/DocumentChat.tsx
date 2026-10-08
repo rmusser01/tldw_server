@@ -302,7 +302,7 @@ export const DocumentChat: React.FC = () => {
                     isProcessing={isProcessing}
                     sources={message.sources}
                     onEditFormSubmit={(value, isSend) => {
-                      editMessage(index, value, !message.isBot, isSend)
+                      return editMessage(index, value, !message.isBot, isSend)
                     }}
                     onDeleteMessage={() => {
                       deleteMessage(index)

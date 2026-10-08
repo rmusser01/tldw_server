@@ -1,7 +1,8 @@
+import { SidePanelBody } from "@/components/Sidepanel/Chat/body"
 import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 // @vitest-environment jsdom
 import React from "react"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
@@ -708,6 +709,34 @@ const parentChat = vi.hoisted(() => ({
   historyId: "identity-chat",
   editMessage: vi.fn()
 }))
+vi.mock("@/hooks/useMessage", () => ({
+  useMessage: () => ({
+    ...parentChat,
+    temporaryChat: false,
+    streaming: false,
+    isProcessing: false,
+    setMessages: vi.fn(),
+    regenerateLastMessage: vi.fn()
+  })
+}))
+vi.mock("@/store/webui", () => ({ useWebUI: () => ({ ttsEnabled: false }) }))
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: (options: {
+    count: number
+    getItemKey?: (index: number) => unknown
+  }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: options.count }, (_, index) => ({
+        index,
+        key: options.getItemKey?.(index) ?? index,
+        start: index * 120
+      })),
+    getTotalSize: () => options.count * 120,
+    measureElement: () => {},
+    getOffsetForIndex: () => [0, "center"],
+    scrollToOffset: vi.fn()
+  })
+}))
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => ({
     ...parentChat,
@@ -807,6 +836,163 @@ it.each([false, true])(
     storedPreferences.clear()
   }
 )
+
+
+it.each([false, true])(
+  "real parent returns its held Save outcome and keeps a rejected draft, bubble=%s",
+  async (bubble) => {
+    storedPreferences.set("chatShowCharacterPortraits", !bubble)
+    storedPreferences.set("userChatBubble", true)
+    parentChat.historyId = "ack-chat"
+    parentChat.messages = [
+      {
+        id: "ack-user",
+        message: "Original row",
+        name: "You",
+        isBot: false,
+        role: "user"
+      }
+    ]
+    let reject!: (error: unknown) => void
+    const held = new Promise<unknown>((_accept, refuse) => {
+      reject = refuse
+    })
+    void held.catch(() => {})
+    parentChat.editMessage.mockReset().mockReturnValue(held)
+    render(<PlaygroundChat />)
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "ack-user" }
+        })
+      )
+    )
+    const editor = screen.getByRole("textbox")
+    fireEvent.change(editor, { target: { value: "Exact preserved edit  \n" } })
+    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    try {
+      expect(screen.queryByRole("textbox")).toBe(editor)
+      expect(editor).toHaveValue("Exact preserved edit  \n")
+    } finally {
+      await act(async () => {
+        reject(new Error("Current edit refused"))
+        await held.catch(() => {})
+      })
+    }
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Your edited text is kept"
+      )
+    )
+    expect(screen.getByRole("textbox")).toHaveValue("Exact preserved edit  \n")
+    expect(parentChat.messages[0].message).toBe("Original row")
+    parentChat.editMessage.mockResolvedValue({ status: "submitted" })
+    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull())
+    expect(parentChat.editMessage).toHaveBeenLastCalledWith(
+      0,
+      "Exact preserved edit  \n",
+      true,
+      false
+    )
+    storedPreferences.clear()
+  }
+)
+
+it.each([false, true])(
+  "replacing a same-text message retires its old editor acknowledgement, bubble=%s",
+  async (bubble) => {
+    storedPreferences.set("chatShowCharacterPortraits", !bubble)
+    storedPreferences.set("userChatBubble", true)
+    let release!: (result: unknown) => void
+    const held = new Promise<unknown>((resolve) => {
+      release = resolve
+    })
+    const closeProps = {
+      ...baseProps,
+      isBot: false,
+      role: "user" as const,
+      message: "Same original text",
+      messageId: "first",
+      onEditFormSubmit: () => held
+    }
+    const view = render(<PlaygroundMessage {...closeProps} />)
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", { detail: { messageId: "first" } })
+      )
+    )
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "First edited text" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    view.rerender(<PlaygroundMessage {...closeProps} messageId="second" />)
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "second" }
+        })
+      )
+    )
+    expect(screen.getByRole("textbox")).toHaveValue("Same original text")
+    await act(async () => {
+      release({ status: "submitted" })
+      await held
+    })
+    expect(screen.getByRole("textbox")).toHaveValue("Same original text")
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Second edited text" }
+    })
+    expect(screen.getByRole("textbox")).toHaveValue("Second edited text")
+    storedPreferences.clear()
+  }
+)
+
+it("the compact body returns its held Save outcome and retains a rejected draft", async () => {
+  storedPreferences.set("chatShowCharacterPortraits", true)
+  parentChat.historyId = "compact-ack-chat"
+  parentChat.messages = [
+    {
+      id: "compact-ack-user",
+      message: "Original compact row",
+      name: "You",
+      isBot: false,
+      role: "user"
+    }
+  ]
+  let reject!: (error: unknown) => void
+  const held = new Promise<unknown>((_accept, refuse) => {
+    reject = refuse
+  })
+  void held.catch(() => {})
+  parentChat.editMessage.mockReset().mockReturnValue(held)
+  render(<SidePanelBody />)
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent("tldw:edit-message", {
+        detail: { messageId: "compact-ack-user" }
+      })
+    )
+  )
+  const editor = screen.getByRole("textbox")
+  fireEvent.change(editor, { target: { value: "Exact compact edit  \n" } })
+  fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+  try {
+    expect(screen.queryByRole("textbox")).toBe(editor)
+    expect(editor).toHaveValue("Exact compact edit  \n")
+  } finally {
+    await act(async () => {
+      reject(new Error("Compact edit refused"))
+      await held.catch(() => {})
+    })
+  }
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Your edited text is kept"
+  )
+  expect(screen.getByRole("textbox")).toHaveValue("Exact compact edit  \n")
+  expect(parentChat.messages[0].message).toBe("Original compact row")
+  storedPreferences.clear()
+})
 
 
 describe("PlaygroundMessage recorded response presentation", () => {

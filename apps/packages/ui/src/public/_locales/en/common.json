@@ -149,6 +149,15 @@
   "editMessage_placeholder": {
     "message": "Type a message..."
   },
+  "editMessage_label": {
+    "message": "Edit message"
+  },
+  "editMessage_failed": {
+    "message": "Your edit could not be confirmed. Your edited text is kept. Try saving again."
+  },
+  "editMessage_changed": {
+    "message": "This message changed while you were editing. Your edited text is kept. Copy it, then cancel and reopen the message to review the latest version."
+  },
   "submit": {
     "message": "Submit"
   },

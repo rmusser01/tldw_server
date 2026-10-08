@@ -222,7 +222,7 @@ export const ModelPlaygroundChat: React.FC = () => {
               isSearchingInternet={false}
               sources={msg.sources}
               onEditFormSubmit={(value, isSend) => {
-                editMessage(block.index, value, !msg.isBot, isSend)
+                return editMessage(block.index, value, !msg.isBot, isSend)
               }}
               onDeleteMessage={() => {
                 void deleteMessage(block.index)
@@ -275,7 +275,7 @@ export const ModelPlaygroundChat: React.FC = () => {
               isSearchingInternet={false}
               sources={userMessage.sources}
               onEditFormSubmit={(value, isSend) => {
-                editMessage(block.userIndex, value, !userMessage.isBot, isSend)
+                return editMessage(block.userIndex, value, !userMessage.isBot, isSend)
               }}
               onDeleteMessage={() => {
                 void deleteMessage(block.userIndex)
@@ -332,7 +332,7 @@ export const ModelPlaygroundChat: React.FC = () => {
                       isSearchingInternet={false}
                       sources={replyMsg.sources}
                       onEditFormSubmit={(value, isSend) => {
-                        editMessage(index, value, !replyMsg.isBot, isSend)
+                        return editMessage(index, value, !replyMsg.isBot, isSend)
                       }}
                       onDeleteMessage={() => {
                         void deleteMessage(index)

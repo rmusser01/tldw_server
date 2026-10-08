@@ -49,6 +49,7 @@ const testController = () => {
     loadConversation: vi.fn(async ({ historyId }, _ref, loaded) => {
       state.owner = {
         kind: "local",
+        profile_id: "declared-local-profile",
         owner_key: "local",
         conversation_id: historyId
       }
@@ -209,6 +210,7 @@ it("waits for an exact child load receipt before displaying a committed child", 
     loadConversation: vi.fn(async (_target, _reference, loaded) => {
       state.owner = {
         kind: "local",
+        profile_id: "declared-local-profile",
         owner_key: "local",
         conversation_id: "child"
       }
@@ -220,7 +222,7 @@ it("waits for an exact child load receipt before displaying a committed child", 
   const options = setup({ historySelection: controller })
   await createBranchMessage(options)(request)
   expect(controller.loadConversation).toHaveBeenCalledWith(
-    { historyId: "child" },
+    { historyId: "child", isCurrent: expect.any(Function) },
     undefined,
     expect.any(Function)
   )

@@ -69,7 +69,7 @@ type PlaygroundCompareClusterProps = {
   handleKeepGeneratedImageVariant: (payload: any) => void
   handleDeleteGeneratedImageVariant: (payload: any) => void
   handleDeleteAllGeneratedImageVariants: (payload: any) => void
-  editMessage: (index: number, value: string, isUser: boolean, isSend?: boolean) => void
+  editMessage: (index: number, value: string, isUser: boolean, isSend?: boolean) => unknown
   deleteMessage: (index: number) => void
   toggleMessagePinned: (index: number) => Promise<void> | void
   createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}, onOpened?: (childId: string) => void) => Promise<ForkResultV1>
@@ -431,7 +431,7 @@ export const PlaygroundCompareCluster = ({
         isSearchingInternet={isSearchingInternet}
         sources={userMessage.sources}
         onEditFormSubmit={(value, isSend) => {
-          editMessage(block.userIndex, value, !userMessage.isBot, isSend)
+          return editMessage(block.userIndex, value, !userMessage.isBot, isSend)
         }}
         onDeleteMessage={() => {
           deleteMessage(block.userIndex)
@@ -974,7 +974,7 @@ export const PlaygroundCompareCluster = ({
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
                 onEditFormSubmit={(value, isSend) => {
-                  editMessage(index, value, !message.isBot, isSend)
+                  return editMessage(index, value, !message.isBot, isSend)
                 }}
                 onDeleteMessage={() => {
                   deleteMessage(index)

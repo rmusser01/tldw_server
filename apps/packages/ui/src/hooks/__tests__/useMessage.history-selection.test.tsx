@@ -671,13 +671,27 @@ it("edits an ordinary local sidepanel message while history selection is idle", 
   current.owner = null
   current.view = null
   mocks.storeState.serverChatId = null
-  mocks.storeState.messages = [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+  mocks.storeState.messages = [
+    { id: "plain-message", isBot: false, message: "old", sources: [] }
+  ]
   const { result } = renderHook(() => useMessage())
   await act(async () => {
-    await result.current.editMessage(0, "edited", false, false)
+    expect(await result.current.editMessage(0, "edited", false, false)).toEqual(
+      { status: "submitted" }
+    )
   })
+  expect(mocks.setMessages).toHaveBeenCalledWith([
+    expect.objectContaining({ id: "plain-message", message: "edited" })
+  ])
+  expect(
+    mocks.setHistory.mock.calls
+      .at(-1)![0]
+      .map((row: { content: string }) => row.content)
+  ).toEqual(["edited"])
   expect(helpers.updateMessageById).toHaveBeenCalledWith(
-    "history-1", "plain-message", "edited"
+    "history-1",
+    "plain-message",
+    "edited"
   )
 })
 
@@ -2208,3 +2222,51 @@ it("keeps a failed actual scene read ahead of compact native admission and shows
   expect(mocks.storeState.setServerChatId).not.toHaveBeenCalled()
   read.mockRestore()
 })
+
+
+it.each(["history-epoch", "new-draft", "same-id-restore"])(
+  "a retained compact idle edit refuses %s before another render",
+  async (retirement) => {
+    const helpers = await import("@/db/dexie/helpers")
+    const sessions = await import("@/store/playground-session")
+    const state = h1.controller.getCurrent()
+    state.status = "idle"
+    state.owner = null
+    state.view = null
+    let epoch = 0
+    h1.controller.fence = () => {
+      const token = epoch
+      return () => epoch === token
+    }
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = [
+      {
+        id: "idle",
+        name: "You",
+        isBot: false,
+        message: "Original compact row",
+        sources: []
+      }
+    ]
+    const hook = renderHook(() => useMessage())
+    const retained = hook.result.current.editMessage
+    mocks.setMessages.mockClear()
+    mocks.setHistory.mockClear()
+    if (retirement === "history-epoch") epoch++
+    else if (retirement === "new-draft")
+      mocks.storeState.chatDraftRevision =
+        Number(mocks.storeState.chatDraftRevision ?? 0) + 1
+    else
+      sessions.usePlaygroundSessionStore.setState({
+        restoreRevision:
+          sessions.usePlaygroundSessionStore.getState().restoreRevision + 1
+      })
+    expect(await retained(0, "Obsolete compact edit", true, false)).toEqual({
+      status: "skipped",
+      reason: "stale_selection"
+    })
+    expect(helpers.updateMessageById).not.toHaveBeenCalled()
+    expect(mocks.setMessages).not.toHaveBeenCalled()
+    expect(mocks.setHistory).not.toHaveBeenCalled()
+  }
+)

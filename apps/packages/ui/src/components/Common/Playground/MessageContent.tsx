@@ -86,7 +86,7 @@ export interface MessageContentProps {
   isBot: boolean
   isStreaming: boolean
   editMode: boolean
-  onEditFormSubmit: (value: string, isSend: boolean) => void
+  onEditFormSubmit: (value: string, isSend: boolean) => unknown
   onCloseEdit: () => void
 
   // Display state (from useMessageState)
@@ -281,6 +281,7 @@ export const MessageContent = React.memo(function MessageContent(
           )
         ) : (
           <EditMessageForm
+            key={messageId}
             value={message}
             onSumbit={onEditFormSubmit}
             onClose={onCloseEdit}

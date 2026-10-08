@@ -284,7 +284,7 @@ export const SidePanelBody = ({
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
                   onEditFormSubmit={(value, isSend) => {
-                    void handleEditMessage(index, value, !message.isBot, isSend)
+                    return handleEditMessage(index, value, !message.isBot, isSend)
                   }}
                   onDeleteMessage={() => {
                     void handleDeleteMessage(index)

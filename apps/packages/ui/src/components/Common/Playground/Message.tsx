@@ -243,7 +243,7 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
-  onEditFormSubmit: (value: string, isSend: boolean) => void
+  onEditFormSubmit: (value: string, isSend: boolean) => unknown
   isProcessing: boolean
   webSearch?: Record<string, unknown>
   isSearchingInternet?: boolean
@@ -2030,6 +2030,7 @@ export const PlaygroundMessage = (props: Props) => {
   if (renderUserBubble) {
     return (
       <PlaygroundUserMessageBubble
+        key={messageKey}
         {...props}
         editMode={editMode}
         onEditModeChange={setEditMode}
@@ -2842,6 +2843,7 @@ export const PlaygroundMessage = (props: Props) => {
               )
             ) : (
               <EditMessageForm
+                key={messageKey}
                 value={props.message}
                 onSumbit={props.onEditFormSubmit}
                 onClose={() => setEditMode(false)}

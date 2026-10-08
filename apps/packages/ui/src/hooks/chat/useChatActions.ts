@@ -5078,7 +5078,8 @@ export const useChatActions = ({
     !serverChatId && historySelection?.getCurrent().status === "idle"
   const editMessage = createEditMessage({
     notification,
-    captureViewFence: ordinaryLocalMutation ? undefined : historySelection?.fence,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
+    getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {
       const owner = captureLocalMutationOwner(
         historySelection,

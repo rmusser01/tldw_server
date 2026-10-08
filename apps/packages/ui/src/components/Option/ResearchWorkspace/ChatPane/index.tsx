@@ -1,3 +1,4 @@
+import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
 import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
@@ -3666,19 +3667,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         suppressDeleteSuccessToast
                         onEditFormSubmit={(value: string, isSend: boolean) => {
                           if (isSend)
-                            void withCurrentCaptureHeads(
+                            return withCurrentCaptureHeads(
                               async (_options, assertCurrent) => {
                                 assertCurrent?.()
-                                await editMessage(
+                                return isChatSubmitSuccess(await editMessage(
                                   idx,
                                   value,
                                   !msg.isBot,
                                   isSend
-                                )
-                                return true
+                                ))
                               }
                             )
-                          else editMessage(idx, value, !msg.isBot, isSend)
+                          return editMessage(idx, value, !msg.isBot, isSend)
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}

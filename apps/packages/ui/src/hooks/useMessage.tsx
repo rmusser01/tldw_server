@@ -1,3 +1,4 @@
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import type { GreetingSeed } from "@/utils/character-greetings";
 import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
 import {
@@ -3178,7 +3179,8 @@ export const useMessage = () => {
     setHistory,
     onSubmit,
     validateBeforeSubmitFn: () => true,
-    captureViewFence: ordinaryLocalMutation ? undefined : historySelection?.fence,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
+    getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {
       const owner = captureLocalMutationOwner(
         historySelection,

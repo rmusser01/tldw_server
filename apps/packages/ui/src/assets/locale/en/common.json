@@ -98,7 +98,10 @@
   "continue": "Continue Response",
   "saveAndSubmit": "Save & Send",
   "editMessage": {
-    "placeholder": "Type a message..."
+    "placeholder": "Type a message...",
+    "label": "Edit message",
+    "failed": "Your edit could not be confirmed. Your edited text is kept. Try saving again.",
+    "changed": "This message changed while you were editing. Your edited text is kept. Copy it, then cancel and reopen the message to review the latest version."
   },
   "submit": "Submit",
   "send": "Send",

@@ -73,7 +73,7 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
-  onEditFormSubmit: (value: string, isSend: boolean) => void
+  onEditFormSubmit: (value: string, isSend: boolean) => unknown
   isProcessing: boolean
   webSearch?: unknown
   isSearchingInternet?: boolean
@@ -309,6 +309,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           style={messageBubbleStyle}>
           <div className="w-full min-w-0">
             <EditMessageForm
+              key={props.serverMessageId ?? props.messageId ?? `${props.role ?? props.isBot}:${props.currentMessageIndex}`}
               value={props.message}
               onSumbit={props.onEditFormSubmit}
               onClose={() => setEditMode(false)}
