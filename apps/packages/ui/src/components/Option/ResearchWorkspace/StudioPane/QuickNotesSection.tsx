@@ -1,3 +1,11 @@
+import { tldwAuth } from "@/services/tldw/TldwAuth"
+import { createNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
+import {
+  readSurfaceOfflineDraftQueue,
+  retainSurfaceOfflineDraft,
+  retireSurfaceOfflineDraft,
+  type OfflineDraftEntry
+} from "@/components/Notes/notes-manager-utils"
 import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import { KnowledgeNoteHistory } from "@/components/Notes/KnowledgeNoteHistory"
 import {
@@ -314,10 +322,17 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const [isSaving, setIsSaving] = useState(false)
   const saveControllerRef = useRef<AbortController | null>(null)
   const pendingSaveRef = useRef<{
-    scopeKey: string; workspaceId: string | null; noteId: string | number | undefined;
-    draft: typeof currentNote; path: AllowedPath; method: "POST" | "PUT";
-    body: Record<string, unknown>; headers: Record<string, string>;
-  } | null>(null)
+    authorityScope: string;
+    entry: OfflineDraftEntry;
+    scopeKey: string;
+    workspaceId: string | null;
+    noteId: string | number | undefined;
+    draft: typeof currentNote;
+    path: AllowedPath;
+    method: "POST" | "PUT";
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+  } | null>(null);
   const [showSavedIndicator, setShowSavedIndicator] = useState(false)
   const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
@@ -712,15 +727,22 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
     const controller = new AbortController()
     saveControllerRef.current = controller
+    let acknowledged = false;
     let scope: ServicePromptSnapshot | undefined
     let noteId = draft.id
+    const operationPrefix = `surface:quick-notes:${JSON.stringify([workspaceId, draftWorkspaceTag])}:`;
+    let operationKey = draft.pendingNoteWriteKey?.startsWith(operationPrefix)
+      ? draft.pendingNoteWriteKey
+      : undefined;
     const hasCurrentIdentity = () => {
       const latest = useWorkspaceStore.getState()
       return (
         latest.workspaceId === workspaceId &&
         latest.workspaceTag === draftWorkspaceTag &&
-        latest.currentNote.id === noteId
-      )
+        latest.currentNote.id === noteId &&
+        (!operationKey ||
+          latest.currentNote.pendingNoteWriteKey === operationKey)
+      );
     }
     const isCurrent = () =>
       !controller.signal.aborted &&
@@ -743,6 +765,19 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     try {
       scope = await loadServicePromptSnapshot([], { signal: controller.signal })
       if (!isCurrent()) return
+      const user =
+        scope.requestScope.userId == null
+          ? await tldwAuth.getCurrentUser()
+          : null;
+      const ownerId =
+        scope.requestScope.userId ?? (user?.is_active ? user.id : null);
+      if (!isCurrent()) return;
+      if (ownerId == null)
+        throw new Error("Verify your account before saving a note.");
+      const authorityScope = createNotesGraphAuthorityScope(
+        scope.requestScope.config.serverUrl,
+        ownerId,
+      );
       const scopedFields = requestScopeFields(scope.requestScope)
       const request = { ...scopedFields, abortSignal: scope.scopeSignal }
       const persistedKeywords = buildPersistedKeywords(
@@ -774,9 +809,53 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
       let pending = pendingSaveRef.current
       if (pending && (pending.scopeKey !== scope.scopeKey || pending.workspaceId !== workspaceId || pending.noteId !== draft.id)) pending = null
+      if (!pending && operationKey) {
+        const entry = (await readSurfaceOfflineDraftQueue(authorityScope))[
+          operationKey
+        ];
+        if (!isCurrent()) return;
+        if (
+          entry?.pendingWrite &&
+          (entry.noteId === (draft.id == null ? null : String(draft.id)) ||
+            (entry.noteId == null && entry.pendingWrite.body.id === draft.id))
+        ) {
+          pending = {
+            authorityScope,
+            entry,
+            scopeKey: scope.scopeKey,
+            workspaceId,
+            noteId: draft.id,
+            draft: {
+              ...entry.metadata,
+              id: draft.id,
+              title: entry.title,
+              content: entry.content,
+              keywords: entry.keywords,
+              version: entry.baseVersion ?? undefined,
+              isDirty: true,
+            },
+            path: entry.noteId
+              ? (`/api/v1/notes/${encodeURIComponent(entry.noteId)}` as AllowedPath)
+              : "/api/v1/notes/",
+            method: entry.noteId ? "PUT" : "POST",
+            body: entry.pendingWrite.body,
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": entry.pendingWrite.key,
+              ...(entry.pendingWrite.expectedVersion != null
+                ? {
+                    "expected-version": String(
+                      entry.pendingWrite.expectedVersion,
+                    ),
+                  }
+                : {}),
+            },
+          };
+        }
+      }
       if (!pending) {
         const path = draft.id ? `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath : "/api/v1/notes/"
-        let expectedVersion = draft.version
+        let expectedVersion = draft.id ? draft.version : undefined;
         if (draft.id && expectedVersion == null) {
           const remote = await bgRequest<NoteListItem>({ ...request, path, method: "GET" })
           if (!isCurrent()) return
@@ -800,16 +879,64 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           )
         }
         if (draft.id && expectedVersion == null) throw new Error("Missing note version; reload before saving.")
-        pending = {
-          scopeKey: scope.scopeKey, workspaceId, noteId: draft.id, draft,
-          path, method: draft.id ? "PUT" : "POST", body: JSON.parse(JSON.stringify(payload)),
-          headers: {
-            "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID(),
-            ...(draft.id ? { "expected-version": String(expectedVersion) } : {}),
+        const queueKey =
+          operationKey || `${operationPrefix}${crypto.randomUUID()}`;
+        if (!draft.id) payload.id = crypto.randomUUID();
+        const key = crypto.randomUUID();
+        const body = JSON.parse(JSON.stringify(payload)) as Record<
+          string,
+          unknown
+        >;
+        const entry: OfflineDraftEntry = {
+          key: queueKey,
+          noteId: draft.id == null ? null : String(draft.id),
+          baseVersion: expectedVersion ?? null,
+          title: draft.title,
+          content: draft.content,
+          keywords: [...draft.keywords],
+          metadata: {
+            ...knowledgeNoteHead(draft),
+            pendingKnowledgeProvenance: draft.pendingKnowledgeProvenance,
           },
-        }
-        pendingSaveRef.current = pending
+          backlinkConversationId: null,
+          backlinkMessageId: null,
+          updatedAt: new Date().toISOString(),
+          syncState: "queued",
+          lastError: null,
+          pendingWrite: { key, body, expectedVersion: expectedVersion ?? null },
+        };
+        pending = {
+          authorityScope,
+          entry,
+          scopeKey: scope.scopeKey,
+          workspaceId,
+          noteId: draft.id,
+          draft,
+          path,
+          method: draft.id ? "PUT" : "POST",
+          body,
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+            ...(draft.id
+              ? { "expected-version": String(expectedVersion) }
+              : {}),
+          },
+        };
       }
+      pendingSaveRef.current = pending;
+      await retainSurfaceOfflineDraft(authorityScope, pending.entry);
+      if (!isCurrent()) return;
+      operationKey = pending.entry.key;
+      if (
+        useWorkspaceStore.getState().currentNote.pendingNoteWriteKey !==
+        operationKey
+      )
+        setCurrentNote({
+          ...useWorkspaceStore.getState().currentNote,
+          pendingNoteWriteKey: operationKey,
+        });
+      if (!isCurrent()) return;
       const saved = await bgRequest<NoteListItem>({ ...request, path: pending.path, method: pending.method, headers: { ...request.headers, ...pending.headers }, body: pending.body })
       if (!isCurrent()) return
       const latest = useWorkspaceStore.getState().currentNote
@@ -819,31 +946,55 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       }
       // The acknowledgment may assign the first canonical ID to this draft.
       noteId = saved.id
-      pendingSaveRef.current = null
-      if (latest === pending.draft) {
-        loadNote(
-          serializeNoteForEditor({
+      pending.noteId = saved.id;
+      const unchanged =
+        latest.title === pending.draft.title &&
+        latest.content === pending.draft.content &&
+        JSON.stringify(latest.keywords) ===
+          JSON.stringify(pending.draft.keywords) &&
+        JSON.stringify(latest.pendingKnowledgeProvenance) ===
+          JSON.stringify(pending.draft.pendingKnowledgeProvenance);
+      if (unchanged) {
+        setCurrentNote({
+          ...serializeNoteForEditor({
             ...saved,
-            keywords: saved.keywords || persistedKeywords
-          })
-        )
-        showSavedIndicatorTemporarily()
+            keywords: saved.keywords || persistedKeywords,
+          }),
+          pendingNoteWriteKey: operationKey,
+          isDirty: false,
+        });
       } else {
         setCurrentNote({
           ...latest,
+          pendingNoteWriteKey: operationKey,
           ...(latest.pendingKnowledgeProvenance &&
           knowledgeNoteProvenanceMatches(
             latest.pendingKnowledgeProvenance,
-            pending.body.knowledge_provenance
+            pending.body.knowledge_provenance,
           )
             ? { pendingKnowledgeProvenance: undefined }
             : {}),
           id: saved.id,
           version: Math.max(latest.version || 0, saved.version || 0),
-          ...((saved.knowledge_provenance_version || 0) >= (latest.knowledge_provenance_version || 0) ? knowledgeNoteHead(saved) : {}),
-          isDirty: true
-        })
+          ...((saved.knowledge_provenance_version || 0) >=
+          (latest.knowledge_provenance_version || 0)
+            ? knowledgeNoteHead(saved)
+            : {}),
+          isDirty: true,
+        });
       }
+      acknowledged = true;
+      await retireSurfaceOfflineDraft(
+        authorityScope,
+        pending.entry.key,
+        pending.entry.pendingWrite!.key,
+      );
+      if (!isCurrent()) return;
+      operationKey = undefined;
+      pendingSaveRef.current = null;
+      const acknowledgedDraft = useWorkspaceStore.getState().currentNote;
+      setCurrentNote({ ...acknowledgedDraft, pendingNoteWriteKey: undefined });
+      if (!acknowledgedDraft.isDirty) showSavedIndicatorTemporarily();
       messageApi.success(
         draft.id
           ? t("playground:studio.noteUpdated", "Note updated")
@@ -852,7 +1003,17 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       await loadWorkspaceNotes({ request, isCurrent })
     } catch (error: any) {
       if (!isCurrent()) return
-      if (isDefinitiveWriteRejection(error)) pendingSaveRef.current = null
+      if (isDefinitiveWriteRejection(error) && pendingSaveRef.current) {
+        const pending = pendingSaveRef.current
+        try {
+          await retireSurfaceOfflineDraft(pending.authorityScope, pending.entry.key, pending.entry.pendingWrite!.key)
+          if (!isCurrent()) return
+          pendingSaveRef.current = null
+        } catch {
+          messageApi.error("Could not retire the rejected note operation on this device. Retry before changing the draft.")
+          return
+        }
+      }
       // A policy-blocked receipt remains uncertain and must retain its key/body.
       if (isNotesProvenancePolicyUnavailable(error)) {
         messageApi.error(t("playground:studio.sourceHistoryUnavailable", NOTES_PROVENANCE_UNAVAILABLE_MESSAGE))
@@ -863,7 +1024,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             const remote = await bgRequest<NoteListItem>({ ...requestScopeFields(scope.requestScope), abortSignal: scope.scopeSignal, path: `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath, method: "GET" })
             if (!isCurrent()) return
             const latest = useWorkspaceStore.getState().currentNote
-            setCurrentNote({ ...latest, ...knowledgeNoteHead(remote), version: remote.version, isDirty: true })
+            setCurrentNote({
+              ...latest,
+              ...knowledgeNoteHead(remote),
+              isDirty: true,
+            });
           } catch { /* Keep the original draft and require another explicit retry. */ }
         }
         messageApi.open({
@@ -895,8 +1060,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         })
       } else {
         messageApi.error(
-          t("playground:studio.noteSaveError", "Failed to save note")
-        )
+          acknowledged
+            ? "Note saved, but its retry checkpoint could not be cleared. Retry the same save."
+            : t("playground:studio.noteSaveError", "Failed to save note"),
+        );
       }
     } finally {
       stopWatchingNote()

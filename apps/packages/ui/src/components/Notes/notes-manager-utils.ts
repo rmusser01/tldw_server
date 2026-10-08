@@ -3,6 +3,10 @@ import React from 'react'
 import { Modal, Input } from 'antd'
 import type { NotesTitleSuggestStrategy, NotesNotebookSetting } from '@/services/settings/ui-settings'
 import { createSafeStorage } from '@/utils/safe-storage'
+import {
+  createLocalRegistryBucket,
+  type LocalRegistryRecord,
+} from "@/services/settings/local-bucket";
 import type { NotesStudioHandwritingMode, NotesStudioTemplateType } from './notes-studio-types'
 import type { NoteListItem } from './types'
 
@@ -565,6 +569,64 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
   }
   return normalized
 }
+// Surface-owned operations share this queue, but only their owning editor acknowledges them.
+export const isSurfaceOfflineDraft = (key: string): boolean => key.startsWith('surface:')
+
+export const readOfflineDraftQueue = (storageKey: string): Record<string, OfflineDraftEntry> =>
+  normalizeOfflineDraftQueue(JSON.parse(window.localStorage.getItem(storageKey) || '{}'))
+
+export const writeOfflineDraftQueue = (storageKey: string, queue: Record<string, OfflineDraftEntry>): void => {
+  const serialized = JSON.stringify(queue)
+  window.localStorage.setItem(storageKey, serialized)
+  if (window.localStorage.getItem(storageKey) !== serialized)
+    throw new Error('Could not retain the pending note operation on this device.')
+}
+
+export const writeNotesEditorOfflineDraftQueue = (storageKey: string, queue: Record<string, OfflineDraftEntry>): void => {
+  const surfaceEntries = Object.fromEntries(Object.entries(readOfflineDraftQueue(storageKey)).filter(([key]) => isSurfaceOfflineDraft(key)))
+  writeOfflineDraftQueue(storageKey, { ...queue, ...surfaceEntries })
+}
+
+const surfaceOfflineDraftPrefix = (authorityScope: string): string => `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:${authorityScope}:`
+
+export const readSurfaceOfflineDraftQueue = async (authorityScope: string): Promise<Record<string, OfflineDraftEntry>> => {
+  const prefix = surfaceOfflineDraftPrefix(authorityScope)
+  const entries = await notesUiStorage.getAll()
+  const queue: Record<string, OfflineDraftEntry> = {}
+  for (const storageKey of Object.keys(entries).filter(key => key.startsWith(`${prefix}surface:`))) {
+    const record = await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(storageKey)
+    if (record == null) continue
+    const key = storageKey.slice(prefix.length)
+    const draft = normalizeOfflineDraftQueue({ [key]: record.value })[key]
+    if (!draft?.pendingWrite) throw new Error('The retained note operation cannot be read safely on this device.')
+    queue[key] = draft
+  }
+  return queue
+}
+
+export const retainSurfaceOfflineDraft = async (authorityScope: string, draft: OfflineDraftEntry): Promise<void> => {
+  const bucket = createLocalRegistryBucket<OfflineDraftEntry>({ prefix: surfaceOfflineDraftPrefix(authorityScope) })
+  const storageKey = bucket.buildKey(draft.key)
+  const previous = await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(storageKey)
+  if (previous?.value?.pendingWrite && JSON.stringify(previous.value.pendingWrite) !== JSON.stringify(draft.pendingWrite))
+    throw new Error('Resolve the retained note operation before replacing it.')
+  await bucket.set(draft.key, draft)
+  const retained = await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(storageKey)
+  if (JSON.stringify(retained?.value) !== JSON.stringify(draft))
+    throw new Error('Could not retain the pending note operation on this device.')
+}
+
+export const retireSurfaceOfflineDraft = async (authorityScope: string, key: string, pendingKey: string): Promise<void> => {
+  const bucket = createLocalRegistryBucket<OfflineDraftEntry>({ prefix: surfaceOfflineDraftPrefix(authorityScope) })
+  const storageKey = bucket.buildKey(key)
+  const previous = await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(storageKey)
+  if (previous?.value?.pendingWrite?.key !== pendingKey) return
+  await bucket.remove(key)
+  const retained = await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(storageKey)
+  if (retained?.value?.pendingWrite?.key === pendingKey)
+    throw new Error('Could not retire the acknowledged note operation on this device. Retry the same save.')
+}
+
 export type RemoteVersionInfo = { version: number; lastModified: string | null }
 export type NotesAssistAction = 'summarize' | 'expand_outline' | 'suggest_keywords'
 export type EditProvenanceState =

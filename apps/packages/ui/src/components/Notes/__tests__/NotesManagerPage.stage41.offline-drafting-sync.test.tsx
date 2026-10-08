@@ -1,3 +1,5 @@
+import { readSurfaceOfflineDraftQueue, retainSurfaceOfflineDraft, type OfflineDraftEntry } from "../notes-manager-utils"
+vi.mock("@plasmohq/storage", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -324,6 +326,67 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
 
     expect(mockMessageSuccess).toHaveBeenCalledWith('Synced {{count}} queued offline draft(s).')
   })
+
+  it("preserves surface pending operations while hydrating, syncing and editing ordinary drafts", async () => {
+    const surfaceKey = "surface:knowledge-export:thread-1";
+    const surface: OfflineDraftEntry = {
+      key: surfaceKey,
+      noteId: null,
+      baseVersion: null,
+      title: "Export pending",
+      content: "Original answer",
+      keywords: [],
+      metadata: null,
+      backlinkConversationId: null,
+      backlinkMessageId: null,
+      updatedAt: "2026-02-18T11:00:00.000Z",
+      syncState: "queued",
+      lastError: null,
+      pendingWrite: {
+        key: "immutable-export-key",
+        expectedVersion: null,
+        body: {
+          id: "46e83da7-44ca-49df-9e40-78b106d76050",
+          content: "Original answer",
+        },
+      },
+    };
+    const ordinary = {
+      ...surface,
+      key: "draft:new",
+      title: "Ordinary draft",
+      content: "Ordinary body",
+      pendingWrite: undefined,
+    };
+    window.localStorage.setItem(
+      OFFLINE_QUEUE_KEY,
+      JSON.stringify({ "draft:new": ordinary }),
+    );
+    await retainSurfaceOfflineDraft("alice", surface);
+    renderPage();
+    await waitFor(() => expect(postCreateCalls()).toHaveLength(1));
+    expect((await readSurfaceOfflineDraftQueue("alice"))[surfaceKey]).toEqual(
+      surface,
+    );
+    expect(postCreateCalls()[0][0].body.content).toBe("Ordinary body");
+    mockOnlineState.value = false;
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "Write your note here... (Markdown supported)",
+      ),
+      { target: { value: "Later ordinary draft" } },
+    );
+    fireEvent.click(screen.getByTestId("notes-save-button"));
+    await waitFor(() =>
+      expect(window.localStorage.getItem(OFFLINE_QUEUE_KEY)).toContain(
+        "Later ordinary draft",
+      ),
+    );
+    expect((await readSurfaceOfflineDraftQueue("alice"))[surfaceKey]).toEqual(
+      surface,
+    );
+    expect(postCreateCalls()).toHaveLength(1);
+  });
 
   it('keeps queued updates when reconnect detects newer server versions', async () => {
     renderPage()

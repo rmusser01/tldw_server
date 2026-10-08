@@ -1,3 +1,7 @@
+import {
+  createNotesGraphAuthorityScope,
+  useNotesGraphAuthorityScope,
+} from "@/components/Notes/hooks/useNotesGraphAuthorityScope";
 /**
  * KnowledgeQAProvider - Context provider for Knowledge QA state management
  */
@@ -1776,6 +1780,21 @@ function OwnedKnowledgeQAProvider({
   }, [isCurrent])
   const historyStorageKey = authority.snapshot
     ? getKnowledgeQaHistoryStorageKey(authority.snapshot.requestScope) : null
+  const verifiedNotesAuthorityScope = useNotesGraphAuthorityScope({
+    config: authority.snapshot?.requestScope.config ?? null,
+    loading: !authority.snapshot,
+  });
+  const expectedNotesAuthorityScope =
+    authority.snapshot?.requestScope.userId != null
+      ? createNotesGraphAuthorityScope(
+          authority.snapshot.requestScope.config.serverUrl,
+          authority.snapshot.requestScope.userId,
+        )
+      : verifiedNotesAuthorityScope;
+  const notesAuthorityScope =
+    verifiedNotesAuthorityScope === expectedNotesAuthorityScope
+      ? verifiedNotesAuthorityScope
+      : null;
   const storageScopeKey = authority.snapshot
     ? getKnowledgeQaStorageScopeKey(authority.snapshot.requestScope) : null
   useEffect(() => {
@@ -3994,6 +4013,7 @@ function OwnedKnowledgeQAProvider({
       client: tldwClient,
       isAuthorityCurrent: isCurrent,
       storageScopeKey,
+      notesAuthorityScope,
       historyHydrated,
       setQuery,
       search,
@@ -4034,6 +4054,7 @@ function OwnedKnowledgeQAProvider({
       isCurrent,
       historyHydrated,
       storageScopeKey,
+      notesAuthorityScope,
       setQuery,
       search,
       cancelSearch,
@@ -4066,8 +4087,8 @@ function OwnedKnowledgeQAProvider({
       persistRagContext,
       scrollToSource,
       scrollToCitation,
-    ]
-  )
+    ],
+  );
 
   return (
     <KnowledgeQAContext.Provider value={contextValue}>

@@ -17,7 +17,7 @@ Use existing mechanisms and minimum supported corrections. No assumption-based d
 **Goal**: Fix conflict-base advancement and uncertain create retry loss in Quick Notes and Knowledge Export using existing Notes draft/pending operation persistence.
 **Success Criteria**: Second save after409 cannot overwrite remote content without explicit reload/merge; committed/lost-response collapse orClose/remount reuses exact key/body and canonical identity, including owner and newer-edit boundaries. No second draft store.
 **Tests**: QuickNotes save-ownership plus ExportDialog a11y/retry and existing Notes offline draft/lifecycle suites; red reproductions for conflicts and unmount.
-**Status**: Not Started
+**Status**: Complete (conflict base and owner-scoped durable pending operations verified default/native; controlled cross-context/extension-adapter evidence and residual live-runtime limits in Task2 report)
 
 ## Stage 3: Restore capture evidence from canonical sources
 **Goal**: Repair migrated source restore when local capture checkpoints disappear using existing owned clip/version readbacks.

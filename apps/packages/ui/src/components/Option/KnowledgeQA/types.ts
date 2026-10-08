@@ -385,11 +385,12 @@ export type KnowledgeQAActions = {
 // Context value combining state and actions
 export type KnowledgeQAContextValue = KnowledgeQAState &
   KnowledgeQAActions & {
-    historyHydrated: boolean
-    client: import("./knowledgeQaClient").KnowledgeQaClient
-    isAuthorityCurrent: () => boolean
-    storageScopeKey: string | null
-  }
+    historyHydrated: boolean;
+    client: import("./knowledgeQaClient").KnowledgeQaClient;
+    isAuthorityCurrent: () => boolean;
+    storageScopeKey: string | null;
+    notesAuthorityScope: string | null;
+  };
 
 // Export format options
 export type ExportFormat = "markdown" | "pdf" | "chatbook"
