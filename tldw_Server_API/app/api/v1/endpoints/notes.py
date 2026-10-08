@@ -2426,7 +2426,11 @@ async def create_note(
                 )
             except Exception as sync_exc:
                 raise _note_sync_http_error(sync_exc) from sync_exc
-        elif sync_service is None and compound_note is None and provenance is not None:
+        elif (
+            sync_service is None
+            and compound_note is None
+            and (provenance is not None or request_fingerprint is not None)
+        ):
             compound_note = _save_local_provenance_note(
                 db,
                 note_id=note_id,
@@ -3608,7 +3612,9 @@ async def import_notes(
                         parsed_note["content"]
                     )
                     provenance_version = parsed_note.get("expected_provenance_version")
-                    local_provenance_save = coordinator is None and provenance is not None
+                    local_provenance_save = coordinator is None and (
+                        provenance is not None or bool(request.headers.get("Idempotency-Key", "").strip())
+                    )
                     raw_note_payload = {
                         "title": parsed_note["title"],
                         "content": parsed_note["content"],
@@ -6899,7 +6905,7 @@ async def update_note(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif provenance is not None:
+            elif provenance is not None or request_fingerprint is not None:
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
@@ -7189,7 +7195,7 @@ async def patch_note(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif provenance is not None:
+            elif provenance is not None or request_fingerprint is not None:
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
@@ -7787,7 +7793,11 @@ async def bulk_create_notes(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif sync_service is None and compound_note is None and provenance is not None:
+            elif (
+                sync_service is None
+                and compound_note is None
+                and (provenance is not None or request_fingerprint is not None)
+            ):
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
