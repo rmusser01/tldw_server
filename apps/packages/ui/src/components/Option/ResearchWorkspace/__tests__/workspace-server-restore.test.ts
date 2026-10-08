@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
@@ -910,4 +912,82 @@ it("allows ordinary clip recovery after a transient history lookup failure", asy
   await restore();
   expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
   expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([7]);
+});
+
+
+it.each(["queryable", "missing_media"])(
+  "clears stale capture unavailability after exact recovery using authoritative %s status",
+  async (state) => {
+    const { ctx, version, tldwClient } = await intactCapture();
+    vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValueOnce(
+      new Error("Temporarily unavailable"),
+    );
+    await restore();
+    expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+      status: "error",
+      statusDetails: { statusReason: "capture_unavailable" },
+      captureOwnerScope: boundary.captureOwner,
+    });
+    expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
+    ctx.sources.items[0].state = state;
+    await restore();
+    const recovered = useWorkspaceStore.getState().sources[0];
+    expect(recovered.webCapture).toMatchObject({
+      versionNumber: 1,
+      versionUuid: version.uuid,
+    });
+    expect(recovered.status).toBe(state === "queryable" ? "ready" : "error");
+    expect(recovered.statusDetails).toBeUndefined();
+    expect(recovered.statusMessage).toBeUndefined();
+    expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual(
+      state === "queryable" ? [7] : [],
+    );
+    if (state === "queryable") {
+      const preview = vi
+        .spyOn(tldwClient, "getWorkspaceSourcePreview")
+        .mockResolvedValue({
+          document_version_number: 1,
+          text_preview: "Original accepted article",
+          content_available: true,
+          snippets: [],
+        } as Awaited<ReturnType<typeof tldwClient.getWorkspaceSourcePreview>>);
+      const { SourcesPane } = await import("../SourcesPane");
+      render(createElement(SourcesPane));
+      fireEvent.click(screen.getByTestId(`preview-source-${recovered.id}`));
+      expect(
+        (await screen.findByText("Original accepted article")).textContent,
+      ).toBe("Original accepted article");
+      expect(preview).toHaveBeenCalledWith(
+        "original",
+        recovered.id,
+        expect.objectContaining({ version_number: 1 }),
+        expect.objectContaining({
+          requestScope: expect.objectContaining({ userId: "alice" }),
+        }),
+      );
+    }
+  },
+);
+
+it("preserves intentional changed-head refusal when canonical recovery verifies the existing pin", async () => {
+  await intactCapture();
+  await restore();
+  const source = useWorkspaceStore.getState().sources[0];
+  useWorkspaceStore
+    .getState()
+    .setSourceStatusById(
+      source.id,
+      "error",
+      "Snapshot changed outside refresh",
+      undefined,
+      { statusReason: "capture_head_changed", retryEligible: false },
+    );
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+    webCapture: source.webCapture,
+    status: "error",
+    statusMessage: "Snapshot changed outside refresh",
+    statusDetails: { statusReason: "capture_head_changed" },
+  });
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
 });
