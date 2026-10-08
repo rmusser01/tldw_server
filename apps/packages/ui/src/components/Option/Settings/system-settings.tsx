@@ -51,12 +51,12 @@ export const DataManagementSettings = () => {
   const handleResetAll = async () => {
     setResetting(true)
     try {
+      if (clearChat({ discardTemporaryConfirmed: true }) === false) return
       const db = new PageAssistDatabase()
       await db.clearDB()
       queryClient.invalidateQueries({
         queryKey: ["fetchChatHistory"]
       })
-      clearChat()
       try {
         await browser.storage.sync.clear()
         await browser.storage.local.clear()

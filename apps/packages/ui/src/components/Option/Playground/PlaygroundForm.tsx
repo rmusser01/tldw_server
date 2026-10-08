@@ -1,3 +1,4 @@
+import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition";
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker";
 import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart";
@@ -3782,6 +3783,24 @@ export const PlaygroundForm = ({
       return;
     }
 
+    const source = captureChatDraftSource(captureAssistantPreparationGuard());
+    const clear = () => {
+      if (!source.isCurrent()) return;
+      // CS-05 (#3106): reset both transcript and request history together.
+      if (clearChat() === false) return;
+      notificationApi.success({
+        message: t(
+          "playground:composer.clearContextSuccess",
+          "Conversation cleared",
+        ),
+        duration: 2,
+      });
+    };
+    if (hasTemporaryChatContent(useStoreMessageOption.getState())) {
+      clear();
+      return;
+    }
+
     Modal.confirm({
       title: t(
         "playground:composer.clearContextConfirmTitle",
@@ -3794,21 +3813,9 @@ export const PlaygroundForm = ({
       okText: t("common:confirm", "Confirm"),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
-      onOk: () => {
-        // CS-05 (#3106): clearing only `history` left the transcript and the
-        // history selection in place, so the next request still carried the
-        // old turns. Use the New chat reset, which clears both.
-        if (clearChat() === false) return;
-        notificationApi.success({
-          message: t(
-            "playground:composer.clearContextSuccess",
-            "Conversation cleared",
-          ),
-          duration: 2,
-        });
-      },
+      onOk: clear,
     });
-  }, [clearChat, history.length, notificationApi, t]);
+  }, [captureAssistantPreparationGuard, clearChat, history.length, notificationApi, t]);
 
   const requestKnowledgePanelTab = React.useCallback((tab: KnowledgeTab) => {
     setKnowledgePanelTab(tab);

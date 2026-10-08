@@ -2,6 +2,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import type { RecoveredChatDraft } from "@/components/Chat/composer/hooks/useComposerText"
+import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -21,6 +22,7 @@ const ast = ts.createSourceFile(
 )
 let callback: ts.Expression | undefined
 const handoffCallbacks = new Map<string, ts.Expression>()
+const clearCallbacks = new Map<string, ts.Expression>()
 let handoffReview: ts.ConditionalExpression | undefined
 const visit = (node: ts.Node) => {
   if (
@@ -30,6 +32,8 @@ const visit = (node: ts.Node) => {
     callback = node.initializer
   if (ts.isVariableDeclaration(node) && node.initializer && ["captureAssistantActionGuard", "captureHandoffGuard"].includes(node.name.getText(ast)))
     handoffCallbacks.set(node.name.getText(ast), node.initializer)
+  if (ts.isVariableDeclaration(node) && node.initializer && ["captureAssistantActionGuard", "captureAssistantPreparationGuard", "handleClearContext"].includes(node.name.getText(ast)))
+    clearCallbacks.set(node.name.getText(ast), node.initializer)
   if (ts.isConditionalExpression(node) && node.condition.getText(ast) === "sidepanelHandoffConflict") handoffReview = node
   ts.forEachChild(node, visit)
 }
@@ -186,12 +190,56 @@ describe("production Form copied-draft ownership and review boundaries", () => {
       compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React }
     }).outputText
     const copy = "  <script>untrusted</script>\n\nCopied draft  "
-    const review = new Function("React", "t", "sidepanelHandoffConflict", "sidepanelImportPending", "sidepanelImportFeedback", "insertHandoffDraft", "replaceWithHandoffDraft", "cancelHandoffImport", `${compiledReview}; return review;`)(
-      React, (_key: string, fallback: string) => fallback, { handoff: { draft: { text: copy } } }, false, null, vi.fn(), vi.fn(), vi.fn())
+    const review = new Function("React", "t", "sidepanelHandoffConflict", "sidepanelImportPending", "sidepanelImportFeedback", "insertHandoffDraft", "replaceWithHandoffDraft", "cancelHandoffImport", "sidepanelContextOnlyCopy", "sidepanelCopyShortened", "sidepanelOptionReview", "sidepanelSkippedFeedback", `${compiledReview}; return review;`)(
+      React, (_key: string, fallback: string) => fallback, { route: { webUi: true }, handoff: { draft: { text: copy } } }, false, null, vi.fn(), vi.fn(), vi.fn(), false, false, [], null)
     const view = render(review)
     expect(view.container.querySelector("pre")?.textContent).toBe(copy)
     expect(view.container.querySelector("script")).toBeNull()
     expect(screen.getByText("Copied draft")).toBeVisible()
     expect(screen.getByRole("button", { name: "Insert handoff draft" })).toBeEnabled()
+  })
+})
+
+
+/** Execute the actual Clear callback and its existing preparation guard, not a copied algorithm. */
+describe("production Form deferred Clear confirmation", () => {
+  const code = ts.transpileModule(Array.from(clearCallbacks, ([name, value]) => `const ${name} = ${value.getText(ast)};`).join("\n"), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 }
+  }).outputText
+  const setup = () => {
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    useStoreMessageOption.setState({ history: [{ role: "user", content: "Owned source" }] })
+    let inputRevision = 1
+    let historyCurrent = true
+    const modal = { confirm: vi.fn() }
+    const clear = vi.fn(() => true)
+    const notification = { success: vi.fn() }
+    const invoke = new Function("React", "captureSelectionFence", "assistantOwnerIsCurrent", "assistantActionRevisionRef", "assistantActionMountedRef",
+      "usePlaygroundSessionStore", "useStoreMessageOption", "assistantComposerRef", "assistantConnectionRevisionRef", "history", "notificationApi", "t", "Modal", "clearChat",
+      "captureChatDraftSource", "hasTemporaryChatContent", `${code}; return handleClearContext;`)(
+      { useCallback: (callback: unknown) => callback }, () => () => historyCurrent, () => true, { current: 0 }, { current: true },
+      usePlaygroundSessionStore, useStoreMessageOption, { current: { getRevision: () => inputRevision } }, { current: 0 }, useStoreMessageOption.getState().history,
+      notification, (_key: string, fallback: string) => fallback, modal, clear, captureChatDraftSource, hasTemporaryChatContent)
+    return { invoke, modal, clear, notification, edit: () => { inputRevision++ }, retire: () => { historyCurrent = false } }
+  }
+
+  it.each(["input", "history", "session"])("does not apply an old Clear confirmation after %s retirement under unchanged IDs", boundary => {
+    const control = setup()
+    control.invoke()
+    expect(control.modal.confirm).toHaveBeenCalledOnce()
+    if (boundary === "input") control.edit()
+    if (boundary === "history") control.retire()
+    if (boundary === "session") usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+    control.modal.confirm.mock.calls[0][0].onOk()
+    expect(control.clear).not.toHaveBeenCalled()
+    expect(control.notification.success).not.toHaveBeenCalled()
+  })
+
+  it("admits the original unchanged ordinary Clear confirmation once", () => {
+    const control = setup()
+    control.invoke()
+    control.modal.confirm.mock.calls[0][0].onOk()
+    expect(control.clear).toHaveBeenCalledOnce()
+    expect(control.notification.success).toHaveBeenCalledOnce()
   })
 })

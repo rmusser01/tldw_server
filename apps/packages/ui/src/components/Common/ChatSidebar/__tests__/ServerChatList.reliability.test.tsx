@@ -265,6 +265,7 @@ const createChat = (
 describe("ServerChatList reliability states", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.selectServerChat.mockReset()
     mocks.chatTypeFilter = "all"
     storeState.value.serverChatId = null
     historyState.value = {
@@ -323,6 +324,18 @@ describe("ServerChatList reliability states", () => {
       )
     }
   )
+
+  it("does not close the history list or report selection when the transition is declined", () => {
+    historyState.value.data = [createChat()]
+    historyState.value.total = 1
+    historyState.value.hasUsableData = true
+    mocks.selectServerChat.mockReturnValueOnce(false)
+    const onConversationSelected = vi.fn()
+    render(<ServerChatList searchQuery="" onConversationSelected={onConversationSelected} />)
+    fireEvent.click(screen.getByRole("button", { name: "Select Recovered chat" }))
+    expect(mocks.selectServerChat).toHaveBeenCalledOnce()
+    expect(onConversationSelected).not.toHaveBeenCalled()
+  })
 
   it("opens a saved chat read-only in temporary mode without management actions (TASK-13389)", () => {
     historyState.value.data = [createChat()]

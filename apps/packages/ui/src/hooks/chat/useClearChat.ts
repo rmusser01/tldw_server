@@ -1,4 +1,5 @@
 import React from "react"
+import { captureChatDraftSource, confirmTemporaryChatDiscard } from "./chat-draft-transition"
 import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
@@ -34,7 +35,9 @@ type ResettableChatBase = {
 
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
-  const resetHistorySelection = useHistorySelectionContext()?.reset
+  const historySelection = useHistorySelectionContext()
+  const resetHistorySelection = historySelection?.reset
+  const captureSelectionFence = historySelection?.fence
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 
@@ -92,9 +95,15 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     shallow
   )
 
-  return React.useCallback(() => {
+  return React.useCallback((options?: { discardTemporaryConfirmed: true } | React.SyntheticEvent) => {
+    const source = captureChatDraftSource(captureSelectionFence?.())
     const destination = resolveClearChatPath()
-    if (!requestSettingsNavigation(destination)) return false
+    if (!requestSettingsNavigation(destination) || !source.isCurrent()) return false
+    const confirmed = options &&
+      "discardTemporaryConfirmed" in options &&
+      options.discardTemporaryConfirmed === true
+    if (!confirmed && !confirmTemporaryChatDiscard()) return false
+    if (!source.isCurrent()) return false
     useStoreMessageOption.getState().startNewChatDraft()
     resetHistorySelection?.()
     const current = useStoreMessageOption.getState()
@@ -155,6 +164,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   }, [
     clearQueuedMessages,
     clearReplyTarget,
+    captureSelectionFence,
     currentChatModelSettings,
     defaultInternetSearchOn,
     navigate,

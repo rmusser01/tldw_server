@@ -1,5 +1,5 @@
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
-import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
+import { captureChatDraftLoad, captureChatDraftSource, confirmTemporaryChatDiscard } from "@/hooks/chat/chat-draft-transition"
 import React from "react"
 import { message } from "antd"
 
@@ -74,6 +74,9 @@ export function useLoadLocalConversation(
 
   return React.useCallback(
     async (conversationId: string, readerScope?: OnDeviceHistoryScope): Promise<boolean> => {
+      if (!mountedRef.current || (readerScope && !readerScope.isCurrent())) return false
+      const source = captureChatDraftSource()
+      if (!confirmTemporaryChatDiscard() || !source.isCurrent()) return false
       const acceptDraft = captureChatDraftLoad("switch")
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision

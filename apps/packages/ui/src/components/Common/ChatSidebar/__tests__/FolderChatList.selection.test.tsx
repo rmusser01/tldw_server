@@ -65,3 +65,13 @@ it.each(["fetch", "handoff"])("does not report a failed folder %s", async (failu
   await waitFor(() => expect(io.error).toHaveBeenCalledTimes(1))
   expect(onConversationSelected).not.toHaveBeenCalled()
 })
+
+it("does not report a declined folder-history transition as selection", async () => {
+  io.select.mockReturnValueOnce(false)
+  const onConversationSelected = vi.fn()
+  render(<FolderChatList owner={owner} verificationState="ready" onConversationSelected={onConversationSelected} />)
+  fireEvent.click(await screen.findByRole("button", { name: "Select folder conversation" }))
+  await waitFor(() => expect(io.select).toHaveBeenCalledWith(chat))
+  expect(onConversationSelected).not.toHaveBeenCalled()
+  expect(io.error).not.toHaveBeenCalled()
+})

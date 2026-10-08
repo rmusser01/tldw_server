@@ -178,9 +178,9 @@ export const CharacterControlsSheet = ({
 
   const handleOpenTrackedSession = React.useCallback(
     (item: ServerChatHistoryItem) => {
+      if (selectServerChat(item) === false) return
       retireTrackedPicker()
       onRequestClose?.()
-      selectServerChat(item)
     },
     [onRequestClose, retireTrackedPicker, selectServerChat]
   )

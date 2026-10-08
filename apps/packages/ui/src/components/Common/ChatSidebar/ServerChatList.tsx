@@ -1011,7 +1011,7 @@ export function ServerChatList({
       if (!captureAction([chat.id])) return
       const receipt = visibleReceiptRef.current
       if (serverChatId !== chat.id) {
-        selectServerChat(chat)
+        if (selectServerChat(chat) === false) return
       }
       if (typeof window === "undefined") return
       if (openSettingsTimeoutRef.current !== null) {
@@ -1076,7 +1076,7 @@ export function ServerChatList({
         return
       }
       if (isTrashView) return
-      selectServerChat(chat)
+      if (selectServerChat(chat) === false) return
       onConversationSelected?.()
     },
     [

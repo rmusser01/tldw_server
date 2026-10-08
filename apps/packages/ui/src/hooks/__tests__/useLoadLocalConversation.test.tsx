@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useLoadLocalConversation } from "../useLoadLocalConversation"
 
@@ -66,6 +67,8 @@ const setup = () => {
   return { ...renderHook(() => useLoadLocalConversation(deps, options)), state }
 }
 beforeEach(() => {
+  useStoreMessageOption.setState({ temporaryChat: false, historyId: null, serverChatId: null, messages: [], history: [] })
+  vi.spyOn(window, "confirm").mockReturnValue(false)
   vi.clearAllMocks()
   for (const read of [io.readMessages, io.readInfo, io.readModelPreference, io.readPrompt, io.readFiles]) read.mockReset()
   io.scopeSignal = new AbortController()
@@ -77,6 +80,8 @@ beforeEach(() => {
   io.readPrompt.mockResolvedValue({ id: "saved-prompt", content: "Saved prompt" })
   io.readFiles.mockResolvedValue([{ id: "saved-file" }])
 })
+
+afterEach(() => vi.restoreAllMocks())
 
 describe("local conversation load ownership", () => {
   it.each(['["http://chat.test","multi-user","manual",null,"alice",null]', undefined])("rejects foreign or unowned local history before publishing (%s)", async owner => {
@@ -207,4 +212,31 @@ describe("local selection preparation", () => {
     await act(async () => { pending.resolve(boundary === "model" ? true : boundary === "prompt" ? { id: "saved-prompt", content: "Saved prompt" } : []); await loading })
     expect(state).toEqual(source)
   })
+})
+
+
+it("keeps the owned Temporary source before local-history reads when selection is cancelled", async () => {
+  const rows = [{ id: "temporary", isBot: false, name: "You", role: "user" as const, message: "Temporary question", sources: [] }]
+  useStoreMessageOption.setState({ temporaryChat: true, historyId: "temp", messages: rows, history: [{ role: "user", content: "Temporary question" }] })
+  const before = useStoreMessageOption.getState()
+  const { result, state, unmount } = setup()
+  await act(async () => expect(await result.current("owned")).toBe(false))
+  expect(window.confirm).toHaveBeenCalledOnce()
+  expect(io.readInfo).not.toHaveBeenCalled()
+  expect(io.readMessages).not.toHaveBeenCalled()
+  expect(useStoreMessageOption.getState()).toBe(before)
+  expect(state.historyId).toBe("before")
+  expect(document.title).toBe("Current page")
+  unmount()
+})
+
+it("admits the complete local selection after a Temporary discard is accepted", async () => {
+  useStoreMessageOption.setState({ temporaryChat: true, historyId: "temp", history: [{ role: "user", content: "Temporary question" }] })
+  vi.mocked(window.confirm).mockReturnValue(true)
+  const { result, state, unmount } = setup()
+  await act(async () => expect(await result.current("owned")).toBe(true))
+  expect(window.confirm).toHaveBeenCalledOnce()
+  expect(state.historyId).toBe("owned")
+  expect(state.messages).toEqual([{ id: "owned", content: "Message owned" }])
+  unmount()
 })

@@ -49,6 +49,7 @@ import {
 } from "@/db/dexie/helpers"
 import { isDatabaseClosedError } from "@/utils/ff-error"
 import { updatePageTitle } from "@/utils/update-page-title"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { promptInput } from "@/components/Common/prompt-input"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { IconButton } from "../Common/IconButton"
@@ -331,8 +332,8 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
       client.invalidateQueries({
         queryKey: ["fetchChatHistory"]
       })
-      if (historyId === history_id) {
-        clearChat()
+      if (useStoreMessageOption.getState().historyId === history_id) {
+        if (clearChat() === false) return
         updatePageTitle()
       }
     }
@@ -362,9 +363,8 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
           queryKey: ["fetchChatHistory"]
         })
 
-        if (deletedIds.includes(historyId)) {
-          clearChat()
-        }
+        const currentHistoryId = useStoreMessageOption.getState().historyId
+        if (currentHistoryId && deletedIds.includes(currentHistoryId)) clearChat()
 
         message.success(
           t("common:historiesDeleted", { count: deletedIds.length })
@@ -425,7 +425,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
 
   const loadServerChat = React.useCallback(
     (chat: ServerChatSummary) => {
-      selectServerChat(chat)
+      if (selectServerChat(chat) === false) return
       onClose()
     },
     [onClose, selectServerChat]
@@ -466,6 +466,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
       errorDefaultMessage: "Something went wrong while loading local chat history." }
   )
   const loadLocalConversation = React.useCallback(async (conversationId: string) => {
+    if (!requestSettingsNavigation("/chat")) return false
     if (!await openLocalConversation(conversationId)) return false
     navigate("/chat")
     onClose()
@@ -787,7 +788,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
               aria-label={t("common:newChat", { defaultValue: "New Chat" })}
               data-testid="sidebar-new-chat"
               onClick={() => {
-                clearChat()
+                if (clearChat() === false) return
                 onClose()
               }}
             />

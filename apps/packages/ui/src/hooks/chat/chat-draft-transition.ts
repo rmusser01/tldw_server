@@ -1,4 +1,6 @@
+import i18n from "i18next";
 import { useStoreMessageOption } from "@/store/option";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
 import type { HistoryLoadReceipt } from "./useHistorySelection";
 import {
   isChatDraftAddress,
@@ -80,10 +82,15 @@ export const captureChatDraftSource = (
   ) => boolean = (current, original) => current === original,
 ) => {
   const source = useStoreMessageOption.getState();
+  const session = usePlaygroundSessionStore.getState();
   const current = () => {
     const state = useStoreMessageOption.getState();
     return (
       isCurrent() &&
+      usePlaygroundSessionStore.getState().restoreRevision ===
+        session.restoreRevision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision ===
+        session.sourceSelectionRevision &&
       state.chatDraftRevision === source.chatDraftRevision &&
       state.chatDraftAddress === source.chatDraftAddress &&
       isHistoryIdCurrent(state.historyId, source.historyId) &&
@@ -98,3 +105,30 @@ export const captureChatDraftSource = (
         source.quickPromptRevision,
   };
 };
+
+/** Only explicit interactive replacement asks; retained tab switches keep their source. */
+export const hasTemporaryChatContent = (chat: {
+  temporaryChat: boolean;
+  historyId?: string | null;
+  serverChatId?: string | null;
+  history: readonly unknown[];
+  messages: readonly unknown[];
+}) =>
+  Boolean(
+    (chat.historyId === "temp" || (chat.temporaryChat && !chat.serverChatId)) &&
+    (chat.history.length || chat.messages.length)
+  );
+
+export const confirmTemporaryChatDiscard = (
+  chat: Parameters<
+    typeof hasTemporaryChatContent
+  >[0] = useStoreMessageOption.getState()
+): boolean =>
+  !hasTemporaryChatContent(chat) ||
+  (typeof window !== "undefined" &&
+    window.confirm(
+      i18n.t("common:temporaryChatDiscardConfirmation", {
+        defaultValue:
+          "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages."
+      })
+    ));

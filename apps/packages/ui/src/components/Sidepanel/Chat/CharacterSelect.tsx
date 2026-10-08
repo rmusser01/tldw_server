@@ -31,6 +31,8 @@ import { useConfirmModal } from "@/hooks/useConfirmModal"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
 import {
   openCharactersWorkspace as openCharactersWorkspaceRoute
@@ -146,6 +148,7 @@ export const CharacterSelect: React.FC<Props> = ({
     useSelectedCharacter<StoredCharacter | null>(null)
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const clearChat = useClearChat()
+  const captureSelectionFence = useHistorySelectionContext()?.fence
   const messages = useStoreMessageOption((state) => state.messages)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const [userDisplayName, setUserDisplayName] = useStorage(
@@ -1037,9 +1040,9 @@ export const CharacterSelect: React.FC<Props> = ({
       }
 
       if (hasActiveChat) {
-        const confirmed = await confirmCharacterSwitch(stored?.name)
-        if (!confirmed) return
-        clearChat()
+        const source = captureChatDraftSource(captureSelectionFence?.())
+        if (!hasTemporaryChatContent(useStoreMessageOption.getState()) && !await confirmCharacterSwitch(stored?.name)) return
+        if (!source.isCurrent() || clearChat() === false) return
       }
 
       greetingRetryAbortRef.current?.abort()
@@ -1124,6 +1127,7 @@ export const CharacterSelect: React.FC<Props> = ({
     [
       buildStoredCharacter,
       clearChat,
+      captureSelectionFence,
       confirmCharacterSwitch,
       hasActiveChat,
       notification,
@@ -1162,9 +1166,9 @@ export const CharacterSelect: React.FC<Props> = ({
         return
       }
       if (hasActiveChat) {
-        const confirmed = await confirmCharacterSwitch(selection.name)
-        if (!confirmed) return
-        clearChat()
+        const source = captureChatDraftSource(captureSelectionFence?.())
+        if (!hasTemporaryChatContent(useStoreMessageOption.getState()) && !await confirmCharacterSwitch(selection.name)) return
+        if (!source.isCurrent() || clearChat() === false) return
       }
       greetingRetryAbortRef.current?.abort()
       greetingRetryAbortRef.current = null
@@ -1175,6 +1179,7 @@ export const CharacterSelect: React.FC<Props> = ({
     },
     [
       clearChat,
+      captureSelectionFence,
       confirmCharacterSwitch,
       hasActiveChat,
       selectedAssistant?.id,

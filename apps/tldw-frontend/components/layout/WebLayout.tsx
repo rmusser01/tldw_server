@@ -1,4 +1,5 @@
-import { HistorySelectionProvider } from '@/hooks/chat/useHistorySelection';
+import { captureChatDraftSource } from '@/hooks/chat/chat-draft-transition';
+import { HistorySelectionProvider, useHistorySelectionContext } from '@/hooks/chat/useHistorySelection';
 import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
@@ -193,6 +194,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           backgroundRepeat: 'no-repeat',
         }
       : undefined;
+  const captureSelectionFence = useHistorySelectionContext()?.fence;
   const { clearChat, useOCR, chatMode, setChatMode, webSearch, setWebSearch } = useMessageOption();
   const queryClient = useQueryClient();
   const {
@@ -623,6 +625,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                           }) as string
                         }
                         onClick={async () => {
+                          const source = captureChatDraftSource(captureSelectionFence?.());
                           const ok = await confirmDanger({
                             title: t('common:confirmTitle', {
                               defaultValue: 'Please confirm',
@@ -639,14 +642,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                             cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
                           });
 
-                          if (!ok) return;
+                          if (!ok || !source.isCurrent()) return;
+                          if (clearChat({ discardTemporaryConfirmed: true }) === false) return;
 
                           const db = new PageAssistDatabase();
                           await db.deleteAllChatHistory();
                           await queryClient.invalidateQueries({
                             queryKey: ['fetchChatHistory'],
                           });
-                          clearChat();
                         }}
                         className="text-text-muted hover:text-text h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0"
                       >

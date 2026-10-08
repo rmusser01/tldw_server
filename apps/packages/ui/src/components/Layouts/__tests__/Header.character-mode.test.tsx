@@ -162,7 +162,7 @@ describe("Header character mode sequencing", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
-      expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
+      expect(setTemporaryChatMock).not.toHaveBeenCalled()
       expect(clearChatMock).not.toHaveBeenCalled()
       expect(actorListener).not.toHaveBeenCalled()
       expect(characterModeListener).toHaveBeenCalledWith(
@@ -197,7 +197,7 @@ describe("Header character mode sequencing", () => {
       expect(screen.getByTestId("active-character")).toHaveTextContent("Rin")
       fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
-      expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
+      expect(setTemporaryChatMock).not.toHaveBeenCalled()
       expect(clearChatMock).not.toHaveBeenCalled()
       expect(actorListener).not.toHaveBeenCalled()
       expect(assistantListener).not.toHaveBeenCalled()

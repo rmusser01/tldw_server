@@ -1915,5 +1915,8 @@
   },
   "chatSidebar_folderCreated": {
     "message": "Folder created successfully"
+  },
+  "temporaryChatDiscardConfirmation": {
+    "message": "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages."
   }
 }

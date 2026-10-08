@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSelectServerChat } from "../useSelectServerChat";
+import type { ServerChatSummary } from "@/services/tldw/TldwApiClient";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
 
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -22,6 +23,8 @@ const chatBaseState = vi.hoisted(() => ({
 
 const optionState = vi.hoisted(() => ({
   value: {
+    temporaryChat: false, historyId: null as string | null, serverChatId: null as string | null,
+    messages: [] as unknown[], history: [] as unknown[],
     chatDraftAddress: { kind: "fresh", id: "draft-a", scope: { type: "global" }, temporary: false },
     chatDraftRevision: 3,
     setChatDraftAddress: vi.fn(() => true),
@@ -94,6 +97,8 @@ vi.mock("@/utils/update-page-title", () => ({
 
 describe("useSelectServerChat context reset", () => {
   beforeEach(() => {
+    Object.assign(optionState.value, { temporaryChat: false, historyId: null, serverChatId: null, messages: [], history: [] });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
     navigateMock.mockClear();
     setSelectedAssistantMock.mockClear();
     Object.values(chatBaseState.value).forEach((value) => {
@@ -117,7 +122,7 @@ describe("useSelectServerChat context reset", () => {
         cluster_id: "cluster-1",
         source: "webui",
         external_ref: null,
-      } as any);
+      } as ServerChatSummary);
     });
     const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent;
     expect(intent).toMatchObject({ chatId: "chat-2", onLoaded: expect.any(Function) });
@@ -142,4 +147,29 @@ describe("useSelectServerChat context reset", () => {
       "Fresh server chat",
     );
   });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("keeps Temporary rows and the pending restore untouched when saved selection is cancelled", () => {
+    Object.assign(optionState.value, { temporaryChat: true, historyId: "temp", messages: [{ message: "Temporary answer" }], history: [{ content: "Temporary answer" }] });
+    usePlaygroundSessionStore.setState({ restoreRevision: 8 });
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved", title: "Next saved" } as ServerChatSummary)).toBe(false));
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(chatBaseState.value.setMessages).not.toHaveBeenCalled();
+    expect(optionState.value.setServerChatId).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(usePlaygroundSessionStore.getState().restoreRevision).toBe(8);
+  });
+
+  it("admits acknowledged Temporary replacement once and reports acceptance", () => {
+    Object.assign(optionState.value, { temporaryChat: true, historyId: "temp", messages: [{ message: "Temporary answer" }] });
+    vi.mocked(window.confirm).mockReturnValue(true);
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved", title: "Next saved" } as ServerChatSummary)).toBe(true));
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(chatBaseState.value.setMessages).toHaveBeenCalledOnce();
+    expect(optionState.value.setServerChatId).toHaveBeenCalledWith("next-saved");
+    expect(navigateMock).toHaveBeenCalledWith("/chat");
+  });
+
 });

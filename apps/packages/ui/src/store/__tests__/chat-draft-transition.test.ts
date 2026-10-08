@@ -8,7 +8,8 @@ vi.mock('@/services/chat-account-boundary', () => ({
   },
 }));
 import { useStoreMessageOption } from '../option';
-import { captureChatDraftLoad } from '@/hooks/chat/chat-draft-transition';
+import { captureChatDraftLoad, captureChatDraftSource } from '@/hooks/chat/chat-draft-transition';
+import { usePlaygroundSessionStore } from '../playground-session';
 import type { HistoryLoadReceipt } from '@/hooks/chat/useHistorySelection';
 
 const native = (id = 'a', valid = true): HistoryLoadReceipt => ({
@@ -81,4 +82,12 @@ describe('explicit conversation draft address transitions', () => {
     useStoreMessageOption.getState().setHistoryId('mirror', { preserveServerChatId: true });
     expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source);
   });
+  it.each(['restoreRevision', 'sourceSelectionRevision'] as const)('retires source preparation when the session %s changes under the same chat IDs', revision => {
+    const before = usePlaygroundSessionStore.getState();
+    const source = captureChatDraftSource();
+    expect(source.isCurrent()).toBe(true);
+    usePlaygroundSessionStore.setState({ [revision]: before[revision] + 1 });
+    expect(source.isCurrent()).toBe(false);
+  });
+
 });

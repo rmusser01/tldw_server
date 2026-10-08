@@ -383,14 +383,6 @@ vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => playgroundFormMessageOptionState.value
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: any) => unknown) =>
-    selector({
-      setRagMediaIds: vi.fn(),
-      setRagPinnedResults: vi.fn()
-    })
-}))
-
 vi.mock("@/store/model", () => ({
   useStoreChatModelSettings: (selector: (state: any) => unknown) =>
     selector({
@@ -720,41 +712,6 @@ vi.mock("@/components/Common/Button", () => ({
       {children}
     </button>
   )
-}))
-
-vi.mock("@/hooks/useSimpleForm", () => ({
-  useSimpleForm: ({ initialValues }: { initialValues: Record<string, string> }) => {
-    const [values, setValues] = React.useState(initialValues)
-    const [errors, setErrors] = React.useState<Record<string, string>>({})
-    const setFieldValue = (field: string, value: string) =>
-      setValues((prev) => ({ ...prev, [field]: value }))
-    const reset = () => setValues(initialValues)
-    return {
-      values,
-      errors,
-      setFieldValue,
-      setFieldError: (field: string, value: string) =>
-        setErrors((prev) => ({ ...prev, [field]: value })),
-      clearFieldError: (field: string) =>
-        setErrors((prev) => {
-          const next = { ...prev }
-          delete next[field]
-          return next
-        }),
-      reset,
-      onSubmit:
-        (handler: (values: Record<string, string>) => void | Promise<void>) =>
-        async (event?: React.FormEvent) => {
-          event?.preventDefault?.()
-          await handler(values)
-        },
-      getInputProps: (field: string) => ({
-        value: values[field] ?? "",
-        onChange: (event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
-          setFieldValue(field, event.target.value)
-      })
-    }
-  }
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({

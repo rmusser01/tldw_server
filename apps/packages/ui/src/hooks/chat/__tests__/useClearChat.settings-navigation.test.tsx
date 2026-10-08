@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import React from "react"
 import { act, renderHook } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useClearChat } from "../useClearChat"
 import {
@@ -30,6 +31,13 @@ const baseState = vi.hoisted(() => ({
 }))
 
 const optionState = vi.hoisted(() => ({
+  temporaryChat: false,
+  messages: [] as unknown[],
+  history: [] as unknown[],
+  serverChatId: "saved" as string | null,
+  historyId: "local" as string | null,
+  chatDraftAddress: null,
+  chatDraftRevision: 1,
   startNewChatDraft: vi.fn(),
   setServerChatId: vi.fn(),
   setServerChatVersion: vi.fn(),
@@ -78,7 +86,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 vi.mock("@/store/option", () => {
   const useStoreMessageOption = Object.assign(
     (selector: (state: typeof optionState) => unknown) => selector(optionState),
-    { setState: optionStoreSetStateMock, getState: () => ({ ...optionState, serverChatId: "saved", historyId: "local" }) }
+    { setState: optionStoreSetStateMock, getState: () => ({ ...optionState }) }
   )
   return { useStoreMessageOption }
 })
@@ -108,9 +116,13 @@ vi.mock("@/utils/update-page-title", () => ({
 describe("useClearChat settings navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.assign(optionState, { temporaryChat: false, messages: [], history: [], serverChatId: "saved", historyId: "local", chatDraftAddress: null, chatDraftRevision: 1 })
+    vi.spyOn(window, "confirm").mockReturnValue(false)
     historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock })
     window.history.replaceState({}, "", "/settings/prompt")
   })
+
+  afterEach(() => vi.restoreAllMocks())
 
   it("does nothing when the mounted settings editor declines navigation", () => {
     const declineNavigation = vi.fn((event: Event) => event.preventDefault())
@@ -173,4 +185,99 @@ describe("useClearChat settings navigation", () => {
     expect(clearSessionMock).toHaveBeenCalledOnce()
     expect(historySelectionResetMock).not.toHaveBeenCalled()
   })
+  const temporarySource = () => {
+    Object.assign(optionState, {
+      temporaryChat: true, serverChatId: null, historyId: "temp",
+      messages: [{ id: "temporary-q", message: "Keep this exact question", images: ["data:image/png;base64,aA=="] }],
+      history: [{ role: "user", content: "Keep this exact question" }]
+    })
+  }
+
+  it.each(["both", "display", "history"])("keeps populated Temporary %s content and every reset side effect on Cancel", kind => {
+    temporarySource()
+    if (kind === "display") optionState.history = []
+    if (kind === "history") optionState.messages = []
+    const before = { ...optionState }
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current()).toBe(false))
+    expect(optionState).toEqual(before)
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(historySelectionResetMock).not.toHaveBeenCalled()
+    expect(optionState.startNewChatDraft).not.toHaveBeenCalled()
+    expect(baseState.setMessages).not.toHaveBeenCalled()
+    expect(clearSessionMock).not.toHaveBeenCalled()
+    expect(destroyAllMock).not.toHaveBeenCalled()
+    expect(updatePageTitleMock).not.toHaveBeenCalled()
+  })
+
+  it("does not ask a Temporary question after the settings editor refuses", () => {
+    temporarySource()
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, event => event.preventDefault(), { once: true })
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current()).toBe(false))
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(optionState.startNewChatDraft).not.toHaveBeenCalled()
+  })
+
+  it("discards once when the Temporary choice is accepted", () => {
+    temporarySource()
+    vi.mocked(window.confirm).mockReturnValue(true)
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current()).toBe(true))
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(navigateMock).toHaveBeenCalledOnce()
+    expect(optionState.startNewChatDraft).toHaveBeenCalledOnce()
+    expect(historySelectionResetMock).toHaveBeenCalledOnce()
+    expect(clearSessionMock).toHaveBeenCalledOnce()
+  })
+
+  it.each([false, true])("skips the question for an empty chat (Temporary=%s)", temporaryChat => {
+    Object.assign(optionState, { temporaryChat, historyId: null, serverChatId: null })
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current()).toBe(true))
+    expect(window.confirm).not.toHaveBeenCalled()
+  })
+
+  it("does not clear a replacement conversation admitted while the browser question is open", () => {
+    temporarySource()
+    vi.mocked(window.confirm).mockImplementation(() => {
+      optionState.chatDraftRevision++
+      optionState.messages = [{ message: "Replacement conversation" }]
+      return true
+    })
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current()).toBe(false))
+    expect(optionState.messages).toEqual([{ message: "Replacement conversation" }])
+    expect(optionState.startNewChatDraft).not.toHaveBeenCalled()
+    expect(historySelectionResetMock).not.toHaveBeenCalled()
+  })
+
+  it("a React click event does not count as prior discard consent", () => {
+    temporarySource()
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current({ nativeEvent: new MouseEvent("click") } as React.MouseEvent)).toBe(false))
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(optionState.startNewChatDraft).not.toHaveBeenCalled()
+  })
+
+  it("does not repeat an explicitly acknowledged all-data discard", () => {
+    temporarySource()
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current({ discardTemporaryConfirmed: true })).toBe(true))
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(optionState.startNewChatDraft).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the same-ID replacement history view when the questioned H1 selection retires", () => {
+    temporarySource()
+    let current = true
+    historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock, fence: () => () => current })
+    vi.mocked(window.confirm).mockImplementation(() => { current = false; return true })
+    const { result } = renderHook(() => useClearChat())
+    act(() => expect(result.current()).toBe(false))
+    expect(historySelectionResetMock).not.toHaveBeenCalled()
+    expect(optionState.startNewChatDraft).not.toHaveBeenCalled()
+  })
+
 })

@@ -34,6 +34,8 @@ import {
   normalizeMessageSteeringPrompts
 } from "@/utils/message-steering"
 import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
 import { preserveAssistantSelectionMode } from "@/types/assistant-selection"
 import type { MessageSteeringPromptTemplates } from "@/types/message-steering"
@@ -171,6 +173,7 @@ export const CharacterSelect: React.FC<Props> = ({
   const [selectedCharacter, setSelectedCharacter] =
     useSelectedCharacter<CharacterSelection | null>(null)
   const clearChat = useClearChat()
+  const captureSelectionFence = useHistorySelectionContext()?.fence
   const messages = useStoreMessageOption((state) => state.messages)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const [userDisplayName, setUserDisplayName] = useStorage(
@@ -816,9 +819,9 @@ export const CharacterSelect: React.FC<Props> = ({
       if (nextId === currentId) return
 
       if (hasActiveChat) {
-        const confirmed = await confirmCharacterSwitch(next?.name)
-        if (!confirmed) return
-        clearChat()
+        const source = captureChatDraftSource(captureSelectionFence?.())
+        if (!hasTemporaryChatContent(useStoreMessageOption.getState()) && !await confirmCharacterSwitch(next?.name)) return
+        if (!source.isCurrent() || clearChat() === false) return
       }
 
       latestSelectionIdRef.current = nextId
@@ -864,6 +867,7 @@ export const CharacterSelect: React.FC<Props> = ({
     },
     [
       clearChat,
+      captureSelectionFence,
       confirmCharacterSwitch,
       hasActiveChat,
       notification,

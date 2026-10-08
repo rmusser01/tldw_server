@@ -6,6 +6,7 @@
   },
   "dismiss": "Dismiss",
   "confirmTitle": "Please confirm",
+  "temporaryChatDiscardConfirmation": "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages.",
   "pdf": {
     "passwordTitle": "Enter the PDF password",
     "unlock": "Unlock"

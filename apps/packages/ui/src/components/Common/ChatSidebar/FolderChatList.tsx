@@ -174,7 +174,7 @@ export function FolderChatList({ className, onConversationSelected, owner,
       const chat = await tldwClient.getChat(id, { requestScope: operation.requestScope, scope: { type: "global" }, signal })
       if (!current()) return
       if (!isGlobalChat(chat, id)) throw new Error("Conversation is unavailable in this history view.")
-      selectServerChat(chat)
+      if (selectServerChat(chat) === false) return
       onConversationSelected?.()
     } catch (error) {
       if (!current()) return

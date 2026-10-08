@@ -118,7 +118,10 @@ const chatAuthority = vi.hoisted(() => ({
   controller: new AbortController(), setSelection: vi.fn()
 }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({ useSelectedAssistant: () => [chatAuthority.selection, chatAuthority.setSelection] }))
-vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: async () => ({
+vi.mock("@/services/service-prompts", () => ({
+  isServicePromptScopeUnresolvedError: () => false,
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://server", authMode: "multi-user" }, userId: "A" }),
+  loadServicePromptSnapshot: async () => ({
   scopeKey: "scope-A", scopeSignal: chatAuthority.controller.signal, scopeInvalidatedSignal: chatAuthority.controller.signal,
   requestScope: { config: { serverUrl: "http://server", authMode: "multi-user" }, userId: "A" }, release: vi.fn()
 }) }))
@@ -229,7 +232,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     chatAuthority.controller = new AbortController()
     chatAuthority.selection = { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } }
     chatAuthority.setSelection.mockImplementation(async (selection, options) => { if (options?.isCurrent?.() !== false) chatAuthority.selection = selection })
-    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: "robot", serverChatCharacterId: "5", serverChatMetaLoaded: true, streaming: false, isProcessing: false })
+    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: "robot", serverChatCharacterId: "5", serverChatMetaLoaded: true, temporaryChat: false, streaming: false, isProcessing: false })
     usePlaygroundSessionStore.getState().saveSession({ historyId: "robot-history", serverChatId: "robot", scopeKey: "scope-A" })
     mockInitialize.mockResolvedValue(undefined)
     mockGetConfig.mockResolvedValue({
@@ -509,7 +512,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     } finally { view.unmount(); localStorage.clear() }
   })
 
-  it.each(["stream", "new-draft", "image-draft", "note-edit", "account"])("does not replace current work when %s changes during a linked read", async change => {
+  it.each(["stream", "new-draft", "image-draft", "note-edit", "account", "restore", "selection"])("does not replace current work when %s changes during a linked read", async change => {
     configureCommonRequests("cedar")
     const chat = { id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat" }
     let release!: (rows: unknown[]) => void
@@ -525,6 +528,8 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       if (change === "new-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "user", isBot: false, name: "You", message: "Keep this thought" }] })
       if (change === "image-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "assistant", isBot: true, name: "Assistant", message: "", images: ["data:image/png;base64,YQ=="] }] })
       if (change === "account") chatAuthority.controller.abort()
+      if (change === "restore") usePlaygroundSessionStore.getState().cancelPendingRestore()
+      if (change === "selection") usePlaygroundSessionStore.getState().markSourceSelectionIntent()
     })
     if (change === "note-edit") fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), { target: { value: "New note edits" } })
     await act(async () => { release([{ id: "a", role: "assistant", content: "Late Cedar", version: 1 }]); await Promise.resolve(); await Promise.resolve() })
@@ -598,6 +603,79 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
       expect(useStoreMessageOption.getState().serverChatId).toBe("normal-saved")
       expect(chatAuthority.selection).toBeNull()
+    }
+  })
+
+  it.each(["history", "greeting"])("keeps the Temporary %s source and identity before linked-chat publication on Cancel", async kind => {
+    configureCommonRequests("cedar")
+    mockGetChat.mockResolvedValue({ id: "cedar", title: "Cedar chat", character_id: 4, version: 3 })
+    mockListChatMessages.mockResolvedValue([{ id: "saved-a", role: "assistant", content: "Destination answer", version: 1 }])
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    act(() => useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null, historyId: "temp",
+      messages: kind === "greeting" ? [{ id: "greeting", role: "assistant", isBot: true, name: "Guide", message: "Keep this opening", messageType: "character:greeting" }] : [],
+      history: [{ role: "assistant", content: "Keep this opening" }] }))
+    const source = useStoreMessageOption.getState()
+    const session = usePlaygroundSessionStore.getState()
+    const selection = chatAuthority.selection
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    try {
+      fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+      fireEvent.click(await screen.findByText(/open linked conversation/i))
+      await waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+      expect(useStoreMessageOption.getState()).toBe(source)
+      expect(usePlaygroundSessionStore.getState()).toBe(session)
+      expect(chatAuthority.selection).toBe(selection)
+      expect(mockNavigate).not.toHaveBeenCalled()
+    } finally { confirm.mockRestore() }
+  })
+
+  it("publishes an accepted Temporary linked replacement after exactly one Settings and discard admission", async () => {
+    configureCommonRequests("cedar")
+    mockGetChat.mockResolvedValue({ id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat", version: 3 })
+    mockListChatMessages.mockResolvedValue([{ id: "saved-a", role: "assistant", content: "Destination answer", version: 1 }])
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    act(() => useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null, historyId: "temp", messages: [], history: [{ role: "assistant", content: "Keep this opening" }] }))
+    const settings = vi.fn()
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+    window.addEventListener("tldw:settings-navigation-request", settings)
+    try {
+      fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+      fireEvent.click(await screen.findByText(/open linked conversation/i))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      expect(settings).toHaveBeenCalledOnce()
+      expect(confirm).toHaveBeenCalledOnce()
+      expect(useStoreMessageOption.getState()).toMatchObject({ temporaryChat: false, serverChatId: "cedar", messages: [{ serverMessageId: "saved-a", message: "Destination answer" }] })
+      expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", trackedCharacterId: "4" })
+      expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent?.isCurrent?.()).toBe(true)
+    } finally {
+      window.removeEventListener("tldw:settings-navigation-request", settings)
+      confirm.mockRestore()
+    }
+  })
+
+  it("declines linked-chat Settings navigation before identity, session, and conversation publication", async () => {
+    configureCommonRequests("cedar")
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    const source = useStoreMessageOption.getState()
+    const session = usePlaygroundSessionStore.getState()
+    const selection = chatAuthority.selection
+    const settings = (event: Event) => event.preventDefault()
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+    window.addEventListener("tldw:settings-navigation-request", settings)
+    try {
+      fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+      fireEvent.click(await screen.findByText(/open linked conversation/i))
+      expect(useStoreMessageOption.getState()).toBe(source)
+      expect(usePlaygroundSessionStore.getState()).toBe(session)
+      expect(chatAuthority.selection).toBe(selection)
+      expect(mockNavigate).not.toHaveBeenCalled()
+      expect(confirm).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("tldw:settings-navigation-request", settings)
+      confirm.mockRestore()
     }
   })
 
