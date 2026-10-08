@@ -1,7 +1,7 @@
 ---
 id: TASK-13531
 title: Repair inherited Research Workspace test contract and overlay failures
-status: To Do
+status: In Progress
 labels:
 - knowledge
 - research
@@ -27,6 +27,7 @@ Burn down the ten named Research/Chat/storage assertions found during TASK-13530
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Scope before edits. Canonical dev comparison: /private/tmp/knowledge-capture-dev-baseline-four-suites-receipt.json,233cases223passed10failed0pending/exit1/46.65s; exact named and diagnostic match to feature621 run. Existing search found no open exact maintenance owner: TASK478.4,13260.268 and13394 are historical Done units; TASK12116 broader strict/lint/dependency work is not assigned all ten. ADR assessment: no new ADR required for fixture/contract repair under existing Research selection, saved normal Chat provider/ownership and dialog accessibility rules. New durable behavior/policy changes require controller assessment. User has authorized burning down followups; separate sequential Task7 is added to the approved execution plan. No new feature, dependency, broad refactor or assertion disabling.
+Sequential implementation begins after approvedTask3 guard fix2. Original canonical-dev233case comparison and exact ten matches retained. Task7 brief in owned SDD workspace; four owning contracts only, meaningful assertions and all current capture/owner/security behavior preserved. ADR assessment:no new ADR for fixture/compatibility repair; a proven broader durable change requires controller assessment.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
