@@ -142,7 +142,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
 **Success Criteria:** Explicit UI actions, honest extraction/version labels, no accidental save, retained original evidence and safe retirement/recovery.
 **Tests:** SourcesPane and capture workflow, prefill/provenance/import/export/restore tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Integrate capture and refresh in Research
 
