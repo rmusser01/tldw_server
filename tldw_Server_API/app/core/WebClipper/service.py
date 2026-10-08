@@ -1116,6 +1116,7 @@ class WebClipperService:
                 overwrite=True,
                 chunks=chunks,
                 owner_user_id=self._coerce_owner_user_id(),
+                deduplicate_content="web_capture_v1" not in request.capture_metadata,
             )
         except (MediaConflictError, MediaDatabaseError, MediaInputError) as exc:
             raise CharactersRAGDBError("Media DB workspace clip persistence failed.") from exc  # noqa: TRY003

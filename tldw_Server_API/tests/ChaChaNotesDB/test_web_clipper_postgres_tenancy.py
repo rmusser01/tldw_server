@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -192,6 +193,7 @@ async def test_postgres_pinned_preview_foreign_workspace_denied_before_media_rea
 def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backend, tmp_path):
     from loguru import logger
 
+    from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
     from tldw_Server_API.app.core.WebClipper.schemas import WebClipperSaveRequest
     from tldw_Server_API.app.core.WebClipper.service import WebClipperService
@@ -241,6 +243,51 @@ def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backen
         assert len(sources) == 1
         assert sources[0]["id"] == f"web-clipper:{clip}"
         assert sources[0]["selected"] is True
+        original_source = sources[0]
+        original_media_id = int(original_source["media_id"])
+        original_version = media_db_api.get_document_version(media, original_media_id, 1)
+        original_chunk = media_db_api.get_unvectorized_chunks_in_range(media, original_media_id, 0, 0)
+        media_ids = {original_media_id}
+        media_uuids = {media_db_api.get_media_by_id(media, original_media_id)["uuid"]}
+        previous_clip = clip
+        for refreshed_text in (text, "changed accepted café article"):
+            payload = request.model_dump()
+            payload["clip_id"] = str(uuid4())
+            payload["content"]["full_extract"] = refreshed_text
+            descriptor = payload["capture_metadata"]["web_capture_v1"]
+            descriptor["refresh_of"] = previous_clip
+            descriptor["content_sha256"] = hashlib.sha256(refreshed_text.encode("utf-8")).hexdigest()
+            refreshed_request = WebClipperSaveRequest.model_validate(payload)
+            refreshed = service.save_clip(refreshed_request)
+            retried = service.save_clip(refreshed_request)
+            assert refreshed.status == retried.status == "saved"
+            assert refreshed.note.id == retried.note.id != first.note.id
+            sources = db.list_workspace_sources(workspace)
+            source = next(row for row in sources if row["id"] == f"web-clipper:{refreshed_request.clip_id}")
+            media_id = int(source["media_id"])
+            assert media_id not in media_ids
+            media_uuid = media_db_api.get_media_by_id(media, media_id)["uuid"]
+            assert media_uuid not in media_uuids
+            version = media_db_api.get_document_version(media, media_id, 1)
+            assert version["uuid"] != original_version["uuid"]
+            assert version["content"] == refreshed_text
+            assert json.loads(version["safe_metadata"])["capture_metadata"]["web_capture_v1"] == descriptor
+            assert len(media_db_api.list_document_versions(media, media_id)) == 1
+            assert original_source in sources
+            assert media_db_api.get_document_version(media, original_media_id, 1) == original_version
+            assert media_db_api.get_unvectorized_chunks_in_range(media, original_media_id, 0, 0) == original_chunk
+            media_ids.add(media_id)
+            media_uuids.add(media_uuid)
+            previous_clip = refreshed_request.clip_id
+        assert len(db.list_workspace_sources(workspace)) == 3
+        assert service.save_clip(request).note.id == first.note.id
+        retried_version = media_db_api.get_document_version(media, original_media_id, 1)
+        assert (retried_version["uuid"], retried_version["content"], retried_version["safe_metadata"]) == (
+            original_version["uuid"],
+            original_version["content"],
+            original_version["safe_metadata"],
+        )
+        assert len(db.list_workspace_sources(workspace)) == 3
     finally:
         logger.remove(sink)
         db.close_connection()
