@@ -1,7 +1,12 @@
 import { browser } from "./wxt-browser"
 import { clearRuntimeAuth } from "@web/lib/authStorage"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import {
+  cancelRuntimeAuthBootstrapRecovery,
+  setRuntimeAuthBootstrapRecovery
+} from "@/services/tldw/runtime-bootstrap-recovery"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
 import {
   DEFAULT_HEADER_SHORTCUT_SELECTION,
@@ -16,6 +21,7 @@ import {
 } from "@/services/settings/ui-settings"
 import {
   COOKIE_SESSION_CONFIG_KEY,
+  isExactOriginCookieSessionConfig,
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
@@ -286,8 +292,11 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
   }
 }
 
-const bootstrapCookieSession = async (): Promise<boolean> => {
+const bootstrapCookieSession = async (
+  isCurrent: () => boolean
+): Promise<boolean> => {
   try {
+    if (!isCurrent()) return false
     const response = await withRuntimeRequestTimeout((signal) =>
       fetch(RUNTIME_SESSION_ENDPOINT, {
         method: "POST",
@@ -296,7 +305,7 @@ const bootstrapCookieSession = async (): Promise<boolean> => {
         signal
       })
     )
-    if (!response.ok) return false
+    if (!response.ok || !isCurrent()) return false
 
     const probe = await withRuntimeRequestTimeout((signal) =>
       fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
@@ -306,7 +315,7 @@ const bootstrapCookieSession = async (): Promise<boolean> => {
         signal
       })
     )
-    return probe.ok
+    return probe.ok && isCurrent()
   } catch {
     return false
   }
@@ -343,12 +352,14 @@ const hasCompleteManualDeviceKey = (config: TldwConfig | null): boolean =>
   )
 
 const scrubMismatchedManualSessionKey = async (
-  quickstartServerUrl: string
+  quickstartServerUrl: string,
+  isCurrent: () => boolean
 ): Promise<void> => {
   if (typeof navigator === "undefined" || !navigator.locks?.request) return
 
   try {
     await navigator.locks.request(MANUAL_SESSION_CREDENTIAL_LOCK, async () => {
+      if (!isCurrent()) return
       const rawConfig = window.localStorage.getItem("tldwConfig")
       if (!rawConfig) return
       const parsedConfig: unknown = JSON.parse(rawConfig)
@@ -371,36 +382,39 @@ const scrubMismatchedManualSessionKey = async (
         typeof record.apiKey === "string" &&
         record.apiKey.trim() &&
         record.apiKeyServerOrigin === serverOrigin
-      if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
+      if (!complete && isCurrent())
+        window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
     })
   } catch {
     // Leave the record unreadable rather than racing a concurrent save.
   }
 }
 
-const seedTldwConfigFromRuntime = async (): Promise<void> => {
-  if (typeof window === "undefined") return
+const seedTldwConfigFromRuntime = async (
+  isCurrent: () => boolean = () => true
+): Promise<"ready" | "retry" | "unavailable"> => {
+  if (typeof window === "undefined" || !isCurrent()) return "unavailable"
 
   const storage = createSafeStorage()
-  invalidateCookieSessionConfig()
-  await storage.remove(COOKIE_SESSION_CONFIG_KEY).catch(() => undefined)
-
   const payload = await fetchRuntimeConfig()
+  if (!isCurrent()) return "unavailable"
+  if (!payload) return "retry"
   if (
     payload?.runtimeAuth?.available !== true ||
     payload.runtimeAuth.authMode !== "single-user" ||
     payload.runtimeAuth.transport !== "cookie-session"
   ) {
-    return
+    return "unavailable"
   }
 
-  if (!(await bootstrapCookieSession())) return
+  if (!(await bootstrapCookieSession(isCurrent)))
+    return isCurrent() ? "retry" : "unavailable"
 
   try {
     const existing =
       (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    if (!quickstartWebUiServerUrl) return
+    if (!quickstartWebUiServerUrl || !isCurrent()) return "unavailable"
 
     const next: TldwConfig = {
       authMode: "single-user",
@@ -412,14 +426,18 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
       const { apiKey: _ambiguousSecret, ...safeExisting } = existing
       await storage.set("tldwConfig", safeExisting)
     }
+    if (!isCurrent()) return "unavailable"
     await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
+    if (!isCurrent()) return "unavailable"
     activateCookieSessionConfig()
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
-    await scrubMismatchedManualSessionKey(quickstartWebUiServerUrl)
+    await scrubMismatchedManualSessionKey(quickstartWebUiServerUrl, isCurrent)
+    return "ready"
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
+    return "retry"
   }
 }
 
@@ -555,9 +573,72 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   }
 }
 
-export const runtimeBootstrapReady = (async () => {
-  await seedTldwConfigFromRuntime().catch(() => undefined)
-  await seedTldwConfigFromEnv().catch(() => undefined)
+export const runtimeBootstrapReady: Promise<void> = (async () => {
+  const initialIsCurrent = setRuntimeAuthBootstrapRecovery(async () => {
+    await runtimeBootstrapReady
+  })
+  const stop = watchChatAccountChanges((invalidated) => {
+    if (invalidated) {
+      cancelRuntimeAuthBootstrapRecovery()
+      stop()
+    }
+  })
+  invalidateCookieSessionConfig()
+  await createSafeStorage()
+    .remove(COOKIE_SESSION_CONFIG_KEY)
+    .catch(() => undefined)
+  const outcome = await seedTldwConfigFromRuntime(initialIsCurrent).catch(
+    () => "retry"
+  )
+  if (initialIsCurrent()) await seedTldwConfigFromEnv().catch(() => undefined)
+  const canRecoverRuntimeAuth = () => {
+    try {
+      const raw = window.localStorage.getItem("tldwConfig")
+      if (raw === null) return true
+      const config: unknown = JSON.parse(raw)
+      return (
+        config === null ||
+        (isRecord(config) &&
+          !Array.isArray(config) &&
+          typeof config.serverUrl === "string" &&
+          Object.keys(config).every((key) =>
+            ["serverUrl", "authMode", "authSource"].includes(key)
+          ) &&
+          isExactOriginCookieSessionConfig(
+            {
+              serverUrl: config.serverUrl,
+              authMode:
+                config.authMode === undefined ? "single-user" : config.authMode,
+              authSource:
+                config.authSource === undefined
+                  ? "cookie-session"
+                  : config.authSource
+            },
+            getQuickstartWebUiServerUrl()
+          ))
+      )
+    } catch {
+      return false
+    }
+  }
+  if (
+    !initialIsCurrent() ||
+    outcome !== "retry" ||
+    !getQuickstartWebUiServerUrl() ||
+    !canRecoverRuntimeAuth()
+  ) {
+    stop()
+    if (initialIsCurrent()) cancelRuntimeAuthBootstrapRecovery()
+    return
+  }
+  setRuntimeAuthBootstrapRecovery(async (isCurrent) => {
+    const current = () => isCurrent() && canRecoverRuntimeAuth()
+    const recovered = await seedTldwConfigFromRuntime(current)
+    if (recovered !== "retry" || !current()) {
+      stop()
+      if (isCurrent()) cancelRuntimeAuthBootstrapRecovery()
+    }
+  })
 })()
 
 const WEB_DEFAULTS_MIRRORED_KEY = "tldw:web-defaults:mirrored"

@@ -1,5 +1,6 @@
 import { isPlaceholderApiKey } from "@/utils/api-key";
 import type { TldwConfig } from "@/services/tldw/TldwApiClient";
+import { isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override";
 import {
   applyRefreshRotation,
   refreshSessionInvalidationKey,
@@ -131,13 +132,13 @@ const isQuickstartDeployment = (): boolean =>
 export const hasActiveCookieSessionAuth = (
   config: { authMode?: unknown; authSource?: unknown } | null | undefined
 ): boolean =>
+  !isCookieSessionConfigInvalidated() &&
   isCookieSessionBrowserTransport({
     authMode: config?.authMode,
     authSource: config?.authSource,
-    transportMode: isQuickstartDeployment() ? "quickstart" : "advanced",
-    transportKind: isQuickstartDeployment() ? "same-origin" : "absolute",
-    pageOrigin:
-      typeof window === "undefined" ? null : String(window.location?.origin || "")
+    transportMode: isQuickstartDeployment() ? 'quickstart' : 'advanced',
+    transportKind: isQuickstartDeployment() ? 'same-origin' : 'absolute',
+    pageOrigin: typeof window === 'undefined' ? null : String(window.location?.origin || ''),
   });
 
 export const getApiKey = (): string | null => {

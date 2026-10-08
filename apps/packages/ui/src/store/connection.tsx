@@ -709,8 +709,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
 
         if (
+          cfg &&
           quickstartWebUiServerUrl &&
-          cfg?.serverUrl !== quickstartWebUiServerUrl &&
+          cfg.serverUrl !== quickstartWebUiServerUrl &&
           (cfg?.authSource !== "cookie-session" || hasCookieSessionAuth || hasSingleUserApiKey(cfg))
         ) {
           await (await getTldwClient()).updateConfig({ serverUrl: quickstartWebUiServerUrl })

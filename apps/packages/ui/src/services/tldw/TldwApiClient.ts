@@ -46,6 +46,11 @@ import {
   type ChatRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import {
+  cancelRuntimeAuthBootstrapRecovery,
+  recoverRuntimeAuthBootstrap
+} from "./runtime-bootstrap-recovery"
+
 import { getNormalizedTldwModels } from "@/services/tldw/model-normalization"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
 import {
@@ -2110,6 +2115,7 @@ export class TldwApiClientBase {
   }
 
   async initialize(): Promise<void> {
+    await recoverRuntimeAuthBootstrap()
     const initialization = ++this.configInitialization
     let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
     if (!storedManual) {
@@ -2335,6 +2341,7 @@ export class TldwApiClientBase {
     if (!serverOrigin) throw new Error("Invalid server URL")
     if (!apiKey) throw new Error("API key is required")
 
+    cancelRuntimeAuthBootstrapRecovery()
     const initialSetup = input.initialSetup
     if (initialSetup) {
       initialSetup.assertCurrent()
@@ -2414,6 +2421,7 @@ export class TldwApiClientBase {
   }
 
   async clearManualSingleUserCredentials(): Promise<void> {
+    cancelRuntimeAuthBootstrapRecovery()
     const stored = await withManualSessionCredentialLock(async () =>
       await this.clearManualSingleUserCredentialsUnlocked()
     )
@@ -2424,6 +2432,8 @@ export class TldwApiClientBase {
   }
 
   async clearCookieSingleUserSession(): Promise<void> {
+    cancelRuntimeAuthBootstrapRecovery()
+    invalidateCookieSessionConfig()
     const previousConfig = this.config
     let failure: unknown
     try {
@@ -2431,7 +2441,6 @@ export class TldwApiClientBase {
     } catch (error) {
       failure = error
     }
-    invalidateCookieSessionConfig()
     this.config = null
     this.applyConfigState()
     this.publishConfigUpdated(previousConfig, true)
@@ -2554,6 +2563,7 @@ export class TldwApiClientBase {
     assertCommitted?: (current: Partial<TldwConfig>) => void,
     initialSetupToken?: object
   ): Promise<void> {
+    cancelRuntimeAuthBootstrapRecovery()
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
     assertCurrent?.(currentConfig)
