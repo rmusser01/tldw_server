@@ -169,7 +169,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     persistCharacterCompletion: persistCharacterCompletionMock,
     addChatMessage: addChatMessageMock,
     getChat: vi.fn(async (id: string) => ({ id, title: "Actual owned chat", character_id: "12" })),
-    getChatSettings: vi.fn(async () => ({ settings: null })),
+    getChatSettings: vi.fn(async (id: string) => ({ conversation_id: id, settings: {} })),
     initialize: vi.fn(async () => null),
     getCharacter: h1.live,
     captureHistorySelection: (...args: any[]) => h1.capture(...args),
@@ -467,6 +467,9 @@ const makeController = () => {
     },
     followResult: vi.fn(async () => true),
     refreshRecovery: vi.fn(async () => {}),
+    retireSameTuple: () => {
+      current = { ...current, owner: { ...current.owner }, view: { ...current.view } }
+    },
     navigate: () => {
       current = {
         ...current,
@@ -490,6 +493,8 @@ beforeEach(async () => {
   h1.lookupRecoveries.mockReset()
   h1.lookupAdmission.mockReset()
   vi.clearAllMocks()
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  vi.mocked(api.getChatSettings).mockReset().mockImplementation(async id => ({ conversation_id: id, settings: {} }))
   localStorage.clear()
   sessionStorage.clear()
   const lockTails = new Map<string, Promise<unknown>>()
@@ -689,6 +694,119 @@ it.each(["model", "tools"])("keeps an explicit playground %s override after its 
   expect(h1.wire).toHaveBeenCalledOnce()
   expect(h1.wire.mock.calls[0][0].model).toBe(overridden === "model" ? "fixed-model" : "deepseek-chat")
   expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+})
+
+it.each([
+  { label: "active zero", saved: { chatGenerationOverride: { enabled: true, temperature: 0, top_p: 0 } }, omitTemperature: true, omitTopP: true },
+  { label: "active finite", saved: { chatGenerationOverride: { temperature: 0.71, top_p: 0.45 } }, omitTemperature: true, omitTopP: true },
+  { label: "null inherits model", saved: { chatGenerationOverride: { enabled: true, temperature: null, top_p: null } }, omitTemperature: false, omitTopP: false },
+  { label: "disabled inherits model", saved: { chatGenerationOverride: { enabled: false, temperature: 0, top_p: 0 } }, omitTemperature: false, omitTopP: false },
+  { label: "empty preferred wins legacy", saved: { chatGenerationOverride: {}, generationOverrides: { temperature: 0, top_p: 0 } }, omitTemperature: false, omitTopP: false },
+  { label: "disabled preferred wins legacy", saved: { chatGenerationOverride: { enabled: false }, generationOverrides: { temperature: 0, top_p: 0 } }, omitTemperature: false, omitTopP: false },
+  { label: "legacy active", saved: { generationOverrides: { temperature: 0, top_p: 0.6 } }, omitTemperature: true, omitTopP: true },
+  { label: "one field inherits", saved: { chatGenerationOverride: { temperature: 0.4, top_p: null } }, omitTemperature: true, omitTopP: false },
+  { label: "no override", saved: {}, omitTemperature: false, omitTopP: false }
+])("native sampler uses the saved chat independently of model defaults: $label", async ({ saved, omitTemperature, omitTopP }) => {
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  vi.mocked(api.getChatSettings).mockResolvedValueOnce({ conversation_id: nativeChatId, settings: saved })
+  const options = { ...createHookOptions(), currentChatModelSettings: { apiProvider: "openai", temperature: 0.23, topP: 0.9 } }
+  h1.controller.getCurrent().owner.scope = { workspace_id: "workspace-a" }
+  const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+  await act(async () => { await result.current.onSubmit({ message: "saved sampler", image: "" }) })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  const request = h1.wire.mock.calls[0][0]
+  expect(Object.hasOwn(request, "temperature")).toBe(!omitTemperature)
+  expect(Object.hasOwn(request, "top_p")).toBe(!omitTopP)
+  if (!omitTemperature) expect(request.temperature).toBe(0.23)
+  if (!omitTopP) expect(request.top_p).toBe(0.9)
+  const { tldw_history_selection_v1: selection, ...preparedPayload } = request
+  const { historyDigest } = await import("@/db/dexie/history-selection")
+  expect(selection.request_context_digest).toBe(historyDigest(preparedPayload))
+  expect(api.getChatSettings).toHaveBeenCalledWith(nativeChatId, expect.objectContaining({
+    scope: { workspace_id: "workspace-a" },
+    requestScope: h1.controller.getCurrent().owner.request_scope,
+    signal: expect.any(AbortSignal)
+  }))
+})
+
+it.each([
+  { label: "foreign owner", raw: { conversation_id: "foreign", settings: {} } },
+  { label: "missing ID", raw: { settings: {} } },
+  { label: "null settings", raw: { conversation_id: "tracked-chat-1", settings: null } },
+  { label: "array settings", raw: { conversation_id: "tracked-chat-1", settings: [] } },
+  { label: "read failure", raw: undefined }
+])("native sampler refuses $label before history capture or provider dispatch", async ({ raw }) => {
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  vi.mocked(api.getChatSettings).mockImplementationOnce(async () => {
+    if (raw === undefined) throw new Error("settings unavailable")
+    return raw as Awaited<ReturnType<typeof api.getChatSettings>>
+  })
+  const options = createHookOptions()
+  const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+  await act(async () => { await result.current.onSubmit({ message: "keep this input", image: "" }) })
+  expect(h1.capture).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(options.notification.error).toHaveBeenCalled()
+})
+
+it.each(["view", "account", "owner lease"])("native sampler does not continue a held settings read after %s retirement", async boundary => {
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  let release!: () => void
+  vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise(resolve => {
+    release = () => resolve({ conversation_id: nativeChatId, settings: { chatGenerationOverride: { temperature: 0 } } })
+  }))
+  const options = createHookOptions()
+  let ownerLive = true
+  h1.controller.getCurrent().owner.validate_lease = () => ownerLive
+  const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+  await act(async () => {
+    const sending = result.current.onSubmit({ message: "held input", image: "" })
+    await waitFor(() => expect(api.getChatSettings).toHaveBeenCalledOnce())
+    if (boundary === "view") h1.controller.navigate()
+    else if (boundary === "account") h1.auth.abort()
+    else ownerLive = false
+    release()
+    await sending
+  })
+  expect(h1.capture).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it.each(["view", "account", "owner lease"])("native sampler suppresses a failed held read after %s retirement", async boundary => {
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  let rejectRead!: (error: Error) => void
+  vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise((_, reject) => { rejectRead = reject }))
+  const options = createHookOptions()
+  const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+  let sending!: Promise<unknown>
+  await act(async () => {
+    sending = result.current.onSubmit({ message: "retained input", image: "" })
+    await waitFor(() => expect(api.getChatSettings).toHaveBeenCalledOnce())
+  })
+  if (boundary === "view") h1.controller.retireSameTuple()
+  else if (boundary === "account") h1.auth.abort()
+  else h1.controller.getCurrent().owner.validate_lease = () => false
+  await act(async () => { rejectRead(new Error("read failed")); await sending })
+  expect(h1.capture).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(options.notification.error).not.toHaveBeenCalled()
+})
+
+it.each(["capture", "dispatch journal"])("native sampler refuses an identical H1 replacement during its %s", async stage => {
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  if (stage === "capture") h1.capture.mockImplementationOnce(async (_id, request) => {
+    entered(); await held; return captureFor(request.view)
+  })
+  else h1.recover.mockImplementationOnce(async () => { entered(); await held })
+  const options = createHookOptions()
+  const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+  let sending!: Promise<unknown>
+  await act(async () => { sending = result.current.onSubmit({ message: "original input", image: "" }); await ready })
+  h1.controller.retireSameTuple()
+  await act(async () => { release(); await sending })
+  expect(h1.wire).not.toHaveBeenCalled()
 })
 
 it("mounted native character sends A1 selection and only new input, following the owner ACK", async () => {
@@ -1483,7 +1601,8 @@ it.each([
   "admission-and-content",
   "empty-content",
   "role-only",
-  "admission-name-collision"
+  "admission-name-collision",
+  "settings-read-name-collision"
 ])(
   "a context-shaped error after %s cannot erase observed native evidence",
   async (observed) => {
@@ -1492,7 +1611,8 @@ it.each([
       if (
         observed === "admission" ||
         observed === "admission-and-content" ||
-        observed === "admission-name-collision"
+        observed === "admission-name-collision" ||
+        observed === "settings-read-name-collision"
       )
         yield { tldw_history_admission_v1: nativeAdmission(request) }
       if (observed === "content" || observed === "admission-and-content")
@@ -1503,6 +1623,8 @@ it.each([
         yield { choices: [{ delta: { role: "assistant" } }] }
       if (observed === "admission-name-collision")
         yield await Promise.reject(new Error("native_history_context_refused"))
+      if (observed === "settings-read-name-collision")
+        yield await Promise.reject(new Error("native_history_settings_unverified"))
       yield await Promise.reject(savedContextRefusal())
     })
     const { result } = renderHook(() =>
@@ -1513,7 +1635,7 @@ it.each([
     })
     expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
       state:
-        observed === "admission" || observed === "admission-name-collision"
+        observed === "admission" || observed === "admission-name-collision" || observed === "settings-read-name-collision"
           ? "accepted_unsent"
           : observed === "empty-content" || observed === "role-only"
             ? "unknown"
@@ -1523,7 +1645,7 @@ it.each([
     expect(h1.dismiss).not.toHaveBeenCalled()
     expect(
       options.notification.error.mock.lastCall?.[0].description
-    ).not.toContain("Your message was not added")
+    ).not.toMatch(/Your message (?:was not added|has not been sent)/)
     expect(h1.wire).toHaveBeenCalledOnce()
   }
 )
@@ -2715,6 +2837,46 @@ it("a refused first native turn preserves acknowledged bound creation and its ex
   expect(h1.dismiss).not.toHaveBeenCalled()
   mounted.hook.unmount()
   mounted.selection.unmount()
+})
+
+it("native sampler retires an actual same-ID H1 read without recapture or dispatch", async () => {
+  const mounted = await mountedNativeOpening()
+  const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
+  const controller = mounted.selection.result.current
+  await act(async () => { expect(await controller.loadConversation({ serverChatId: nativeChatId })).toBe(true) })
+  const original = controller.getCurrent()
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  let release!: () => void
+  vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise(resolve => {
+    release = () => resolve({ conversation_id: nativeChatId, settings: { chatGenerationOverride: { temperature: 0 } } })
+  }))
+  h1.capture.mockClear(); h1.wire.mockClear(); h1.recover.mockClear()
+  let sending!: Promise<unknown>
+  await act(async () => {
+    sending = sendNativeHistoryCharacter({
+      controller, surface: "playground", originIsCurrent: controller.fence(),
+      signal: new AbortController().signal, temporary: false,
+      serverChatId: nativeChatId, characterId: "12", model: "deepseek:deepseek-chat", currentModel: "deepseek:deepseek-chat",
+      settings: { apiProvider: "deepseek", temperature: 0.23, topP: 0.9 },
+      message: "held next", image: "", t: mounted.options.t,
+      setServerChatId: mounted.options.setServerChatId, setMessages: mounted.options.setMessages, releaseActivity: vi.fn()
+    }).catch(error => error)
+    await waitFor(() => expect(api.getChatSettings).toHaveBeenCalledOnce())
+  })
+  expect(h1.capture).not.toHaveBeenCalled()
+  await act(async () => { expect(await controller.loadConversation({ serverChatId: nativeChatId })).toBe(true) })
+  const next = controller.getCurrent()
+  expect(next.owner).not.toBe(original.owner)
+  expect(original.owner?.kind === "native" && original.owner.validate_lease()).toBe(false)
+  const loadCaptureCount = h1.capture.mock.calls.length
+  let error: unknown
+  await act(async () => { release(); error = await sending })
+  expect(error).toMatchObject({ message: "stale_selection" })
+  expect(h1.capture).toHaveBeenCalledTimes(loadCaptureCount)
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.recover).not.toHaveBeenCalled()
+  expect(controller.getCurrent().owner).toBe(next.owner)
+  mounted.hook.unmount(); mounted.selection.unmount()
 })
 
 it.each(["capture", "bookmark"].flatMap(stage =>

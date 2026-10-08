@@ -39,6 +39,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("ordinary settings captured owner and explicit reconciliation", () => {
+  it.each([false, true])("read-only recovery never resends an unsupported retained change (already applied=%s)", async committed => {
+    const patch = { authorNote: "Legacy unsupported note" }
+    transport.updateChatSettings.mockImplementationOnce(async () => {
+      if (committed) state.remote = { ...state.remote, ...patch }
+      throw new Error("Lost response")
+    })
+    await expect(applyChatSettingsPatch({ ...params, patch })).rejects.toThrow("chat_settings_server_unconfirmed")
+    const recovery = await getChatSettingsRecovery(params)
+    expect(recovery).not.toBeNull()
+    const verify = applyChatSettingsPatch({ ...params, patch, recoveryOperationId: recovery!.operationId, reconcileOnly: true })
+    if (committed) {
+      await expect(verify).resolves.toMatchObject(patch)
+      expect(await getChatSettingsRecovery(params)).toBeNull()
+    } else {
+      await expect(verify).rejects.toThrow("chat_settings_recovery_requires_compatible_path")
+      expect(await getChatSettingsRecovery(params)).toEqual(recovery)
+    }
+    expect(transport.updateChatSettings).toHaveBeenCalledTimes(1)
+  })
+
   it("preserves canonical legacy generation and supported participant fields through normalization", () => {
     const supported = { generationOverrides: { temperature: 0, top_p: 0.8 }, turnTakingMode: "single", participantCharacterIds: [1] }
     expect(normalizeChatSettingsRecord({ ...canonical, ...supported, unknownControl: "unsupported" }))

@@ -91,6 +91,13 @@ export class NativeHistoryContextRefusal extends Error {
   }
 }
 
+/** Only a failed pre-dispatch settings read can certify that no input was sent. */
+export class NativeHistorySettingsReadError extends Error {
+  constructor(cause: unknown, readonly isCurrent: () => boolean) {
+    super('native_history_settings_unverified', { cause });
+  }
+}
+
 export const nativeCharacterPreflightMessage = (
   error: unknown,
   t: (key: string, fallback: string, options?: { setting: string }) => string
@@ -100,6 +107,11 @@ export const nativeCharacterPreflightMessage = (
     'playground:composer.sceneLoadError',
     'Scene settings could not be loaded. Existing chat setup was left unchanged.'
   );
+  if (error instanceof NativeHistorySettingsReadError)
+    return t(
+      'playground:composer.native_history_settings_unverified',
+      'Conversation settings could not be verified. Your message has not been sent. Reload this saved chat or try again.'
+    );
   if (error instanceof NativeHistoryContextRefusal)
     return t(
       'playground:composer.native_history_context_refused',

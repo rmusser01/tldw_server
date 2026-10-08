@@ -39,7 +39,8 @@ import {
   type ChatCompletionRequest
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
-import { NativeHistoryContextRefusal, validateNativeCharacterConfiguration } from "./native-character-preflight"
+import { requireServerSettingsResponse } from "@/services/chat-settings"
+import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 
 export type NativeHistoryCharacterSendParams = {
@@ -347,6 +348,8 @@ export const sendNativeHistoryCharacter = async (
         throw new Error("stale_selection")
       return greetingResult
     }
+    const originOwner = current.owner
+    const originView = current.view
     const view = structuredClone(current.view)
     const scope = { ...current.bookmarkScope }
     const owner = {
@@ -374,6 +377,27 @@ export const sendNativeHistoryCharacter = async (
         now.selection_revision === view.selection_revision
       )
     }
+    const preparingIsCurrent = () => sameView() && selectionCurrent() && leaseValid() &&
+      controller.getCurrent().owner === originOwner && controller.getCurrent().view === originView && originOwner.validate_lease()
+    if (!preparingIsCurrent()) throw new Error("stale_selection")
+    let savedSettings: Record<string, unknown>
+    try {
+      savedSettings = requireServerSettingsResponse(owner.conversation_id,
+        await tldwClient.getChatSettings(owner.conversation_id, {
+          scope: owner.scope, requestScope: owner.request_scope, signal: snapshot.scopeSignal
+        }))
+    } catch (cause) {
+      throw new NativeHistorySettingsReadError(cause, preparingIsCurrent)
+    }
+    if (!preparingIsCurrent()) throw new Error("stale_selection")
+    const preferred = savedSettings.chatGenerationOverride
+    const legacy = savedSettings.generationOverrides
+    const overrides = preferred && typeof preferred === "object" && !Array.isArray(preferred)
+      ? preferred as Record<string, unknown>
+      : legacy && typeof legacy === "object" && !Array.isArray(legacy)
+        ? legacy as Record<string, unknown> : null
+    const usesSavedSampler = (field: "temperature" | "top_p") =>
+      overrides?.enabled !== false && typeof overrides?.[field] === "number" && Number.isFinite(overrides[field])
     const capture = await captureHistorySnapshot(
       owner,
       view,
@@ -381,7 +405,7 @@ export const sendNativeHistoryCharacter = async (
       snapshot.scopeSignal
     )
     if (capture.status !== "captured") throw new Error(capture.code)
-    if (!sameView()) throw new Error("stale_selection")
+    if (!preparingIsCurrent()) throw new Error("stale_selection")
     const request = prepareChatCompletionRequest(
       [
         ...(settings.systemPrompt?.trim()
@@ -394,9 +418,9 @@ export const sendNativeHistoryCharacter = async (
         apiProvider: provider,
         saveToDb: true,
         conversationId: owner.conversation_id,
-        temperature: settings.temperature,
+        temperature: usesSavedSampler("temperature") ? undefined : settings.temperature,
         maxTokens: settings.numPredict,
-        topP: settings.topP,
+        topP: usesSavedSampler("top_p") ? undefined : settings.topP,
         frequencyPenalty: settings.frequencyPenalty,
         presencePenalty: settings.presencePenalty,
         reasoningEffort: settings.reasoningEffort as
@@ -413,7 +437,7 @@ export const sendNativeHistoryCharacter = async (
         slashCommandInjectionMode: settings.slashCommandInjectionMode
       }
     )
-    const prepared = prepareHistoryContext(request, leaseValid)
+    const prepared = prepareHistoryContext(request, preparingIsCurrent)
     const selection = finalizeHistorySelection(
       owner,
       capture,
@@ -455,7 +479,7 @@ export const sendNativeHistoryCharacter = async (
     })
     await saveHistoryTurnRecovery(scope, view, record("dispatching"))
     try {
-      if (!sameView() || !leaseValid()) throw new Error("stale_selection")
+      if (!preparingIsCurrent()) throw new Error("stale_selection")
       dispatched = true
       // The transport sets stream=true. Never give it the frozen provenance object.
       const wire = {

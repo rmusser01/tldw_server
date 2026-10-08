@@ -430,10 +430,10 @@ describe("ConversationTab generation override controls", () => {
   it("reports a typed conversation draft before blur and cancels without a write", () => {
     const onDraftChange = vi.fn()
     renderConversationTab({ onDraftChange })
-    const editor = screen.getByPlaceholderText(
-      "E.g., Keep responses grounded, avoid repetition, and progress the scene."
-    )
-    fireEvent.change(editor, { target: { value: "My unsaved note" } })
+    const section = screen.getByTestId("chat-generation-override")
+    fireEvent.change(within(section).getByRole("combobox"), { target: { value: "on" } })
+    const editor = within(section).getByPlaceholderText("Stop sequences, one per line")
+    fireEvent.change(editor, { target: { value: "My unsaved stop" } })
     expect(onDraftChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ dirty: true, pending: false })
     )

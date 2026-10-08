@@ -175,6 +175,7 @@ export const CurrentChatModelSettings = ({
     retrySelectedModelSave,
     serverChatId,
     serverChatVersion,
+    serverChatCharacterId,
     serverChatAssistantKind,
     serverChatPersonaMemoryMode,
     serverChatTopic,
@@ -217,7 +218,7 @@ export const CurrentChatModelSettings = ({
   const readSourceRef = React.useRef<(() => boolean) | null>(null)
   const loadedSourceRef = React.useRef<(() => boolean) | null>(null)
   const panelKey = JSON.stringify([
-    open, historyId, serverChatId, selectedCharacterId, personaChatActive,
+    open, historyId, serverChatId, serverChatCharacterId, selectedCharacterId, personaChatActive,
     draftRevision, restoreRevision, selectionRevision, readRevision, settingsScope
   ])
   const panel = { key: panelKey, selectionSignal, captureSelectionFence, accountIsCurrent }
@@ -229,6 +230,7 @@ export const CurrentChatModelSettings = ({
     open,
     historyId,
     serverChatId,
+    serverChatCharacterId,
     selectedCharacterId,
     personaChatActive,
     draftRevision,
@@ -858,6 +860,7 @@ export const CurrentChatModelSettings = ({
               isCurrent={isEditorCurrent}
               onDraftChange={onConversationDraftChange}
               serverChatVersion={serverChatVersion}
+              serverChatCharacterId={serverChatCharacterId}
               useDrawer={useDrawer}
               historyId={historyId}
               selectedSystemPrompt={selectedSystemPrompt}
@@ -928,6 +931,7 @@ export const CurrentChatModelSettings = ({
       historyId,
       serverChatId,
       serverChatVersion,
+      serverChatCharacterId,
       serverChatAssistantKind,
       serverChatPersonaMemoryMode,
       renderedView.revision,

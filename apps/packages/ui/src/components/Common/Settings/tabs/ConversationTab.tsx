@@ -44,6 +44,7 @@ interface ConversationTabProps {
   onRemoveFile: (id: string) => void
   serverChatId: string | null
   serverChatVersion?: number | null
+  serverChatCharacterId?: string | number | null
   isCurrent?: () => boolean
   onDraftChange?: (status: ConversationDraftStatus) => void
   serverChatAssistantKind?: "character" | "persona" | null
@@ -63,6 +64,7 @@ type ConversationProposal = {
   target?: ChatSettingsTarget
   expectedVersion?: number
   settingsOperationId?: string
+  settingsVerificationOnly?: boolean
   settingsAcknowledged: boolean
   detailsAcknowledged: boolean
   detailsAttempted: boolean
@@ -74,6 +76,12 @@ type CharacterLite = {
   id: string | number
   name?: string | null
 }
+
+// H1's deployed self-contained projector; broader effects need its behavior protocol.
+const NATIVE_CONVERSATION_SETTING_KEYS = new Set([
+  "schemaVersion", "updatedAt", "chatGenerationOverride", "generationOverrides", "turnTakingMode", "participantCharacterIds",
+  "presetScope", "chatPresetOverrideId", "greetingScope", "greetingEnabled", "greetingSelectionId", "greetingsChecksum", "useCharacterDefault"
+])
 
 export const CONVERSATION_TAB_QUERY_KEYS = {
   listCharacters: ["tldw:listCharacters", "conversation-tab"] as const,
@@ -357,6 +365,7 @@ export function ConversationTab({
   onRemoveFile,
   serverChatId,
   serverChatVersion,
+  serverChatCharacterId,
   isCurrent = () => true,
   onDraftChange,
   serverChatAssistantKind,
@@ -387,6 +396,20 @@ export function ConversationTab({
   const [isResettingSystemPrompt, setIsResettingSystemPrompt] = React.useState(false)
   const hasDraft = Object.keys(draft.settings).length > 0 || Object.keys(draft.details).length > 0
   const canEdit = Boolean(isReady && settingsIsCurrent?.() && isCurrent())
+  const nativeHistory = mode === "ordinary" && Boolean(serverChatId)
+  const primaryValue = typeof serverChatCharacterId === "number" ? serverChatCharacterId
+    : typeof serverChatCharacterId === "string" && /^\d+$/.test(serverChatCharacterId.trim()) ? Number(serverChatCharacterId.trim()) : null
+  const nativePrimaryId = primaryValue !== null && Number.isSafeInteger(primaryValue) && primaryValue > 0 ? primaryValue : null
+  const nativeUnsupportedHelp = t("common:modelSettings.conversation.nativeUnavailableEffects", "Author notes, memory, directed replies and summaries are unavailable in saved server chat. Existing values are shown for reference.")
+  const canApplyNativeSettings = (patch: Partial<ChatSettingsRecord>) =>
+    Object.keys(patch).every(key => NATIVE_CONVERSATION_SETTING_KEYS.has(key)) &&
+    (patch.turnTakingMode === undefined || patch.turnTakingMode === "single") &&
+    (patch.participantCharacterIds === undefined || (nativePrimaryId !== null && Array.isArray(patch.participantCharacterIds) &&
+      patch.participantCharacterIds.length === 1 && patch.participantCharacterIds[0] === nativePrimaryId))
+  const verifyRecoveryOnly = Boolean(nativeHistory && draft.recoveryId && !canApplyNativeSettings(draft.settings))
+  const recoveryUnsupported = Boolean(nativeHistory && settingsRecovery && !canApplyNativeSettings(settingsRecovery.patch))
+  const applyLabel = verifyRecoveryOnly ? t("common:modelSettings.conversation.verifyPreviousChange", "Verify previous change")
+    : saveError ? t("playground:composer.retryConversation", "Retry conversation changes") : t("playground:composer.applyConversation", "Apply conversation changes")
   const reportDraft = (next: ConversationDraft, busy: boolean) => onDraftChange?.({
     dirty: Object.keys(next.settings).length > 0 || Object.keys(next.details).length > 0,
     pending: busy, revision: next.revision
@@ -398,6 +421,16 @@ export function ConversationTab({
   }, [onDraftChange])
   const stage = (settings: Partial<ChatSettingsRecord>, details: ConversationDetailsPatch = {}) => {
     if (!canEdit || pendingRef.current || proposalRef.current || draftRef.current.recoveryId) return
+    if (nativeHistory && settings.participantCharacterIds !== undefined) {
+      if (!nativePrimaryId || !Array.isArray(settings.participantCharacterIds) ||
+          settings.participantCharacterIds.some(id => String(id) !== String(nativePrimaryId))) {
+        setSaveError(t("common:modelSettings.conversation.nativePrimaryRequired", "Saved server chat supports only its verified primary character. Reload this chat to verify its character."))
+        return
+      }
+      settings = { ...settings, participantCharacterIds: [nativePrimaryId] }
+    }
+    if (nativeHistory && !canApplyNativeSettings(settings)) { setSaveError(nativeUnsupportedHelp); return }
+    setSaveError(null)
     const previous = draftRef.current
     const next = {
       settings: { ...previous.settings, ...settings }, details: { ...previous.details, ...details },
@@ -608,7 +641,8 @@ export function ConversationTab({
   ]
   const participantCharacterOptions = availableCharacters.map((character) => ({
     value: String(character.id),
-    label: character.name || String(character.id)
+    label: character.name || String(character.id),
+    disabled: nativeHistory && String(character.id) !== String(nativePrimaryId)
   }))
 
   React.useEffect(() => {
@@ -710,7 +744,7 @@ export function ConversationTab({
             .filter(([, entry]) => entry.note.trim())
             .map(([id, entry]) => [id, { note: entry.note.trim(), updatedAt: new Date().toISOString() }]))
         }
-        proposal = { draft: captured, target, expectedVersion, settingsOperationId: captured.recoveryId, settingsAcknowledged: false, detailsAcknowledged: false, detailsAttempted: false, observedVersion: serverChatVersion ?? null,
+        proposal = { draft: captured, target, expectedVersion, settingsOperationId: captured.recoveryId, settingsVerificationOnly: Boolean(nativeHistory && captured.recoveryId && !canApplyNativeSettings(captured.settings)), settingsAcknowledged: false, detailsAcknowledged: false, detailsAttempted: false, observedVersion: serverChatVersion ?? null,
           isCurrent: () => mounted.current && isCurrent() && Boolean(settingsIsCurrent?.()) &&
             target?.validate_lease?.() !== false }
         proposalRef.current = proposal
@@ -759,8 +793,9 @@ export function ConversationTab({
         // Both writes advance conversations.version. Preserve the original metadata
         // CAS by applying it first, then refresh only for the next user edit.
         if (!proposal.settingsAcknowledged && Object.keys(proposal.draft.settings).length) {
-          await (proposal.settingsOperationId
-            ? updateSettings(proposal.draft.settings, proposal.settingsOperationId)
+          await (proposal.settingsVerificationOnly
+            ? updateSettings(proposal.draft.settings, proposal.settingsOperationId, true)
+            : proposal.settingsOperationId ? updateSettings(proposal.draft.settings, proposal.settingsOperationId)
             : updateSettings(proposal.draft.settings))
           proposal.settingsAcknowledged = true
         }
@@ -792,7 +827,8 @@ export function ConversationTab({
       } catch (error) {
         if (error && typeof error === "object" && "settingsOperationId" in error && typeof error.settingsOperationId === "string") proposal.settingsOperationId = error.settingsOperationId
         if (proposal.isCurrent()) setSaveError(isErrorWithMessage(error)
-          ? error.message === "chat_settings_recovery_changed" ? "That previous change was verified or replaced elsewhere. Cancel this proposal and refresh before editing." : error.message
+          ? error.message === "chat_settings_recovery_requires_compatible_path" ? "The server has not confirmed this change. It is retained; this chat cannot resend these settings. Review the saved setup or start a compatible chat."
+          : error.message === "chat_settings_recovery_changed" ? "That previous change was verified or replaced elsewhere. Cancel this proposal and refresh before editing." : error.message
           : "Conversation changes could not be applied.")
       } finally {
         if (pendingRef.current === attempt) {
@@ -940,15 +976,16 @@ export function ConversationTab({
           <Button htmlType="button" onClick={() => void refreshRecovery?.()}>{t("playground:composer.retryRecoveryRead", "Retry recovery read")}</Button>
         </p>}
         {settingsRecovery && <div className="space-y-2">
-          <p role="status">{t("playground:composer.conversationRecoveryHelp", "A previous settings change still needs verification. Review it, then Apply to reconcile it before applying new edits. Cancel does not undo a change already accepted by the server.")}</p>
+          <p role="status">{recoveryUnsupported ? t("common:modelSettings.conversation.nativeRecoveryHelp", "A previous change uses behavior unavailable in saved server chat. Review it to verify whether the server accepted it. Verification does not resend it.") : t("playground:composer.conversationRecoveryHelp", "A previous settings change still needs verification. Review it, then Apply to reconcile it before applying new edits. Cancel does not undo a change already accepted by the server.")}</p>
           <Button className="min-h-[40px]" htmlType="button" disabled={!canEdit || hasDraft || pending} onClick={() => void reviewRecovery()}>{t("playground:composer.reviewRecovery", "Review previous settings change")}</Button>
         </div>}
+        {verifyRecoveryOnly && <p role="status">{t("common:modelSettings.conversation.nativeRecoveryVerification", "This previous change is unavailable in saved server chat. Verify checks server status without resending it.")}</p>}
         {draft.recoveryId && <details><summary>{t("playground:composer.recoveredSettings", "Recovered settings to verify")}</summary><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(draft.settings, null, 2).slice(0, 4000)}</pre></details>}
       {!canEdit && <p role="status">{t("playground:composer.conversationUnready", "Conversation settings are not ready. Check the selected chat and account before editing.")}</p>}
-      {saveError && <p role="alert">{saveError} {t("playground:composer.conversationRetryHelp", "Your proposal is retained. Retry applies only unconfirmed changes; Cancel discards unapplied edits.")}</p>}
+      {saveError && <p role="alert">{saveError} {verifyRecoveryOnly ? t("common:modelSettings.conversation.nativeRecoveryRetained", "Your exact previous change is retained. Verify reads its server status; it does not resend this unsupported change.") : t("playground:composer.conversationRetryHelp", "Your proposal is retained. Retry applies only unconfirmed changes; Cancel discards unapplied edits.")}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button className="min-h-[40px]" htmlType="button" type="primary" aria-label={saveError ? t("playground:composer.retryConversation", "Retry conversation changes") : t("playground:composer.applyConversation", "Apply conversation changes")} aria-busy={pending} loading={pending} disabled={!canEdit || !hasDraft || pending || Boolean(settingsRecovery && !draft.recoveryId && !proposalRef.current)} onClick={() => void applyChanges()}>
-          {saveError ? t("playground:composer.retryConversation", "Retry conversation changes") : t("playground:composer.applyConversation", "Apply conversation changes")}
+        <Button className="min-h-[40px]" htmlType="button" type="primary" aria-label={applyLabel} aria-busy={pending} loading={pending} disabled={!canEdit || !hasDraft || pending || Boolean(settingsRecovery && !draft.recoveryId && !proposalRef.current)} onClick={() => void applyChanges()}>
+          {applyLabel}
         </Button>
         <Button className="min-h-[40px]" htmlType="button" disabled={!canEdit || !hasDraft || pending} onClick={cancelChanges}>
           {t("playground:composer.cancelConversation", "Cancel conversation changes")}
@@ -1013,9 +1050,10 @@ export function ConversationTab({
         />
       </Form.Item>
 
+      {nativeHistory && <p className="text-sm text-text-muted">{nativeUnsupportedHelp}</p>}
       <Form.Item
         label={t("playground:composer.authorNote.label", "Author note")}
-        help={t(
+        help={nativeHistory ? undefined : t(
           "playground:composer.authorNote.help",
           "Optional note injected into character prompts for this chat."
         )}
@@ -1026,6 +1064,7 @@ export function ConversationTab({
           showCount
           maxLength={1200}
           value={authorNoteDraft}
+          disabled={nativeHistory}
           onChange={(e) => stage({ authorNote: e.target.value })}
           placeholder={t(
             "playground:composer.authorNote.placeholder",
@@ -1039,7 +1078,7 @@ export function ConversationTab({
           "playground:composer.authorNotePosition.label",
           "Author note insertion"
         )}
-        help={t(
+        help={nativeHistory ? undefined : t(
           "playground:composer.authorNotePosition.help",
           "Choose whether the note is inserted before system instructions or at conversation depth N."
         )}
@@ -1048,6 +1087,7 @@ export function ConversationTab({
           <Select
             aria-label={t("playground:composer.authorNotePosition.label", "Author note insertion")}
             value={authorNoteMode}
+            disabled={nativeHistory}
             options={authorNotePositionOptions}
             onChange={(value) => {
               const nextMode = value === "depth" ? "depth" : "before_system"
@@ -1068,6 +1108,7 @@ export function ConversationTab({
                 min={0}
                 step={1}
                 value={authorNoteDepth}
+                disabled={nativeHistory}
                 onChange={(value) => {
                   stage({ authorNotePosition: { mode: "depth", depth: sanitizeDepth(value) } })
                 }}
@@ -1254,7 +1295,7 @@ export function ConversationTab({
 
       <Form.Item
         label={t("playground:composer.memoryScope.label", "Memory scope")}
-        help={t("playground:composer.memoryScope.help", {
+        help={nativeHistory ? undefined : t("playground:composer.memoryScope.help", {
           defaultValue:
             "Choose whether memory is shared, per-character, or both."
         })}
@@ -1262,6 +1303,7 @@ export function ConversationTab({
         <Select
           aria-label={t("playground:composer.memoryScope.label", "Memory scope")}
           value={memoryScopeValue}
+          disabled={nativeHistory}
           options={memoryScopeOptions}
           onChange={(value) => {
             const normalized = normalizeMemoryScope(value)
@@ -1272,7 +1314,7 @@ export function ConversationTab({
 
       <Form.Item
         label={t("playground:composer.turnTakingMode.label", "Turn-taking mode")}
-        help={t("playground:composer.turnTakingMode.help", {
+        help={nativeHistory ? t("common:modelSettings.conversation.nativeSingleSpeaker", "Saved server chat uses its primary character as a single speaker.") : t("playground:composer.turnTakingMode.help", {
           defaultValue:
             "Choose whether responses use one active speaker or rotate across selected participants."
         })}
@@ -1280,6 +1322,7 @@ export function ConversationTab({
         <Select
           aria-label={t("playground:composer.turnTakingMode.label", "Turn-taking mode")}
           value={turnTakingModeValue}
+          disabled={nativeHistory}
           options={turnTakingModeOptions}
           onChange={(value) => {
             const normalized = normalizeTurnTakingMode(value)
@@ -1290,7 +1333,7 @@ export function ConversationTab({
 
       <Form.Item
         label={t("playground:composer.participants.label", "Participants")}
-        help={t("playground:composer.participants.help", {
+        help={nativeHistory ? t("common:modelSettings.conversation.nativeParticipantHelp", "Only the chat’s primary character is supported. Reset keeps this character selected.") : t("playground:composer.participants.help", {
           defaultValue:
             "Select additional characters for multi-character chats. The chat's primary character remains included."
         })}
@@ -1299,7 +1342,8 @@ export function ConversationTab({
           <Select
             aria-label={t("playground:composer.participants.label", "Participants")}
             mode="multiple"
-            allowClear
+            allowClear={!nativeHistory}
+            disabled={nativeHistory}
             showSearch
             value={participantCharacterIdsValue}
             options={participantCharacterOptions}
@@ -1313,6 +1357,10 @@ export function ConversationTab({
               stage({ participantCharacterIds: normalizeParticipantCharacterIds(nextValues) })
             }}
           />
+          {nativeHistory && <Button htmlType="button" className="min-h-10" disabled={!nativePrimaryId}
+            onClick={() => stage({ participantCharacterIds: [], turnTakingMode: "single" })}>
+            {t("common:modelSettings.conversation.resetNativePrimary", "Reset to primary character")}
+          </Button>}
           {isAvailableCharactersError && (
             <p className="text-[11px] text-danger">
               {t("playground:composer.participants.loadError", {
@@ -1329,7 +1377,7 @@ export function ConversationTab({
           "playground:composer.directedReply.label",
           "Directed responder"
         )}
-        help={t("playground:composer.directedReply.help", {
+        help={nativeHistory ? undefined : t("playground:composer.directedReply.help", {
           defaultValue:
             "Optional: choose which participant should generate the next response."
         })}
@@ -1339,6 +1387,7 @@ export function ConversationTab({
           allowClear
           showSearch
           value={directedCharacterIdValue ?? undefined}
+          disabled={nativeHistory}
           options={participantCharacterOptions}
           placeholder={t("playground:composer.directedReply.placeholder", {
             defaultValue: "Automatic by turn-taking"
@@ -1356,7 +1405,7 @@ export function ConversationTab({
             "playground:composer.characterMemory.label",
             "Per-character memory"
           )}
-          help={t("playground:composer.characterMemory.help", {
+          help={nativeHistory ? t("common:modelSettings.conversation.nativeMemoryReference", "Saved memory notes are shown for reference; this server chat cannot apply them.") : t("playground:composer.characterMemory.help", {
             defaultValue:
               "Edit memory notes for individual characters used when memory scope includes per-character injection."
           })}
@@ -1396,7 +1445,7 @@ export function ConversationTab({
 
       <Form.Item
         label={t("playground:composer.autoSummary.label", "Auto summary")}
-        help={t("playground:composer.autoSummary.help", {
+        help={nativeHistory ? t("common:modelSettings.conversation.nativeSummaryReference", "Saved summary settings are shown for reference; this server chat does not compress prompt history.") : t("playground:composer.autoSummary.help", {
           defaultValue:
             "Compress older unpinned messages once the threshold is reached."
         })}
@@ -1405,6 +1454,7 @@ export function ConversationTab({
           <Select
             aria-label={t("playground:composer.autoSummary.label", "Auto summary")}
             value={autoSummaryEnabledDraft ? "on" : "off"}
+            disabled={nativeHistory}
             options={[
               {
                 value: "on",
@@ -1439,7 +1489,7 @@ export function ConversationTab({
                 max={5000}
                 step={1}
                 value={autoSummaryThresholdDraft}
-                disabled={!autoSummaryEnabledDraft}
+                disabled={nativeHistory || !autoSummaryEnabledDraft}
                 onChange={(value) => {
                   stageSummaryThreshold(value)
                 }}
@@ -1459,7 +1509,7 @@ export function ConversationTab({
                 max={Math.max(1, autoSummaryThresholdDraft - 1)}
                 step={1}
                 value={autoSummaryWindowDraft}
-                disabled={!autoSummaryEnabledDraft}
+                disabled={nativeHistory || !autoSummaryEnabledDraft}
                 onChange={(value) => {
                   stage({ autoSummaryWindowMessages: sanitizeAutoSummaryWindow(value, autoSummaryThresholdDraft) })
                 }}
@@ -1471,7 +1521,7 @@ export function ConversationTab({
 
       <Form.Item
         label={t("playground:composer.pinnedMessages.label", "Pinned messages")}
-        help={t("playground:composer.pinnedMessages.help", {
+        help={nativeHistory ? t("common:modelSettings.conversation.nativePinReference", "These are saved message markers; this server chat does not use them for prompt compression.") : t("playground:composer.pinnedMessages.help", {
           defaultValue:
             "Pinned messages are excluded from auto-summary compression."
         })}
@@ -1516,7 +1566,7 @@ export function ConversationTab({
               "playground:composer.autoSummary.currentSummary",
               "Current summary"
             )}
-            help={t(
+            help={nativeHistory ? t("common:modelSettings.conversation.nativeSavedSummary", "This is a saved summary; this server chat does not apply it to prompt history.") : t(
               "playground:composer.autoSummary.currentSummaryHelp",
               "Persisted server-side summary used for prompt compression."
             )}

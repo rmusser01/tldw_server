@@ -484,7 +484,7 @@ export const normalizeChatSettingsRecord = (
   raw: any
 ): ChatSettingsRecord | null => coerceSettings(raw)
 
-const requireServerSettingsResponse = (
+export const requireServerSettingsResponse = (
   serverChatId: string,
   response: unknown
 ): Record<string, unknown> => {
@@ -1032,6 +1032,7 @@ export const getChatSettingsRecovery = async (target: ChatSettingsTarget): Promi
 const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   patch: Partial<ChatSettingsRecord>
   recoveryOperationId?: string
+  reconcileOnly?: boolean
 }): Promise<ChatSettingsRecord | null> => {
   assertSettingsCurrent(target)
   const chatKey = resolveChatSettingsKey(target)
@@ -1086,6 +1087,9 @@ const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   const retry = sameIntent && previous && ["pending", "acknowledged"].includes(previous.value.status)
   const alreadyApplied = sameIntent && previous?.value.status !== "rejected" && existing && sameSettingsIntent(settingsSubset(existing as unknown as Record<string, unknown>, intent), intent)
   if (retry && previous.value.status === "acknowledged" && !alreadyApplied) throw new Error("chat_settings_changed_after_acknowledgement")
+  // A legacy effect unavailable to this client may be verified, never resubmitted.
+  if (target.reconcileOnly && (!target.recoveryOperationId || !retry || !alreadyApplied))
+    throw new Error("chat_settings_recovery_requires_compatible_path")
   let pending = previous
   if (!retry || !alreadyApplied) {
     const value: SettingsSave = { version: 1, destination: chatKey, operation_id: retry ? previous.value.operation_id : crypto.randomUUID(), status: "pending", intent, patch }
@@ -1147,7 +1151,7 @@ const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   }
 }
 
-export const applyChatSettingsPatch = async (target: ChatSettingsTarget & { patch: Partial<ChatSettingsRecord>; recoveryOperationId?: string }): Promise<ChatSettingsRecord | null> => {
+export const applyChatSettingsPatch = async (target: ChatSettingsTarget & { patch: Partial<ChatSettingsRecord>; recoveryOperationId?: string; reconcileOnly?: boolean }): Promise<ChatSettingsRecord | null> => {
   const captured = { ...target, patch: structuredClone(target.patch), scope: target.scope ? { ...target.scope } : undefined }
   assertSettingsCurrent(captured)
   if (!captured.serverChatId) return await applyCapturedChatSettingsPatch(captured)

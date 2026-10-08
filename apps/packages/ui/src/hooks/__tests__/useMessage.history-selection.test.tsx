@@ -393,6 +393,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getCharacter: h1.live,
     createChat: (...args: any[]) => h1.create(...args),
     getChat: vi.fn(async (id: string) => ({ id, title: "Owned opening", character_id: "12" })),
+    getChatSettings: vi.fn(async (id: string) => ({ conversation_id: id, settings: {} })),
     captureHistorySelection: (...args: any[]) => h1.capture(...args),
     addChatMessage: (...args: any[]) => h1.append(...args),
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
@@ -487,6 +488,13 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
   saveHistoryTurnRecovery: h1.recover,
   dismissHistoryTurnRecovery: h1.dismiss
 }))
+let nativeChatId = "tracked-chat-1"
+const createdNativeChat = (body: { id?: string }) => {
+  if (!body.id) throw new Error("fixture requires the reserved client chat ID")
+  nativeChatId = body.id
+  return { id: body.id }
+}
+
 const captureFor = (view: any) => {
   const nodes = [
     {
@@ -522,7 +530,7 @@ const captureFor = (view: any) => {
     snapshot: {
       version: 1,
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       fences: { conversation: "1", history: "1", settings: "1" },
       nodes,
       source_digest: "source",
@@ -545,7 +553,7 @@ const makeController = () => {
   let current: any = {
     owner: {
       kind: "native",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       request_scope: {
         config: { serverUrl: "https://server.test", authMode: "multi-user" },
         userId: "alice"
@@ -554,7 +562,7 @@ const makeController = () => {
     },
     view: {
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       view_session_id: "origin",
       selection_revision: 1,
       interpretation: { kind: "parent_graph_v1" },
@@ -587,6 +595,10 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  nativeChatId = "tracked-chat-1"
+  h1.create.mockReset()
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  vi.mocked(api.getChatSettings).mockReset().mockImplementation(async id => ({ conversation_id: id, settings: {} }))
   localStorage.clear()
   sessionStorage.clear()
   const lockTails = new Map<string, Promise<unknown>>()
@@ -613,7 +625,7 @@ beforeEach(async () => {
   mocks.storeState.fileRetrievalEnabled = false
   mocks.storeState.toolChoice = "auto"
   mocks.storeState.selectedModel = "model-1"
-  mocks.storeState.serverChatId = "tracked-chat-1"
+  mocks.storeState.serverChatId = nativeChatId
   mocks.chatBaseState.history = [
     { role: "user", content: "old question" },
     { role: "assistant", content: "wrong latest" }
@@ -637,7 +649,7 @@ beforeEach(async () => {
           tldw_history_admission_v1: {
             version: 1,
             owner_key: "native-key",
-            conversation_id: "tracked-chat-1",
+            conversation_id: nativeChatId,
             input_message_id: body.id,
             input_message_revision: "accepted-r",
             selection_digest: body.tldw_history_selection_v1.selection_digest,
@@ -836,7 +848,7 @@ it("mounted sidepanel native character uses owner selection and ACK without lega
       tldw_history_admission_v1: {
         version: 1,
         owner_key: "native-key",
-        conversation_id: "tracked-chat-1",
+        conversation_id: nativeChatId,
         input_message_id: "native-input",
         input_message_revision: "r",
         selection_digest: request.tldw_history_selection_v1.selection_digest,
@@ -847,7 +859,7 @@ it("mounted sidepanel native character uses owner selection and ACK without lega
     yield { choices: [{ delta: { content: "native answer" } }] }
     yield {
       tldw_message_id: "native-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   const { result } = renderHook(() => useMessage())
@@ -857,7 +869,7 @@ it("mounted sidepanel native character uses owner selection and ACK without lega
   expect(h1.wire).toHaveBeenCalledOnce()
   expect(h1.wire.mock.calls[0][0]).toMatchObject({
     save_to_db: true,
-    conversation_id: "tracked-chat-1",
+    conversation_id: nativeChatId,
     messages: [{ role: "user", content: "next" }]
   })
   expect(
@@ -875,13 +887,53 @@ it("mounted sidepanel native character uses owner selection and ACK without lega
 const nativeAdmission = (request: any) => ({
   version: 1,
   owner_key: "native-key",
-  conversation_id: "tracked-chat-1",
+  conversation_id: nativeChatId,
   input_message_id: "native-input",
   input_message_revision: "native-r",
   selection_digest: request.tldw_history_selection_v1.selection_digest,
   messages: request.tldw_history_selection_v1.messages,
   originating_selection_revision:
     request.tldw_history_selection_v1.selection_revision
+})
+
+it.each(["current", "navigation", "account", "owner lease"])("compact native settings-read feedback belongs to its %s source", async boundary => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  let rejectRead!: (error: Error) => void
+  vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise((_, reject) => { rejectRead = reject }))
+  const { result } = renderHook(() => useMessage())
+  let sending!: Promise<unknown>
+  await act(async () => {
+    sending = result.current.onSubmit({ message: "  exact input  ", image: "" })
+    await (await import("@testing-library/react")).waitFor(() => expect(api.getChatSettings).toHaveBeenCalledOnce())
+  })
+  if (boundary === "navigation") h1.controller.navigate()
+  else if (boundary === "account") h1.auth.abort()
+  else if (boundary === "owner lease") h1.controller.getCurrent().owner.validate_lease = () => false
+  let submitted: unknown
+  await act(async () => { rejectRead(new Error("failed read")); submitted = await sending })
+  expect(submitted).toMatchObject({ status: "failed", errorMessage: "native_history_settings_unverified" })
+  expect(h1.capture).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.recover).not.toHaveBeenCalled()
+  if (boundary === "current") expect(mocks.notification.error.mock.lastCall?.[0].description).toContain("Your message has not been sent")
+  else expect(mocks.notification.error).not.toHaveBeenCalled()
+})
+
+it("compact native admitted transport text cannot certify a failed settings read", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield await Promise.reject(new Error("native_history_settings_unverified"))
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ state: "accepted_unsent", input_text: "next" })
+  expect(mocks.notification.error.mock.lastCall?.[0].description).not.toContain("Your message has not been sent")
 })
 
 it("compact native confirmed context refusal retains raw input and shows a failed result without a transcript row", async () => {
@@ -1012,14 +1064,14 @@ it("native before-first sends no historical content and retains unacknowledged t
     persistence: "server",
     state: "generated_unsaved",
     owner_key: "native-key",
-    conversation_id: "tracked-chat-1",
+    conversation_id: nativeChatId,
     origin_view: {
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       view_session_id: "origin"
     },
     admission: {
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       input_message_id: "native-input"
     },
     input_id: "native-input",
@@ -1056,7 +1108,7 @@ it.each(["wrong-selection", "result-before-admission", "wrong-conversation"])(
       yield {
         tldw_message_id: "forged-result",
         tldw_conversation_id:
-          failure === "wrong-conversation" ? "other" : "tracked-chat-1"
+          failure === "wrong-conversation" ? "other" : nativeChatId
       }
     })
     const { result } = renderHook(() => useMessage())
@@ -1087,7 +1139,7 @@ it("native selection navigation preserves server ownership and never overwrites 
     yield { choices: [{ delta: { content: "old result" } }] }
     yield {
       tldw_message_id: "owner-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   await act(async () => {
@@ -1097,7 +1149,7 @@ it("native selection navigation preserves server ownership and never overwrites 
   expect(h1.controller.followResult).not.toHaveBeenCalled()
   expect(h1.dismiss).toHaveBeenCalledWith(
     expect.anything(),
-    expect.objectContaining({ conversation_id: "tracked-chat-1" }),
+    expect.objectContaining({ conversation_id: nativeChatId }),
     expect.any(String),
     "completed"
   )
@@ -1137,7 +1189,7 @@ it.each(["account change", "disconnect"])(
       yield { choices: [{ delta: { content: "new account must not see" } }] }
       yield {
         tldw_message_id: "late-result",
-        tldw_conversation_id: "tracked-chat-1"
+        tldw_conversation_id: nativeChatId
       }
     })
     const { result } = renderHook(() => useMessage())
@@ -1151,14 +1203,14 @@ it.each(["account change", "disconnect"])(
       persistence: "server",
       state: "accepted_unsent",
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       origin_view: {
-        conversation_id: "tracked-chat-1",
+        conversation_id: nativeChatId,
         view_session_id: "origin"
       },
       admission: {
         owner_key: "native-key",
-        conversation_id: "tracked-chat-1",
+        conversation_id: nativeChatId,
         input_message_id: "native-input"
       },
       input_id: "native-input",
@@ -1184,7 +1236,7 @@ it("a disconnect after the native owner ACK preserves the completed outcome", as
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield {
       tldw_message_id: "owner-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
     throw new Error("late disconnect")
   })
@@ -1252,7 +1304,10 @@ it.each([false, true])(
     const ready = makeController().getCurrent()
     ready.view.cursor = { kind: "empty" }
     ready.capture = captureFor(ready.view)
-    const load = vi.fn(async (_target, _reference, onLoaded) => {
+    const load = vi.fn(async (target, _reference, onLoaded) => {
+      ready.owner.conversation_id = target.serverChatId
+      ready.view.conversation_id = target.serverChatId
+      ready.capture = captureFor(ready.view)
       current = ready
       onLoaded({ owner: current.owner, view: current.view })
       return true
@@ -1264,15 +1319,15 @@ it.each([false, true])(
       followResult: vi.fn(async () => true),
       refreshRecovery: vi.fn()
     }
-    h1.create.mockImplementation(async () => {
+    h1.create.mockImplementation(async body => {
       if (navigate) origin = false
-      return { id: "tracked-chat-1" }
+      return createdNativeChat(body)
     })
     h1.wire.mockImplementation(async function* (request) {
       yield { tldw_history_admission_v1: nativeAdmission(request) }
       yield {
         tldw_message_id: "native-result",
-        tldw_conversation_id: "tracked-chat-1"
+        tldw_conversation_id: nativeChatId
       }
     })
     const { result } = renderHook(() => useMessage())
@@ -1286,14 +1341,14 @@ it.each([false, true])(
       expect(load).not.toHaveBeenCalled()
       expect(mocks.storeState.setServerChatId).not.toHaveBeenCalled()
     } else {
-      expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1", ownerKey: "native-key" })
+      expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId, ownerKey: "native-key" })
       expect(draftStore.getState().chatDraftTransition).toMatchObject({ kind: "bind", sourceAddress: sourceDraft })
       expect(h1.wire).toHaveBeenCalledOnce()
       expect(
         h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
       ).toEqual([])
       expect(mocks.storeState.setServerChatId).toHaveBeenCalledWith(
-        "tracked-chat-1"
+        nativeChatId
       )
     }
     expect(h1.live).not.toHaveBeenCalled()
@@ -1317,21 +1372,21 @@ it("dispatches first native creation through a real controller epoch and accepte
   h1.native = true
   mocks.chatBaseState.historyId = null
   mocks.storeState.serverChatId = null
-  h1.create.mockResolvedValue({ id: "tracked-chat-1" })
+  h1.create.mockImplementation(createdNativeChat)
   h1.capture.mockImplementation(async (_id, request) => {
     const result = captureFor({ ...request.view, owner_key: "native-key" })
     return { ...result, rows: [], selected_content: [], snapshot: { ...result.snapshot, nodes: [] } }
   })
   h1.wire.mockImplementation(async function* (request) {
     yield { tldw_history_admission_v1: nativeAdmission(request) }
-    yield { tldw_message_id: "native-result", tldw_conversation_id: "tracked-chat-1" }
+    yield { tldw_message_id: "native-result", tldw_conversation_id: nativeChatId }
   })
   const hook = renderHook(() => useMessage())
   await act(async () => { await hook.result.current.onSubmit({ message: "first", image: "" }) })
   expect(sourceCurrent()).toBe(false)
   expect(h1.create).toHaveBeenCalledOnce()
   expect(h1.wire).toHaveBeenCalledOnce()
-  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   hook.unmount()
   selection.unmount()
 })
@@ -1347,7 +1402,7 @@ it("native dispatch freezes workspace routing independently of the view owner", 
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield {
       tldw_message_id: "owner-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   const { result } = renderHook(() => useMessage())
@@ -1387,7 +1442,7 @@ it("an older native completion cannot release a newer operation's Stop control",
     await firstHeld
     yield {
       tldw_message_id: "first-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   h1.wire.mockImplementationOnce(async function* (request) {
@@ -1396,7 +1451,7 @@ it("an older native completion cannot release a newer operation's Stop control",
     await secondHeld
     yield {
       tldw_message_id: "second-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   const { result } = renderHook(() => useMessage())
@@ -1641,7 +1696,7 @@ it("native plain edit/delete reject before any mutation or display change", asyn
       sources: []
     }
   ]
-  mocks.storeState.serverChatId = "tracked-chat-1"
+  mocks.storeState.serverChatId = nativeChatId
   mocks.storeState.messages = visible
   const options = {
     setMessages: mocks.setMessages,
@@ -1945,7 +2000,7 @@ describe("compact submission outcomes", () => {
         yield { tldw_history_admission_v1: nativeAdmission(request) }
         yield {
           tldw_message_id: "owner-result",
-          tldw_conversation_id: "tracked-chat-1"
+          tldw_conversation_id: nativeChatId
         }
         if (lateDisconnect) throw new Error("late disconnect")
       })
@@ -2030,7 +2085,7 @@ it.each(["default", "alternate_index"] as const)("actual compact submit binds th
   h1.native = true
   mocks.chatBaseState.historyId = null
   mocks.storeState.serverChatId = null
-  h1.create.mockResolvedValue({ id: "tracked-chat-1" })
+  h1.create.mockImplementation(createdNativeChat)
   h1.capture.mockImplementation(async (id, request) => {
     const result = captureFor({ ...request.view, owner_key: "native-key" })
     const node = { id: "saved-root", revision: "root-revision", role: "assistant", parent_id: null, settled: true }
@@ -2048,7 +2103,7 @@ it.each(["default", "alternate_index"] as const)("actual compact submit binds th
   expect(h1.create).toHaveBeenCalledOnce()
   expect(h1.create.mock.calls[0][1]).toMatchObject({ seedFirstMessage: true, greetingStrategy: strategy, ...(strategy === "alternate_index" ? { alternateIndex: 0 } : {}) })
   expect(onCapture).toHaveBeenCalledOnce()
-  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   expect(h1.wire).not.toHaveBeenCalled()
   expect(h1.append).not.toHaveBeenCalled()
   expect(h1.live).not.toHaveBeenCalled()

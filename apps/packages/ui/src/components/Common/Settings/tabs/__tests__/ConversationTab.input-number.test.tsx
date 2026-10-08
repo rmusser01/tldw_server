@@ -12,10 +12,13 @@ import { Storage } from "@plasmohq/storage"
 import { useStoreMessageOption } from "@/store/option"
 import { installSettingsLocks, settingsTestOwner } from "@/services/__tests__/chat-settings-fixture"
 import { getChatSettingsStorageKey, resolveChatSettingsKey } from "@/services/chat-settings"
-const boundary = vi.hoisted(() => ({ settings: null as ChatSettingsRecord | null, write: vi.fn() }))
+const boundary = vi.hoisted(() => ({ native: true, settings: null as ChatSettingsRecord | null, write: vi.fn() }))
 const owner = { kind: "native" as const, conversation_id: "chat-1", owner_key: "test-owner",
   request_scope: settingsTestOwner.requestScope, validate_lease: () => true }
-const controller = { settingsMode: () => "ordinary" as const, getCurrent: () => ({ owner }), fence: () => () => true, getSignal: () => undefined }
+const localOwner = { kind: "local" as const, conversation_id: "local-history-1", owner_key: "local-test-owner" }
+const controller = { settingsMode: () => "ordinary" as const, getCurrent: () => ({ owner: boundary.native ? owner : localOwner }), fence: () => () => true, getSignal: () => undefined }
+import { memory } from "@/hooks/chat/__tests__/local-history-fixture"
+vi.mock("@/db/dexie/schema", async () => ({ db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory }))
 vi.mock("@/hooks/chat/useHistorySelection", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>(),
   useHistorySelectionContext: () => controller
@@ -40,7 +43,7 @@ vi.mock("@/components/Common/Settings/LorebookDebugPanel", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => undefined,
-    listCharacters: async () => [],
+    listCharacters: async () => [{ id: 4, name: "Saved primary" }, { id: 9, name: "Selected alias" }],
     listChatMessages: async () => [],
     getChat: async (id: string) => ({ id, version: 5, state: "in-progress", topic_label: null }),
     getChatSettings: async (id: string) => ({ conversation_id: id, settings: boundary.settings }),
@@ -66,15 +69,21 @@ const initialSettings: ChatSettingsRecord = {
 const chatKey = resolveChatSettingsKey({ historyId: null, serverChatId: "chat-1", requestScope: settingsTestOwner.requestScope })
 const storageKey = getChatSettingsStorageKey(chatKey)
 
-const mountConversation = () => render(
+const localKey = "local:local-history-1"
+const localStorageKey = getChatSettingsStorageKey(localKey)
+const mountConversation = (native = true, primary: string | number | null = 4) => {
+  boundary.native = native
+  useStoreMessageOption.setState({ historyId: native ? null : "local-history-1", serverChatId: native ? "chat-1" : null })
+  return render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <ConversationTab
-      historyId={null}
+      historyId={native ? null : "local-history-1"}
       selectedSystemPrompt={null}
       onSystemPromptChange={vi.fn()}
       uploadedFiles={[]}
       onRemoveFile={vi.fn()}
-      serverChatId="chat-1"
+      serverChatId={native ? "chat-1" : null}
+      serverChatCharacterId={primary}
       serverChatState="in-progress"
       onStateChange={vi.fn()}
       serverChatTopic={null}
@@ -82,7 +91,8 @@ const mountConversation = () => render(
       onVersionChange={vi.fn()}
     />
   </QueryClientProvider>
-)
+  )
+}
 
 describe("ConversationTab real AntD numeric controls", () => {
   beforeEach(async () => {
@@ -95,12 +105,79 @@ describe("ConversationTab real AntD numeric controls", () => {
       return { conversation_id: id, settings: boundary.settings }
     })
     await new Storage({ area: "local" }).set(storageKey, { value: structuredClone(initialSettings), updatedAt: 1 })
+    await new Storage({ area: "local" }).set(localStorageKey, structuredClone(initialSettings))
+    memory.chatHistories.rows.clear()
+    await memory.chatHistories.put({ id: "local-history-1", local_settings_guard: { initialized: true, revision: "numeric-test", pending: [] } })
+  })
+
+  it("keeps unsupported native controls read-only without promising prompt effects", async () => {
+    mountConversation()
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Temp" })).toBeEnabled())
+    for (const name of ["Author note", "Author note insertion", "Memory scope", "Turn-taking mode", "Participants", "Directed responder", "Auto summary"])
+      expect(screen.getByLabelText(name)).toBeDisabled()
+    for (const name of ["Depth", "Threshold", "Recent window"])
+      expect(screen.getByRole("spinbutton", { name })).toBeDisabled()
+    fireEvent.change(screen.getByRole("textbox", { name: "Author note" }), { target: { value: "Unsupported native note" } })
+    expect(boundary.write).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Retry conversation changes" })).toBeDisabled()
+    expect(screen.getAllByText("Author notes, memory, directed replies and summaries are unavailable in saved server chat. Existing values are shown for reference.").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Pinned messages are excluded from auto-summary compression.")).not.toBeInTheDocument()
+  })
+
+  it("resets native participants to the numeric saved primary instead of a selected alias", async () => {
+    boundary.settings = { ...initialSettings, participantCharacterIds: ["4", "9"] }
+    await new Storage({ area: "local" }).set(storageKey, { value: boundary.settings, updatedAt: 1 })
+    mountConversation(true, "4")
+    const reset = await screen.findByRole("button", { name: "Reset to primary character" })
+    await waitFor(() => expect(reset).toBeEnabled())
+    fireEvent.click(reset)
+    expect(boundary.write).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
+    await waitFor(() => expect(boundary.write).toHaveBeenCalledOnce())
+    expect(boundary.write.mock.calls[0][1]).toMatchObject({ participantCharacterIds: [4] })
+    await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ participantCharacterIds: [4] }))
+  })
+
+  it.each([null, "alias-9", 0, -1, Number.MAX_SAFE_INTEGER + 1])("refuses a native participant reset with unknown or unsafe saved primary %s", async primary => {
+    mountConversation(true, primary)
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Temp" })).toBeEnabled())
+    expect(screen.getByRole("combobox", { name: "Participants" })).toBeDisabled()
+    const reset = screen.getByRole("button", { name: "Reset to primary character" })
+    expect(reset).toBeDisabled()
+    fireEvent.click(reset)
+    expect(boundary.write).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("verifies a retained unsupported native change without resending it (already applied=%s)", async committed => {
+    const { applyChatSettingsPatch, getChatSettingsRecovery } = await import("@/services/chat-settings")
+    const target = { historyId: null, serverChatId: "chat-1", requestScope: settingsTestOwner.requestScope, validate_lease: () => true }
+    boundary.write.mockImplementationOnce(async (_id: string, patch: Partial<ChatSettingsRecord>) => {
+      if (committed) boundary.settings = { ...boundary.settings!, ...patch }
+      throw new Error("Uncertain legacy response")
+    })
+    await expect(applyChatSettingsPatch({ ...target, patch: { authorNote: "Legacy pending note" } })).rejects.toThrow("chat_settings_server_unconfirmed")
+    const receipt = await getChatSettingsRecovery(target)
+    mountConversation()
+    const review = await screen.findByRole("button", { name: "Review previous settings change" })
+    await waitFor(() => expect(review).toBeEnabled())
+    fireEvent.click(review)
+    const verify = await screen.findByRole("button", { name: "Verify previous change" })
+    await waitFor(() => expect(verify).toBeEnabled())
+    expect(screen.getByText(/Legacy pending note/, { selector: "pre" })).toBeInTheDocument()
+    fireEvent.click(verify)
+    if (committed) await waitFor(() => expect(screen.queryByRole("button", { name: "Review previous settings change" })).not.toBeInTheDocument())
+    else {
+      await screen.findByText(/The server has not confirmed this change/, { selector: '[role="alert"]' })
+      expect(await getChatSettingsRecovery(target)).toEqual(receipt)
+      expect(screen.getByText(/Legacy pending note/, { selector: "pre" })).toBeInTheDocument()
+    }
+    expect(boundary.write).toHaveBeenCalledTimes(1)
   })
 
   it("opens all six numeric controls without the addonBefore deprecation", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {})
     const warnings = vi.spyOn(console, "warn").mockImplementation(() => {})
-    mountConversation()
+    mountConversation(false)
     await waitFor(() => expect(screen.getAllByRole("spinbutton")).toHaveLength(6))
 
     const deprecations = [...errors.mock.calls, ...warnings.mock.calls]
@@ -110,7 +187,7 @@ describe("ConversationTab real AntD numeric controls", () => {
   })
 
   it("labels each numeric control and preserves its initial value and bounds", async () => {
-    mountConversation()
+    mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
     for (const [name, value, min, max] of [
       ["Depth", "2", "0", null],
@@ -132,7 +209,8 @@ describe("ConversationTab real AntD numeric controls", () => {
   it("names the actual AntD selectors and text inputs for assistive technology", async () => {
     boundary.settings = { ...initialSettings, presetScope: "chat", memoryScope: "both", summary: { content: "Saved summary" } } as ChatSettingsRecord
     await new Storage({ area: "local" }).set(storageKey, { value: boundary.settings, updatedAt: 1 })
-    mountConversation()
+    await new Storage({ area: "local" }).set(localStorageKey, boundary.settings)
+    mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
     for (const name of ["Conversation status", "Author note insertion", "Greeting scope", "Preset scope", "Chat preset override", "Chat generation override", "Memory scope", "Turn-taking mode", "Participants", "Directed responder", "Memory character", "Auto summary"])
       expect(screen.getByRole("combobox", { name })).toBeInTheDocument()
@@ -141,7 +219,7 @@ describe("ConversationTab real AntD numeric controls", () => {
   })
 
   it("stages all six numeric edits until Apply and restores them through owned storage after reopening", async () => {
-    const view = mountConversation()
+    const view = mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
     for (const [name, value] of [
       ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
@@ -151,21 +229,21 @@ describe("ConversationTab real AntD numeric controls", () => {
       fireEvent.change(input, { target: { value } })
       fireEvent.blur(input)
       expect(boundary.write).not.toHaveBeenCalled()
-      expect(await getChatSettingsForKey(chatKey)).toEqual(initialSettings)
+      expect(await getChatSettingsForKey(localKey)).toEqual(initialSettings)
     }
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
-    await waitFor(() => expect(boundary.write).toHaveBeenCalledTimes(1))
+    await waitFor(async () => expect(await getChatSettingsForKey(localKey)).toMatchObject({ authorNotePosition: { mode: "depth", depth: 5 } }))
     await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Depth" })).toBeEnabled())
     expect(screen.getByRole("button", { name: "Apply conversation changes" })).toBeDisabled()
-    expect(boundary.write).toHaveBeenCalledTimes(1)
-    expect(await getChatSettingsForKey(chatKey)).toMatchObject({
+    expect(boundary.write).not.toHaveBeenCalled()
+    expect(await getChatSettingsForKey(localKey)).toMatchObject({
       authorNotePosition: { mode: "depth", depth: 5 },
       chatGenerationOverride: { enabled: true, temperature: 1.25, top_p: 0.65, repetition_penalty: 1.35, stop: ["END"] },
       autoSummaryEnabled: true, autoSummaryThresholdMessages: 30, autoSummaryWindowMessages: 8
     })
-    expect(boundary.write.mock.calls[0][2]).toMatchObject({ requestScope: settingsTestOwner.requestScope })
+    expect(memory.chatHistories.rows.size).toBe(1)
     view.unmount()
-    mountConversation()
+    mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
     for (const [name, value] of [
       ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
@@ -179,15 +257,15 @@ describe("ConversationTab real AntD numeric controls", () => {
       throw new Error("Response lost after committing")
     })
     let view = mountConversation()
-    const note = await screen.findByRole("textbox", { name: "Author note" })
+    const note = await screen.findByRole("spinbutton", { name: "Temp" })
     await waitFor(() => expect(note).toBeEnabled())
-    fireEvent.change(note, { target: { value: "Original note A" } })
+    fireEvent.change(note, { target: { value: "0.45" } })
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
     await screen.findByRole("alert")
     await waitFor(() => expect(screen.getByRole("button", { name: "Cancel conversation changes" })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: "Cancel conversation changes" }))
     expect(await screen.findByRole("button", { name: "Review previous settings change" })).toBeEnabled()
-    fireEvent.change(screen.getByRole("textbox", { name: "Author note" }), { target: { value: "New note B" } })
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Temp" }), { target: { value: "0.66" } })
     expect(screen.getByRole("button", { name: "Review previous settings change" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Apply conversation changes" })).toBeDisabled()
     expect(boundary.write).toHaveBeenCalledTimes(1)
@@ -196,17 +274,17 @@ describe("ConversationTab real AntD numeric controls", () => {
     const review = await screen.findByRole("button", { name: "Review previous settings change" })
     await waitFor(() => expect(review).toBeEnabled())
     fireEvent.click(review)
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Author note" })).toHaveValue("Original note A"))
-    expect(screen.getByText(/Original note A/, { selector: "pre" })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Temp" })).toHaveValue("0.45"))
+    expect(screen.getByText(/0.45/, { selector: "pre" })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole("button", { name: "Apply conversation changes" })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
-    await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ authorNote: "Original note A" }))
+    await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ chatGenerationOverride: { temperature: 0.45 } }))
     await waitFor(() => expect(screen.queryByRole("button", { name: "Review previous settings change" })).not.toBeInTheDocument())
     expect(boundary.write).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Author note" })).toBeEnabled())
-    fireEvent.change(screen.getByRole("textbox", { name: "Author note" }), { target: { value: "New note B" } })
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Temp" })).toBeEnabled())
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Temp" }), { target: { value: "0.66" } })
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
-    await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ authorNote: "New note B" }))
+    await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ chatGenerationOverride: { temperature: 0.66 } }))
     expect(boundary.write).toHaveBeenCalledTimes(2)
   }, 15_000)
 
@@ -216,7 +294,8 @@ describe("ConversationTab real AntD numeric controls", () => {
       chatGenerationOverride: { ...initialSettings.chatGenerationOverride, enabled: false }, autoSummaryEnabled: false
     }
     await new Storage({ area: "local" }).set(storageKey, { value: boundary.settings, updatedAt: 1 })
-    mountConversation()
+    await new Storage({ area: "local" }).set(localStorageKey, boundary.settings)
+    mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
     for (const name of ["Temp", "Top-p", "Rep pen", "Threshold", "Recent window"])
       expect(screen.getByRole("spinbutton", { name })).toBeDisabled()
@@ -224,7 +303,7 @@ describe("ConversationTab real AntD numeric controls", () => {
   })
 
   it("keeps the staged summary window below an edited threshold and saves it only on Apply", async () => {
-    mountConversation()
+    mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
     const threshold = screen.getByRole("spinbutton", { name: "Threshold" })
     fireEvent.change(threshold, { target: { value: "5" } })
@@ -232,7 +311,7 @@ describe("ConversationTab real AntD numeric controls", () => {
     expect(boundary.write).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
     await waitFor(async () => {
-      expect(await getChatSettingsForKey(chatKey)).toMatchObject({
+      expect(await getChatSettingsForKey(localKey)).toMatchObject({
         autoSummaryThresholdMessages: 5,
         autoSummaryWindowMessages: 4
       })

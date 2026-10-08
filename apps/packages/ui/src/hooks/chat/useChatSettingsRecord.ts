@@ -148,12 +148,12 @@ export const useChatSettingsRecord = ({
   const recoveryReady = !serverChatId || guarded || (ownsRecovery && !recoveryPresentation.error)
   const settingsRecovery = ownsRecovery ? recoveryPresentation.value : null
   const settingsRecoveryError = ownsRecovery ? recoveryPresentation.error : null
-  const updateSettings = React.useCallback(async (patch: Partial<ChatSettingsRecord>, recoveryOperationId?: string) => {
+  const updateSettings = React.useCallback(async (patch: Partial<ChatSettingsRecord>, recoveryOperationId?: string, reconcileOnly = false) => {
     if (!renderedIsCurrent()) throw new Error("chat_settings_owner_unavailable")
     if (mode === "pending") throw new Error("fork_settings_owner_unavailable")
     if (mode === "fork") return controller!.updateForkSettings(patch)
     const capturedTarget = captureTarget()
-    try { return await applyChatSettingsPatch({ ...capturedTarget, patch, recoveryOperationId }) }
+    try { return await applyChatSettingsPatch({ ...capturedTarget, patch, recoveryOperationId, reconcileOnly }) }
     finally { await refreshRecovery(capturedTarget) }
   }, [renderedIsCurrent, mode, controller, captureTarget, refreshRecovery])
 
