@@ -320,6 +320,17 @@ describe("ServerAdminPage design-system states", () => {
 
     renderPage(<ServerAdminPage />)
 
+    // Diagnostics only fire after an explicit user selection (B-S5); the
+    // mousedown handler lives on the `.ant-select` root in antd v6.
+    const mediaBudgetCard = screen.getByText("Media ingestion budget").closest(
+      ".ant-card"
+    ) as HTMLElement
+    const userSelect = (
+      within(mediaBudgetCard).getByText("User").closest(".ant-select") as HTMLElement
+    )
+    fireEvent.mouseDown(userSelect)
+    fireEvent.click(await screen.findByText("admin (#11)"))
+
     const alert = await expectDesignSystemAlertForTitle(
       "Unable to load media ingestion budget diagnostics"
     )

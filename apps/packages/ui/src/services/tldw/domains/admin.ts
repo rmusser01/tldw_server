@@ -302,7 +302,15 @@ export const adminMethods = {
     return await bgRequest<any>({ path: `/api/v1/admin/usage/daily${query}`, method: "GET" })
   },
 
-  async getTopUsage(params?: { metric?: string; limit?: number }): Promise<any> {
+  // `start`/`end` pass straight through to the documented backend params:
+  // YYYY-MM-DD inclusive on /usage/top, ISO timestamps on the llm-usage*
+  // endpoints (admin_usage.py).
+  async getTopUsage(params?: {
+    metric?: string
+    limit?: number
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/usage/top${query}`, method: "GET" })
   },
@@ -315,17 +323,31 @@ export const adminMethods = {
     return await bgRequest<string>({ path: "/api/v1/admin/usage/top/export.csv", method: "GET" })
   },
 
-  async getLlmUsage(params?: { provider?: string; model?: string; limit?: number }): Promise<any> {
+  async getLlmUsage(params?: {
+    provider?: string
+    model?: string
+    limit?: number
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/llm-usage${query}`, method: "GET" })
   },
 
-  async getLlmUsageSummary(params?: { group_by?: string }): Promise<any> {
+  async getLlmUsageSummary(params?: {
+    group_by?: string
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/llm-usage/summary${query}`, method: "GET" })
   },
 
-  async getLlmTopSpenders(params?: { limit?: number }): Promise<any> {
+  async getLlmTopSpenders(params?: {
+    limit?: number
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/llm-usage/top-spenders${query}`, method: "GET" })
   },

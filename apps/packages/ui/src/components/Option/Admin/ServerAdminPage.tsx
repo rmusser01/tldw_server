@@ -120,6 +120,10 @@ export const ServerAdminPage: React.FC = () => {
   const [mediaBudgetError, setMediaBudgetError] = React.useState<string | null>(null)
   const [mediaBudgetUserId, setMediaBudgetUserId] = React.useState<number | null>(null)
   const [mediaBudgetPolicyId, setMediaBudgetPolicyId] = React.useState("media.default")
+  // Debounce handle for the media-budget diagnostics fetch (B-S5): typing in
+  // the policy input must not fire a network call per keystroke — same shape
+  // as the remote-search debounce in WatchlistsOversightPage.
+  const mediaBudgetTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [userRoleFilter, setUserRoleFilter] = React.useState<string | undefined>(undefined)
   const [userActiveFilter, setUserActiveFilter] = React.useState<string | undefined>(undefined)
   const [usersPage, setUsersPage] = React.useState(1)
@@ -285,22 +289,28 @@ export const ServerAdminPage: React.FC = () => {
   const mediaBudgetLimits = mediaBudget?.limits || {}
   const mediaBudgetUsage = mediaBudget?.usage || {}
 
-  React.useEffect(() => {
-    if (mediaBudgetUserId !== null) {
-      return
-    }
-    const firstUser = usersData?.users?.[0]
-    if (firstUser && typeof firstUser.id === "number" && firstUser.id > 0) {
-      setMediaBudgetUserId(firstUser.id)
-    }
-  }, [mediaBudgetUserId, usersData])
-
+  // Diagnostics fetch only after an explicit user selection (B-S5): no
+  // first-user auto-preload on mount. Selection and policy-id changes are
+  // debounced (300ms) so typing never fires a call per keystroke.
   React.useEffect(() => {
     if (adminGuard || mediaBudgetUserId === null) {
       return
     }
-    void loadMediaBudget(mediaBudgetUserId, mediaBudgetPolicyId)
+    if (mediaBudgetTimerRef.current) {
+      clearTimeout(mediaBudgetTimerRef.current)
+    }
+    mediaBudgetTimerRef.current = setTimeout(() => {
+      void loadMediaBudget(mediaBudgetUserId, mediaBudgetPolicyId)
+    }, 300)
   }, [adminGuard, loadMediaBudget, mediaBudgetPolicyId, mediaBudgetUserId])
+
+  React.useEffect(() => {
+    return () => {
+      if (mediaBudgetTimerRef.current) {
+        clearTimeout(mediaBudgetTimerRef.current)
+      }
+    }
+  }, [])
 
   const handleUserTableChange = (pagination: any) => {
     const page = pagination.current || 1
