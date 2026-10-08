@@ -105,7 +105,7 @@ assert all(item["kind"] != "chunk" for item in preview["snippets"])
 **Goal:** Small shared client and acceptance helpers retain immutable identity and resolve real version pins.
 **Success Criteria:** Same pending body retries; exact version/digest readback gates confirmation; requests stay owner-bound and abortable.
 **Tests:** Shared client and narrow capture helper tests.
-**Status:** Complete
+**Status:** In Progress
 
 ### Task 3: Scoped clients and capture acceptance helpers
 
