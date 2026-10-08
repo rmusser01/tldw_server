@@ -656,6 +656,16 @@ class FileValidator:
                 if detected_mime_type:
                     detected_mime_type = detected_mime_type.strip()
                     mime_detection_source = "magic"
+                    if media_type_key == "html" and detected_mime_type == "text/plain":
+                        # HTML magic is offset-zero; legal leading whitespace can
+                        # otherwise become generic text in the file deep scan.
+                        with contextlib.suppress(_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                            with current_file_path.open("rb") as source:
+                                prefix = source.read(4096).lstrip(b" \t\r\n\f")
+                            if prefix.startswith(b"\xef\xbb\xbf"):
+                                prefix = prefix[3:].lstrip(b" \t\r\n\f")
+                            if puremagic.from_string(prefix, mime=True) == "text/html":
+                                detected_mime_type = "text/html"
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:  # Catch other errors during MIME detection
                 logging.warning("MIME magic detection failed; using extension fallback (error_type={})", exception_type_for_log(e))
                 detected_mime_type = None

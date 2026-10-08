@@ -27,3 +27,11 @@ No new durable rule is proposed: restore existing transport selection and apply 
 ## Acceptance
 
 All confirmed defects get red/green behavioral regressions through real existing seams and independent review. Publish full reuse inventory and exact changes, updated tracking including13514, preserved failed receipts, limitations, touched-scope Bandit and canonical checks. User review gets a concrete branch/PR; landing follows the actual queue mode, required exact-head statuses, real rebase where applicable and human-owned Change summary.
+
+## Task4 integration fix1: whitespace-prefixed HTML recognition
+
+Actual legacy `/media/add` live ingestion received valid NN/G HTML but rejected it as `text/plain`: six leading LF bytes defeat puremagic 2.2.0 offset-zero HTML signatures. The privately preserved 141947-byte response has SHA256 `9d989bdcdd1643cc69baf2f0a9c9e5ac659b977282e6f481d57f0c1e9df43ce6`; unchanged validation reproduces the failure, while removing only those LF bytes in memory gives a positive HTML signature. Earlier response bytes were cleaned up and remain an unknown-content historical failure; only the second retained response establishes this cause.
+
+Ruling9 authorizes a correction inside the existing shared MIME detector only when the target is HTML and detected MIME is generic `text/plain`: inspect at most4096 bytes, normalize leading ASCII HTML whitespace and an optional UTF8 BOM in memory, and require the existing detector to identify `text/html`. Keep the original file bytes, extension/size gates, nontext mismatch refusal, YARA and downstream sanitizer. No blanket plain-text allowance, HTTP-header/extension trust, alternate downloader, dependency change or new validation subsystem. Test synthetic whitespace/BOM HTML through existing upload and downloaded-file wrappers, normal HTML, plain/fake/nontext/malformed/over-bound prefixes and preserved safety/sanitization behavior. The remote article remains a private diagnostic, never a committed fixture.
+
+ADR required: no. This restores valid content recognition within existing shared validation and ADR026/042/066 acquisition constraints, without a changed durable security or architecture rule.
