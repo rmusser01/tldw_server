@@ -3,7 +3,7 @@ import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation
 import { browser } from "wxt/browser"
 import { freshChatDraftAddress, isChatDraftAddress, isChatDraftHandle, chatDraftAddressKey, type ChatDraftAddress } from "@/utils/chat-draft-address"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
-import { captureChatDraftLoad, chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { captureChatDraftLoad, captureChatDraftSource, chatDraftAddressForReceipt, confirmTemporaryChatDiscard } from "@/hooks/chat/chat-draft-transition"
 import { RecoveryCallout } from "@/components/ui/state/RecoveryCallout"
 import { resolveOptionsHref } from "@/utils/browser-runtime"
 import { requestSettingsNavigation } from "@/utils/settings-return"
@@ -1508,8 +1508,8 @@ const SidepanelChatContent = ({
   useChatShortcuts(handleNewTab, true)
 
   const handleSelectTab = React.useCallback(
-    async (tabId: string) => {
-      if (!owner.isCurrent() || (isRestoringChat && restoreFailure !== "target") || !tabId) return false
+    async (tabId: string, isAdmitted: () => boolean = () => true) => {
+      if (!isAdmitted() || !owner.isCurrent() || (isRestoringChat && restoreFailure !== "target") || !tabId) return false
       if (!useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === tabId)) return false
       if (tabId === activeTabId) {
         invalidateLoads()
@@ -1524,7 +1524,7 @@ const SidepanelChatContent = ({
       const source = useStoreMessageOption.getState()
       const sourceTabId = useSidepanelChatTabsStore.getState().activeTabId
       const sourceFence = historySelection.fence()
-      const current = () => owner.isCurrent() && sourceFence() && generation === loadGenerationRef.current &&
+      const current = () => isAdmitted() && owner.isCurrent() && sourceFence() && generation === loadGenerationRef.current &&
         useSidepanelChatTabsStore.getState().activeTabId === sourceTabId &&
         useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === tabId) &&
         useSidepanelChatTabsStore.getState().getSnapshot(tabId) === snapshot &&
@@ -1534,7 +1534,7 @@ const SidepanelChatContent = ({
       try {
         const prepared = snapshot ? await prepareSnapshot(snapshot, current) : null
         if (!current() || (snapshot && !prepared)) return false
-        if (snapshot && !requestSettingsNavigation("/")) return false
+        if ((snapshot && !requestSettingsNavigation("/")) || !current()) return false
         saveActiveTabSnapshot()
         if (streaming) {
           stopStreamingRequest()
@@ -1578,25 +1578,84 @@ const SidepanelChatContent = ({
   )
 
   const handleCloseTab = React.useCallback(
-    async (tabId: string) => {
-      if (!owner.isCurrent() || isRestoringChat) return
+    async (
+      tabId: string,
+      options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }
+    ): Promise<boolean> => {
+      const isAdmitted = options?.isCurrent ?? (() => true)
+      if (!isAdmitted() || !owner.isCurrent() || isRestoringChat) return false
       const store = useSidepanelChatTabsStore.getState()
+      const target = store.tabs.find((tab) => tab.id === tabId)
+      if (!target) return false
+      const snapshot = store.getSnapshot(tabId)
+      const chat =
+        tabId === store.activeTabId
+          ? useStoreMessageOption.getState()
+          : snapshot
+      const addressKey =
+        chat && isChatDraftAddress(chat.chatDraftAddress)
+          ? chatDraftAddressKey(chat.chatDraftAddress)
+          : null
+      const sourceFence = historySelection.fence()
+      const source = captureChatDraftSource(() => isAdmitted() && sourceFence())
+      if (
+        chat &&
+        options?.discardTemporaryConfirmed !== true &&
+        !confirmTemporaryChatDiscard(chat)
+      )
+        return false
+      if (
+        !owner.isCurrent() ||
+        !source.isCurrent() ||
+        useSidepanelChatTabsStore.getState().activeTabId !==
+          store.activeTabId ||
+        useSidepanelChatTabsStore.getState().getSnapshot(tabId) !== snapshot
+      )
+        return false
       if (store.tabs.length <= 1) {
-        if (!handleNewTab()) return
-        store.removeTab(tabId)
-        return
-      }
-      if (tabId === store.activeTabId) {
+        if (
+          !handleNewTab() ||
+          !isAdmitted() ||
+          !owner.isCurrent() ||
+          useSidepanelChatTabsStore.getState().activeTabId === tabId
+        )
+          return false
+      } else if (tabId === store.activeTabId) {
         const currentIndex = store.tabs.findIndex((tab) => tab.id === tabId)
         const nextTab =
           store.tabs[currentIndex + 1] || store.tabs[currentIndex - 1]
-        if (nextTab) {
-          if (!await handleSelectTab(nextTab.id)) return
-        }
+        if (
+          !nextTab ||
+          !(await handleSelectTab(nextTab.id, isAdmitted)) ||
+          !isAdmitted() ||
+          !owner.isCurrent() ||
+          useSidepanelChatTabsStore.getState().activeTabId !== nextTab.id
+        )
+          return false
       }
+      const currentStore = useSidepanelChatTabsStore.getState()
+      const currentTarget = currentStore.tabs.find((tab) => tab.id === tabId)
+      const currentSnapshot = currentStore.getSnapshot(tabId)
+      const currentAddressKey = isChatDraftAddress(
+        currentSnapshot?.chatDraftAddress
+      )
+        ? chatDraftAddressKey(currentSnapshot.chatDraftAddress)
+        : null
+      if (
+        !isAdmitted() ||
+        !owner.isCurrent() ||
+        !currentTarget ||
+        currentTarget.historyId !== target.historyId ||
+        currentTarget.serverChatId !== target.serverChatId ||
+        currentSnapshot?.historyId !== chat?.historyId ||
+        currentSnapshot?.serverChatId !== chat?.serverChatId ||
+        currentAddressKey !== addressKey
+      )
+        return false
       store.removeTab(tabId)
+      return true
     },
-    [handleNewTab, handleSelectTab, owner, isRestoringChat]
+    [handleNewTab, handleSelectTab, historySelection, owner, isRestoringChat]
   )
 
   const openSnapshotTab = React.useCallback(

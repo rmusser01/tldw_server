@@ -22,7 +22,9 @@ const io = vi.hoisted(() => ({
   updateHistory: vi.fn(),
   renameTab: vi.fn(),
   showUndoNotification: vi.fn(),
-  messageError: vi.fn()
+  messageError: vi.fn(),
+  messageInfo: vi.fn(),
+  messageSuccess: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -44,12 +46,13 @@ vi.mock("react-i18next", () => ({
 }))
 vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>()
-  return { ...actual, message: { ...actual.message, error: io.messageError, success: vi.fn(), info: vi.fn() } }
+  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo } }
 })
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => {},
     searchConversationsWithMeta: async () => ({ chats: [], total: 0 }),
+    listChatsWithMeta: async () => ({ chats: [], total: 0 }),
     deleteChat: (...args: unknown[]) => io.deleteChat(...args),
     updateChat: (...args: unknown[]) => io.updateChat(...args),
     restoreChat: (...args: unknown[]) => io.restoreChat(...args),
@@ -66,6 +69,7 @@ vi.mock("@/db/dexie/helpers", () => ({
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: vi.fn(function MockPageAssistDatabase(this: Record<string, unknown>) {
     this.fullTextSearchChatHistories = async () => []
+    this.getRecentChatHistories = async () => []
   })
 }))
 vi.mock("@/hooks/useUndoNotification", () => ({
@@ -88,13 +92,6 @@ vi.mock("@/store/folder", () => {
       typeof select === "function" ? select(state) : state
   }
 })
-vi.mock("@/hooks/useBulkChatOperations", () => ({
-  useBulkChatOperations: () => ({
-    openBulkFolderPicker: vi.fn(),
-    openBulkTagPicker: vi.fn(),
-    applyBulkDelete: vi.fn()
-  })
-}))
 vi.mock("@plasmohq/storage/hook", () => ({ useStorage: () => [288, vi.fn()] }))
 vi.mock("../ModeToggle", () => ({ ModeToggle: () => null }))
 vi.mock("../FolderPickerModal", () => ({ FolderPickerModal: () => null }))
@@ -160,12 +157,12 @@ const renderSidebar = (overrides: Partial<React.ComponentProps<typeof SidepanelC
     onSearchQueryChange: vi.fn(),
     ...overrides
   }
-  render(
+  const view = render(
     <QueryClientProvider client={client}>
       <SidepanelChatSidebar {...props} />
     </QueryClientProvider>
   )
-  return { ...props, client }
+  return { ...props, client, view }
 }
 
 /** Right-click a tab row and pick an item from its menu, as a user does. */
@@ -201,11 +198,300 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     io.renameTab.mockReset()
     io.showUndoNotification.mockReset()
     io.messageError.mockReset()
+    io.messageInfo.mockReset()
+    io.messageSuccess.mockReset()
   })
   afterEach(() => {
     document.body.innerHTML = ""
   })
 
+  const openBulkDialog = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Select chats" }))
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    return screen.findByRole("dialog", { name: "Delete selected chats?" })
+  }
+
+  it("names local Temporary discard before accepting one bulk choice, and Cancel closes nothing", async () => {
+    const props = renderSidebar({ tabs: [localTab] })
+    const dialog = await openBulkDialog()
+    expect(dialog).toHaveTextContent(
+      "Closing a Temporary tab discards its messages."
+    )
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    expect(props.onCloseTab).not.toHaveBeenCalled()
+    expect(io.deleteChat).not.toHaveBeenCalled()
+  })
+
+  it("awaits each local closure and counts only accepted tabs", async () => {
+    let finish!: (accepted: boolean) => void
+    const second = { ...localTab, id: "tab-second", label: "Second local" }
+    const close = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve
+          })
+      )
+      .mockResolvedValueOnce(false)
+    renderSidebar({ tabs: [localTab, second], onCloseTab: close })
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(close).toHaveBeenCalledWith(
+      "tab-local",
+      expect.objectContaining({
+        discardTemporaryConfirmed: true,
+        isCurrent: expect.any(Function)
+      })
+    )
+    expect(io.messageInfo).not.toHaveBeenCalled()
+    await act(async () => {
+      finish(true)
+    })
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(2))
+    expect(io.messageInfo).toHaveBeenCalledWith("1 local chat(s) were closed.")
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("keeps declined local tabs selected without reporting closure", async () => {
+    renderSidebar({ tabs: [localTab], onCloseTab: vi.fn(async () => false) })
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(isClosing(dialog)).toBe(true))
+    expect(io.messageInfo).not.toHaveBeenCalled()
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("uses the verified request scope for bulk Trash and retains failed server tabs", async () => {
+    io.deleteChat.mockRejectedValue(new Error("Trash unavailable"))
+    const props = renderSidebar()
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(isClosing(dialog)).toBe(true))
+    expect(io.deleteChat).toHaveBeenCalledWith("chat-1", {
+      requestScope: owner.snapshot.requestScope
+    })
+    expect(props.onCloseTab).toHaveBeenCalledExactlyOnceWith(
+      "tab-local",
+      expect.objectContaining({
+        discardTemporaryConfirmed: true,
+        isCurrent: expect.any(Function)
+      })
+    )
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it.each(["server", "local"])(
+    "retires aggregate closure and feedback after held %s work loses its owner",
+    async (boundary) => {
+      let current = true
+      let finish!: () => void
+      const held = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      const owned = { ...owner, isCurrent: () => current }
+      const close = boundary === "local" ? vi.fn(() => held) : vi.fn()
+      if (boundary === "server") io.deleteChat.mockReturnValue(held)
+      renderSidebar({
+        owner: owned,
+        tabs:
+          boundary === "local"
+            ? [localTab, { ...localTab, id: "second", label: "Second local" }]
+            : [serverTab, localTab],
+        onCloseTab: close
+      })
+      const dialog = await openBulkDialog()
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+      await waitFor(() =>
+        expect(
+          boundary === "local" ? close : io.deleteChat
+        ).toHaveBeenCalledTimes(1)
+      )
+      current = false
+      await act(async () => {
+        finish()
+      })
+      expect(close).toHaveBeenCalledTimes(boundary === "local" ? 1 : 0)
+      expect(io.messageSuccess).not.toHaveBeenCalled()
+      expect(io.messageInfo).not.toHaveBeenCalled()
+      expect(screen.getByText("2 selected")).toBeInTheDocument()
+    }
+  )
+
+  it("retires held bulk Trash when a selected tab binds a different conversation under the same ID", async () => {
+    let finish!: () => void
+    io.deleteChat.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    )
+    const props = renderSidebar()
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(io.deleteChat).toHaveBeenCalledTimes(1))
+    props.view.rerender(
+      <QueryClientProvider client={props.client}>
+        <SidepanelChatSidebar
+          {...props}
+          tabs={[{ ...serverTab, serverChatId: "replacement-chat" }, localTab]}
+        />
+      </QueryClientProvider>
+    )
+    await act(async () => {
+      finish()
+    })
+    expect(props.onCloseTab).not.toHaveBeenCalled()
+    expect(io.messageInfo).not.toHaveBeenCalled()
+    expect(io.messageSuccess).not.toHaveBeenCalled()
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+  })
+
+  it.each(["cancel", "selection", "unmount"])(
+    "retires held local closure after %s without later closes or aggregate feedback",
+    async (ending) => {
+      let finish!: () => void
+      const close = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          })
+      )
+      const props = renderSidebar({
+        tabs: [localTab, { ...localTab, id: "second", label: "Second local" }],
+        onCloseTab: close
+      })
+      const dialog = await openBulkDialog()
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+      await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+      if (ending === "cancel")
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      else if (ending === "selection")
+        fireEvent.click(screen.getByRole("button", { name: "Clear" }))
+      else props.view.unmount()
+      await act(async () => {
+        finish()
+      })
+      expect(close).toHaveBeenCalledTimes(1)
+      expect(io.messageInfo).not.toHaveBeenCalled()
+      if (ending === "cancel")
+        expect(screen.getByText("2 selected")).toBeInTheDocument()
+      if (ending === "selection")
+        expect(screen.getByText("0 selected")).toBeInTheDocument()
+    }
+  )
+
+  it("allows a new bulk attempt after Cancel and prevents old completion from clearing its loading state", async () => {
+    let finishOld!: () => void
+    let finishNew!: () => void
+    const close = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishOld = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishNew = resolve
+          })
+      )
+    renderSidebar({ tabs: [localTab], onCloseTab: close })
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: /Delete$/ }))
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    fireEvent.click(
+      within(screen.getByTestId("sidepanel-chat-sidebar")).getByRole("button", {
+        name: "Delete"
+      })
+    )
+    const currentDialog = await screen.findByRole("dialog", {
+      name: "Delete selected chats?"
+    })
+    fireEvent.click(
+      within(currentDialog).getByRole("button", { name: /Delete$/ })
+    )
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      finishOld()
+    })
+    expect(
+      within(currentDialog).getByRole("button", { name: /Delete$/ }).className
+    ).toContain("ant-btn-loading")
+    expect(io.messageInfo).not.toHaveBeenCalled()
+    await act(async () => {
+      finishNew()
+    })
+    expect(io.messageInfo).toHaveBeenCalledExactlyOnceWith(
+      "1 local chat(s) were closed."
+    )
+  })
+
+  it.each(["owner", "unmount"])(
+    "silences an old single Trash failure after %s retirement",
+    async (ending) => {
+      let current = true
+      let fail!: (error: Error) => void
+      io.deleteChat.mockReturnValue(
+        new Promise<void>((_resolve, reject) => {
+          fail = reject
+        })
+      )
+      const props = renderSidebar({
+        owner: { ...owner, isCurrent: () => current }
+      })
+      await chooseTabMenuItem("Quarterly plan", "Delete")
+      const dialog = await screen.findByRole("dialog", {
+        name: "Delete conversation"
+      })
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Move to Trash" })
+      )
+      await waitFor(() => expect(io.deleteChat).toHaveBeenCalledTimes(1))
+      if (ending === "owner") current = false
+      else props.view.unmount()
+      await act(async () => {
+        fail(new Error("Old Trash failure"))
+      })
+      expect(io.messageError).not.toHaveBeenCalled()
+      expect(props.onCloseTab).not.toHaveBeenCalled()
+      expect(io.removeServerChatMirror).not.toHaveBeenCalled()
+    }
+  )
+
+  it("awaits a saved tab's declined close before removing its local copy", async () => {
+    let finish!: (accepted: boolean) => void
+    const props = renderSidebar({
+      onCloseTab: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve
+          })
+      )
+    })
+    await chooseTabMenuItem("Quarterly plan", "Delete")
+    const dialog = await screen.findByRole("dialog", {
+      name: "Delete conversation"
+    })
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Move to Trash" })
+    )
+    await waitFor(() => expect(props.onCloseTab).toHaveBeenCalled())
+    expect(io.removeServerChatMirror).not.toHaveBeenCalled()
+    await act(async () => {
+      finish(false)
+    })
+    expect(io.removeServerChatMirror).not.toHaveBeenCalled()
+    expect(io.deleteChat).toHaveBeenCalledExactlyOnceWith("chat-1", {
+      requestScope: owner.snapshot.requestScope
+    })
+    // Trash already succeeded; keep its Undo available even when the tab stays open.
+    expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
+  })
   it("moves a server chat to Trash, drops its local copy and closes its tab, with Undo", async () => {
     const props = renderSidebar()
     await chooseTabMenuItem("Quarterly plan", "Delete")
@@ -225,7 +511,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     await act(async () => {
       await undo.onUndo()
     })
-    expect(io.restoreChat).toHaveBeenCalledWith("chat-1")
+    expect(io.restoreChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
     expect(props.onOpenServerChat).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1", title: "Quarterly plan" }))
   })
 

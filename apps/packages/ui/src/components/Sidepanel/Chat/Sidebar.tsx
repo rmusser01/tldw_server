@@ -39,7 +39,6 @@ import { ModeToggle } from "./ModeToggle"
 import { ConversationContextMenu } from "./ConversationContextMenu"
 import { FolderPickerModal } from "./FolderPickerModal"
 import { exportTabToJSON, exportTabToMarkdown } from "@/utils/conversation-export"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import {
   moveServerChatToTrash,
@@ -74,7 +73,7 @@ type SidepanelChatSidebarProps = {
   tabs: SidepanelChatTab[]
   activeTabId: string | null
   onSelectTab: (tabId: string) => void
-  onCloseTab: (tabId: string) => void
+  onCloseTab: (tabId: string, options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }) => void | boolean | Promise<void | boolean>
   onNewTab: () => void
   searchQuery: string
   onSearchQueryChange: (value: string) => void
@@ -338,6 +337,14 @@ export const SidepanelChatSidebar = ({
   // latest handler, whose tab list no longer holds the deleted tab.
   const openServerChatRef = React.useRef(onOpenServerChat)
   openServerChatRef.current = onOpenServerChat
+  const tabsRef = React.useRef(tabs)
+  tabsRef.current = tabs
+  const mountedRef = React.useRef(true)
+  const bulkActionRevisionRef = React.useRef(0)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const unverifiedAccountMessage = t(
     "sidepanel:contextMenu.accountUnverified",
     "This conversation can't be changed until your account is verified."
@@ -393,10 +400,8 @@ export const SidepanelChatSidebar = ({
     async (tabId: string): Promise<boolean> => {
       const tab = tabs.find((item) => item.id === tabId)
       const chatId = tab?.serverChatId
-      if (!tab || !chatId) {
-        onCloseTab(tabId)
-        return true
-      }
+      if (!tab) return false
+      if (!chatId) return (await onCloseTab(tabId)) !== false
       if (!owner?.isCurrent()) {
         message.error(unverifiedAccountMessage)
         return false
@@ -404,6 +409,9 @@ export const SidepanelChatSidebar = ({
       try {
         await moveServerChatToTrash(chatId, owner.snapshot.requestScope)
       } catch (error) {
+        const currentTab = tabsRef.current.find(item => item.id === tabId)
+        if (!owner.isCurrent() || !mountedRef.current || currentTab?.serverChatId !== chatId ||
+          currentTab.historyId !== tab.historyId) return false
         console.error("[sidepanel] Failed to move chat to Trash", error)
         message.error(
           t(
@@ -414,9 +422,13 @@ export const SidepanelChatSidebar = ({
         return false
       }
       void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
-      if (!owner.isCurrent()) return true
-      onCloseTab(tabId)
-      await removeLocalCopyOfServerChat(chatId, owner.ownerKey)
+      if (!owner.isCurrent() || !mountedRef.current) return true
+      const currentTab = tabsRef.current.find(item => item.id === tabId)
+      const closed = currentTab?.serverChatId === chatId && currentTab.historyId === tab.historyId &&
+        (await onCloseTab(tabId)) !== false
+      if (!owner.isCurrent() || !mountedRef.current) return true
+      if (closed) await removeLocalCopyOfServerChat(chatId, owner.ownerKey)
+      if (!owner.isCurrent() || !mountedRef.current) return true
       showUndoNotification({
         title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
         description: t("sidepanel:contextMenu.movedToTrashDescription", {
@@ -427,7 +439,7 @@ export const SidepanelChatSidebar = ({
           if (!owner.isCurrent()) {
             throw new Error(unverifiedAccountMessage)
           }
-          const restored = await restoreServerChatFromTrash(chatId)
+          const restored = await restoreServerChatFromTrash(chatId, owner.snapshot.requestScope)
           void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
           if (!owner.isCurrent()) return
           const createdAtMs = Date.parse(restored?.created_at ?? "")
@@ -572,6 +584,10 @@ export const SidepanelChatSidebar = ({
   const [bulkTagPickerOpen, setBulkTagPickerOpen] = React.useState(false)
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = React.useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = React.useState(false)
+  const retireBulkAction = React.useCallback(() => {
+    bulkActionRevisionRef.current++
+    setIsBulkDeleting(false)
+  }, [])
 
   const { folderApiAvailable } = useFolderStore(
     (state) => ({
@@ -631,14 +647,16 @@ export const SidepanelChatSidebar = ({
   const groupSpacing = isPro ? "mb-3" : "mb-4"
 
   const toggleSelectionMode = React.useCallback(() => {
+    retireBulkAction()
     setSelectionMode((prev) => !prev)
-  }, [])
+  }, [retireBulkAction])
 
   const toggleTabSelected = React.useCallback((tabId: string) => {
+    retireBulkAction()
     setSelectedTabIds((prev) =>
       prev.includes(tabId) ? prev.filter((id) => id !== tabId) : [...prev, tabId]
     )
-  }, [])
+  }, [retireBulkAction])
 
   const handleRowClick = React.useCallback(
     (tabId: string) => {
@@ -920,15 +938,14 @@ export const SidepanelChatSidebar = ({
     [selectedTabs]
   )
 
-  const localOnlySelectedCount = React.useMemo(
-    () => selectedTabs.filter((tab) => !tab.serverChatId).length,
-    [selectedTabs]
-  )
   const { openBulkFolderPicker, openBulkTagPicker, applyBulkDelete } =
     useBulkChatOperations({
       selectedConversationIds,
       folderApiAvailable,
-      deleteConversation: (conversationId) => tldwClient.deleteChat(conversationId),
+      deleteConversation: (conversationId) => {
+        if (!owner?.isCurrent()) return Promise.reject(new Error("server_history_action_expired"))
+        return moveServerChatToTrash(conversationId, owner.snapshot.requestScope)
+      },
       t,
       setBulkFolderPickerOpen,
       setBulkTagPickerOpen
@@ -953,16 +970,19 @@ export const SidepanelChatSidebar = ({
   }, [selectionMode, visibleTabIds])
 
   const handleSelectAllVisible = React.useCallback(() => {
+    retireBulkAction()
     setSelectedTabIds(visibleTabIds)
-  }, [visibleTabIds])
+  }, [retireBulkAction, visibleTabIds])
 
   const clearSelection = React.useCallback(() => {
+    retireBulkAction()
     setSelectedTabIds([])
-  }, [])
+  }, [retireBulkAction])
 
   const openBulkDeleteConfirm = React.useCallback(() => {
+    retireBulkAction()
     setBulkDeleteConfirmOpen(true)
-  }, [])
+  }, [retireBulkAction])
 
   const handleBulkFolderPickerClose = React.useCallback(() => {
     setBulkFolderPickerOpen(false)
@@ -973,36 +993,68 @@ export const SidepanelChatSidebar = ({
   }, [])
 
   const handleBulkDeleteConfirmClose = React.useCallback(() => {
+    retireBulkAction()
     setBulkDeleteConfirmOpen(false)
-  }, [])
+  }, [retireBulkAction])
 
   const handleBulkDelete = async () => {
-    if (selectedTabs.length === 0) return
+    if (isBulkDeleting || selectedTabs.length === 0 || !owner?.isCurrent())
+      return
+    const revision = bulkActionRevisionRef.current
+    const isCurrent = () =>
+      mountedRef.current &&
+      owner.isCurrent() &&
+      revision === bulkActionRevisionRef.current
+    const targetIsCurrent = (tab: SidepanelChatTab) =>
+      tabsRef.current.some(
+        (current) =>
+          current.id === tab.id &&
+          current.serverChatId === tab.serverChatId &&
+          current.historyId === tab.historyId
+      )
+    if (!selectedTabs.every(targetIsCurrent)) return
 
     setIsBulkDeleting(true)
     try {
       const failedConversationIds = new Set<string>()
       if (selectedConversationIds.length > 0) {
-        const result = await applyBulkDelete()
-        if (!result) return
-        result.failedConversationIds.forEach((id) => failedConversationIds.add(id))
+        const result = await applyBulkDelete(
+          () => isCurrent() && selectedTabs.every(targetIsCurrent)
+        )
+        if (!result || !isCurrent() || !selectedTabs.every(targetIsCurrent))
+          return
+        result.failedConversationIds.forEach((id) =>
+          failedConversationIds.add(id)
+        )
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
       }
 
       const remainingSelection: string[] = []
-      selectedTabs.forEach((tab) => {
-        if (tab.serverChatId && failedConversationIds.has(tab.serverChatId)) {
+      let localClosedCount = 0
+      for (const tab of selectedTabs) {
+        if (!isCurrent()) return
+        if (
+          !targetIsCurrent(tab) ||
+          (tab.serverChatId && failedConversationIds.has(tab.serverChatId))
+        ) {
           remainingSelection.push(tab.id)
-          return
+          continue
         }
-        onCloseTab(tab.id)
-      })
+        const closed =
+          (await onCloseTab(tab.id, {
+            discardTemporaryConfirmed: true,
+            isCurrent: () => isCurrent() && targetIsCurrent(tab)
+          })) !== false
+        if (!isCurrent()) return
+        if (!closed) remainingSelection.push(tab.id)
+        else if (!tab.serverChatId) localClosedCount++
+      }
 
-      if (localOnlySelectedCount > 0) {
+      if (localClosedCount > 0) {
         message.info(
           t("sidepanel:multiSelect.localOnlyClosed", {
             defaultValue: "{{count}} local chat(s) were closed.",
-            count: localOnlySelectedCount
+            count: localClosedCount
           })
         )
       }
@@ -1010,7 +1062,8 @@ export const SidepanelChatSidebar = ({
       setSelectedTabIds(remainingSelection)
       setBulkDeleteConfirmOpen(false)
     } finally {
-      setIsBulkDeleting(false)
+      if (mountedRef.current && revision === bulkActionRevisionRef.current)
+        setIsBulkDeleting(false)
     }
   }
 
@@ -1403,8 +1456,8 @@ export const SidepanelChatSidebar = ({
       >
         <p>
           {t(
-            "sidepanel:multiSelect.deleteConfirmBody",
-            "This will delete the selected chats from the server."
+            "sidepanel:multiSelect.deleteAndCloseConfirmBody",
+            "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
           )}
         </p>
       </Modal>

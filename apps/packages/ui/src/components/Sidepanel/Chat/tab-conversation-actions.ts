@@ -86,4 +86,5 @@ export async function removeLocalCopyOfServerChat(chatId: string, ownerKey: stri
 }
 
 /** Bring a chat back from Trash. */
-export const restoreServerChatFromTrash = (chatId: string) => tldwClient.restoreChat(chatId)
+export const restoreServerChatFromTrash = (chatId: string, requestScope: ServicePromptRequestScope) =>
+  tldwClient.restoreChat(chatId, { requestScope })

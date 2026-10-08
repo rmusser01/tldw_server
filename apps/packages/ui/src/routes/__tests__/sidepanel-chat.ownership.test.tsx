@@ -44,6 +44,7 @@ const io = vi.hoisted(() => ({
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
   keyboardNew: null as (() => void) | null,
+  closeTab: null as ((id: string, options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }) => Promise<boolean | void>) | null,
   data: new Map<string, unknown>(),
   read: vi.fn(),
   local: vi.fn(),
@@ -305,11 +306,13 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
   SidepanelChatSidebar: (props: {
     tabs: { id: string; label: string }[]
     onSelectTab: (id: string) => void
-    onCloseTab: (id: string) => void
+    onCloseTab: (id: string, options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }) => Promise<boolean | void>
     onNewTab: () => void
     onOpenLocalHistory: (id: string) => void
     onOpenServerChat: (chat: { id: string; title: string }) => void
-  }) => (
+  }) => {
+    io.closeTab = props.onCloseTab
+    return (
     <nav>
       <button onClick={props.onNewTab}>New conversation</button>
       {props.tabs.map((tab) => (
@@ -327,7 +330,8 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
         Open server history
       </button>
     </nav>
-  )
+    )
+  }
 }))
 vi.mock("@/components/Common/CommandPaletteHost", () => ({
   CommandPaletteHost: ({ commandPaletteProps }: { commandPaletteProps: { onNewChat: () => void } }) =>
@@ -480,6 +484,7 @@ describe.each([
     sessionStorage.clear()
     io.controller = null
     io.keyboardNew = null
+    io.closeTab = null
     io.data.clear()
     io.read.mockReset().mockImplementation(async (key) => io.data.get(key))
     io.local.mockReset()
@@ -500,6 +505,397 @@ describe.each([
     useStoreChatModelSettings.getState().reset()
   })
 
+  it.each([
+    ["active", false],
+    ["active", true],
+    ["inactive", false],
+    ["inactive", true],
+    ["last", false],
+    ["last", true]
+  ] as const)(
+    "admits %s Temporary tab closure only after discard accepts (%s)",
+    async (placement, accepted) => {
+      io.useComposer = true
+      const saved = tabsState()
+      if (placement === "last") saved.tabs = saved.tabs.slice(0, 1)
+      io.data.set(storedKey("alice"), saved)
+      render(<Route />)
+      await screen.findByText("alice first")
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setHistory(snapshot("TEMPORARY CLOSE TARGET").history)
+        state.setMessages(snapshot("TEMPORARY CLOSE TARGET").messages)
+      })
+      await waitFor(() =>
+        expect(screen.getByLabelText("Composer draft")).toBeEnabled()
+      )
+      fireEvent.change(screen.getByLabelText("Composer draft"), {
+        target: { value: "TEMP NEXT UNSENT  " }
+      })
+      if (placement === "inactive") {
+        fireEvent.click(screen.getByRole("button", { name: "alice two" }))
+        await screen.findByText("alice inactive")
+        await waitFor(() =>
+          expect(screen.getByLabelText("Composer draft")).toBeEnabled()
+        )
+      }
+      const tabsBefore = useSidepanelChatTabsStore.getState().tabs
+      const targetBefore = useSidepanelChatTabsStore
+        .getState()
+        .getSnapshot("alice-one")
+      const currentBefore = useStoreMessageOption.getState()
+      const activeBefore = useSidepanelChatTabsStore.getState().activeTabId
+      const draftBefore = (
+        screen.getByLabelText("Composer draft") as HTMLTextAreaElement
+      ).value
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(accepted)
+      try {
+        let result: boolean | void
+        await act(async () => {
+          result = await io.closeTab!("alice-one")
+        })
+        expect(confirm).toHaveBeenCalledTimes(1)
+        expect(result!).toBe(accepted)
+        if (!accepted) {
+          expect(useSidepanelChatTabsStore.getState().tabs).toEqual(tabsBefore)
+          expect(
+            useSidepanelChatTabsStore.getState().getSnapshot("alice-one")
+          ).toEqual(targetBefore)
+        } else {
+          expect(
+            useSidepanelChatTabsStore
+              .getState()
+              .tabs.some((tab) => tab.id === "alice-one")
+          ).toBe(false)
+          expect(
+            useSidepanelChatTabsStore.getState().getSnapshot("alice-one")
+          ).toBeUndefined()
+        }
+        if (!accepted || placement === "inactive") {
+          expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(
+            activeBefore
+          )
+          expect(useStoreMessageOption.getState()).toMatchObject({
+            chatDraftAddress: currentBefore.chatDraftAddress,
+            chatDraftRevision: currentBefore.chatDraftRevision,
+            history: currentBefore.history,
+            messages: currentBefore.messages,
+            temporaryChat: currentBefore.temporaryChat
+          })
+          expect(screen.getByLabelText("Composer draft")).toHaveValue(
+            draftBefore
+          )
+        } else if (placement === "active") {
+          expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(
+            "alice-two"
+          )
+          expect(useStoreMessageOption.getState().messages).toEqual(
+            snapshot("alice inactive").messages
+          )
+        } else {
+          expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(1)
+          expect(useStoreMessageOption.getState().messages).toEqual([])
+        }
+      } finally {
+        confirm.mockRestore()
+      }
+    }
+  )
+
+  it("rejects Temporary closure when confirmation retires the original H1 view under unchanged IDs", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    act(() => {
+      const state = useStoreMessageOption.getState()
+      state.setTemporaryChat(true)
+      state.startNewChatDraft(true)
+      state.setHistoryId("temp")
+      state.setMessages(snapshot("TEMPORARY H1 TARGET").messages)
+    })
+    const confirm = vi.spyOn(window, "confirm").mockImplementation(() => {
+      io.controller!.reset()
+      return true
+    })
+    try {
+      let result: boolean | void
+      await act(async () => {
+        result = await io.closeTab!("alice-one")
+      })
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(result!).toBe(false)
+      expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        snapshot("TEMPORARY H1 TARGET").messages
+      )
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it("rejects a missing last-tab target without creating a replacement", async () => {
+    const saved = tabsState()
+    saved.tabs = saved.tabs.slice(0, 1)
+    io.data.set(storedKey("alice"), saved)
+    render(<Route />)
+    await screen.findByText("alice first")
+    const before = useSidepanelChatTabsStore.getState().tabs
+    let result: boolean | void
+    await act(async () => {
+      result = await io.closeTab!("missing")
+    })
+    expect(result!).toBe(false)
+    expect(useSidepanelChatTabsStore.getState().tabs).toEqual(before)
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+  })
+
+  it.each(["new", "switch"])(
+    "retains Temporary content without discard confirmation during %s",
+    async (action) => {
+      io.data.set(storedKey("alice"), tabsState())
+      render(<Route />)
+      await screen.findByText("alice first")
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setMessages(snapshot("RETAINED TEMPORARY SOURCE").messages)
+      })
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+      try {
+        fireEvent.click(
+          screen.getByRole("button", {
+            name: action === "new" ? "New conversation" : "alice two"
+          })
+        )
+        await waitFor(() =>
+          expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBe(
+            "alice-one"
+          )
+        )
+        expect(confirm).not.toHaveBeenCalled()
+        expect(
+          useSidepanelChatTabsStore.getState().getSnapshot("alice-one")
+            ?.messages
+        ).toEqual(snapshot("RETAINED TEMPORARY SOURCE").messages)
+      } finally {
+        confirm.mockRestore()
+      }
+    }
+  )
+
+  it("uses already acknowledged bulk discard without asking a second question", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice one" })
+    await screen.findByText("alice first")
+    act(() => {
+      const state = useStoreMessageOption.getState()
+      state.setTemporaryChat(true)
+      state.startNewChatDraft(true)
+      state.setHistoryId("temp")
+      state.setMessages(snapshot("BULK ACKNOWLEDGED TEMPORARY").messages)
+    })
+    await waitFor(() =>
+      expect(
+        useSidepanelChatTabsStore.getState().getSnapshot("alice-one")
+          ?.temporaryChat
+      ).toBe(true)
+    )
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    try {
+      let accepted: boolean | void
+      await act(async () => {
+        accepted = await io.closeTab!("alice-one", {
+          discardTemporaryConfirmed: true
+        })
+      })
+      expect(accepted!).toBe(true)
+      expect(confirm).not.toHaveBeenCalled()
+      expect(
+        useSidepanelChatTabsStore
+          .getState()
+          .tabs.some((tab) => tab.id === "alice-one")
+      ).toBe(false)
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it("retains Temporary source without discard confirmation when opening owned cached history", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    io.localId = "cached"
+    io.local.mockResolvedValue({
+      historyInfo: {
+        id: "cached",
+        title: "Cached history",
+        server_scope_key: ownerKey("alice")
+      },
+      messages: [
+        { id: "cached-row", role: "user", content: "CACHED DESTINATION" }
+      ]
+    })
+    render(<Route />)
+    await screen.findByText("alice first")
+    act(() => {
+      const state = useStoreMessageOption.getState()
+      state.setTemporaryChat(true)
+      state.startNewChatDraft(true)
+      state.setHistoryId("temp")
+      state.setMessages(snapshot("RETAINED HISTORY SOURCE").messages)
+    })
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open cached history" })
+      )
+      await screen.findByText("CACHED DESTINATION")
+      expect(confirm).not.toHaveBeenCalled()
+      expect(
+        useSidepanelChatTabsStore.getState().getSnapshot("alice-one")?.messages
+      ).toEqual(snapshot("RETAINED HISTORY SOURCE").messages)
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it.each(["replacement", "caller"])(
+    "keeps the source after %s retirement while admitted close waits for owned history",
+    async (ending) => {
+      const saved = tabsState()
+      Object.assign(saved.snapshotsById["alice-two"], {
+        historyId: "saved-B",
+        chatDraftHandle: {
+          address: { kind: "local", id: "saved-B", profileId: "profile" },
+          ownerHash: chatDraftOwnerKey({
+            config: { serverUrl: "http://chat.test", authMode: "multi-user" },
+            userId: "alice"
+          })
+        }
+      })
+      io.data.set(storedKey("alice"), saved)
+      let finish!: (value: unknown) => void
+      io.local
+        .mockResolvedValue({
+          historyInfo: { id: "saved-B", local_owner_key: "local-profile" },
+          messages: []
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve
+            })
+        )
+      render(<Route />)
+      await screen.findByRole("button", { name: "alice one" })
+      await screen.findByText("alice first")
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setMessages(snapshot("OLD CLOSING TEMPORARY").messages)
+      })
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+      try {
+        let current = true
+        let closing!: Promise<boolean | void>
+        act(() => {
+          closing = io.closeTab!("alice-one", {
+            discardTemporaryConfirmed: true,
+            isCurrent: () => current
+          })
+        })
+        await waitFor(() => expect(finish).toBeTypeOf("function"))
+        if (ending === "replacement")
+          act(() => {
+            useStoreMessageOption.getState().startNewChatDraft(true)
+            useStoreMessageOption
+              .getState()
+              .setMessages(snapshot("NEW SOURCE WHILE CLOSE WAITS").messages)
+          })
+        else current = false
+        let accepted: boolean | void
+        await act(async () => {
+          finish({
+            historyInfo: { id: "saved-B", local_owner_key: "local-profile" },
+            messages: []
+          })
+          accepted = await closing
+        })
+        expect(accepted!).toBe(false)
+        expect(useSidepanelChatTabsStore.getState().activeTabId).toBe(
+          "alice-one"
+        )
+        expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(2)
+        expect(useStoreMessageOption.getState().messages).toEqual(
+          snapshot(
+            ending === "replacement"
+              ? "NEW SOURCE WHILE CLOSE WAITS"
+              : "OLD CLOSING TEMPORARY"
+          ).messages
+        )
+      } finally {
+        confirm.mockRestore()
+      }
+    }
+  )
+
+  it.each(["active", "last"])(
+    "retains a same-ID replacement published during its own %s close transition",
+    async (placement) => {
+      const saved = tabsState()
+      if (placement === "last") saved.tabs = saved.tabs.slice(0, 1)
+      io.data.set(storedKey("alice"), saved)
+      render(<Route />)
+      await screen.findByText("alice first")
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setMessages(snapshot("APPROVED OLD TARGET").messages)
+      })
+      const address = useStoreMessageOption.getState().chatDraftAddress!
+      if (address.kind !== "fresh")
+        throw new Error("Expected the real Temporary draft address")
+      let replaced = false
+      const unsubscribe = useSidepanelChatTabsStore.subscribe((state) => {
+        if (replaced || state.activeTabId === "alice-one") return
+        replaced = true
+        state.setSnapshot("alice-one", {
+          ...state.getSnapshot("alice-one")!,
+          chatDraftAddress: { ...address, id: "replacement-draft" },
+          messages: snapshot("SAME ID NEW TARGET").messages
+        })
+      })
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+      try {
+        let accepted: boolean | void
+        await act(async () => {
+          accepted = await io.closeTab!("alice-one")
+        })
+        expect(replaced).toBe(true)
+        expect(accepted!).toBe(false)
+        expect(
+          useSidepanelChatTabsStore
+            .getState()
+            .tabs.some((tab) => tab.id === "alice-one")
+        ).toBe(true)
+        expect(
+          useSidepanelChatTabsStore.getState().getSnapshot("alice-one")
+            ?.messages
+        ).toEqual(snapshot("SAME ID NEW TARGET").messages)
+      } finally {
+        unsubscribe()
+        confirm.mockRestore()
+      }
+    }
+  )
   it("keeps recovery mounted during cold Retry, then mounts the verified chat", async () => {
     const alice = await io.scope()
     io.scope.mockRejectedValueOnce(new Error("offline"))

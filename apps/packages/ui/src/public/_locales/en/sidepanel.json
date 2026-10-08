@@ -2090,5 +2090,8 @@
   },
   "controlRow_copyDraftPageReferencesUnavailable": {
     "message": "Page references could not be read. Try again. Your source draft remains here."
+  },
+  "multiSelect_deleteAndCloseConfirmBody": {
+    "message": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
   }
 }

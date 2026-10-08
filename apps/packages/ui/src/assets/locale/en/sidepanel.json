@@ -522,6 +522,7 @@
     "serverOnlyWarning": "Select chats saved on the server to apply this action.",
     "deleteConfirmTitle": "Move chats to trash?",
     "deleteConfirmBody": "This will hide the selected chats by tagging them as Trash.",
+    "deleteAndCloseConfirmBody": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages.",
     "deleteConfirmOk": "Move to trash",
     "deleteFailed": "Unable to move chats to trash.",
     "deletePartial": "Some chats could not be moved to trash.",
