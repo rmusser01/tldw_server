@@ -5884,44 +5884,7 @@ export class TldwApiClientBase {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
-    const data = await bgRequest<any>({
-      path: `/api/v1/chats/${query}`,
-      method: "GET",
-      abortSignal: options?.signal,
-      headers: scopeFields.headers,
-      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
-    })
-
-    let list: any[] = []
-    let total: number | null = null
-
-    if (Array.isArray(data)) {
-      list = data
-    } else if (data && typeof data === "object") {
-      const obj: any = data
-      if (typeof obj.total === "number") {
-        total = obj.total
-      } else if (typeof obj.count === "number") {
-        total = obj.count
-      }
-      if (Array.isArray(obj.chats)) {
-        list = obj.chats
-      } else if (Array.isArray(obj.items)) {
-        list = obj.items
-      } else if (Array.isArray(obj.results)) {
-        list = obj.results
-      } else if (Array.isArray(obj.data)) {
-        list = obj.data
-      }
-    }
-
-    const chats = list.map((c) => this.normalizeChatSummary(c))
-    return {
-      chats,
-      total: typeof total === "number" ? total : chats.length
-    }
+    return chatRagMethods.listChatsWithMeta.call(this as unknown as TldwApiClientCore, params, options)
   }
 
   async createChat(
@@ -6706,12 +6669,8 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path: '/api/v1/chat/dictionaries', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
   }
 
-  async listDictionaries(include_inactive?: boolean, include_usage?: boolean): Promise<any> {
-    const params = new URLSearchParams()
-    if (include_inactive) params.set('include_inactive', 'true')
-    if (include_usage) params.set('include_usage', 'true')
-    const qp = params.toString()
-    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET' })
+  async listDictionaries(include_inactive?: boolean, include_usage?: boolean, options?: ScopedRequestOptions): Promise<any> {
+    return chatRagMethods.listDictionaries.call(this as unknown as TldwApiClientCore, include_inactive, include_usage, options)
   }
 
   async getDictionary(dictionary_id: number | string): Promise<any> {

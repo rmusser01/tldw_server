@@ -227,3 +227,21 @@ async def test_legacy_retry_flags_cannot_mutate_a_versioned_history_selection(me
         )
     assert failure.value.status_code == 409
     assert failure.value.detail["code"] == "unsupported_history_legacy_retry"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("character", [False, True])
+@pytest.mark.parametrize("settings", [
+    {"chat_dictionary_ids": [42]},
+    {"conversationContext": {"chat_dictionary_ids": [42]}},
+])
+def test_saved_dictionary_settings_have_no_native_projector(character, settings):
+    """Stored membership cannot certify native completion behavior."""
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+
+    captured = state() if character else {
+        "conversation": {}, "behavior_snapshot": {"status": "missing"}
+    }
+    captured["settings"] = settings
+    with pytest.raises(HistorySelectionError, match="unsupported_history_context_saved_settings"):
+        project_history_context(captured)

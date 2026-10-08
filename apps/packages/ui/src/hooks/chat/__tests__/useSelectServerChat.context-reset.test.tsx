@@ -28,6 +28,7 @@ const optionState = vi.hoisted(() => ({
     chatDraftAddress: { kind: "fresh", id: "draft-a", scope: { type: "global" }, temporary: false },
     chatDraftRevision: 3,
     setChatDraftAddress: vi.fn(() => true),
+    setTemporaryChat: vi.fn(),
     setIsSearchingInternet: vi.fn(),
     clearReplyTarget: vi.fn(),
     setServerChatId: vi.fn(),
@@ -146,6 +147,23 @@ describe("useSelectServerChat context reset", () => {
     expect(optionState.value.setServerChatTitle).toHaveBeenCalledWith(
       "Fresh server chat",
     );
+  });
+  it("refuses a retired caller before replacement admission", () => {
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved" } as ServerChatSummary, { isCurrent: () => false })).toBe(false));
+    expect(chatBaseState.value.setMessages).not.toHaveBeenCalled();
+  });
+
+  it.each(["consent", "mode publication"])("keeps rows when caller retires during %s", (change) => {
+    let current = true;
+    if (change === "consent") {
+      Object.assign(optionState.value, { temporaryChat: true, historyId: "temp", messages: [{ message: "Temporary answer" }] });
+      vi.mocked(window.confirm).mockImplementation(() => { current = false; return true; });
+    } else optionState.value.setTemporaryChat.mockImplementationOnce(() => { current = false; });
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved" } as ServerChatSummary, { temporaryChat: false, isCurrent: () => current })).toBe(false));
+    expect(chatBaseState.value.setMessages).not.toHaveBeenCalled();
+    expect(optionState.value.setServerChatId).not.toHaveBeenCalled();
   });
   afterEach(() => vi.restoreAllMocks());
 

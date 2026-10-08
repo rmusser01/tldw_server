@@ -668,7 +668,7 @@ export const chatRagMethods = {
       ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
     })
 
-    let list: any[] = []
+    let list: any[] | null = null
     let total: number | null = null
 
     if (Array.isArray(data)) {
@@ -691,6 +691,10 @@ export const chatRagMethods = {
       }
     }
 
+    if (!list || list.some((row) => !row || typeof row !== "object" || Array.isArray(row) ||
+      !(typeof row.id === "string" && row.id.trim() ||
+        typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0)))
+      throw new Error("The saved chat list response could not be verified.")
     const chats = list.map((c) => this.normalizeChatSummary(c))
     return {
       chats,
@@ -1784,12 +1788,12 @@ export const chatRagMethods = {
     return await bgRequest<any>({ path: '/api/v1/chat/dictionaries', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
   },
 
-  async listDictionaries(this: TldwApiClientCore, include_inactive?: boolean, include_usage?: boolean): Promise<any> {
+  async listDictionaries(this: TldwApiClientCore, include_inactive?: boolean, include_usage?: boolean, options?: ScopedRequestOptions): Promise<any> {
     const params = new URLSearchParams()
     if (include_inactive) params.set('include_inactive', 'true')
     if (include_usage) params.set('include_usage', 'true')
     const qp = params.toString()
-    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET' })
+    return await bgRequest<any>({ ...requestScopeFields(options?.requestScope), path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET', abortSignal: options?.signal })
   },
 
   async getDictionary(this: TldwApiClientCore, dictionary_id: number | string): Promise<any> {

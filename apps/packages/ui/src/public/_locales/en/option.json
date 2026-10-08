@@ -2669,11 +2669,11 @@
   "dictionariesList_stepPreviewBody": {
     "message": "— paste sample text to see the rules in action before going live."
   },
-  "dictionariesList_stepAssignTitle": {
-    "message": "Assign to chats"
+  "dictionariesList_savedChatLinksTitle": {
+    "message": "Inspect saved chat links"
   },
-  "dictionariesList_stepAssignBody": {
-    "message": "— link the dictionary to chat sessions so rules apply automatically."
+  "dictionariesList_savedChatLinksBody": {
+    "message": "— existing links are references. Saved chat assignment is unavailable in this server version."
   },
   "dictionariesList_searchPlaceholder": {
     "message": "Search dictionaries by name, description, category, or tags"
@@ -2705,8 +2705,8 @@
   "dictionariesList_emptyTitle": {
     "message": "No dictionaries yet"
   },
-  "dictionariesList_emptyDescription": {
-    "message": "Create your first dictionary to transform text consistently across chats."
+  "dictionariesList_previewEmptyDescription": {
+    "message": "Create a dictionary and preview its text transformations. Saved chat assignment is unavailable in this server version."
   },
   "dictionariesList_emptyExampleMedical": {
     "message": "Medical abbreviations (e.g., BP -> blood pressure)"

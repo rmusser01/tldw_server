@@ -95,16 +95,36 @@ export const useSelectServerChat = () => {
       discardTemporaryConfirmed?: true
       settingsNavigationConfirmed?: true
       temporaryChat?: false
+      isCurrent?: () => boolean
     }) => {
-      const source = captureChatDraftSource(captureSelectionFence?.())
+      const callerIsCurrent = options?.isCurrent ?? (() => true)
+      if (!callerIsCurrent()) return false
+      const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+      const source = captureChatDraftSource(selectionIsCurrent)
       const chatPath = typeof window !== "undefined" &&
         window.location.pathname.toLowerCase().endsWith("sidepanel.html") ? "/" : "/chat"
       if (options?.settingsNavigationConfirmed !== true && !requestSettingsNavigation(chatPath)) return false
-      if (!source.isCurrent()) return false
+      if (!source.isCurrent() || !callerIsCurrent()) return false
       if (options?.discardTemporaryConfirmed !== true && !confirmTemporaryChatDiscard()) return false
-      if (!source.isCurrent()) return false
-      // An explicitly normal linked open changes mode before its load receipt is captured.
-      if (options?.temporaryChat === false) useStoreMessageOption.getState().setTemporaryChat(false)
+      if (!source.isCurrent() || !callerIsCurrent()) return false
+      // A mode publication must not adopt a New/load published by a synchronous subscriber.
+      if (options?.temporaryChat === false) {
+        const before = useStoreMessageOption.getState()
+        const session = usePlaygroundSessionStore.getState()
+        before.setTemporaryChat(false)
+        const after = useStoreMessageOption.getState()
+        const changed = before.temporaryChat !== false
+        const addressCurrent = !changed || before.chatDraftAddress?.kind !== "fresh"
+          ? after.chatDraftAddress === before.chatDraftAddress
+          : after.chatDraftAddress?.kind === "fresh" && after.chatDraftAddress.id === before.chatDraftAddress.id &&
+            after.chatDraftAddress.scope === before.chatDraftAddress.scope && after.chatDraftAddress.temporary === false
+        if (!callerIsCurrent() || !selectionIsCurrent() || !addressCurrent ||
+          after.chatDraftRevision !== before.chatDraftRevision + (changed ? 1 : 0) ||
+          after.historyId !== before.historyId || after.serverChatId !== before.serverChatId ||
+          usePlaygroundSessionStore.getState().restoreRevision !== session.restoreRevision ||
+          usePlaygroundSessionStore.getState().sourceSelectionRevision !== session.sourceSelectionRevision) return false
+      }
+      if (!callerIsCurrent()) return false
       const acceptDraft = captureChatDraftLoad("switch")
       usePlaygroundSessionStore.getState().cancelPendingRestore()
       if (typeof window !== "undefined") {

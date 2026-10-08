@@ -50,9 +50,27 @@ const expectedScopeFields = {
 }
 
 describe("TldwApiClient captured request scope", () => {
+  it("pins dictionary source reads to the captured owner before catalogue display", async () => {
+    const client = new TldwApiClient()
+    const signal = new AbortController().signal
+    mocks.bgRequest.mockResolvedValue({ dictionaries: [] })
+    await (client.listDictionaries as unknown as (inactive: boolean, usage: boolean, options: { requestScope: typeof requestScope; signal: AbortSignal }) => Promise<unknown>)(true, true, { requestScope, signal })
+    expect(mocks.bgRequest.mock.calls[0][0]).toMatchObject({ path: "/api/v1/chat/dictionaries?include_inactive=true&include_usage=true", method: "GET", abortSignal: signal, headers: { "X-TLDW-Expected-User-ID": "42" }, servicePromptConfig: expectedScopeFields.servicePromptConfig })
+  })
+
   beforeEach(() => {
     mocks.bgRequest.mockReset()
     mocks.bgStream.mockReset()
+  })
+
+  it.each([null, {}, { chats: {} }])("does not manufacture empty chats from an unknown list response %j", async response => {
+    mocks.bgRequest.mockResolvedValue(response)
+    await expect(new TldwApiClient().listChatsWithMeta({}, { requestScope })).rejects.toThrow(/chat.*list|list.*chat/i)
+  })
+
+  it.each([null, {}, "saved", { id: "" }, { id: {} }, { id: Number.MAX_SAFE_INTEGER + 1 }])("rejects malformed chat rows before normalization %j", async row => {
+    mocks.bgRequest.mockResolvedValue({ chats: [row] })
+    await expect(new TldwApiClient().listChatsWithMeta({}, { requestScope })).rejects.toThrow(/chat.*list|list.*chat/i)
   })
 
   it("pins default Character reads and writes to the captured account", async () => {
