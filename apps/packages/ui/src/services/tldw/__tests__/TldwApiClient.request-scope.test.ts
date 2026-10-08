@@ -537,3 +537,41 @@ it("preserves default version URLs and forwards native page parameters and rows"
     headers: { "X-TLDW-Expected-User-ID": "42" }
   })
 })
+
+
+it.each([TldwApiClientBase, TldwApiClient])(
+  "native message reads and edits preserve captured workspace, principal and cancellation through %s",
+  async (Client) => {
+    mocks.bgRequest.mockReset()
+    const client = new Client()
+    const signal = new AbortController().signal
+    const options = { requestScope, signal, scope: { type: "workspace" as const, workspaceId: "original" } }
+    mocks.bgRequest.mockResolvedValue({ id: "m1", version: 2 })
+    await (client.getMessage as any)("m1", options)
+    await (client.editMessage as any)("m1", "Exact  \n", 1, "chat", options)
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining({
+        path: "/api/v1/messages/m1?scope_type=workspace&workspace_id=original", method: "GET",
+        abortSignal: signal, headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "42" }),
+        servicePromptConfig: expectedScopeFields.servicePromptConfig
+      }),
+      expect.objectContaining({
+        path: "/api/v1/messages/m1?expected_version=1&scope_type=workspace&workspace_id=original", method: "PUT",
+        body: { content: "Exact  \n" }, abortSignal: signal,
+        headers: expectedScopeFields.headers, servicePromptConfig: expectedScopeFields.servicePromptConfig
+      })
+    ])
+  }
+)
+
+it.each(["getMessage", "editMessage"])("native %s refuses pre-aborted owner requests before transport", async method => {
+  mocks.bgRequest.mockReset()
+  const client = new TldwApiClient()
+  const controller = new AbortController()
+  controller.abort()
+  const options = { requestScope, signal: controller.signal }
+  const pending = method === "getMessage" ? (client.getMessage as any)("m1", options)
+    : (client.editMessage as any)("m1", "Exact", 1, "chat", options)
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(mocks.bgRequest).not.toHaveBeenCalled()
+})

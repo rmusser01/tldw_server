@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
-import { act, renderHook, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
@@ -194,7 +194,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
     getConfig: vi.fn(async () => null),
     deleteMessage: vi.fn(async () => undefined),
-    getMessage: vi.fn(async () => ({ version: 1 })),
+    getMessage: h1.read,
+    editMessage: h1.write,
     resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
   }
 }))
@@ -327,7 +328,9 @@ const h1 = vi.hoisted(() => ({
   localSettle: vi.fn(),
   beforeModel: vi.fn(),
   lookupRecoveries: vi.fn(),
-  lookupAdmission: vi.fn()
+  lookupAdmission: vi.fn(),
+  read: vi.fn(),
+  write: vi.fn()
 }))
 vi.mock("@/store/connection", () => ({
   useConnectionStore: { getState: () => ({ state: { isConnected: h1.connected, phase: "connected", mode: "normal" } }) }
@@ -2476,7 +2479,7 @@ it("late leaf deletion retains its storage result without moving a new view", as
   expect(choose).not.toHaveBeenCalled()
   expect(options.setMessages).not.toHaveBeenCalled()
 })
-it("native plain edit/delete reject before any mutation or display change", async () => {
+it("unqualified native edits and unsupported deletes cannot mutate or change the display", async () => {
   const helpers = await import("@/db/dexie/helpers")
   const visible = [
     {
@@ -2497,7 +2500,7 @@ it("native plain edit/delete reject before any mutation or display change", asyn
   options.setMessages.mockClear()
   await expect(
     result.current.editMessage(0, "bad", false, false)
-  ).rejects.toThrow("native_history_mutation_unavailable")
+  ).resolves.toEqual({ status: "skipped", reason: "stale_selection" })
   await expect(result.current.deleteMessage(0)).rejects.toThrow(
     "native_history_mutation_unavailable"
   )
@@ -4698,5 +4701,503 @@ it.each([false, true])(
       })
     }
     expect(store.getState().detachedHistoryResponse).toBeNull()
+  }
+)
+
+
+const mountNativePlainSave = async (
+  role: "user" | "assistant",
+  character = false
+) => {
+  const { useHistorySelection } = await vi.importActual<
+    typeof import("@/hooks/chat/useHistorySelection")
+  >("@/hooks/chat/useHistorySelection")
+  const { formatSelectedHistory } =
+    await vi.importActual<typeof import("@/db/dexie/helpers")>(
+      "@/db/dexie/helpers"
+    )
+  const { useStoreMessageOption: draftStore } =
+    await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  const messageId = role === "user" ? "u-old" : "a1"
+  const server = { version: 1, text: "Original {{char}}  \n" }
+  h1.capture.mockImplementation(async (_id, request) => {
+    const captured = captureFor({ ...request.view, owner_key: "native-key" })
+    captured.snapshot.nodes.forEach((node) => {
+      node.revision =
+        node.id === messageId
+          ? `opaque-target-${server.version}`
+          : "opaque-other"
+      if (node.id === messageId)
+        Object.assign(node, {
+          metadata: [
+            { id: messageId, kind: "message_metadata", revision: "preserved" }
+          ]
+        })
+    })
+    captured.selected_content.forEach((row) => {
+      row.revision =
+        row.id === messageId
+          ? `opaque-target-${server.version}`
+          : "opaque-other"
+      if (row.id === messageId)
+        Object.assign(row, {
+          message: server.text,
+          extra_metadata: {
+            sender_role: role,
+            pinned: true,
+            nested: { value: 1 }
+          }
+        })
+    })
+    return captured
+  })
+  const publish = vi.fn((capture: any) => {
+    const projection = formatSelectedHistory(capture)
+    draftStore.setState(projection)
+    messageStoreState.editRows = () => draftStore.getState().messages
+  })
+  const selection = renderHook(() =>
+    useHistorySelection({ onCapture: publish })
+  )
+  await act(async () => {
+    expect(
+      await selection.result.current.loadConversation({
+        serverChatId: nativeChatId
+      })
+    ).toBe(true)
+  })
+  h1.controller = selection.result.current
+  await act(async () => {
+    expect(
+      await selection.result.current.choose({
+        kind: "after_message",
+        message_id: "a1"
+      })
+    ).toBe(true)
+  })
+  const origin = selection.result.current.getCurrent().capture!
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  const read = vi.mocked(api.getMessage),
+    write = vi.mocked(api.editMessage)
+  const wire = () => ({
+    id: messageId,
+    conversation_id: nativeChatId,
+    parent_message_id: role === "user" ? null : "u-old",
+    sender: role,
+    content: server.text,
+    has_image: false,
+    version: server.version
+  })
+  read.mockReset().mockImplementation(async () => wire())
+  write.mockReset().mockImplementation(async (_id, text) => {
+    server.version++
+    server.text = text
+    return { ...wire(), content: text.replace("{{user}}", "Alice") }
+  })
+  const projection = formatSelectedHistory(origin as any)
+  const options = {
+    ...ordinaryOptions(),
+    ...projection,
+    serverChatId: nativeChatId,
+    selectedCharacter: character ? { id: 12, name: "Mira" } : null,
+    serverChatCharacterId: character ? "12" : null,
+    serverChatAssistantKind: character ? "character" : null
+  }
+  const hook = renderHook(() => useChatActions(options as any))
+  ;(hook as any).flat = options
+  options.setMessages.mockClear()
+  options.setHistory.mockClear()
+  const index = role === "user" ? 0 : 1
+  publish.mockClear()
+  return {
+    hook,
+    selection,
+    publish,
+    origin,
+    owner: selection.result.current.getCurrent().owner!,
+    server,
+    read,
+    write,
+    index,
+    role,
+    draftStore,
+    wire,
+    cleanup: () => {
+      hook.unmount()
+      selection.unmount()
+    }
+  }
+}
+
+it.each([
+  { role: "user" as const, character: false },
+  { role: "assistant" as const, character: false },
+  { role: "user" as const, character: true },
+  { role: "assistant" as const, character: true }
+])(
+  "native plain Save $role character=$character acknowledges only canonical raw text",
+  async ({ role, character }) => {
+    const mounted = await mountNativePlainSave(role, character)
+    const helpers = await import("@/db/dexie/helpers")
+    const original = structuredClone(mounted.origin)
+    let outcome: unknown
+    try {
+      await act(async () => {
+        outcome = await mounted.hook.result.current.editMessage(
+          mounted.index,
+          "Edited {{user}}  \n",
+          role === "user",
+          false,
+          () => true
+        )
+      })
+      expect(outcome).toEqual({ status: "submitted" })
+      expect(mounted.write).toHaveBeenCalledExactlyOnceWith(
+        role === "user" ? "u-old" : "a1",
+        "Edited {{user}}  \n",
+        1,
+        nativeChatId,
+        expect.objectContaining({
+          requestScope: mounted.owner.request_scope,
+          scope: mounted.owner.scope,
+          signal: expect.any(AbortSignal)
+        })
+      )
+      expect(
+        mounted.selection.result.current.getCurrent().view?.cursor
+      ).toEqual(original.view.cursor)
+      const capture = mounted.selection.result.current.getCurrent().capture
+      expect(capture?.status).toBe("captured")
+      if (capture?.status !== "captured")
+        throw new Error("missing canonical capture")
+      expect(capture.selected_content[mounted.index]).toMatchObject({
+        message: "Edited {{user}}  \n",
+        revision: "opaque-target-2",
+        extra_metadata: original.selected_content[mounted.index].extra_metadata
+      })
+      expect(
+        capture.snapshot.nodes.map((row) => ({
+          id: row.id,
+          parent: row.parent_id
+        }))
+      ).toEqual(
+        original.snapshot.nodes.map((row) => ({
+          id: row.id,
+          parent: row.parent_id
+        }))
+      )
+      expect(mounted.publish).toHaveBeenCalledOnce()
+      expect(helpers.updateMessageById).not.toHaveBeenCalled()
+      expect(h1.wire).not.toHaveBeenCalled()
+      expect((mounted.hook as any).flat.setMessages).not.toHaveBeenCalled()
+      expect((mounted.hook as any).flat.setHistory).not.toHaveBeenCalled()
+    } finally {
+      mounted.cleanup()
+    }
+  }
+)
+
+it.each(
+  ["read", "write", "refresh", "final-read"].flatMap((stage) =>
+    [
+      "editor",
+      "new-draft",
+      "same-id-epoch",
+      "account",
+      "streaming",
+      "isProcessing"
+    ].map((boundary) => ({ stage, boundary }))
+  )
+)(
+  "native plain Save retains the current source after $boundary during held $stage",
+  async ({ stage, boundary }) => {
+    const mounted = await mountNativePlainSave("user")
+    let current = true,
+      reached = false,
+      release!: () => void
+    const held = new Promise<void>((accept) => {
+      release = accept
+    })
+    if (stage === "final-read") {
+      const original = mounted.read.getMockImplementation()!
+      mounted.read.mockImplementation(async (...args: any[]) => {
+        if (mounted.server.version === 2 && !reached) {
+          reached = true
+          await held
+        }
+        return (original as any)(...args)
+      })
+    } else if (stage !== "refresh") {
+      const boundary = stage === "read" ? mounted.read : mounted.write
+      const original = boundary.getMockImplementation()!
+      boundary.mockImplementationOnce(async (...args: any[]) => {
+        reached = true
+        await held
+        return (original as any)(...args)
+      })
+    } else {
+      const original = h1.capture.getMockImplementation()!
+      h1.capture.mockImplementation(async (...args) => {
+        if (mounted.server.version === 2 && !reached) {
+          reached = true
+          await held
+        }
+        return original(...args)
+      })
+    }
+    let pending!: Promise<unknown>
+    try {
+      act(() => {
+        pending = mounted.hook.result.current.editMessage(
+          0,
+          "Kept authored edit",
+          true,
+          false,
+          () => current
+        )
+        void pending.catch(() => {})
+      })
+      await waitFor(() => expect(reached).toBe(true))
+      if (boundary === "editor") current = false
+      else if (boundary === "streaming" || boundary === "isProcessing")
+        mounted.draftStore.setState({ [boundary]: true })
+      else if (boundary === "new-draft")
+        mounted.draftStore.getState().startNewChatDraft()
+      else if (boundary === "same-id-epoch")
+        act(() => {
+          mounted.selection.result.current.beginLoad()
+        })
+      else
+        act(() => {
+          window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+        })
+      const replacement = mounted.selection.result.current.getCurrent().capture
+      let outcome: unknown
+      await act(async () => {
+        release()
+        outcome = await pending
+      })
+      expect(outcome).toMatchObject({ status: "skipped" })
+      expect(mounted.write).toHaveBeenCalledTimes(stage === "read" ? 0 : 1)
+      expect(mounted.publish).not.toHaveBeenCalled()
+      expect(mounted.selection.result.current.getCurrent().capture).toBe(
+        replacement
+      )
+    } finally {
+      release?.()
+      await pending?.catch(() => {})
+      mounted.draftStore.setState({ streaming: false, isProcessing: false })
+      mounted.cleanup()
+    }
+  }
+)
+
+
+it.each(["streaming", "isProcessing"])(
+  "an open native editor refuses Save during live %s",
+  async (flag) => {
+    const mounted = await mountNativePlainSave("user")
+    const signal = mounted.selection.result.current.getSignal()
+    try {
+      mounted.draftStore.setState({ [flag]: true })
+      let outcome: unknown
+      await act(async () => {
+        outcome = await mounted.hook.result.current.editMessage(
+          0,
+          "Held authored text",
+          true,
+          false,
+          () => true
+        )
+      })
+      expect(outcome).toMatchObject({ status: "skipped" })
+      expect(mounted.read).not.toHaveBeenCalled()
+      expect(mounted.write).not.toHaveBeenCalled()
+      expect(mounted.publish).not.toHaveBeenCalled()
+      expect(mounted.selection.result.current.getSignal()).toBe(signal)
+      expect(signal?.aborted).toBe(false)
+    } finally {
+      mounted.draftStore.setState({ streaming: false, isProcessing: false })
+      mounted.cleanup()
+    }
+  }
+)
+
+
+it.each(["read", "write", "refresh"])(
+  "the mounted native editor keeps newer text saveable after typing during %s",
+  async (stage) => {
+    const mounted = await mountNativePlainSave("user")
+    const { EditMessageForm } = await import(
+      "@/components/Common/Playground/EditMessageForm"
+    )
+    const close = vi.fn()
+    function Editor() {
+      const rows = mounted.draftStore((state) => state.messages)
+      const actions = useChatActions({
+        ...(mounted.hook as any).flat,
+        messages: rows,
+        history: mounted.draftStore.getState().history
+      })
+      return (
+        <EditMessageForm
+          value={rows[0].message}
+          isBot={false}
+          onClose={close}
+          onSumbit={(value, send, current, origin) =>
+            (actions.editMessage as any)(0, value, true, send, current, origin)
+          }
+        />
+      )
+    }
+    let reached = false,
+      release!: () => void
+    const held = new Promise<void>((accept) => {
+      release = accept
+    })
+    if (stage !== "refresh") {
+      const boundary = stage === "read" ? mounted.read : mounted.write
+      const original = boundary.getMockImplementation()!
+      boundary.mockImplementationOnce(async (...args: any[]) => {
+        reached = true
+        await held
+        return (original as any)(...args)
+      })
+    } else {
+      const original = h1.capture.getMockImplementation()!
+      h1.capture.mockImplementation(async (...args) => {
+        if (mounted.server.version === 2 && !reached) {
+          reached = true
+          await held
+        }
+        return original(...args)
+      })
+    }
+    const view = render(<Editor />)
+    try {
+      const textarea = screen.getByRole("textbox")
+      fireEvent.change(textarea, { target: { value: "First {{user}}  \n" } })
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(reached).toBe(true))
+      fireEvent.change(textarea, {
+        target: { value: "Newer authored edit  \n" }
+      })
+      await act(async () => {
+        release()
+        await held
+      })
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^save$/i })).toBeEnabled()
+      )
+      expect(close).not.toHaveBeenCalled()
+      expect(textarea).toHaveValue("Newer authored edit  \n")
+      expect(mounted.write).toHaveBeenCalledTimes(stage === "read" ? 0 : 1)
+      if (stage !== "read")
+        expect(mounted.draftStore.getState().messages[0].message).toBe(
+          "First {{user}}  \n"
+        )
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(close).toHaveBeenCalledOnce())
+      expect(
+        mounted.write.mock.calls.map(([, text, version]) => [text, version])
+      ).toEqual(
+        stage === "read"
+          ? [["Newer authored edit  \n", 1]]
+          : [
+              ["First {{user}}  \n", 1],
+              ["Newer authored edit  \n", 2]
+            ]
+      )
+    } finally {
+      release?.()
+      view.unmount()
+      mounted.cleanup()
+    }
+  }
+)
+
+
+it.each(["write", "refresh", "final-read"])(
+  "Cancel retires the actual native editor during %s",
+  async (stage) => {
+    const mounted = await mountNativePlainSave("user")
+    const { EditMessageForm } = await import(
+      "@/components/Common/Playground/EditMessageForm"
+    )
+    const close = vi.fn()
+    function Editor() {
+      const rows = mounted.draftStore((state) => state.messages)
+      const actions = useChatActions({
+        ...(mounted.hook as any).flat,
+        messages: rows,
+        history: mounted.draftStore.getState().history
+      })
+      return (
+        <EditMessageForm
+          value={rows[0].message}
+          isBot={false}
+          onClose={close}
+          onSumbit={(value, send, current, origin) =>
+            actions.editMessage(0, value, true, send, current, origin)
+          }
+        />
+      )
+    }
+    let reached = false,
+      release!: () => void
+    const held = new Promise<void>((accept) => {
+      release = accept
+    })
+    if (stage === "write") {
+      const original = mounted.write.getMockImplementation()!
+      mounted.write.mockImplementationOnce(async (...args: any[]) => {
+        reached = true
+        await held
+        return (original as any)(...args)
+      })
+    } else if (stage === "final-read") {
+      const original = mounted.read.getMockImplementation()!
+      mounted.read.mockImplementation(async (...args: any[]) => {
+        if (mounted.server.version === 2 && !reached) {
+          reached = true
+          await held
+        }
+        return (original as any)(...args)
+      })
+    } else {
+      const original = h1.capture.getMockImplementation()!
+      h1.capture.mockImplementation(async (...args) => {
+        if (mounted.server.version === 2 && !reached) {
+          reached = true
+          await held
+        }
+        return original(...args)
+      })
+    }
+    const view = render(<Editor />)
+    try {
+      fireEvent.change(screen.getByRole("textbox"), {
+        target: { value: "Cancelled authored edit" }
+      })
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(reached).toBe(true))
+      fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
+      await act(async () => {
+        release()
+        await held
+      })
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^save$/i })).toBeEnabled()
+      )
+      expect(close).toHaveBeenCalledOnce()
+      expect(mounted.publish).not.toHaveBeenCalled()
+      expect(mounted.selection.result.current.getCurrent().capture).toBe(
+        mounted.origin
+      )
+    } finally {
+      release?.()
+      view.unmount()
+      mounted.cleanup()
+    }
   }
 )

@@ -689,3 +689,297 @@ def test_factory_opening_change_preserves_supplied_and_existing_named_rows(
         for row in db.get_messages_for_conversation(cid)
     ] == [("supplied-root", "Supplied Greeter", "Keep {{char}} raw", None)]
     assert db.get_message_by_id(old_id) == old
+
+
+@pytest.mark.parametrize("role", ["user", "assistant"])
+@pytest.mark.parametrize("character", [False, True])
+@pytest.mark.parametrize("workspace", [False, True])
+def test_plain_message_save_preserves_owned_graph_and_raw_acknowledgement(
+    history_api, role, character, workspace
+):
+    """Exercise real GET/CAS/H1: displayed PUT text is not raw saved content."""
+    client, db, cid, headers = history_api
+    scope = {"scope_type": "global"}
+    if character or workspace:
+        payload = {"title": "Native Save", "character_id": None}
+        if character:
+            payload["character_id"] = db.add_character_card({"name": "Mira"})
+        if workspace:
+            db.upsert_workspace("save-workspace", "Save workspace")
+            scope = {"scope_type": "workspace", "workspace_id": "save-workspace"}
+            payload.update(scope)
+        created = client.post(
+            "/api/v1/chats/",
+            headers=headers,
+            params={"seed_first_message": False},
+            json=payload,
+        )
+        assert created.status_code == 201, created.text
+        cid = created.json()["id"]
+    bootstrap = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        params=scope,
+        json={
+            "purpose": "send",
+            "view": {
+                "view_session_id": "save-fixture",
+                "conversation_id": cid,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "cursor": {"kind": "empty"},
+                "selection_revision": 0,
+            },
+        },
+    )
+    assert bootstrap.status_code == 200, bootstrap.text
+    body = bootstrap.json()
+    assert body["status"] == "captured"
+    selection = resolve_history_selection(
+        body["snapshot"], body["view"], "send", "save-fixture"
+    )["selection"]
+    accepted = client.post(
+        f"/api/v1/chats/{cid}/messages",
+        headers=headers,
+        params=scope,
+        json={
+            "id": "save-user",
+            "role": "user",
+            "content": "Original {{char}}  \n",
+            "tldw_history_selection_v1": selection,
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    ids = {"user": accepted.json()["id"]}
+    admission = accepted.json()["tldw_history_admission_v1"]
+    reference = {
+        key: admission[key]
+        for key in (
+            "version",
+            "owner_key",
+            "conversation_id",
+            "input_message_id",
+            "input_message_revision",
+            "selection_digest",
+        )
+    }
+    for label in ("reply", "sibling"):
+        added = client.post(
+            f"/api/v1/chats/{cid}/messages",
+            headers=headers,
+            params=scope,
+            json={
+                "id": f"save-{label}",
+                "role": "assistant",
+                "content": "Original {{char}}  \n",
+                "tldw_history_admission_v1": reference,
+            },
+        )
+        assert added.status_code == 201, added.text
+        ids[label] = added.json()["id"]
+    target = ids["user" if role == "user" else "reply"]
+    db.add_message_metadata(target, tool_calls=[{"id": "tool", "name": "lookup"}])
+    db.set_message_metadata_extra(
+        target,
+        {
+            "sender_role": role,
+            "pinned": True,
+            "nested": {"value": 1},
+        },
+    )
+    metadata = db.get_message_metadata(target)
+    sibling = db.get_message_by_id(ids["sibling"])
+    view = {
+        "view_session_id": "save-view",
+        "conversation_id": cid,
+        "interpretation": {"kind": "parent_graph_v1"},
+        "cursor": {"kind": "after_message", "message_id": ids["reply"]},
+        "selection_revision": 1,
+    }
+    before_response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        params=scope,
+        json={"purpose": "send", "view": view},
+    )
+    assert before_response.status_code == 200, before_response.text
+    before = before_response.json()
+    raw = client.get(f"/api/v1/messages/{target}", headers=headers, params=scope)
+    assert raw.status_code == 200, raw.text
+    version = raw.json()["version"]
+    edited = "  {{char}} answers {{user}}.\n\nExact authored edit  "
+    saved = client.put(
+        f"/api/v1/messages/{target}",
+        headers=headers,
+        params={**scope, "expected_version": version},
+        json={"content": edited},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["version"] == version + 1
+    assert saved.json()["content"] != edited
+    after_response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        params=scope,
+        json={"purpose": "send", "view": before["view"]},
+    )
+    assert after_response.status_code == 200, after_response.text
+    after = after_response.json()
+    after_node = next(node for node in after["rows"] if node["id"] == target)
+    before_node = next(node for node in before["rows"] if node["id"] == target)
+    assert after_node["revision"] != before_node["revision"]
+    assert after_node["revision"] != str(saved.json()["version"])
+    for field in ("parent_id", "role", "settled", "metadata", "assets", "comparison"):
+        assert after_node.get(field) == before_node.get(field)
+    assert after["view"] == before["view"]
+    selected = next(row for row in after["selected_content"] if row["id"] == target)
+    assert selected["message"] == edited
+    assert selected["tool_calls"] == metadata["tool_calls"]
+    assert selected["extra_metadata"] == metadata["extra"]
+    readback = client.get(f"/api/v1/messages/{target}", headers=headers, params=scope)
+    assert readback.status_code == 200
+    assert readback.json()["content"] == edited
+    assert readback.json()["version"] == version + 1
+    assert db.get_message_metadata(target) == metadata
+    assert db.get_message_by_id(ids["sibling"]) == sibling
+    conflict = client.put(
+        f"/api/v1/messages/{target}",
+        headers=headers,
+        params={**scope, "expected_version": version},
+        json={"content": "Lost edit"},
+    )
+    assert conflict.status_code == 409, conflict.text
+    final_response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        params=scope,
+        json={"purpose": "send", "view": before["view"]},
+    )
+    assert final_response.status_code == 200
+    assert final_response.json() == after
+
+
+@pytest.mark.parametrize("boundary", ["account", "workspace", "trashed"])
+def test_plain_message_save_refuses_retired_owner_without_mutation(
+    history_api, boundary
+):
+    """The real message route must reject stale owner/scope and hidden chats."""
+    client, db, cid, headers = history_api
+    mid = db.add_message(
+        {
+            "id": "owner-save",
+            "conversation_id": cid,
+            "sender": "user",
+            "content": "Kept",
+            "parent_message_id": None,
+        }
+    )
+    request_headers = headers
+    params = {"expected_version": 1}
+    expected_status = 404
+    if boundary == "account":
+        request_headers = {**headers, "X-TLDW-Expected-User-ID": "another-account"}
+        expected_status = 412
+    elif boundary == "workspace":
+        params.update({"scope_type": "workspace", "workspace_id": "other"})
+    else:
+        conversation = db.get_conversation_by_id(cid)
+        assert db.soft_delete_conversation(
+            cid, expected_version=conversation["version"]
+        )
+    before = db.get_message_by_id(mid, include_deleted=True)
+    read = client.get(f"/api/v1/messages/{mid}", headers=request_headers, params=params)
+    assert read.status_code == expected_status, read.text
+    written = client.put(
+        f"/api/v1/messages/{mid}",
+        headers=request_headers,
+        params=params,
+        json={"content": "Wrong owner edit"},
+    )
+    assert written.status_code == expected_status, written.text
+    assert db.get_message_by_id(mid, include_deleted=True) == before
+
+
+@pytest.mark.parametrize(
+    "operation", ["read", "list", "search", "edit", "delete", "add"]
+)
+def test_message_routes_reject_stale_expected_account(history_api, operation):
+    """Every message route shares the original-account assertion at the router."""
+    client, db, cid, headers = history_api
+    mid = db.add_message(
+        {
+            "id": "scoped-message",
+            "conversation_id": cid,
+            "sender": "user",
+            "content": "Kept",
+            "parent_message_id": None,
+        }
+    )
+    stale = {**headers, "X-TLDW-Expected-User-ID": "another-account"}
+    before = db.get_message_by_id(mid, include_deleted=True)
+    if operation == "read":
+        response = client.get(f"/api/v1/messages/{mid}", headers=stale)
+    elif operation == "list":
+        response = client.get(f"/api/v1/chats/{cid}/messages", headers=stale)
+    elif operation == "search":
+        response = client.get(
+            f"/api/v1/chats/{cid}/messages/search",
+            headers=stale,
+            params={"query": "Kept"},
+        )
+    elif operation == "edit":
+        response = client.put(
+            f"/api/v1/messages/{mid}",
+            headers=stale,
+            params={"expected_version": 1},
+            json={"content": "Wrong account"},
+        )
+    elif operation == "delete":
+        response = client.delete(
+            f"/api/v1/messages/{mid}", headers=stale, params={"expected_version": 1}
+        )
+    else:
+        response = client.post(
+            f"/api/v1/chats/{cid}/messages",
+            headers=stale,
+            json={"role": "user", "content": "Wrong account"},
+        )
+    assert response.status_code == 412, response.text
+    assert response.json()["detail"]["code"] == "request_config_scope_changed"
+    assert response.headers["cache-control"] == "no-store"
+    assert db.get_message_by_id(mid, include_deleted=True) == before
+    assert db.count_messages_for_conversation(cid) == 1
+
+
+@pytest.mark.parametrize("expected_account", [None, "1"])
+def test_message_routes_accept_current_expected_account(history_api, expected_account):
+    """Absent-header clients and matching scoped clients retain GET/PUT behavior."""
+    client, db, cid, headers = history_api
+    mid = db.add_message(
+        {
+            "id": "current-save",
+            "conversation_id": cid,
+            "sender": "user",
+            "content": "Original",
+            "parent_message_id": None,
+        }
+    )
+    current = (
+        headers
+        if expected_account is None
+        else {
+            **headers,
+            "X-TLDW-Expected-User-ID": expected_account,
+        }
+    )
+    read = client.get(f"/api/v1/messages/{mid}", headers=current)
+    assert read.status_code == 200, read.text
+    assert read.json()["content"] == "Original"
+    saved = client.put(
+        f"/api/v1/messages/{mid}",
+        headers=current,
+        params={"expected_version": read.json()["version"]},
+        json={"content": "Exact saved edit  \n"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["version"] == read.json()["version"] + 1
+    assert db.get_message_by_id(mid)["content"] == "Exact saved edit  \n"

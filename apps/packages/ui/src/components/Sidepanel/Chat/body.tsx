@@ -116,8 +116,9 @@ export const SidePanelBody = ({
       value: string,
       isUser: boolean,
       isSend: boolean,
-      editIsCurrent?: () => boolean
-    ) => editMessage(index, value, isUser, isSend, editIsCurrent),
+      editIsCurrent?: () => boolean,
+                          editOriginIsCurrent?: () => boolean
+    ) => editMessage(index, value, isUser, isSend, editIsCurrent, editOriginIsCurrent),
     [editMessage]
   )
   const handleDeleteMessage = React.useCallback(
@@ -288,13 +289,14 @@ export const SidePanelBody = ({
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
-                  onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                  onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
                     return handleEditMessage(
                       index,
                       value,
                       !message.isBot,
                       isSend,
-                      editIsCurrent
+                      editIsCurrent,
+                      editOriginIsCurrent
                     )
                   }}
                   onDeleteMessage={() => {

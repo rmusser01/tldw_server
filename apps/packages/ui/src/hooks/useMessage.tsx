@@ -3187,6 +3187,7 @@ export const useMessage = () => {
   const ordinaryLocalMutation =
     !serverChatId && historySelection?.getCurrent().status === "idle";
   const editMessage = createEditMessage({
+    serverChatId,
     historySelection,
     notification,
     messages,

@@ -10,7 +10,8 @@ type Props = {
   onSumbit: (
     value: string,
     isSend: boolean,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
   ) => unknown
   onClose: () => void
   isBot: boolean
@@ -83,14 +84,14 @@ export const EditMessageForm = (props: Props) => {
     setPending(true)
     setFeedback(null)
     try {
-      const isCurrent = () =>
+      const isOriginCurrent = () =>
         mounted.current &&
         attempt.current === currentAttempt &&
-        form.getRevision() === revision &&
         (source.current.revision === originalSource.revision ||
           (source.current.revision === originalSource.revision + 1 &&
             source.current.value === value))
-      const outcome = props.onSumbit(value, isSend, isCurrent)
+      const isCurrent = () => isOriginCurrent() && form.getRevision() === revision
+      const outcome = props.onSumbit(value, isSend, isCurrent, isOriginCurrent)
       const asynchronous =
         outcome !== null &&
         (typeof outcome === "object" || typeof outcome === "function") &&

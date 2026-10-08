@@ -370,6 +370,180 @@ export const captureHistorySnapshot = async (
   return freeze(result)
 }
 
+export type NativeMessageEditReceipt = Readonly<{
+  message_id: string
+  message: string
+  version: number
+}>
+
+const nativeEditTarget = (
+  capture: HistorySelectionCaptureV1,
+  messageId: string
+) => {
+  const nodes = capture.rows.filter((row) => row.id === messageId)
+  const members = capture.snapshot.nodes.filter((row) => row.id === messageId)
+  const content = capture.selected_content.filter((row) => row.id === messageId)
+  if (
+    nodes.length !== 1 ||
+    members.length !== 1 ||
+    content.length !== 1 ||
+    canonicalHistoryJson(nodes[0]) !== canonicalHistoryJson(members[0]) ||
+    content[0].revision !== nodes[0].revision ||
+    !nodes[0].settled ||
+    !["user", "assistant"].includes(nodes[0].role)
+  )
+    fail("message_changed")
+  if (content[0].images.length) fail("unsupported_message_payload")
+  return { node: nodes[0], content: content[0] }
+}
+const nativeEditPreservedState = (
+  target: ReturnType<typeof nativeEditTarget>
+) => ({
+  parent: target.node.parent_id,
+  role: target.node.role,
+  settled: target.node.settled,
+  legacy_projection_id: target.node.legacy_projection_id ?? null,
+  metadata: target.node.metadata ?? [],
+  assets: target.node.assets ?? [],
+  comparison: target.node.comparison ?? null,
+  extra_metadata: target.content.extra_metadata ?? null,
+  tool_calls: target.content.tool_calls ?? null
+})
+
+/** A content-only edit must be canonically recaptured before replacing its mounted source. */
+export const qualifyNativeMessageEditCapture = (
+  original: HistorySelectionCaptureV1,
+  refreshed: HistorySelectionCaptureV1,
+  receipt: NativeMessageEditReceipt
+): void => {
+  const before = nativeEditTarget(original, receipt.message_id)
+  const after = nativeEditTarget(refreshed, receipt.message_id)
+  if (
+    original.snapshot.owner_key !== refreshed.snapshot.owner_key ||
+    original.snapshot.conversation_id !== refreshed.snapshot.conversation_id ||
+    canonicalHistoryJson(original.view) !==
+      canonicalHistoryJson(refreshed.view) ||
+    !Number.isSafeInteger(receipt.version) ||
+    receipt.version <= 1 ||
+    after.node.revision === before.node.revision ||
+    after.content.message !== receipt.message ||
+    canonicalHistoryJson(nativeEditPreservedState(before)) !==
+      canonicalHistoryJson(nativeEditPreservedState(after))
+  )
+    fail("message_changed")
+}
+
+/** Reuse the native target CAS; never turn an in-place Save into a local history mutation. */
+export const saveNativeHistoryMessage = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  target: { id: string; message: string; isBot?: boolean },
+  message: string,
+  options?: HistoryOperationOptions & {
+    acknowledgement_current?: () => boolean
+  }
+): Promise<NativeMessageEditReceipt> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.view.interpretation.kind !== "parent_graph_v1")
+    fail("unsupported_history_capability")
+  const original = nativeEditTarget(capture, target.id)
+  if (
+    original.content.message !== target.message ||
+    original.node.role !== (target.isBot ? "assistant" : "user")
+  )
+    fail("message_changed")
+  if (!message.trim()) fail("unsupported_message_payload")
+  const scoped = nativeOptions(owner, options?.signal)
+  const row = await tldwClient.getMessage(target.id, scoped)
+  assertOwnerLease(owner, options)
+  if (
+    !row ||
+    row.id !== target.id ||
+    row.conversation_id !== owner.conversation_id ||
+    row.sender !== original.node.role ||
+    row.parent_message_id !== original.node.parent_id ||
+    row.has_image !== false ||
+    row.content !== target.message ||
+    !Number.isSafeInteger(row.version) ||
+    row.version <= 0 ||
+    row.version >= Number.MAX_SAFE_INTEGER
+  )
+    fail("message_changed")
+  const fresh = await captureHistorySnapshot(
+    owner,
+    capture.view,
+    "send",
+    options?.signal
+  )
+  assertOwnerLease(owner, options)
+  if (fresh.status !== "captured") return fail(fresh.code)
+  if (
+    canonicalHistoryJson(original) !==
+    canonicalHistoryJson(nativeEditTarget(fresh, target.id))
+  )
+    fail("message_changed")
+  const result = await tldwClient.editMessage(
+    target.id,
+    message,
+    row.version,
+    owner.conversation_id,
+    scoped
+  )
+  assertOwnerLease(owner, {
+    ...options,
+    validate_lease: options?.acknowledgement_current ?? options?.validate_lease
+  })
+  // PUT may render roleplay placeholders; the subsequent raw capture certifies the edited text.
+  if (
+    !result ||
+    result.id !== target.id ||
+    result.conversation_id !== owner.conversation_id ||
+    result.sender !== row.sender ||
+    result.parent_message_id !== row.parent_message_id ||
+    result.has_image !== false ||
+    typeof result.content !== "string" ||
+    !Number.isSafeInteger(result.version) ||
+    result.version !== row.version + 1
+  )
+    fail("message_edit_unconfirmed")
+  return Object.freeze({
+    message_id: target.id,
+    message,
+    version: result.version
+  })
+}
+
+/** Keep opaque snapshot revisions separate from the server message version CAS. */
+export const verifyNativeMessageEditReceipt = async (
+  owner: NativeHistoryOwnerV1,
+  original: HistorySelectionCaptureV1,
+  receipt: NativeMessageEditReceipt,
+  options?: HistoryOperationOptions
+): Promise<void> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, original.snapshot, true)
+  const target = nativeEditTarget(original, receipt.message_id)
+  const row = await tldwClient.getMessage(
+    receipt.message_id,
+    nativeOptions(owner, options?.signal)
+  )
+  assertOwnerLease(owner, options)
+  if (
+    !Number.isSafeInteger(receipt.version) ||
+    receipt.version <= 1 ||
+    !row ||
+    row.id !== receipt.message_id ||
+    row.conversation_id !== owner.conversation_id ||
+    row.sender !== target.node.role ||
+    row.parent_message_id !== target.node.parent_id ||
+    row.has_image !== false ||
+    row.content !== receipt.message ||
+    row.version !== receipt.version
+  )
+    fail("message_edit_unconfirmed")
+}
+
 /** Capture an explicit branch without replacing the mounted source/editor. */
 export const nativeEditResendView = (
   owner: HistoryOwnerV1,

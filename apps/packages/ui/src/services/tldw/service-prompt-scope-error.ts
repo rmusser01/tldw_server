@@ -110,6 +110,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (/^\/api\/v1\/messages\/[^/]+$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
   if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
   if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))

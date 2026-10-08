@@ -1358,13 +1358,14 @@ export const PlaygroundChat = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
                   return editMessage(
                     block.index,
                     value,
                     !message.isBot,
                     isSend,
-                    editIsCurrent
+                    editIsCurrent,
+                    editOriginIsCurrent
                   )
                 }}
                 onDeleteMessage={() => {

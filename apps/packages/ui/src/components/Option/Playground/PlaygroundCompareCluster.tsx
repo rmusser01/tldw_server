@@ -74,7 +74,8 @@ type PlaygroundCompareClusterProps = {
     value: string,
     isUser: boolean,
     isSend?: boolean,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
   ) => unknown
   deleteMessage: (index: number) => void
   toggleMessagePinned: (index: number) => Promise<void> | void
@@ -436,13 +437,14 @@ export const PlaygroundCompareCluster = ({
         isProcessing={isProcessing}
         isSearchingInternet={isSearchingInternet}
         sources={userMessage.sources}
-        onEditFormSubmit={(value, isSend, editIsCurrent) => {
+        onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
           return editMessage(
             block.userIndex,
             value,
             !userMessage.isBot,
             isSend,
-            editIsCurrent
+            editIsCurrent,
+            editOriginIsCurrent
           )
         }}
         onDeleteMessage={() => {
@@ -985,13 +987,14 @@ export const PlaygroundCompareCluster = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
                   return editMessage(
                     index,
                     value,
                     !message.isBot,
                     isSend,
-                    editIsCurrent
+                    editIsCurrent,
+                    editOriginIsCurrent
                   )
                 }}
                 onDeleteMessage={() => {

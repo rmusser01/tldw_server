@@ -36,6 +36,9 @@ import {
   readNativeForkSettings,
   updateNativeForkSettings,
   captureHistorySnapshot,
+  qualifyNativeMessageEditCapture,
+  verifyNativeMessageEditReceipt,
+  type NativeMessageEditReceipt,
   confirmLegacyHistoryProjection,
   type HistoryOwnerV1
 } from "@/services/chat-history-selection"
@@ -558,6 +561,64 @@ export function useHistorySelection(
       return false
     }
   }, [install, invalidate, publish])
+  const refreshEditedMessage = useCallback(
+    async (
+      origin: import("@/types/history-selection").HistorySelectionCaptureV1,
+      receipt: NativeMessageEditReceipt,
+      isCurrent: () => boolean
+    ) => {
+      const current = live.current
+      if (
+        current.status !== "ready" ||
+        current.owner?.kind !== "native" ||
+        current.capture !== origin ||
+        current.view !== origin.view ||
+        !current.bookmarkScope ||
+        !ownerLeaseValid(current.owner) ||
+        !isCurrent()
+      )
+        return false
+      const operation = invalidate()
+      // Keep the editing row mounted and replace its retired render fence.
+      publish({ ...current })
+      try {
+        const result = await captureHistorySnapshot(
+          current.owner,
+          origin.view,
+          "send",
+          operation.signal
+        )
+        if (result.status !== "captured") throw new Error(result.code)
+        qualifyNativeMessageEditCapture(origin, result, receipt)
+        const canInstall = () =>
+          isCurrent() &&
+          live.current.owner === current.owner &&
+          sameView(live.current.view, origin.view) &&
+          (live.current.capture === origin || live.current.capture === result)
+        await verifyNativeMessageEditReceipt(current.owner, origin, receipt, {
+          signal: operation.signal,
+          validate_lease: canInstall
+        })
+        return await install(
+          result,
+          current.owner,
+          current.bookmarkScope,
+          operation.epoch,
+          current.pending,
+          canInstall
+        )
+      } catch (error) {
+        if (
+          operation.epoch === epoch.current &&
+          live.current.capture === origin &&
+          isCurrent()
+        )
+          publish({ ...live.current, error: errorCode(error) })
+        return false
+      }
+    },
+    [install, invalidate, publish]
+  )
   const confirm = useCallback(
     async (orderedPathIds: readonly string[], cursor: HistoryCursorV1) => {
       const current = live.current
@@ -1430,6 +1491,7 @@ export function useHistorySelection(
     activate,
     choose,
     refresh,
+    refreshEditedMessage,
     confirm,
     followResult,
     reset,

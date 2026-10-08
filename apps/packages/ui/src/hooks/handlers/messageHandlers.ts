@@ -19,6 +19,8 @@ import {
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import {
   nativeHistoryMessagePayload,
+  saveNativeHistoryMessage,
+  assertHistoryConversationTarget,
   commitNativeFork,
   prepareNativeFork
 } from "@/services/chat-history-selection"
@@ -30,7 +32,7 @@ import { isImageGenerationMessageType } from "@/utils/image-generation-chat"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import { chatSubmitSkipped, chatSubmitSubmitted, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
-import { type ChatHistory, type Message } from "~/store/option"
+import { useStoreMessageOption, type ChatHistory, type Message } from "~/store/option"
 
 /** Derive provider display history from the same visible identities after a successful mutation. */
 export const historyFromVisibleMessages = (messages: Message[]): ChatHistory =>
@@ -197,6 +199,7 @@ export const createEditMessage = (options: {
   historyId: string | null
   validateBeforeSubmitFn: () => boolean
   onSubmit: (params: any) => Promise<ChatSubmitResult | void>
+  serverChatId?: string | null
   captureViewFence?: () => () => boolean
   captureSourceFence?: () => () => boolean
   mutate?: (target: Message, content: string) => Promise<void>
@@ -204,15 +207,21 @@ export const createEditMessage = (options: {
 }) => {
   const current = options.captureViewFence?.() ?? (() => true)
   const sourceCurrent = options.captureSourceFence?.() ?? (() => true)
+  const canMutate = () => {
+    const state = useStoreMessageOption.getState()
+    return !state.streaming && !state.isProcessing
+  }
   return async (
     index: number,
     message: string,
     isHuman: boolean,
     isSend: boolean,
-    isEditorCurrent?: () => boolean
+    isEditorCurrent?: () => boolean,
+    isEditorOriginCurrent?: () => boolean
   ): Promise<ChatSubmitResult> => {
     if (!current() || !sourceCurrent())
       return chatSubmitSkipped("stale_selection")
+    if (!canMutate()) return chatSubmitSkipped("response_in_progress")
     const target = options.messages[index]
     if (!target?.id) throw new Error("missing_message")
     // Unsupported forms must not choose/truncate or mutate the captured stable target.
@@ -271,6 +280,63 @@ export const createEditMessage = (options: {
         description: error.message
       })
       throw error
+    }
+    const nativeOrigin = options.historySelection?.getCurrent()
+    if (nativeOrigin?.owner?.kind === "native") {
+      const selection = options.historySelection!
+      if (
+        nativeOrigin.status !== "ready" ||
+        nativeOrigin.capture?.status !== "captured" ||
+        !isEditorCurrent?.()
+      )
+        return chatSubmitSkipped("stale_selection")
+      const visible = options.getMessages?.() ?? options.messages
+      const candidates = visible.filter((row) => row.id === target.id)
+      if (candidates.length !== 1 || candidates[0].message !== target.message)
+        return chatSubmitSkipped("message_changed")
+      const editorCurrent = () =>
+        sourceCurrent() && canMutate() && isEditorCurrent()
+      const editorOriginCurrent = () =>
+        sourceCurrent() &&
+        canMutate() &&
+        (isEditorOriginCurrent?.() ?? isEditorCurrent())
+      let receipt: Awaited<ReturnType<typeof saveNativeHistoryMessage>>
+      try {
+        await assertHistoryConversationTarget(nativeOrigin.owner, {
+          historyId: options.historyId,
+          serverChatId: options.serverChatId
+        })
+        receipt = await saveNativeHistoryMessage(
+          nativeOrigin.owner,
+          nativeOrigin.capture,
+          { ...target, id: target.serverMessageId ?? target.id },
+          message,
+          {
+            signal: selection.getSignal(),
+            validate_lease: () => current() && editorCurrent(),
+            acknowledgement_current: () => current() && editorOriginCurrent()
+          }
+        )
+      } catch (error) {
+        if (!current() || !editorOriginCurrent())
+          return chatSubmitSkipped("stale_selection")
+        options.notification?.error({
+          message: "Message edit failed",
+          description:
+            error instanceof Error ? error.message : "message_edit_failed"
+        })
+        throw error
+      }
+      if (!current() || !editorOriginCurrent())
+        return chatSubmitSkipped("stale_selection")
+      const installed = await selection.refreshEditedMessage(
+        nativeOrigin.capture,
+        receipt,
+        editorOriginCurrent
+      )
+      return installed && editorOriginCurrent()
+        ? chatSubmitSubmitted()
+        : chatSubmitSkipped("submission_unacknowledged")
     }
     if (!options.historyId && !options.mutate)
       throw new Error("temporary_history_unavailable")

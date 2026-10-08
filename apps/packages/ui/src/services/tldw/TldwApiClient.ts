@@ -6461,9 +6461,11 @@ export class TldwApiClientBase {
   }
 
   // Message (single) APIs
-  async getMessage(message_id: string | number): Promise<any> {
-    const mid = String(message_id)
-    return await bgRequest<any>({ path: `/api/v1/messages/${mid}`, method: 'GET' })
+  async getMessage(
+    message_id: string | number,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<any> {
+    return chatRagMethods.getMessage.call(this as unknown as TldwApiClientCore, message_id, options)
   }
 
   async editMessage(
@@ -6471,24 +6473,9 @@ export class TldwApiClientBase {
     content: string,
     expectedVersion: number,
     chatId?: string | number,
-    options?: { pinned?: boolean }
+    options?: { pinned?: boolean; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<any> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    const body: Record<string, unknown> = { content }
-    if (typeof options?.pinned === "boolean") {
-      body.pinned = options.pinned
-    }
-    const res = await bgRequest<any>({
-      path: `/api/v1/messages/${mid}${qp}`,
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body
-    })
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
-    return res
+    return chatRagMethods.editMessage.call(this as unknown as TldwApiClientCore, message_id, content, expectedVersion, chatId, options)
   }
 
   async deleteMessage(

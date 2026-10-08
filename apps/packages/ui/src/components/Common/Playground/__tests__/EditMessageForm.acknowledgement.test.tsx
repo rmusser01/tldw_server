@@ -59,6 +59,7 @@ it.each(["Save", "Save & Send"])(
       expect(submit).toHaveBeenCalledExactlyOnceWith(
         "Exact authored edit  \n",
         action === "Save & Send",
+        expect.any(Function),
         expect.any(Function)
       )
     } finally {
@@ -233,6 +234,7 @@ it("a matching canonical value arriving after acknowledgement keeps newer input 
   expect(submit).toHaveBeenLastCalledWith(
     "Newer authored edit",
     false,
+    expect.any(Function),
     expect.any(Function)
   )
 })
@@ -313,3 +315,27 @@ it.each(["typing", "undo", "cancel"])(
     }
   }
 )
+
+
+it("the editor origin lease preserves newer typing but retires Cancel and unrelated canonical changes", async () => {
+  const held = deferred()
+  let full!: () => boolean, origin!: () => boolean
+  const view = mount((_value, _send, current?: () => boolean, original?: () => boolean) => {
+    full = current!; origin = original!
+    return held.promise
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  try {
+    expect(full()).toBe(true)
+    expect(origin).toEqual(expect.any(Function))
+    fireEvent.change(view.editor, { target: { value: "Newer authored edit" } })
+    expect(full()).toBe(false)
+    expect(origin()).toBe(true)
+    view.rerender(<EditMessageForm {...view.props} value={"Exact authored edit  \n"} />)
+    expect(origin()).toBe(true)
+    view.rerender(<EditMessageForm {...view.props} value="Unrelated canonical edit" />)
+    expect(origin()).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    expect(origin()).toBe(false)
+  } finally { await act(async () => { held.resolve({ status: "submitted" }); await held.promise }) }
+})

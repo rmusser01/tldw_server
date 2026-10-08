@@ -3668,7 +3668,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         onEditFormSubmit={(
                           value: string,
                           isSend: boolean,
-                          editIsCurrent?: () => boolean
+                          editIsCurrent?: () => boolean,
+                          editOriginIsCurrent?: () => boolean
                         ) => {
                           if (isSend)
                             return withCurrentCaptureHeads(
@@ -3680,7 +3681,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                                     value,
                                     !msg.isBot,
                                     isSend,
-                                    editIsCurrent
+                                    editIsCurrent,
+                                    editOriginIsCurrent
                                   )
                                 )
                               }
@@ -3690,7 +3692,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                             value,
                             !msg.isBot,
                             isSend,
-                            editIsCurrent
+                            editIsCurrent,
+                            editOriginIsCurrent
                           )
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}

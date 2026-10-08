@@ -221,13 +221,14 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={msg.sources}
-              onEditFormSubmit={(value, isSend, editIsCurrent) => {
+              onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
                 return editMessage(
                   block.index,
                   value,
                   !msg.isBot,
                   isSend,
-                  editIsCurrent
+                  editIsCurrent,
+                  editOriginIsCurrent
                 )
               }}
               onDeleteMessage={() => {
@@ -280,13 +281,14 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={userMessage.sources}
-              onEditFormSubmit={(value, isSend, editIsCurrent) => {
+              onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
                 return editMessage(
                   block.userIndex,
                   value,
                   !userMessage.isBot,
                   isSend,
-                  editIsCurrent
+                  editIsCurrent,
+                  editOriginIsCurrent
                 )
               }}
               onDeleteMessage={() => {
@@ -344,13 +346,14 @@ export const ModelPlaygroundChat: React.FC = () => {
                       isProcessing={isProcessing}
                       isSearchingInternet={false}
                       sources={replyMsg.sources}
-                      onEditFormSubmit={(value, isSend, editIsCurrent) => {
+                      onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
                         return editMessage(
                           index,
                           value,
                           !replyMsg.isBot,
                           isSend,
-                          editIsCurrent
+                          editIsCurrent,
+                          editOriginIsCurrent
                         )
                       }}
                       onDeleteMessage={() => {

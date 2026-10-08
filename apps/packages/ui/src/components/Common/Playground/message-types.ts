@@ -129,7 +129,8 @@ export interface MessageActionCallbacks {
     value: string,
     isUser: boolean,
     isSend?: boolean,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
   ) => unknown
   onSourceClick?: (source: any) => void
   onContinue?: () => void

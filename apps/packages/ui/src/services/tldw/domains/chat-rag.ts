@@ -1571,9 +1571,21 @@ export const chatRagMethods = {
   },
 
   // Message (single) APIs
-  async getMessage(this: TldwApiClientCore, message_id: string | number): Promise<any> {
-    const mid = String(message_id)
-    return await bgRequest<any>({ path: `/api/v1/messages/${mid}`, method: 'GET' })
+  async getMessage(
+    this: TldwApiClientCore,
+    message_id: string | number,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<any> {
+    const scoped = requestScopeFields(options?.requestScope)
+    options?.signal?.throwIfAborted()
+    const response = await bgRequest<any>({
+      ...scoped,
+      path: appendPathQuery(`/api/v1/messages/${encodeURIComponent(String(message_id))}`, buildQuery(toChatScopeParams(options?.scope))),
+      method: "GET",
+      abortSignal: options?.signal
+    })
+    options?.signal?.throwIfAborted()
+    return response
   },
 
   async editMessage(
@@ -1582,25 +1594,25 @@ export const chatRagMethods = {
     content: string,
     expectedVersion: number,
     chatId?: string | number,
-    options?: { pinned?: boolean }
+    options?: { pinned?: boolean; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<any> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
+    const scoped = requestScopeFields(options?.requestScope)
+    options?.signal?.throwIfAborted()
+    const query = buildQuery({ expected_version: expectedVersion, ...toChatScopeParams(options?.scope) })
     const body: Record<string, unknown> = { content }
-    if (typeof options?.pinned === "boolean") {
-      body.pinned = options.pinned
-    }
+    if (typeof options?.pinned === "boolean") body.pinned = options.pinned
     const res = await trackServerChatWrite(chatId, () =>
       bgRequest<any>({
-        path: `/api/v1/messages/${mid}${qp}`,
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body
+        ...scoped,
+        path: appendPathQuery(`/api/v1/messages/${encodeURIComponent(String(message_id))}`, query),
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...scoped.headers },
+        body,
+        abortSignal: options?.signal
       })
     )
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
+    options?.signal?.throwIfAborted()
+    if (chatId != null) this.invalidateChatMessagesCache(chatId)
     return res
   },
 

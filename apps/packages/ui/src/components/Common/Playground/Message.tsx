@@ -246,7 +246,8 @@ type Props = {
   onEditFormSubmit: (
     value: string,
     isSend: boolean,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
   ) => unknown
   isProcessing: boolean
   webSearch?: Record<string, unknown>

@@ -757,6 +757,7 @@ for (const initialPortraits of [true, false]) {
         expect(submit).toHaveBeenCalledWith(
           "Retained authored draft",
           false,
+          expect.any(Function),
           expect.any(Function)
         )
       else expect(submit).not.toHaveBeenCalled()
@@ -966,6 +967,7 @@ it.each([false, true])(
       "Exact preserved edit  \n",
       true,
       false,
+      expect.any(Function),
       expect.any(Function)
     )
     storedPreferences.clear()

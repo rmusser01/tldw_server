@@ -363,3 +363,16 @@ describe("canonical raw URL controls", () => {
     }
   )
 })
+
+
+it.each([
+  ["/api/v1/messages/owned", "GET", true],
+  ["/api/v1/messages/owned?scope_type=workspace&workspace_id=original", "PUT", true],
+  ["/api/v1/messages/owned", "DELETE", false],
+  ["/api/v1/messages/owned", "POST", false],
+  ["/api/v1/messages/owned/extra", "PUT", false],
+  ["/api/v1/messages/owned%2Fforeign", "GET", false],
+  ["/api/v1/messages/../foreign", "PUT", false]
+])("native Save admits only the exact scoped message read/write: %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})

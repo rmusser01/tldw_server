@@ -106,7 +106,7 @@ _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_expected_user)])
 
 _HistoryWrite = TypeVar("_HistoryWrite")
 
@@ -347,8 +347,7 @@ def _resolve_message_scope(
 
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,
-             summary="Send a message in a chat", tags=["Messages"],
-             dependencies=[Depends(require_expected_user)])
+             summary="Send a message in a chat", tags=["Messages"])
 async def send_message(
     message_data: MessageCreate,
     request: Request,

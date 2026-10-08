@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   forkSettings: vi.fn(async (..._args: any[]) => null as any),
   updateForkSettings: vi.fn(async (..._args: any[]) => null as any),
   capture: vi.fn(),
+  beforeBookmark: vi.fn(async () => {}),
+  verifyEdit: vi.fn(async (..._args: any[]) => {}),
   confirm: vi.fn(),
   profile: vi.fn(),
   details: vi.fn(),
@@ -48,7 +50,8 @@ vi.mock("@/db/dexie/fork-operations", () => ({
   loadForkOperations: (...args: any[]) => mocks.forkRecords(...args),
   allowNewForkOperation: vi.fn()
 }))
-vi.mock("@/db/dexie/history-selection", () => ({
+vi.mock("@/db/dexie/history-selection", async (original) => ({
+  canonicalHistoryJson: (await original<any>()).canonicalHistoryJson,
   ensureLocalProfileId: () => mocks.profile(),
   loadHistoryTurnRecoveries: (...args: any[]) => mocks.recoveries(...args),
   dismissHistoryTurnRecovery: (...args: any[]) =>
@@ -63,17 +66,21 @@ vi.mock("@/db/dexie/history-selection", () => ({
         { owner_key: owner.owner_key, conversation_id: owner.conversation_id }
       ])
     ) ?? null,
-  saveHistoryBookmark: async (scope: any, view: any) =>
-    mocks.bookmarks.set(
+  saveHistoryBookmark: async (scope: any, view: any) => {
+    await mocks.beforeBookmark()
+    return mocks.bookmarks.set(
       JSON.stringify([
         scope,
         { owner_key: view.owner_key, conversation_id: view.conversation_id }
       ]),
       { ...scope, view }
-    ),
+    )
+  },
   getLocalHistoryOwner: (id: string) => mocks.localOwner(id)
 }))
-vi.mock("@/services/chat-history-selection", () => ({
+vi.mock("@/services/chat-history-selection", async (original) => ({
+  qualifyNativeMessageEditCapture: (await original<any>()).qualifyNativeMessageEditCapture,
+  verifyNativeMessageEditReceipt: (...args: any[]) => mocks.verifyEdit(...args),
   captureHistorySnapshot: (...args: any[]) => mocks.capture(...args),
   readNativeForkSettings: (...args: any[]) => mocks.forkSettings(...args),
   updateNativeForkSettings: (...args: any[]) => mocks.updateForkSettings(...args),
@@ -168,6 +175,8 @@ function View({ label, reference }: { label: string; reference?: any }) {
   )
 }
 beforeEach(() => {
+  mocks.beforeBookmark.mockReset().mockResolvedValue(undefined)
+  mocks.verifyEdit.mockReset().mockResolvedValue(undefined)
   mocks.forkCandidate.mockReset().mockResolvedValue(null)
   mocks.forkRecords.mockReset().mockResolvedValue([])
   mocks.forkSettings.mockReset().mockResolvedValue(null)
@@ -1559,4 +1568,155 @@ it("a retained rendered recovery callback refuses an actual same-ID H1 refresh b
     await Promise.resolve()
   })
   await waitFor(() => expect(mocks.dismissRecovery).toHaveBeenCalledOnce())
+})
+
+
+const mountNativeEditRefresh = async () => {
+  let saved = false
+  const originalCapture = mocks.capture.getMockImplementation()!
+  mocks.capture.mockImplementation(async (...args) => {
+    const capture = await originalCapture(...args)
+    capture.snapshot = structuredClone(capture.snapshot)
+    capture.rows = structuredClone(capture.rows)
+    capture.selected_content = structuredClone(capture.selected_content)
+    for (const node of [...capture.snapshot.nodes, ...capture.rows])
+      if (node.id === "u") node.revision = saved ? "opaque-2" : "opaque-1"
+    for (const row of capture.selected_content)
+      if (row.id === "u")
+        Object.assign(row, {
+          revision: saved ? "opaque-2" : "opaque-1",
+          message: saved ? "Edited {{char}}  \n" : "Original"
+        })
+    return capture
+  })
+  const onCapture = vi.fn()
+  const hook = renderHook(() => useHistorySelection({ onCapture }))
+  const native = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    validate_lease: () => true,
+    request_scope: {
+      config: {
+        serverUrl: "https://original.test",
+        authMode: "multi-user" as const
+      },
+      userId: "alice"
+    }
+  }
+  await act(async () => {
+    expect(await hook.result.current.open(native)).toBe(true)
+  })
+  const origin = hook.result.current.getCurrent().capture!
+  onCapture.mockClear()
+  saved = true
+  return {
+    hook,
+    native,
+    origin,
+    onCapture,
+    receipt: { message_id: "u", message: "Edited {{char}}  \n", version: 2 }
+  }
+}
+
+it("native Save refresh preserves the original cursor and certifies canonical raw text before installation", async () => {
+  const mounted = await mountNativeEditRefresh()
+  try {
+    await act(async () => {
+      expect(
+        await (mounted.hook.result.current as any).refreshEditedMessage(
+          mounted.origin,
+          mounted.receipt,
+          () => true
+        )
+      ).toBe(true)
+    })
+    expect(mounted.hook.result.current.view?.cursor).toEqual(
+      mounted.origin.view.cursor
+    )
+    expect(mounted.hook.result.current.view?.selection_revision).toBe(
+      mounted.origin.view.selection_revision
+    )
+    expect(mounted.onCapture).toHaveBeenCalledOnce()
+    expect(mounted.hook.result.current.status).toBe("ready")
+  } finally {
+    mounted.hook.unmount()
+  }
+})
+
+it.each(["capture", "bookmark"])(
+  "native Save refresh keeps an edited draft when source retires during held %s",
+  async (stage) => {
+    const mounted = await mountNativeEditRefresh()
+    let current = true,
+      reached = false,
+      release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    if (stage === "bookmark")
+      mocks.beforeBookmark.mockImplementationOnce(async () => {
+        reached = true
+        await held
+      })
+    else {
+      const original = mocks.capture.getMockImplementation()!
+      mocks.capture.mockImplementationOnce(async (...args) => {
+        reached = true
+        await held
+        return original(...args)
+      })
+    }
+    let pending!: Promise<boolean>
+    try {
+      act(() => {
+        pending = (mounted.hook.result.current as any).refreshEditedMessage(
+          mounted.origin,
+          mounted.receipt,
+          () => current
+        )
+      })
+      await waitFor(() => expect(reached).toBe(true))
+      expect(mounted.hook.result.current.getCurrent().capture).toBe(
+        mounted.origin
+      )
+      expect(mounted.hook.result.current.status).toBe("ready")
+      current = false
+      await act(async () => {
+        release()
+        expect(await pending).toBe(false)
+      })
+      expect(mounted.onCapture).not.toHaveBeenCalled()
+      expect(mounted.hook.result.current.getCurrent().capture).toBe(
+        mounted.origin
+      )
+    } finally {
+      release?.()
+      await pending?.catch(() => {})
+      mounted.hook.unmount()
+    }
+  }
+)
+
+it("native Save refresh refuses a newer canonical target before publication", async () => {
+  const mounted = await mountNativeEditRefresh()
+  mounted.receipt.message = "Different raw text"
+  try {
+    await act(async () => {
+      expect(
+        await (mounted.hook.result.current as any).refreshEditedMessage(
+          mounted.origin,
+          mounted.receipt,
+          () => true
+        )
+      ).toBe(false)
+    })
+    expect(mounted.onCapture).not.toHaveBeenCalled()
+    expect(mounted.hook.result.current.getCurrent().capture).toBe(
+      mounted.origin
+    )
+    expect(mounted.hook.result.current.status).toBe("ready")
+  } finally {
+    mounted.hook.unmount()
+  }
 })

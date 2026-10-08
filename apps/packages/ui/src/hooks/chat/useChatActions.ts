@@ -5090,6 +5090,7 @@ export const useChatActions = ({
   const ordinaryLocalMutation =
     !serverChatId && historySelection?.getCurrent().status === "idle"
   const editMessage = createEditMessage({
+    serverChatId,
     historySelection,
     notification,
     captureSourceFence: () => captureChatDraftSource().isCurrent,

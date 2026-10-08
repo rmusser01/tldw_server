@@ -89,7 +89,8 @@ export interface MessageContentProps {
   onEditFormSubmit: (
     value: string,
     isSend: boolean,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
   ) => unknown
   onCloseEdit: () => void
 
