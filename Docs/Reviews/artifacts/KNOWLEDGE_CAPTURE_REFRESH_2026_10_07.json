@@ -5594,5 +5594,21 @@
       "No publication, human Change summary, seven updated-head CI, merge or cleanup performed"
     ],
     "controller_disposition": "Controller accepts the bounded Web I1 live qualification for local affected acceptance: actual Web processing disables RAG before dispatch; independently approved actual ChatPane/store tests, real SQLite current-body/FTS regression and current extension real Send cover the shared repaired guard. This is not a Web live guard pass or vector/server-atomicity claim. No further browser retry. Product acceptance criteria 2/3 and verified DoD1/2 are satisfied; TASK-13530.1 and parent TASK-13530 remain In Progress solely for publication, requester-written Change summary, seven updated-head CI statuses and merge, not unresolved I1/I2 product defects. TASK-13514 remains Done on dev; residual pagination repair is reviewed and both current clients passed actual page2 acceptance. Historical CSV uncertainty remains active TASK-13532; all remote/default/native/device qualifications remain."
+  },
+  "publication": {
+    "recorded_at": "2026-10-08",
+    "pr": "https://github.com/rmusser01/tldw_server/pull/3213",
+    "base": "dev",
+    "published_head": "69fe6d09534477e08463bcceb86f9f2cb5c447c1",
+    "dev": "2c5f19d0328360d45bce99b8bae75ce252cc312f",
+    "qodo": "billing-blocked; requester authorized merge after checks without Qodo",
+    "merge_queue": "unset",
+    "remaining_gates": [
+      "requester-written Change summary",
+      "seven updated-head required statuses",
+      "merge"
+    ],
+    "merged": false,
+    "cleanup": false
   }
 }
