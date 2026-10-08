@@ -1,3 +1,5 @@
+import { useResearchWebCapture } from "@/utils/use-research-web-capture"
+import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
 import React, { Suspense, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Drawer, Tabs, Modal, Input, Empty, Skeleton, Button, message } from "antd"
@@ -1270,6 +1272,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const webCapture = useResearchWebCapture(workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
   const activeDeepResearchReturnContext =
     isResearchWorkspaceDeepResearchReturnForWorkspace(
@@ -3388,6 +3391,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         fallback={<WorkspacePaneFallback testId="workspace-sources-pane" />}
       >
         <SourcesPane
+          onCaptureArticle={webCapture.open}
           onHide={options?.onHide}
           onOpenTransferSources={openTransferSourcesModal}
           sourceListViewState={sourceListViewState}
@@ -3631,6 +3635,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
       {messageContextHolder}
+      <WebArticleCaptureModal capture={webCapture} />
       {(knowledgeImport.attached > 0 ||
         knowledgeImport.failed > 0 ||
         knowledgeImport.importing ||

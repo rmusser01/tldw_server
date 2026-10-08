@@ -291,35 +291,38 @@ async def ingest_web_content_orchestrate(
             },
         )
 
-    # Topic monitoring (non-blocking): URLs and provided titles
-    try:
-        from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import (
-            get_topic_monitoring_service,
-        )
+    credential_free = bool(getattr(request, "credential_free", False))
 
-        mon = get_topic_monitoring_service()
-        uid = getattr(db, "client_id", None) if hasattr(db, "client_id") else None
-        for u in (getattr(request, "urls", []) or [])[:10]:
-            if u:
-                mon.schedule_evaluate_and_alert(
-                    user_id=str(uid) if uid else None,
-                    text=str(u),
-                    source="ingestion.web",
-                    scope_type="user",
-                    scope_id=str(uid) if uid else None,
-                )
-        for t in (getattr(request, "titles", []) or [])[:10]:
-            if t:
-                mon.schedule_evaluate_and_alert(
-                    user_id=str(uid) if uid else None,
-                    text=str(t),
-                    source="ingestion.web",
-                    scope_type="user",
-                    scope_id=str(uid) if uid else None,
-                )
-    except Exception as monitoring_error:
-        # Do not let monitoring failures break ingestion.
-        _ = monitoring_error
+    if not credential_free:
+        # Topic monitoring (non-blocking): URLs and provided titles
+        try:
+            from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import (
+                get_topic_monitoring_service,
+            )
+
+            mon = get_topic_monitoring_service()
+            uid = getattr(db, "client_id", None) if hasattr(db, "client_id") else None
+            for u in (getattr(request, "urls", []) or [])[:10]:
+                if u:
+                    mon.schedule_evaluate_and_alert(
+                        user_id=str(uid) if uid else None,
+                        text=str(u),
+                        source="ingestion.web",
+                        scope_type="user",
+                        scope_id=str(uid) if uid else None,
+                    )
+            for t in (getattr(request, "titles", []) or [])[:10]:
+                if t:
+                    mon.schedule_evaluate_and_alert(
+                        user_id=str(uid) if uid else None,
+                        text=str(t),
+                        source="ingestion.web",
+                        scope_type="user",
+                        scope_id=str(uid) if uid else None,
+                    )
+        except Exception as monitoring_error:
+            # Do not let monitoring failures break ingestion.
+            _ = monitoring_error
 
     scrape_method = getattr(request, "scrape_method", None)
 
@@ -429,11 +432,45 @@ async def ingest_web_content_orchestrate(
             author_ = authors[i]
             kw_ = keywords[i]
 
-            article_data = await scrape_article(
-                url,
-                custom_cookies=custom_cookies_list,
-                allow_llm_extraction=bool(request.perform_analysis),
-            )
+            try:
+                article_data = await scrape_article(
+                    url,
+                    custom_cookies=custom_cookies_list,
+                    allow_llm_extraction=bool(request.perform_analysis) and not credential_free,
+                    **({"credential_free": True} if credential_free else {}),
+                )
+            except Exception:  # noqa: BLE001 - public preview never returns transport details
+                if not credential_free:
+                    raise
+                article_data = {"extraction_successful": False, "error": "fetch_error"}
+            if credential_free:
+                from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import PUBLIC_FAILURE_CODES
+
+                article_data = article_data if isinstance(article_data, dict) else {}
+                content = article_data.get("content")
+                content = content.strip() if isinstance(content, str) else ""
+                error = None
+                if not article_data.get("extraction_successful"):
+                    code = article_data.get("error")
+                    error = code if isinstance(code, str) and code in PUBLIC_FAILURE_CODES else "extraction_error"
+                    if article_data.get("policy_reason"):
+                        error = "policy_denied"
+                elif not content:
+                    error = "empty_content"
+                elif len(content) > 1_000_000:
+                    error = "content_too_large"
+                if error:
+                    results.append({"url": url, "content": "", "extraction_successful": False, "error": error})
+                else:
+                    results.append(
+                        {
+                            "url": url,
+                            "title": str(article_data.get("title") or "Untitled")[:1000],
+                            "content": content,
+                            "extraction_successful": True,
+                        }
+                    )
+                continue
             if not article_data or not article_data.get("extraction_successful"):
                 logging.warning(f"Failed to scrape: {url}")
                 continue

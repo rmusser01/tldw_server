@@ -35,6 +35,7 @@ import {
 import type { DataTableColumn } from "@/types/data-tables"
 
 import type {
+  ScopedRequestOptions,
   FileCreateResponse,
   ImageArtifactRequest,
   ReferenceImageCandidate,
@@ -100,7 +101,48 @@ const normalizeReferenceImageListResponse = (
   return { items }
 }
 
+/** Exact active Media version wire response (VersionDetailResponse). */
+export interface MediaDocumentVersion {
+  uuid?: string | null
+  media_id: number
+  version_number: number
+  created_at: string
+  prompt?: string | null
+  analysis_content?: string | null
+  safe_metadata?: Record<string, unknown> | null
+  content?: string | null
+}
+
 export const mediaMethods = {
+  async listMediaDocumentVersions(
+    mediaId: number,
+    options?: ScopedRequestOptions,
+    pagination?: { limit?: number; page?: number }
+  ): Promise<MediaDocumentVersion[]> {
+    const query = buildQuery({
+      include_content: true,
+      limit: pagination?.limit,
+      page: pagination?.page
+    })
+    return await bgRequest<MediaDocumentVersion[]>({
+      path: `/api/v1/media/${encodeURIComponent(String(mediaId))}/versions${query}`,
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
+    })
+  },
+  async getMediaDocumentVersion(
+    mediaId: number,
+    versionNumber: number,
+    options?: ScopedRequestOptions
+  ): Promise<MediaDocumentVersion> {
+    return await bgRequest<MediaDocumentVersion>({
+      path: `/api/v1/media/${encodeURIComponent(String(mediaId))}/versions/${encodeURIComponent(String(versionNumber))}?include_content=true`,
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
+    })
+  },
   // ─────────────────────────────────────────────────────────────────────────────
   // Media Ingestion & CRUD
   // ─────────────────────────────────────────────────────────────────────────────

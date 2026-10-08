@@ -15,6 +15,9 @@ from .probe import DefaultProbeEgressGuard as DefaultProbeEgressGuard
 
 
 class DefaultWebOutboundPolicyChecker:
+    def __init__(self, *, credential_free: bool = False) -> None:
+        self.credential_free = credential_free
+
     async def decide(
         self,
         url: str,
@@ -31,6 +34,7 @@ class DefaultWebOutboundPolicyChecker:
             source=context.source,
             stage=context.stage,
             config=dict(config or {}),
+            **({"credential_free": True} if self.credential_free else {}),
         )
         return PolicyDecision(
             allowed=bool(raw.allowed),

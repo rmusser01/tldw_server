@@ -1,4 +1,8 @@
-import type { KnowledgeNoteHead, KnowledgeNoteEvidence } from "@/utils/knowledge-note-provenance"
+import type {
+  KnowledgeNoteHead,
+  KnowledgeNoteEvidence,
+  KnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Types
  * Types for the NotebookLM-style three-pane research interface
@@ -68,7 +72,19 @@ export interface WorkspaceSourceStatusDetails {
   job?: WorkspaceSourceJobStatus | null
 }
 
+export interface WebArticleCapturePin {
+  clipId: string
+  requestedUrl: string
+  capturedAt: string
+  contentSha256: string
+  refreshOf: string | null
+  mediaId: number
+  versionNumber: number
+  versionUuid: string
+}
+
 export interface WorkspaceSource {
+  webCapture?: WebArticleCapturePin
   id: string
   mediaId: number // Server-side media ID
   knowledgeQaEvidence?: KnowledgeNoteEvidence
@@ -620,6 +636,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface WorkspaceNote extends KnowledgeNoteHead {
+  pendingKnowledgeProvenance?: KnowledgeNoteProvenance
   id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string
   content: string

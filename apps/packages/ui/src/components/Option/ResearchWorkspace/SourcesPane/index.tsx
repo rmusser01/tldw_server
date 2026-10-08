@@ -1,3 +1,4 @@
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -389,6 +390,7 @@ const describePreviewUnavailable = (
 }
 
 interface SourcesPaneProps {
+  onCaptureArticle?: (source: WorkspaceSource) => void
   /** Callback to hide/collapse the pane */
   onHide?: () => void
   /** Open the shared transfer modal for the current effective selection. */
@@ -419,6 +421,7 @@ interface SourcesPaneProps {
  * SourcesPane - Left pane for managing research sources
  */
 export const SourcesPane: React.FC<SourcesPaneProps> = ({
+  onCaptureArticle,
   onHide,
   onOpenTransferSources,
   statusGuardrailsEnabled = true,
@@ -1027,7 +1030,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   )
 
   React.useEffect(() => {
-    if (!previewSourceId) {
+    if (!previewSourceId || !previewSource) {
       setSourcePreviewState((previous) => {
         if (
           previous.sourceId === null &&
@@ -1048,6 +1051,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     }
 
     let cancelled = false
+    const controller = new AbortController()
+    let scope: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined
+    const activeSource = previewSource
     const activeSourceId = previewSourceId
     setSourcePreviewState({
       sourceId: activeSourceId,
@@ -1070,15 +1076,40 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       }
 
       try {
+        if (activeSource?.webCapture)
+          scope = await loadServicePromptSnapshot([], {
+            signal: controller.signal
+          })
+        if (
+          cancelled ||
+          scope?.scopeSignal.aborted ||
+          scope?.scopeInvalidatedSignal.aborted
+        )
+          return
         const data = await tldwClient.getWorkspaceSourcePreview(
           workspaceId,
           activeSourceId,
           {
             max_chars: SOURCE_PREVIEW_MAX_CHARS,
-            chunk_limit: SOURCE_PREVIEW_CHUNK_LIMIT
-          }
+            chunk_limit: SOURCE_PREVIEW_CHUNK_LIMIT,
+            ...(activeSource?.webCapture
+              ? { version_number: activeSource.webCapture.versionNumber }
+              : {})
+          },
+          scope
+            ? { requestScope: scope.requestScope, signal: scope.scopeSignal }
+            : undefined
         )
-        if (!cancelled) {
+        if (
+          activeSource?.webCapture &&
+          data.document_version_number !== activeSource.webCapture.versionNumber
+        )
+          throw new Error("Exact capture version unavailable")
+        if (
+          !cancelled &&
+          !scope?.scopeSignal.aborted &&
+          !scope?.scopeInvalidatedSignal.aborted
+        ) {
           setSourcePreviewState({
             sourceId: activeSourceId,
             loading: false,
@@ -1104,8 +1135,15 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     void loadPreview()
     return () => {
       cancelled = true
+      controller.abort()
+      scope?.release()
     }
-  }, [previewReloadNonce, previewSourceId, workspaceId])
+  }, [
+    previewReloadNonce,
+    previewSourceId,
+    workspaceId,
+    previewSource
+  ])
 
   const handleSelectAllToggle = React.useCallback((event: {
     target: { checked: boolean }
@@ -1726,6 +1764,30 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 </span>
               )}
             </div>
+            {source.webCapture ? (
+              <p className="text-xs text-text-muted">
+                {t(
+                  "playground:sources.extractedSnapshot",
+                  "Extracted article snapshot"
+                )}{" "}
+                · {source.webCapture.capturedAt}
+                <br />
+                {t(
+                  "playground:sources.snapshotVersion",
+                  "Source snapshot: Media version {{version}}",
+                  { version: source.webCapture.versionNumber }
+                )}
+              </p>
+            ) : (
+              source.knowledgeQaEvidence?.snapshot && (
+                <p className="text-xs text-text-muted">
+                  {t(
+                    "playground:sources.retrievedExcerpt",
+                    "Retrieved excerpt"
+                  )}
+                </p>
+              )
+            )}
             <Tooltip title={metadataTooltip}>
               <p className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate text-[11px] text-text-subtle">
                 <Info className="h-3 w-3 shrink-0" />
@@ -1782,6 +1844,13 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             isSelected ? "border border-primary/20 bg-primary/5" : ""
           }`}
         >
+          {source.url && onCaptureArticle && (
+            <Button size="small" onClick={() => onCaptureArticle(source)}>
+              {source.webCapture
+                ? t("playground:sources.refreshCapture", "Refresh capture")
+                : t("playground:sources.captureArticle", "Capture article")}
+            </Button>
+          )}
           <SourceFolderMembershipMenu
             sourceTitle={source.title}
             folderOptions={sourceFolderOptions}

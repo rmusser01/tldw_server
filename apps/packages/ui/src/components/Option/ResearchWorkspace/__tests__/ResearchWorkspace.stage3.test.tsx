@@ -69,6 +69,7 @@ const testState = {
   workspaceTag: "workspace:test",
   initializeWorkspace: vi.fn(),
   restoreServerWorkspace: vi.fn(),
+  workspaceSnapshots: {},
   createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
@@ -128,8 +129,10 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 
 vi.mock("@/store/workspace", async original => ({
   ...await original<typeof import("@/store/workspace")>(),
-  useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState),
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof testState) => unknown) => selector(testState),
+    { getState: () => testState }
+  ),
   createWorkspaceStorage: () => ({
     getItem: vi.fn(() => null),
     setItem: vi.fn(),

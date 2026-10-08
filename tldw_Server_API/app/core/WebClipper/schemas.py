@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Any, Literal
+from urllib.parse import urlsplit
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 WebClipperDestination = Literal["note", "workspace", "both"]
 WebClipperOutcomeState = Literal["saved", "saved_with_warnings", "partially_saved", "failed"]
@@ -44,6 +48,58 @@ def validate_capture_metadata_json_size(value: dict[str, Any]) -> dict[str, Any]
     if _json_size_chars(value) > MAX_CAPTURE_METADATA_JSON_CHARS:
         raise ValueError(f"capture_metadata JSON must be {MAX_CAPTURE_METADATA_JSON_CHARS} characters or fewer.")
     return value
+
+
+class WebCaptureDescriptor(BaseModel):
+    """Bounded client acceptance metadata, without website-authorship attestation."""
+
+    mode: Literal["server_article"]
+    requested_url: str = Field(min_length=1, max_length=_MAX_SOURCE_URL_CHARS)
+    captured_at: str = Field(min_length=1, max_length=128)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    refresh_of: str | None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("requested_url")
+    @classmethod
+    def validate_public_url(cls, value: str) -> str:
+        """Validate a credential-free HTTP URL without fetching or rewriting it."""
+        if any(char.isspace() or ord(char) < 32 for char in value) or "\\" in value:
+            raise ValueError("requested_url must be a public HTTP(S) URL.")
+        parsed = AnyHttpUrl(value)
+        if urlsplit(value).username is not None or parsed.password is not None:
+            raise ValueError("requested_url must not contain credentials.")
+        host = (parsed.host or "").strip("[]").lower().rstrip(".")
+        if host == "localhost" or host.endswith((".localhost", ".local")) or "." not in host and ":" not in host:
+            raise ValueError("requested_url must have a public hostname.")
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            pass  # DNS/public-address enforcement is performed by explicit acquisition.
+        else:
+            if not address.is_global:
+                raise ValueError("requested_url must not target a private address.")
+        return value
+
+    @field_validator("captured_at")
+    @classmethod
+    def validate_utc_timestamp(cls, value: str) -> str:
+        """Require an ISO timestamp with an explicit UTC offset."""
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)", value):
+            raise ValueError("captured_at must be an ISO UTC timestamp.")
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if timestamp.utcoffset() != timedelta(0):
+            raise ValueError("captured_at must be UTC.")
+        return value
+
+    @field_validator("refresh_of")
+    @classmethod
+    def validate_refresh_parent(cls, value: str | None) -> str | None:
+        """Keep an optional UUID parent as supplied by the client."""
+        if value is not None:
+            UUID(value)
+        return value
 
 
 class WebClipperSaveRequest(BaseModel):
@@ -191,12 +247,18 @@ class WebClipperSaveRequest(BaseModel):
     @field_validator("capture_metadata")
     @classmethod
     def validate_capture_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]:
-        return validate_capture_metadata_json_size(value)
+        validate_capture_metadata_json_size(value)
+        if "web_capture_v1" in value:
+            WebCaptureDescriptor.model_validate(value["web_capture_v1"])
+        return value
 
     @model_validator(mode="after")
     def validate_workspace_destination(self) -> WebClipperSaveRequest:
         if self.destination_mode in {"workspace", "both"} and self.workspace is None:
             raise ValueError("workspace is required when destination_mode targets a workspace.")
+        descriptor = self.capture_metadata.get("web_capture_v1")
+        if descriptor is not None and descriptor["requested_url"] != self.source_url:
+            raise ValueError("web_capture_v1 requested_url must match source_url exactly.")
         return self
 
 

@@ -6,7 +6,7 @@ import dataclasses
 import inspect
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import FrozenInstanceError, dataclass, replace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, call
 
@@ -1240,15 +1240,18 @@ def test_public_coroutine_is_a_direct_canonical_export_with_exact_signature() ->
         "url",
         "custom_cookies",
         "allow_llm_extraction",
+        "credential_free",
     ]
     assert [parameter.kind for parameter in parameters] == [
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.KEYWORD_ONLY,
     ]
     assert parameters[0].default is inspect.Parameter.empty
     assert parameters[1].default is None
     assert parameters[2].default is True
+    assert parameters[3].default is False
     resolved = inspect.get_annotations(canonical, eval_str=True)
     assert resolved["url"] is str
     assert resolved["custom_cookies"] == list[dict[str, Any]] | None
@@ -1270,3 +1273,178 @@ def test_orchestration_never_recovers_cancelled_error_in_exception_tuples() -> N
                     for element in handler.type.elts
                 )
             ), path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["httpx", "playwright"])
+async def test_credential_free_plan_cleans_headers_and_all_cookies_before_admission(monkeypatch, backend):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article
+
+    harness = _harness(backend=backend)
+    configured = replace(
+        _plan(backend=backend),
+        headers={"X-Site-Key": "secret", "User-Agent": "secret"},
+        cookies={"route": "secret"},
+        browser=replace(_plan().browser, custom_cookies=({"name": "browser", "value": "secret"},)),
+    )
+    harness.dependencies = replace(harness.dependencies, resolve_plan=lambda *_args: configured)
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args, **_kwargs: harness.dependencies)
+    result = await article.scrape_article(
+        URL, custom_cookies=[{"name": "caller", "value": "secret"}], credential_free=True
+    )
+    assert result["extraction_successful"] is True
+    assert harness.evaluate_target.call_args.kwargs["user_agent"] != "secret"
+    if backend == "httpx":
+        assert harness.fetch.requests[0].cookies == {}
+        assert "X-Site-Key" not in harness.fetch.requests[0].headers
+        assert harness.fetch.requests[0].headers["Accept-Language"] == "en-US,en;q=0.9"
+    else:
+        assert harness.browser.calls[0][1].custom_cookies == ()
+        assert harness.browser.calls[0][1].user_agent != "secret"
+    assert harness.executor.calls[0][2]["allow_llm_extraction"] is False
+
+
+@pytest.mark.asyncio
+async def test_credential_free_browser_fallback_retains_clean_profile(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article
+
+    harness = _harness(
+        fetch_outcomes=[OSError("network")],
+        browser_outcomes=[ArticleFailure("browser_transport_unavailable", "acquire")],
+    )
+    configured = replace(
+        _plan(),
+        cookies={"route": "secret"},
+        browser=replace(_plan().browser, custom_cookies=({"name": "browser", "value": "secret"},)),
+    )
+    harness.dependencies = replace(harness.dependencies, resolve_plan=lambda *_args: configured)
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args, **_kwargs: harness.dependencies)
+    result = await article.scrape_article(URL, credential_free=True)
+    assert result["error"] == "browser_transport_unavailable"
+    assert harness.browser.calls[0][1].custom_cookies == ()
+    assert harness.fetch.requests[0].cookies == {}
+
+
+@pytest.mark.asyncio
+async def test_credential_free_redirect_denial_never_acquires_private_target(monkeypatch):
+    from tldw_Server_API.app.core.Security import egress
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article
+
+    harness = _harness(fetch_outcomes=[FetchResponse(URL, 302, {"Location": "http://127.0.0.1/a"}, "", "httpx")])
+
+    async def target(url, **kwargs):
+        decision = egress.evaluate_url_policy(url)
+        return replace(
+            _allowed_target(url),
+            decision=PolicyDecision(
+                decision.allowed, "strict", decision.reason or "allowed", "redirect", "article_extract"
+            ),
+        )
+
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    harness.dependencies = replace(harness.dependencies, evaluate_target=target)
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args, **_kwargs: harness.dependencies)
+    result = await article.scrape_article(URL, credential_free=True)
+    assert result["extraction_successful"] is False
+    assert len(harness.fetch.requests) == 1
+    assert harness.browser.calls == []
+
+
+@pytest.mark.asyncio
+async def test_credential_free_preflight_cannot_reintroduce_curl(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article
+
+    harness = _harness(backend="curl")
+    harness.apply_advice.side_effect = lambda result, **kwargs: ("curl", "auto", result)
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args, **_kwargs: harness.dependencies)
+    await article.scrape_article(URL, credential_free=True)
+    assert harness.fetch.requests[0].backend == "httpx"
+
+
+def test_credential_free_default_dependencies_disable_external_probes():
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _build_default_dependencies
+
+    dependencies = _build_default_dependencies((), credential_free=True)
+    assert (
+        dependencies.preflight_options({"web_scraper_preflight_enable_external_tools": True}).external_tools_enabled
+        is False
+    )
+
+
+def test_credential_free_http_runtime_delegates_environment_and_pinning_to_central_transport(monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress
+    from tldw_Server_API.app.core.Web_Scraping.runtime import fetch as fetch_module
+
+    clients = []
+    dispatches = []
+
+    def send(request):
+        dispatches.append((request.url.host, request.headers["Host"], request.extensions["sni_hostname"]))
+        return httpx.Response(200, stream=httpx.ByteStream(b"article"))
+
+    def create(**kwargs):
+        clients.append(kwargs)
+        return httpx.Client(transport=httpx.MockTransport(send), **kwargs)
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=create))
+    assert fetch_module.http_fetch is hc.fetch
+    with egress.public_url_policy_scope():
+        result = fetch_module.DefaultFetchClient().fetch(FetchRequest(URL, backend="httpx", max_response_bytes=50))
+    assert result.text == "article"
+    assert clients == [{"trust_env": False}]
+    assert dispatches == [("93.184.216.34", "example.com", "example.com")]
+
+
+@pytest.mark.asyncio
+async def test_credential_free_native_http_probe_disables_environment_state(monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
+    from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import http as adapter
+
+    calls = []
+    client = object()
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return client
+
+    async def fetch(**kwargs):
+        assert kwargs["client"] is client
+        return object()
+
+    monkeypatch.setattr(adapter.http_client, "create_async_client", create)
+    monkeypatch.setattr(adapter.http_client, "afetch", fetch)
+    with public_url_policy_scope():
+        await adapter.HttpxProbeTransport().send(
+            SimpleNamespace(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1)
+        )
+    assert calls == [{"proxies": None, "trust_env": False}]
+
+
+@pytest.mark.asyncio
+async def test_credential_free_native_curl_probe_declined_before_session(monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
+    from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import http as adapter
+    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeUnavailable
+
+    factory = Mock(side_effect=AssertionError("curl environment state must not be acquired"))
+    monkeypatch.setattr(adapter, "_CurlOpt", SimpleNamespace(RESOLVE=1))
+    guard = Mock(decide=AsyncMock(return_value=SimpleNamespace(allowed=True, resolved_ips=("93.184.216.34",))))
+    transport = adapter.CurlCffiProbeTransport(
+        egress_guard=guard, request_context=RuntimeRequestContext(), session_factory=factory
+    )
+    with public_url_policy_scope(), pytest.raises(ProbeUnavailable):
+        await transport.send(
+            SimpleNamespace(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1, impersonate="chrome")
+        )
+    factory.assert_not_called()

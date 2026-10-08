@@ -1979,5 +1979,8 @@
     "resetPosition": "Reset position",
     "manage": "Manage Buddy & Persona",
     "detach": "Detach Buddy"
+  },
+  "notification_webClipAnalyzeNewChatRequired": {
+    "message": "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
   }
 }

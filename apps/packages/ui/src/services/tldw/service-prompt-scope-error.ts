@@ -84,6 +84,7 @@ const readCanonicalPathname = (path: unknown): string | null => {
   if (!pathname.startsWith("/") ||
     pathname.includes("\\") ||
     pathname.includes("//") ||
+    /[\t\r\n]/.test(pathname) ||
     /%(?:2e|2f|5c)/i.test(pathname) ||
     pathname.split("/").some((segment) => segment === "." || segment === "..")
   ) {
@@ -109,11 +110,22 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))
+    return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
+    return ["PATCH", "DELETE"].includes(requestMethod)
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
+  if (pathname === "/api/v1/media/ingest-web-content")
+    return requestMethod === "POST"
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/web-clipper\/[^/]+\/?$/.test(pathname) ||
+    /^\/api\/v1\/media\/[0-9]+\/versions(?:\/[1-9][0-9]*)?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources(?:\/[^/]+\/preview)?$/.test(pathname)
+  )) return true
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
   if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)

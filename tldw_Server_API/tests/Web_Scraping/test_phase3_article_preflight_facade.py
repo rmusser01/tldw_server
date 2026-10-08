@@ -574,19 +574,22 @@ async def test_article_run_preflight_cancellation_propagates(
         await harness.article.scrape_article(URL)
 
 
-def test_article_public_signature_is_unchanged() -> None:
+def test_article_public_signature_preserves_defaults_with_additive_public_profile() -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
 
     signature = inspect.signature(article.scrape_article)
-    assert list(signature.parameters) == ["url", "custom_cookies", "allow_llm_extraction"]
+    assert list(signature.parameters) == ["url", "custom_cookies", "allow_llm_extraction", "credential_free"]
     assert signature.parameters["url"].default is inspect.Signature.empty
     assert signature.parameters["custom_cookies"].default is None
     assert signature.parameters["allow_llm_extraction"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["allow_llm_extraction"].default is True
+    assert signature.parameters["credential_free"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["credential_free"].default is False
     assert get_type_hints(article.scrape_article) == {
         "url": str,
         "custom_cookies": list[dict[str, Any]] | None,
         "allow_llm_extraction": bool,
+        "credential_free": bool,
         "return": dict[str, Any],
     }
 

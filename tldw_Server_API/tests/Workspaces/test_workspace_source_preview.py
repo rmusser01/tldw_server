@@ -5,6 +5,9 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_repository import MediaRepository
 from tldw_Server_API.app.core.Workspaces.source_preview import (
     build_workspace_source_preview,
 )
@@ -213,3 +216,110 @@ def test_unavailable_preview_preserves_neutral_local_payload() -> None:
     assert preview["unavailable_reason"] == "media_not_found"
     assert preview["text_preview"] is None
     assert preview["snippets"] == []
+
+
+class _PinnedMediaDB(_MediaDB):
+    def __init__(self):
+        super().__init__()
+        self.version_calls = []
+        self.version = {"version_number": 1, "content": "old accepted snapshot"}
+        self.content = "new current head"
+
+    def get_document_version(self, media_id, version_number=None, include_content=True):
+        self.version_calls.append((media_id, version_number, include_content))
+        return self.version if version_number == 1 else None
+
+
+def test_pinned_preview_reads_exact_old_version_without_current_chunks():
+    db = _PinnedMediaDB()
+    preview = build_workspace_source_preview(
+        workspace_id="owned",
+        source=_source(),
+        source_status=_status(),
+        media_db=db,
+        max_chars=12,
+        chunk_limit=3,
+        version_number=1,
+    )
+    assert preview["document_version_number"] == 1
+    assert preview["text_preview"] == "old accepted"
+    assert preview["text_total_chars"] == len("old accepted snapshot")
+    assert all(item["kind"] != "chunk" for item in preview["snippets"])
+    assert db.range_calls == []
+    assert db.version_calls == [(5, 1, True)]
+
+
+@pytest.mark.parametrize("missing_media", [False, True])
+def test_missing_pin_never_falls_back_to_current_content(missing_media):
+    db = _PinnedMediaDB()
+    preview = build_workspace_source_preview(
+        workspace_id="owned",
+        source=_source(media_id=99 if missing_media else 5),
+        source_status=_status(),
+        media_db=db,
+        max_chars=3000,
+        chunk_limit=3,
+        version_number=7,
+    )
+    assert preview["content_available"] is False
+    assert preview["text_preview"] is None
+    assert preview["snippets"] == []
+    assert db.range_calls == []
+    assert db.version_calls == ([] if missing_media else [(5, 7, True)])
+
+
+def test_preview_rejects_nonpositive_version_before_media_access():
+    db = _PinnedMediaDB()
+    with pytest.raises(ValueError, match="version_number"):
+        build_workspace_source_preview(
+            workspace_id="owned",
+            source=_source(),
+            source_status=_status(),
+            media_db=db,
+            max_chars=3000,
+            chunk_limit=3,
+            version_number=0,
+        )
+    assert db.version_calls == []
+
+
+def test_real_media_pin_reads_old_active_version_and_rejects_deleted_pin(tmp_path):
+    db = MediaDatabase(db_path=str(tmp_path / "versions.db"), client_id="1")
+    try:
+        repository = MediaRepository.from_legacy_db(db)
+        media_id, _, _ = repository.add_text_media(
+            url="https://example.com/snapshot",
+            title="Snapshot",
+            media_type="article",
+            content="old accepted text",
+            owner_user_id=1,
+        )
+        old = media_db_api.get_document_version(db, media_id)
+        repository.add_text_media(
+            url="https://example.com/snapshot",
+            title="Snapshot",
+            media_type="article",
+            content="new current text",
+            owner_user_id=1,
+            overwrite=True,
+        )
+        assert media_db_api.get_media_by_id(db, media_id)["content"] == "new current text"
+        params = {
+            "workspace_id": "owned",
+            "source": _source(media_id=media_id),
+            "source_status": _status(),
+            "media_db": db,
+            "max_chars": 3000,
+            "chunk_limit": 3,
+            "version_number": old["version_number"],
+        }
+        preview = build_workspace_source_preview(**params)
+        assert preview["text_preview"] == "old accepted text"
+        assert all(item["kind"] != "chunk" for item in preview["snippets"])
+        assert media_db_api.soft_delete_document_version(db, old["uuid"])
+        missing = build_workspace_source_preview(**params)
+        assert missing["content_available"] is False
+        assert missing["text_preview"] is None
+        assert missing["snippets"] == []
+    finally:
+        db.close_connection()

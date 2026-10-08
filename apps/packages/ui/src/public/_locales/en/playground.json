@@ -3745,5 +3745,62 @@
   },
   "composer_persistence_serverFailedPill": {
     "message": "Couldn't save to server"
+  },
+  "sources_captureArticle": {
+    "message": "Capture article"
+  },
+  "sources_saveCapture": {
+    "message": "Save capture"
+  },
+  "sources_refreshCapture": {
+    "message": "Refresh capture"
+  },
+  "sources_retryCapture": {
+    "message": "Retry capture"
+  },
+  "sources_cancelCapture": {
+    "message": "Cancel"
+  },
+  "sources_expandText": {
+    "message": "Expand text"
+  },
+  "sources_collapseText": {
+    "message": "Collapse text"
+  },
+  "sources_captureDisclosure": {
+    "message": "Save creates an additional capture Note and a new source containing the complete extracted article snapshot. Original retrieved evidence stays intact."
+  },
+  "sources_capturePublicOnly": {
+    "message": "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used."
+  },
+  "sources_captureCompleteText": {
+    "message": "The complete text is saved; it is never silently shortened."
+  },
+  "sources_extractedSnapshot": {
+    "message": "Extracted article snapshot"
+  },
+  "sources_retrievedExcerpt": {
+    "message": "Retrieved excerpt"
+  },
+  "sources_snapshotVersion": {
+    "message": "Source snapshot: Media version {{version}}"
+  },
+  "sources_snapshotChanged": {
+    "message": "Snapshot changed outside refresh"
+  },
+  "sources_textUnchanged": {
+    "message": "Text unchanged"
+  },
+  "sources_captureTitle": {
+    "message": "Extracted title"
+  },
+  "sources_captureUrl": {
+    "message": "Requested URL"
+  },
+  "sources_captureTime": {
+    "message": "Captured at"
+  },
+  "sources_captureCharacters": {
+    "message": "Characters"
   }
 }

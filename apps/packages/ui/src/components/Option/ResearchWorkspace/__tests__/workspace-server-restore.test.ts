@@ -2,17 +2,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
   request: vi.fn(),
+  captures: [] as unknown[],
   controller: new AbortController(),
   release: vi.fn(),
   scopeKey: "original-alice",
-  userId: "alice",
+  userId: "alice" as string | null,
+  captureOwner: "original-alice",
+  config: { serverUrl: "https://original.test", authMode: "multi-user" as "single-user" | "multi-user" },
+}));
+vi.mock("@/utils/research-workspace-prefill", async (original) => ({
+  ...(await original<typeof import("@/utils/research-workspace-prefill")>()),
+  readResearchWebCaptures: async (owner: string, workspace: string) =>
+    owner === boundary.captureOwner && workspace === "original"
+      ? boundary.captures
+      : [],
 }));
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }));
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
     scopeKey: boundary.scopeKey,
     requestScope: {
-      config: { serverUrl: "https://original.test", authMode: "multi-user" },
+      config: boundary.config,
       userId: boundary.userId,
     },
     scopeSignal: boundary.controller.signal,
@@ -21,6 +31,11 @@ vi.mock("@/services/service-prompts", () => ({
   }),
 }));
 
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
+import {
+  buildResearchWorkspaceMigrationTombstone,
+  buildResearchWorkspaceMigrationTombstoneKey,
+} from "@/store/workspace-migration";
 import { useWorkspaceStore } from "@/store/workspace";
 import {
   readMigratedResearchWorkspaceId,
@@ -67,10 +82,13 @@ const restore = (apply = useWorkspaceStore.getState().restoreServerWorkspace) =>
 
 beforeEach(() => {
   localStorage.clear();
+  boundary.captures = [];
   useWorkspaceStore.getState().reset();
   boundary.controller = new AbortController();
   boundary.scopeKey = "original-alice";
   boundary.userId = "alice";
+  boundary.config = { serverUrl: "https://original.test", authMode: "multi-user" };
+  boundary.captureOwner = buildChatSurfaceScopeKeyFromConfig(boundary.config, { userId: "alice" });
   boundary.release.mockReset();
   boundary.request
     .mockReset()
@@ -351,3 +369,203 @@ it("allows only an owned explicit source-history restore route", () => {
   expect(isServicePromptRequestPath("/api/v1/notes/owned/provenance/restore", "POST")).toBe(true)
   expect(isServicePromptRequestPath("/api/v1/notes/owned%2Fforeign/provenance/restore", "POST")).toBe(false)
 })
+
+it.each(["single-user", "multi-user"] as const)("restores exact pins from the unchanged public namespace for %s", async (mode) => {
+  boundary.config = { serverUrl: "https://original.test", authMode: mode };
+  boundary.userId = mode === "single-user" ? null : "alice";
+  const config = { ...boundary.config, apiKey: "synthetic-test-key" };
+  boundary.scopeKey = buildChatSurfaceScopeKeyFromConfig(config, { userId: boundary.userId });
+  boundary.captureOwner = buildChatSurfaceScopeKeyFromConfig({ ...config, apiKey: undefined }, { userId: boundary.userId });
+  if (mode === "single-user") expect(boundary.scopeKey).not.toBe(boundary.captureOwner);
+  localStorage.setItem(receiptKey, JSON.stringify({ ...JSON.parse(localStorage.getItem(receiptKey)!), serverScopeKey: boundary.scopeKey }));
+  const pin = {
+    clipId: "clip",
+    requestedUrl: "https://example.org",
+    capturedAt: "2026-10-07T00:00:00Z",
+    contentSha256: "digest",
+    refreshOf: "prior",
+    mediaId: 7,
+    versionNumber: 9,
+    versionUuid: "version-nine",
+  };
+  boundary.captures = [{ pin }];
+  const ctx = context();
+  Object.assign(ctx.sources.items[0], {
+    id: "web-clipper:clip",
+    url: pin.requestedUrl,
+  });
+  boundary.request.mockImplementation(async ({ path }: { path: string }) =>
+    path.endsWith("/context") ? ctx : [],
+  );
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0].webCapture).toEqual(pin);
+  ctx.sources.items = [];
+  await restore();
+  expect(useWorkspaceStore.getState().sources).toEqual([]);
+});
+
+const restoreCaptureFixture = async () => {
+  const pin = {
+    clipId: "capture-clip",
+    requestedUrl: "https://example.org/article",
+    capturedAt: "2026-10-07T00:00:00Z",
+    contentSha256: "digest",
+    refreshOf: null,
+    mediaId: 7,
+    versionNumber: 1,
+    versionUuid: "version-one",
+  };
+  boundary.captures = [{ pin }];
+  const ctx = context();
+  Object.assign(ctx.sources.items[0], {
+    id: "web-clipper:capture-clip",
+    url: pin.requestedUrl,
+  });
+  boundary.request.mockImplementation(async ({ path }: { path: string }) =>
+    path.endsWith("/context") ? ctx : [],
+  );
+  await restore();
+  useWorkspaceStore
+    .getState()
+    .setSourceStatusById(
+      "web-clipper:capture-clip",
+      "error",
+      "Snapshot changed outside refresh",
+      undefined,
+      { statusReason: "capture_head_changed", retryEligible: false },
+    );
+  return { pin, ctx };
+};
+
+it.each(["current", "persisted", "inactive"])(
+  "canonical restore retains a known capture refusal from %s display state",
+  async (display) => {
+    const { pin } = await restoreCaptureFixture();
+    if (display === "persisted") {
+      // The canonical workspace is distinct from the intentionally tombstoned legacy cache.
+      const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+      localStorage.removeItem(receiptKey);
+      localStorage.setItem(
+        buildResearchWorkspaceMigrationTombstoneKey("legacy"),
+        JSON.stringify({
+          ...receipt,
+          ...buildResearchWorkspaceMigrationTombstone({
+            ...receipt,
+            legacyWorkspaceId: "legacy",
+          }),
+        }),
+      );
+      // Await the public native persistence write; the earlier identical-ID tombstone suppressed it.
+      const persistence = useWorkspaceStore.persist.getOptions();
+      await persistence.storage!.setItem(persistence.name, {
+        state: persistence.partialize!(useWorkspaceStore.getState()),
+        version: persistence.version,
+      });
+      await useWorkspaceStore.persist.rehydrate();
+    }
+    if (display === "inactive") {
+      useWorkspaceStore.getState().saveCurrentWorkspace();
+      useWorkspaceStore.setState({ workspaceId: "another", sources: [] });
+    }
+    await restore();
+    const state = useWorkspaceStore.getState();
+    expect(state.sources[0]).toMatchObject({
+      webCapture: pin,
+      status: "error",
+      statusMessage: "Snapshot changed outside refresh",
+      statusDetails: { statusReason: "capture_head_changed" },
+    });
+    expect(state.selectedSourceIds).toEqual([]);
+    expect(state.getSelectedMediaIds()).toEqual([]);
+    state.toggleSourceSelection("web-clipper:capture-clip");
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([]);
+  },
+);
+
+it.each([
+  "owner",
+  "workspace",
+  "snapshot-workspace",
+  "pin",
+  "ordinary",
+  "transient",
+  "removed",
+])(
+  "canonical restore does not transfer refusal across %s boundaries",
+  async (change) => {
+    const { pin, ctx } = await restoreCaptureFixture();
+    if (change === "owner") {
+      boundary.userId = "bob";
+      boundary.scopeKey = "original-bob";
+      localStorage.setItem(
+        receiptKey,
+        JSON.stringify({
+          ...JSON.parse(localStorage.getItem(receiptKey)!),
+          serverScopeKey: boundary.scopeKey,
+        }),
+      );
+    }
+    if (change === "workspace")
+      useWorkspaceStore.setState({
+        workspaceId: "another",
+        workspaceSnapshots: {},
+      });
+    if (change === "snapshot-workspace") {
+      useWorkspaceStore.getState().saveCurrentWorkspace();
+      const snapshot = useWorkspaceStore.getState().workspaceSnapshots.original;
+      useWorkspaceStore.setState({
+        workspaceId: "another",
+        sources: [],
+        workspaceSnapshots: {
+          original: { ...snapshot, workspaceId: "another" },
+        },
+      });
+    }
+    if (change === "pin")
+      boundary.captures = [
+        { pin: { ...pin, versionNumber: 2, versionUuid: "version-two" } },
+      ];
+    if (change === "ordinary") boundary.captures = [];
+    if (change === "transient")
+      useWorkspaceStore
+        .getState()
+        .setSourceStatusById("web-clipper:capture-clip", "ready");
+    if (change === "removed") ctx.sources.items = [];
+    await restore();
+    const state = useWorkspaceStore.getState();
+    if (change === "removed") expect(state.sources).toEqual([]);
+    else {
+      expect(state.sources[0].status).toBe("ready");
+      expect(state.sources[0].statusMessage).toBeUndefined();
+      expect(state.getSelectedMediaIds()).toEqual([7]);
+      if (change === "owner" || change === "ordinary")
+        expect(state.sources[0].webCapture).toBeUndefined();
+      if (change === "pin")
+        expect(state.sources[0].webCapture?.versionNumber).toBe(2);
+    }
+  },
+);
+
+it("canonical restore never revives refusal display intentionally scrubbed by an identical-ID tombstone", async () => {
+  await restoreCaptureFixture();
+  const persistence = useWorkspaceStore.persist.getOptions();
+  await persistence.storage!.setItem(persistence.name, {
+    state: persistence.partialize!(useWorkspaceStore.getState()),
+    version: persistence.version,
+  });
+  await useWorkspaceStore.persist.rehydrate();
+  expect(
+    useWorkspaceStore
+      .getState()
+      .sources.every(
+        (source) =>
+          source.statusDetails?.statusReason !== "capture_head_changed",
+      ),
+  ).toBe(true);
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0].status).toBe("ready");
+  expect(useWorkspaceStore.getState().sources[0].statusMessage).toBeUndefined();
+  expect(JSON.parse(localStorage.getItem(receiptKey)!).contentRetained).toBe(
+    false,
+  );
+});
