@@ -231,7 +231,7 @@ describe("usePlaygroundPersistence", () => {
       expect(notificationApi.info).toHaveBeenCalledWith(
         expect.objectContaining({
           message: next
-            ? "New messages are not added to saved chat history. Draft text may remain on this device."
+            ? "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
             : "New messages can be stored in chat history."
         })
       )

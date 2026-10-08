@@ -28,7 +28,7 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { useServerChatHistory, type ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
-import { PageAssistDatabase } from "@/db/dexie/chat"
+import { PageAssistDatabase, watchOnDeviceHistoryChanges } from "@/db/dexie/chat"
 import type { HistoryInfo } from "@/db/dexie/types"
 import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import { useFolderStore } from "@/store/folder"
@@ -409,9 +409,14 @@ export const SidepanelChatSidebar = ({
       try {
         await moveServerChatToTrash(chatId, owner.snapshot.requestScope)
       } catch (error) {
-        const currentTab = tabsRef.current.find(item => item.id === tabId)
-        if (!owner.isCurrent() || !mountedRef.current || currentTab?.serverChatId !== chatId ||
-          currentTab.historyId !== tab.historyId) return false
+        const currentTab = tabsRef.current.find((item) => item.id === tabId)
+        if (
+          !owner.isCurrent() ||
+          !mountedRef.current ||
+          currentTab?.serverChatId !== chatId ||
+          currentTab.historyId !== tab.historyId
+        )
+          return false
         console.error("[sidepanel] Failed to move chat to Trash", error)
         message.error(
           t(
@@ -423,24 +428,50 @@ export const SidepanelChatSidebar = ({
       }
       void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
       if (!owner.isCurrent() || !mountedRef.current) return true
-      const currentTab = tabsRef.current.find(item => item.id === tabId)
-      const closed = currentTab?.serverChatId === chatId && currentTab.historyId === tab.historyId &&
-        (await onCloseTab(tabId)) !== false
+      const currentTarget = () => {
+        const currentTab = tabsRef.current.find((item) => item.id === tabId)
+        return (
+          owner.isCurrent() &&
+          mountedRef.current &&
+          currentTab?.serverChatId === chatId &&
+          currentTab.historyId === tab.historyId
+        )
+      }
+      const removed = await removeLocalCopyOfServerChat(
+        chatId,
+        owner.ownerKey,
+        {
+          scope: { type: "global" },
+          validate_lease: currentTarget
+        }
+      )
       if (!owner.isCurrent() || !mountedRef.current) return true
-      if (closed) await removeLocalCopyOfServerChat(chatId, owner.ownerKey)
+      if (!removed && currentTarget())
+        message.warning(
+          t(
+            "common:chatSidebar.deletedDeviceCopyRetained",
+            "Removed from server history. A cached copy remains on this device because it could not be removed."
+          )
+        )
+      if (currentTarget()) await onCloseTab(tabId)
       if (!owner.isCurrent() || !mountedRef.current) return true
       showUndoNotification({
         title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
         description: t("sidepanel:contextMenu.movedToTrashDescription", {
-          defaultValue: "\"{{title}}\" is in Trash.",
+          defaultValue: '"{{title}}" is in Trash.',
           title: tab.label
         }),
         onUndo: async () => {
           if (!owner.isCurrent()) {
             throw new Error(unverifiedAccountMessage)
           }
-          const restored = await restoreServerChatFromTrash(chatId, owner.snapshot.requestScope)
-          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+          const restored = await restoreServerChatFromTrash(
+            chatId,
+            owner.snapshot.requestScope
+          )
+          void queryClient.invalidateQueries({
+            queryKey: ["serverChatHistory"]
+          })
           if (!owner.isCurrent()) return
           const createdAtMs = Date.parse(restored?.created_at ?? "")
           openServerChatRef.current?.({
@@ -485,12 +516,23 @@ export const SidepanelChatSidebar = ({
   const { isConnected } = useConnectionState()
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
   const [localSearchRetry, setLocalSearchRetry] = React.useState(0)
+  const localSearchRevision = React.useRef(0)
+  const invalidateLocalSearch = React.useCallback(() => {
+    const revision = ++localSearchRevision.current
+    setLocalSearchRetry(revision)
+  }, [])
+  React.useEffect(
+    () => watchOnDeviceHistoryChanges(invalidateLocalSearch),
+    [invalidateLocalSearch]
+  )
   const [localSearch, setLocalSearch] = React.useState<{
     owner: typeof owner
+    revision: number
     query: string
     status: "idle" | "pending" | "success" | "error"
     results: HistoryInfo[]
-  }>({ owner: undefined, query: "", status: "idle", results: [] })
+  }>({ owner: undefined, revision: 0, query: "", status: "idle", results: [] })
+
   const serverSearch = useServerChatHistory(
     debouncedSearchQuery,
     {
@@ -499,7 +541,12 @@ export const SidepanelChatSidebar = ({
       mode: "search"
     }
   )
-  const localSearchCurrent = localSearch.owner === owner && localSearch.query === normalizedQuery
+  const localSearchCurrent =
+    localSearch.owner === owner &&
+    localSearch.query === normalizedQuery &&
+    localSearch.revision === localSearchRetry &&
+    localSearch.revision === localSearchRevision.current
+
   const localSearchPending = ownerCurrent && hasSearch && (
     isSearchDebouncing || !localSearchCurrent || localSearch.status === "pending"
   )
@@ -516,7 +563,7 @@ export const SidepanelChatSidebar = ({
   }
   const retryLocalSearch = () => {
     if (!owner?.isCurrent() || isSearchDebouncing || !hasSearch || localSearchPending) return
-    setLocalSearchRetry(value => value + 1)
+    invalidateLocalSearch()
   }
 
   React.useEffect(() => {
@@ -548,26 +595,48 @@ export const SidepanelChatSidebar = ({
   React.useEffect(() => {
     const normalized = debouncedSearchQuery.trim()
     const query = normalized.toLowerCase()
+    const revision = localSearchRetry
     if (!normalized || !owner?.isCurrent()) {
-      setLocalSearch({ owner, query, status: "idle", results: [] })
+      setLocalSearch({ owner, revision, query, status: "idle", results: [] })
       return
     }
     let isActive = true
-    setLocalSearch({ owner, query, status: "pending", results: [] })
+    setLocalSearch({ owner, revision, query, status: "pending", results: [] })
     if (!dbRef.current) {
       dbRef.current = new PageAssistDatabase()
     }
     const fetchResults = async () => {
       try {
-        const results = await dbRef.current!.fullTextSearchChatHistories(
-          normalized
-        )
-        if (isActive && owner.isCurrent()) {
-          setLocalSearch({ owner, query, status: "success", results: results.filter(history => history.server_scope_key === owner.ownerKey) })
+        const results =
+          await dbRef.current!.fullTextSearchChatHistories(normalized)
+        if (
+          isActive &&
+          revision === localSearchRevision.current &&
+          owner.isCurrent()
+        ) {
+          setLocalSearch({
+            owner,
+            revision,
+            query,
+            status: "success",
+            results: results.filter(
+              (history) => history.server_scope_key === owner.ownerKey
+            )
+          })
         }
       } catch {
-        if (isActive && owner.isCurrent()) {
-          setLocalSearch({ owner, query, status: "error", results: [] })
+        if (
+          isActive &&
+          revision === localSearchRevision.current &&
+          owner.isCurrent()
+        ) {
+          setLocalSearch({
+            owner,
+            revision,
+            query,
+            status: "error",
+            results: []
+          })
         }
       }
     }
@@ -1031,6 +1100,7 @@ export const SidepanelChatSidebar = ({
 
       const remainingSelection: string[] = []
       let localClosedCount = 0
+      let localCleanupFailed = false
       for (const tab of selectedTabs) {
         if (!isCurrent()) return
         if (
@@ -1039,6 +1109,22 @@ export const SidepanelChatSidebar = ({
         ) {
           remainingSelection.push(tab.id)
           continue
+        }
+        if (tab.serverChatId) {
+          const removed = await removeLocalCopyOfServerChat(
+            tab.serverChatId,
+            owner.ownerKey,
+            {
+              scope: { type: "global" },
+              validate_lease: () => isCurrent() && targetIsCurrent(tab)
+            }
+          )
+          if (!isCurrent()) return
+          if (!removed) localCleanupFailed = true
+          if (!targetIsCurrent(tab)) {
+            remainingSelection.push(tab.id)
+            continue
+          }
         }
         const closed =
           (await onCloseTab(tab.id, {
@@ -1050,6 +1136,13 @@ export const SidepanelChatSidebar = ({
         else if (!tab.serverChatId) localClosedCount++
       }
 
+      if (localCleanupFailed)
+        message.warning(
+          t(
+            "common:chatSidebar.deletedDeviceCopyRetained",
+            "Removed from server history. A cached copy remains on this device because it could not be removed."
+          )
+        )
       if (localClosedCount > 0) {
         message.info(
           t("sidepanel:multiSelect.localOnlyClosed", {

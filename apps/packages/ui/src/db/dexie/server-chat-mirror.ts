@@ -52,19 +52,52 @@ export const linkServerChatMirror = async ({
  * deleted (moved to Trash), so local history search stops offering it. Another
  * owner's copy is left alone. Returns the ids of the removed histories.
  */
-export const removeServerChatMirror = async ({ chatId, ownerKey }: {
-  chatId: string; ownerKey: string
-}): Promise<string[]> => db.transaction("rw", [db.chatHistories, db.messages, db.compareStates], async () => {
-  const owned = (await db.chatHistories.where("server_chat_id").equals(chatId).toArray())
-    .filter(history => history.server_scope_key === ownerKey)
-  owned.forEach(assertNoPendingLocalSettingsWrite)
-  for (const history of owned) {
-    await db.chatHistories.delete(history.id)
-    await db.messages.where("history_id").equals(history.id).delete()
-    await db.compareStates.delete(history.id)
-  }
-  return owned.map(history => history.id)
-})
+export const removeServerChatMirror = async ({
+  chatId,
+  ownerKey,
+  scope,
+  signal,
+  validate_lease
+}: {
+  chatId: string
+  ownerKey: string
+  scope?: ChatScope
+} & HistoryOperationOptions): Promise<string[]> =>
+  db.transaction(
+    "rw",
+    [db.chatHistories, db.messages, db.compareStates],
+    async () => {
+      const assertCurrent = () => {
+        if (signal?.aborted || validate_lease?.() === false)
+          throw createServicePromptScopeChangedError()
+      }
+      assertCurrent()
+      const owned = (
+        await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
+      ).filter(
+        (history) =>
+          history.server_scope_key === ownerKey &&
+          (scope?.type === "workspace"
+            ? history.server_scope_type === "workspace" &&
+              history.server_workspace_id === scope.workspaceId
+            : (!history.server_scope_type ||
+                history.server_scope_type === "global") &&
+              !history.server_workspace_id)
+      )
+      assertCurrent()
+      owned.forEach(assertNoPendingLocalSettingsWrite)
+      for (const history of owned) {
+        assertCurrent()
+        await db.chatHistories.delete(history.id)
+        assertCurrent()
+        await db.messages.where("history_id").equals(history.id).delete()
+        assertCurrent()
+        await db.compareStates.delete(history.id)
+        assertCurrent()
+      }
+      return owned.map((history) => history.id)
+    }
+  )
 
 /** Persist a receipt only onto the captured source row; edits are never replaced. */
 export const acknowledgePromotedChatMessage = async ({

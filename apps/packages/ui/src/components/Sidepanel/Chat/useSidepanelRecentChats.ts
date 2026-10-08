@@ -1,6 +1,6 @@
 import React from "react"
 
-import { PageAssistDatabase } from "@/db/dexie/chat"
+import { PageAssistDatabase, watchOnDeviceHistoryChanges } from "@/db/dexie/chat"
 import type { HistoryInfo } from "@/db/dexie/types"
 import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import {
@@ -101,10 +101,22 @@ export const useSidepanelRecentChats = ({
     page: 1,
     limit: RECENT_SERVER_FETCH
   })
+  const [revision, setRevision] = React.useState(0)
+  const readRevision = React.useRef(0)
+  React.useEffect(
+    () =>
+      watchOnDeviceHistoryChanges(() => {
+        const next = ++readRevision.current
+        setRevision(next)
+      }),
+    []
+  )
   const [local, setLocal] = React.useState<{
     owner?: RecentChatsOwner
+    revision: number
     items: HistoryInfo[]
-  }>({ items: [] })
+  }>({ revision: 0, items: [] })
+
   // Re-read when tabs open or close: a closed tab's chat becomes recent.
   const openKey = React.useMemo(
     () => [...openHistoryIds].sort().join("\n"),
@@ -123,21 +135,31 @@ export const useSidepanelRecentChats = ({
           RECENT_LOCAL_FETCH,
           belongsToOwner
         )
-        if (live && owner.isCurrent()) {
-          setLocal({ owner, items: items.filter(belongsToOwner) })
+        if (live && revision === readRevision.current && owner.isCurrent()) {
+          setLocal({ owner, revision, items: items.filter(belongsToOwner) })
         }
       } catch (error) {
-        console.warn("[sidepanel] Could not read recent chats on this device", error)
-        if (live) setLocal({ owner, items: [] })
+        console.warn(
+          "[sidepanel] Could not read recent chats on this device",
+          error
+        )
+        if (live && revision === readRevision.current && owner.isCurrent())
+          setLocal({ owner, revision, items: [] })
       }
     })()
     return () => {
       live = false
     }
-  }, [active, owner, openKey])
+  }, [active, owner, openKey, revision])
 
   const serverChats = server.data
-  const localChats = local.owner === owner ? local.items : null
+  const localChats =
+    local.owner === owner &&
+    local.revision === revision &&
+    local.revision === readRevision.current
+      ? local.items
+      : null
+
   return React.useMemo(
     () =>
       active

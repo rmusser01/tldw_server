@@ -31,12 +31,14 @@ const storeState = vi.hoisted(() => ({
 
 const antdMessage = vi.hoisted(() => ({
   error: vi.fn(),
-  success: vi.fn()
+  success: vi.fn(),
+  warning: vi.fn()
 }))
 
 const mocks = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   deleteChat: vi.fn(),
+  removeMirror: vi.fn(),
   restoreChat: vi.fn(),
   confirmDanger: vi.fn(),
   clearChat: vi.fn(),
@@ -89,13 +91,7 @@ vi.mock("antd", () => ({
   Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
     <input {...props} />
   ),
-  Modal: ({
-    open,
-    children
-  }: {
-    open?: boolean
-    children?: React.ReactNode
-  }) => (open ? <div>{children}</div> : null),
+  Modal: ({ open, children, title, onOk, onCancel }: { open?: boolean; children?: React.ReactNode; title?: string; onOk?: () => void; onCancel?: () => void }) => open ? <div role="dialog" aria-label={title}>{children}<button onClick={onOk}>Confirm deletion</button><button onClick={onCancel}>Cancel</button></div> : null,
   Select: () => <div data-testid="chat-filter-select" />,
   message: antdMessage
 }))
@@ -159,13 +155,6 @@ vi.mock("@/hooks/chat/useSelectServerChat", () => ({
   useSelectServerChat: () => mocks.selectServerChat
 }))
 
-vi.mock("@/hooks/useBulkChatOperations", () => ({
-  useBulkChatOperations: () => ({
-    openBulkFolderPicker: vi.fn(),
-    openBulkTagPicker: vi.fn(),
-    applyBulkDelete: vi.fn()
-  })
-}))
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign(
@@ -238,6 +227,7 @@ vi.mock("../ServerChatRow", async () => {
   }
 })
 
+vi.mock("@/db/dexie/server-chat-mirror", () => ({ removeServerChatMirror: (...args: unknown[]) => mocks.removeMirror(...args) }))
 import { ServerChatList } from "../ServerChatList"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 beforeEach(() => {
@@ -749,4 +739,132 @@ it("retires a held bulk restore after New and makes a fresh operation usable", a
   fireEvent.click(screen.getByRole("button", { name: "Select all" }))
   expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled()
   expect(mocks.clearChat).not.toHaveBeenCalled()
+})
+
+
+describe("acknowledged Server history device cache cleanup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.deleteChat.mockReset().mockResolvedValue(undefined)
+    mocks.removeMirror.mockReset().mockResolvedValue(["mirror"])
+    mocks.confirmDanger.mockResolvedValue(true)
+    storeState.value.serverChatId = null
+    historyState.value = {
+      data: [createChat()],
+      total: 1,
+      status: "success",
+      isLoading: false,
+      sidebarRefreshState: "ready",
+      hasUsableData: true,
+      isShowingStaleData: false,
+      isServerPagedResult: true,
+      isFetching: false,
+      refetch: vi.fn()
+    }
+    useChatSurfaceCoordinatorStore.getState().markPanelEngaged("server-history")
+  })
+  const deleteFromList = async (bulk: boolean, permanent: boolean) => {
+    mocks.chatTypeFilter = permanent ? "trash" : "all"
+    render(<ServerChatList searchQuery="needle" selectionMode={bulk} />)
+    if (bulk) {
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: permanent ? "Delete permanently" : "Move to trash"
+        })
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deletion" }))
+    } else fireEvent.click(screen.getByRole("button", { name: "delete" }))
+    await waitFor(() => expect(mocks.deleteChat).toHaveBeenCalled())
+  }
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true]
+  ])(
+    "cleans current acknowledged cache for bulk=%s permanent=%s",
+    async (bulk, permanent) => {
+      await deleteFromList(bulk, permanent)
+      await waitFor(() =>
+        expect(mocks.removeMirror).toHaveBeenCalledWith(
+          expect.objectContaining({
+            chatId: "chat-1",
+            ownerKey: "A",
+            scope: { type: "global" },
+            validate_lease: expect.any(Function)
+          })
+        )
+      )
+      expect(mocks.deleteChat).toHaveBeenCalledWith(
+        "chat-1",
+        expect.objectContaining({
+          requestScope: expect.objectContaining({ userId: "A" }),
+          expectedVersion: 4,
+          ...(permanent ? { hardDelete: true } : {})
+        })
+      )
+    }
+  )
+  it.each(["owner", "view", "unmount"])(
+    "retires a held device cleanup before feedback or clearing a newer source: %s",
+    async (ending) => {
+      let finish!: () => void
+      mocks.removeMirror.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+      )
+      storeState.value.serverChatId = "chat-1"
+      mocks.chatTypeFilter = "all"
+      const view = render(<ServerChatList searchQuery="needle" />)
+      fireEvent.click(screen.getByRole("button", { name: "delete" }))
+      await waitFor(() => expect(mocks.removeMirror).toHaveBeenCalled())
+      const lease = mocks.removeMirror.mock.calls[0][0]
+        .validate_lease as () => boolean
+      if (ending === "owner") mocks.ownerCurrent = false
+      else if (ending === "view")
+        act(() =>
+          usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+        )
+      else view.unmount()
+      expect(lease()).toBe(false)
+      await act(async () => {
+        finish()
+      })
+      expect(mocks.clearChat).not.toHaveBeenCalled()
+      expect(antdMessage.warning).not.toHaveBeenCalled()
+      expect(antdMessage.error).not.toHaveBeenCalled()
+    }
+  )
+  it("does not clean a rejected server operation", async () => {
+    mocks.deleteChat.mockRejectedValue(new Error("HTTP 500"))
+    await deleteFromList(false, false)
+    await waitFor(() => expect(antdMessage.error).toHaveBeenCalled())
+    expect(mocks.removeMirror).not.toHaveBeenCalled()
+  })
+  it("keeps acknowledged Trash distinct from a device cleanup failure", async () => {
+    mocks.removeMirror.mockRejectedValue(new Error("IndexedDB unavailable"))
+    await deleteFromList(true, false)
+    await waitFor(() => expect(antdMessage.warning).toHaveBeenCalled())
+    expect(antdMessage.success).toHaveBeenCalledWith("Chats moved to trash.")
+    expect(antdMessage.error).not.toHaveBeenCalled()
+    expect(mocks.deleteChat).toHaveBeenCalledTimes(1)
+  })
+  it("cleans only the acknowledged subset after partial bulk Trash", async () => {
+    historyState.value.data = [
+      createChat(),
+      createChat({ id: "failed", title: "Keep failed" })
+    ]
+    historyState.value.total = 2
+    mocks.deleteChat.mockImplementation(async (id: string) => {
+      if (id === "failed") throw new Error("HTTP 500")
+    })
+    await deleteFromList(true, false)
+    await waitFor(() => expect(mocks.removeMirror).toHaveBeenCalledTimes(1))
+    expect(mocks.removeMirror.mock.calls[0][0].chatId).toBe("chat-1")
+    expect(antdMessage.error).toHaveBeenCalledWith(
+      "Some chats could not be moved to trash."
+    )
+  })
 })

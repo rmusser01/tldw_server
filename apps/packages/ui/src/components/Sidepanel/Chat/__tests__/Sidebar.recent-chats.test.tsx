@@ -5,7 +5,7 @@
  * handlers, which give it its own tab (XS-01).
  */
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidepanelChatSidebar } from "../Sidebar"
@@ -14,6 +14,7 @@ import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
 import type { SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
 
 const io = vi.hoisted(() => ({
+  listeners: new Set<(profileChanged: boolean) => void>(),
   serverHistory: vi.fn(),
   recentLocal: vi.fn(),
   search: vi.fn(async () => [] as unknown[])
@@ -52,6 +53,7 @@ vi.mock("@/hooks/useServerChatHistory", () => ({
   useServerChatHistory: (...args: unknown[]) => io.serverHistory(...args)
 }))
 vi.mock("@/db/dexie/chat", () => ({
+  watchOnDeviceHistoryChanges: (listener: (profileChanged: boolean) => void) => { io.listeners.add(listener); return () => { io.listeners.delete(listener) } },
   PageAssistDatabase: vi.fn(function MockPageAssistDatabase(this: Record<string, unknown>) {
     this.fullTextSearchChatHistories = io.search
     this.getRecentChatHistories = io.recentLocal
@@ -148,6 +150,7 @@ const recentTitles = () =>
 
 describe("side-panel recent chats (XS-06)", () => {
   beforeEach(() => {
+    io.listeners.clear()
     io.serverHistory.mockReset().mockImplementation((_query: string, options?: { mode?: string }) => ({
       data:
         options?.mode === "overview"
@@ -240,4 +243,44 @@ describe("side-panel recent chats (XS-06)", () => {
     expect(io.recentLocal).not.toHaveBeenCalled()
     expect(io.serverHistory).not.toHaveBeenCalledWith("", expect.objectContaining({ mode: "overview", enabled: true }))
   })
+})
+
+
+it("refreshes recent owned copies after mutation without changing tabs or query", async () => {
+  io.recentLocal
+    .mockReset()
+    .mockResolvedValue([localHistory("deleted", "Deleted device copy", 6_000)])
+  const view = renderSidebar()
+  await screen.findByText("Deleted device copy")
+  io.recentLocal.mockResolvedValue([])
+  act(() => io.listeners.forEach((listener) => listener(false)))
+  await waitFor(() =>
+    expect(screen.queryByText("Deleted device copy")).toBeNull()
+  )
+  view.unmount()
+  expect(io.listeners.size).toBe(0)
+})
+
+it("retires a held recent read when a newer mutation read is pending", async () => {
+  let release!: (rows: HistoryInfo[]) => void
+  let releaseNext!: (rows: HistoryInfo[]) => void
+  const held = new Promise<HistoryInfo[]>((resolve) => {
+    release = resolve
+  })
+  const next = new Promise<HistoryInfo[]>((resolve) => {
+    releaseNext = resolve
+  })
+  io.recentLocal.mockReset().mockReturnValueOnce(held).mockReturnValue(next)
+  renderSidebar()
+  await waitFor(() => expect(io.recentLocal).toHaveBeenCalledTimes(1))
+  await act(async () => {
+    io.listeners.forEach((listener) => listener(false))
+    release([localHistory("deleted", "Late deleted copy", 6_000)])
+  })
+  await waitFor(() => expect(io.recentLocal).toHaveBeenCalledTimes(2))
+  expect(screen.queryByText("Late deleted copy")).toBeNull()
+  await act(async () => {
+    releaseNext([])
+  })
+  expect(screen.queryByText("Late deleted copy")).toBeNull()
 })

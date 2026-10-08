@@ -24,7 +24,8 @@ const io = vi.hoisted(() => ({
   showUndoNotification: vi.fn(),
   messageError: vi.fn(),
   messageInfo: vi.fn(),
-  messageSuccess: vi.fn()
+  messageSuccess: vi.fn(),
+  messageWarning: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -46,7 +47,7 @@ vi.mock("react-i18next", () => ({
 }))
 vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>()
-  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo } }
+  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo, warning: io.messageWarning } }
 })
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -67,6 +68,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   getTitleById: (...args: unknown[]) => io.getTitleById(...args)
 }))
 vi.mock("@/db/dexie/chat", () => ({
+  watchOnDeviceHistoryChanges: () => () => {},
   PageAssistDatabase: vi.fn(function MockPageAssistDatabase(this: Record<string, unknown>) {
     this.fullTextSearchChatHistories = async () => []
     this.getRecentChatHistories = async () => []
@@ -200,6 +202,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     io.messageError.mockReset()
     io.messageInfo.mockReset()
     io.messageSuccess.mockReset()
+    io.messageWarning.mockReset()
   })
   afterEach(() => {
     document.body.innerHTML = ""
@@ -463,7 +466,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     }
   )
 
-  it("awaits a saved tab's declined close before removing its local copy", async () => {
+  it("removes acknowledged Trash from device discovery even when tab closure declines", async () => {
     let finish!: (accepted: boolean) => void
     const props = renderSidebar({
       onCloseTab: vi.fn(
@@ -481,17 +484,96 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       within(dialog).getByRole("button", { name: "Move to Trash" })
     )
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalled())
-    expect(io.removeServerChatMirror).not.toHaveBeenCalled()
+    expect(io.removeServerChatMirror).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: "chat-1", ownerKey: "alice-owner" })
+    )
     await act(async () => {
       finish(false)
     })
-    expect(io.removeServerChatMirror).not.toHaveBeenCalled()
+    expect(io.removeServerChatMirror).toHaveBeenCalledTimes(1)
     expect(io.deleteChat).toHaveBeenCalledExactlyOnceWith("chat-1", {
       requestScope: owner.snapshot.requestScope
     })
     // Trash already succeeded; keep its Undo available even when the tab stays open.
     expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
   })
+  it.each(["cancel", "binding", "owner"])(
+    "retires held compact cleanup at %s before any close or aggregate feedback",
+    async (ending) => {
+      let current = true
+      let finish!: () => void
+      io.removeServerChatMirror.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+      )
+      const props = renderSidebar({
+        owner: { ...owner, isCurrent: () => current },
+        tabs: [serverTab]
+      })
+      const dialog = await openBulkDialog()
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+      await waitFor(() => expect(io.removeServerChatMirror).toHaveBeenCalled())
+      const lease = io.removeServerChatMirror.mock.calls[0][0]
+        .validate_lease as () => boolean
+      if (ending === "cancel")
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      else if (ending === "owner") current = false
+      else
+        props.view.rerender(
+          <QueryClientProvider client={props.client}>
+            <SidepanelChatSidebar
+              {...props}
+              tabs={[{ ...serverTab, serverChatId: "new-chat" }]}
+            />
+          </QueryClientProvider>
+        )
+      expect(lease()).toBe(false)
+      await act(async () => {
+        finish()
+      })
+      expect(props.onCloseTab).not.toHaveBeenCalled()
+      expect(io.messageWarning).not.toHaveBeenCalled()
+      expect(io.messageInfo).not.toHaveBeenCalled()
+    }
+  )
+
+  it("cleans acknowledged bulk Trash even if the saved tab close is refused", async () => {
+    const props = renderSidebar({
+      tabs: [serverTab],
+      onCloseTab: vi.fn().mockResolvedValue(false)
+    })
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(props.onCloseTab).toHaveBeenCalled())
+    expect(io.removeServerChatMirror).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat-1",
+        ownerKey: "alice-owner",
+        scope: { type: "global" },
+        validate_lease: expect.any(Function)
+      })
+    )
+    expect(io.deleteChat).toHaveBeenCalledTimes(1)
+    expect(io.messageInfo).not.toHaveBeenCalled()
+  })
+  it("warns about the retained device cache without retrying acknowledged bulk Trash", async () => {
+    io.removeServerChatMirror.mockRejectedValue(
+      new Error("Pending local settings")
+    )
+    const props = renderSidebar({
+      tabs: [serverTab],
+      onCloseTab: vi.fn().mockResolvedValue(true)
+    })
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(io.messageWarning).toHaveBeenCalled())
+    expect(props.onCloseTab).toHaveBeenCalledTimes(1)
+    expect(io.deleteChat).toHaveBeenCalledTimes(1)
+    expect(io.messageError).not.toHaveBeenCalled()
+    expect(io.messageSuccess).toHaveBeenCalledWith("Chats moved to trash.")
+  })
+
   it("moves a server chat to Trash, drops its local copy and closes its tab, with Undo", async () => {
     const props = renderSidebar()
     await chooseTabMenuItem("Quarterly plan", "Delete")
@@ -503,7 +585,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalledWith("tab-server"))
     expect(io.deleteChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
     expect(io.deleteChat.mock.calls[0][1]).not.toHaveProperty("hardDelete")
-    expect(io.removeServerChatMirror).toHaveBeenCalledWith({ chatId: "chat-1", ownerKey: "alice-owner" })
+    expect(io.removeServerChatMirror).toHaveBeenCalledWith(expect.objectContaining({ chatId: "chat-1", ownerKey: "alice-owner" }))
     expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
 
     const undo = io.showUndoNotification.mock.calls[0][0] as { title: string; onUndo: () => Promise<void> }

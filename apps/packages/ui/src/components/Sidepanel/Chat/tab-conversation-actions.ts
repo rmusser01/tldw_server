@@ -4,6 +4,8 @@
  * act on the server first and keep the local copy in step; a tab with only a
  * local history renames that history.
  */
+import type { HistoryOperationOptions } from "@/db/dexie/history-selection"
+import type { ChatScope } from "@/types/chat-scope"
 import { removeServerChatMirror } from "@/db/dexie/server-chat-mirror"
 import { getTitleById, updateHistory } from "@/db/dexie/helpers"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
@@ -77,11 +79,21 @@ export const moveServerChatToTrash = (
  * history search stops listing it. Reopening the chat after a restore links a
  * fresh copy.
  */
-export async function removeLocalCopyOfServerChat(chatId: string, ownerKey: string): Promise<void> {
+export async function removeLocalCopyOfServerChat(
+  chatId: string,
+  ownerKey: string,
+  options: HistoryOperationOptions & { scope?: ChatScope } = {}
+): Promise<boolean> {
   try {
-    await removeServerChatMirror({ chatId, ownerKey })
+    await removeServerChatMirror({ chatId, ownerKey, ...options })
+    return true
   } catch (error) {
-    console.warn("[sidepanel] Could not remove the local copy of a deleted chat", error)
+    if (!options.signal?.aborted && options.validate_lease?.() !== false)
+      console.warn(
+        "[chat] Could not remove the local copy of a deleted chat",
+        error
+      )
+    return false
   }
 }
 

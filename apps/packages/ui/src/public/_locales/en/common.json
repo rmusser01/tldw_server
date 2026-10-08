@@ -1918,5 +1918,8 @@
   },
   "temporaryChatDiscardConfirmation": {
     "message": "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages."
+  },
+  "chatSidebar_deletedDeviceCopyRetained": {
+    "message": "Removed from server history. A cached copy remains on this device because it could not be removed."
   }
 }

@@ -4249,5 +4249,8 @@
   },
   "multiSelect_deleteAndCloseConfirmBody": {
     "message": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
+  },
+  "chatSidebar_deletedDeviceCopyRetained": {
+    "message": "Removed from server history. A cached copy remains on this device because it could not be removed."
   }
 }

@@ -590,7 +590,8 @@
     "folderTitlesLoading": "Loading conversation details…",
     "folderTitlesPartial": "Some conversation details are unavailable. Folder links remain visible.",
     "foldersEmpty": "No folders yet. Create a folder to organize your chats.",
-    "folderCreated": "Folder created successfully"
+    "folderCreated": "Folder created successfully",
+    "deletedDeviceCopyRetained": "Removed from server history. A cached copy remains on this device because it could not be removed."
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"

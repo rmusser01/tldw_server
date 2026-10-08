@@ -46,6 +46,7 @@ import {
   type SidebarServerChatFilterValue
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
+import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 
 const BulkFolderPickerModal = React.lazy(
   () => import("@/components/Sidepanel/Chat/BulkFolderPickerModal")
@@ -68,6 +69,7 @@ interface ServerChatListProps {
 }
 
 type ServerHistoryAction = {
+  serverScopeKey: string
   requestScope: ServicePromptRequestScope
   isCurrent: () => boolean
 }
@@ -521,6 +523,7 @@ export function ServerChatList({
       const session = usePlaygroundSessionStore.getState()
       const draftRevision = useStoreMessageOption.getState().chatDraftRevision
       return {
+        serverScopeKey: receipt.serverScopeKey,
         requestScope: historyRequestScope,
         isCurrent: () =>
           !readOnlyNow.current &&
@@ -570,6 +573,40 @@ export function ServerChatList({
     () => selectedChats.map((chat) => chat.id),
     [selectedChats]
   )
+  const deleteServerChat = React.useCallback(
+    async (
+      chat: ServerChatHistoryItem,
+      action: ServerHistoryAction,
+      hardDelete = false
+    ) => {
+      if (!action.isCurrent()) throw new Error("server_history_action_expired")
+      await tldwClient.deleteChat(chat.id, {
+        requestScope: action.requestScope,
+        scope: { type: "global" },
+        expectedVersion: chat.version ?? undefined,
+        ...(hardDelete ? { hardDelete: true } : {})
+      })
+      if (!action.isCurrent()) return
+      const removed = await removeLocalCopyOfServerChat(
+        chat.id,
+        action.serverScopeKey,
+        {
+          scope: { type: "global" },
+          validate_lease: action.isCurrent
+        }
+      )
+      if (!removed && action.isCurrent())
+        message.warning({
+          key: "chat-device-copy-removal",
+          content: t(
+            "common:chatSidebar.deletedDeviceCopyRetained",
+            "Removed from server history. A cached copy remains on this device because it could not be removed."
+          )
+        })
+    },
+    [t]
+  )
+
   const { openBulkFolderPicker, openBulkTagPicker, applyBulkDelete } =
     useBulkChatOperations({
       selectedConversationIds,
@@ -578,11 +615,9 @@ export function ServerChatList({
         const action = managementAction.current
         if (!action?.isCurrent())
           throw new Error("server_history_action_expired")
-        await tldwClient.deleteChat(conversationId, {
-          requestScope: action.requestScope,
-          scope: { type: "global" },
-          expectedVersion: chatById.get(conversationId)?.version ?? undefined
-        })
+        const chat = chatById.get(conversationId)
+        if (!chat) throw new Error("server_history_action_expired")
+        await deleteServerChat(chat, action)
       },
       t,
       setBulkFolderPickerOpen,
@@ -877,11 +912,7 @@ export function ServerChatList({
       if (!ok || !action.isCurrent()) return
 
       try {
-        await tldwClient.deleteChat(chat.id, {
-          requestScope: action.requestScope,
-          scope: { type: "global" },
-          expectedVersion: chat.version ?? undefined
-        })
+        await deleteServerChat(chat, action)
         if (!action.isCurrent()) return
         setPinnedChatIds((prev) => (prev || []).filter((id) => id !== chat.id))
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
@@ -907,6 +938,7 @@ export function ServerChatList({
     [
       captureAction,
       clearChat,
+      deleteServerChat,
       confirmDanger,
       queryClient,
       resolveChatMutationErrorMessage,
@@ -967,12 +999,7 @@ export function ServerChatList({
       if (!ok || !action.isCurrent()) return
 
       try {
-        await tldwClient.deleteChat(chat.id, {
-          requestScope: action.requestScope,
-          scope: { type: "global" },
-          expectedVersion: chat.version ?? undefined,
-          hardDelete: true
-        })
+        await deleteServerChat(chat, action, true)
         if (!action.isCurrent()) return
         setPinnedChatIds((prev) => (prev || []).filter((id) => id !== chat.id))
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
@@ -998,6 +1025,7 @@ export function ServerChatList({
     [
       captureAction,
       clearChat,
+      deleteServerChat,
       confirmDanger,
       queryClient,
       resolveChatMutationErrorMessage,
@@ -1213,12 +1241,7 @@ export function ServerChatList({
       if (bulkConfirmAction === "hard_delete") {
         const results = await Promise.allSettled(
           selectedChats.map((chat) =>
-            tldwClient.deleteChat(chat.id, {
-              requestScope: action.requestScope,
-              scope: { type: "global" },
-              expectedVersion: chat.version ?? undefined,
-              hardDelete: true
-            })
+            deleteServerChat(chat, action, true)
           )
         )
         if (!action.isCurrent()) return
@@ -1299,6 +1322,7 @@ export function ServerChatList({
     applyBulkDelete,
     bulkConfirmAction,
     clearChat,
+    deleteServerChat,
     queryClient,
     selectedChats,
     selectedConversationIds,

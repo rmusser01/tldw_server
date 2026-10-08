@@ -75,6 +75,7 @@ vi.mock("@/hooks/useServerChatHistory", () => ({
 }))
 
 vi.mock("@/db/dexie/chat", () => ({
+  watchOnDeviceHistoryChanges: () => () => {},
   PageAssistDatabase: vi.fn(
     function MockPageAssistDatabase(this: { fullTextSearchChatHistories: typeof fullTextSearchChatHistoriesMock }) {
       this.fullTextSearchChatHistories = fullTextSearchChatHistoriesMock
