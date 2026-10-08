@@ -137,4 +137,141 @@ describe("model normalization helpers", () => {
       })
     )
   })
+
+  it("retains the exact provider default even when model availability is complete", async () => {
+    const client = {
+      getModelsMetadata: async () => ({
+        models: [
+          {
+            id: "shared",
+            provider: "ollama",
+            type: "chat",
+            is_configured: true,
+            provider_enabled: true,
+            availability: "available"
+          },
+          {
+            id: "shared",
+            provider: "custom_openai_api",
+            type: "chat",
+            is_configured: true,
+            provider_enabled: true,
+            availability: "available"
+          },
+          {
+            id: "other",
+            provider: "custom_openai_api",
+            type: "chat",
+            is_configured: true,
+            provider_enabled: true,
+            availability: "available"
+          }
+        ]
+      }),
+      getProviders: async () => ({
+        default_provider: "custom-openai-api",
+        providers: [
+          { name: "ollama", default_model: "shared" },
+          { name: "custom_openai_api", default_model: "shared" }
+        ]
+      })
+    }
+    const models = await getNormalizedTldwModels(client)
+    expect(models.map((model) => model.is_server_default)).toEqual([
+      false,
+      true,
+      false
+    ])
+  })
+
+  it.each(
+    [undefined, null, "missing", ["shared"], { id: "shared" }].map(
+      (defaultModel) => ({ defaultModel })
+    )
+  )(
+    "does not fabricate a default for malformed or unavailable model %j",
+    async ({ defaultModel }) => {
+      const models = await getNormalizedTldwModels({
+        getModelsMetadata: async () => [
+          {
+            id: "shared",
+            provider: "openai",
+            type: "chat",
+            is_server_default: true
+          }
+        ],
+        getProviders: async () => ({
+          default_provider: "openai",
+          providers: [{ name: "openai", default_model: defaultModel }]
+        })
+      })
+      expect(models[0].is_server_default).toBe(false)
+    }
+  )
+
+  it("does not accept a metadata default assertion after provider discovery fails", async () => {
+    const models = await getNormalizedTldwModels({
+      getModelsMetadata: async () => [
+        {
+          id: "shared",
+          provider: "openai",
+          type: "chat",
+          is_server_default: true
+        }
+      ],
+      getProviders: async () => {
+        throw new Error("Unavailable provider defaults")
+      }
+    })
+    expect(models[0].is_server_default).toBe(false)
+  })
+
+  it("supports the deployed name-only API model identity", async () => {
+    const models = await getNormalizedTldwModels({
+      getModelsMetadata: async () => [
+        { name: "Vendor/Model", provider: "openai", type: "chat" }
+      ],
+      getProviders: async () => ({
+        default_provider: "openai",
+        providers: [{ name: "openai", default_model: "Vendor/Model" }]
+      })
+    })
+    expect(models[0]).toMatchObject({
+      id: "Vendor/Model",
+      is_server_default: true
+    })
+  })
+
+  it("does not derive a server default from a friendly display label", async () => {
+    const models = await getNormalizedTldwModels({
+      getModelsMetadata: async () => [
+        {
+          id: "different",
+          name: "Friendly default label",
+          provider: "openai",
+          type: "chat"
+        }
+      ],
+      getProviders: async () => ({
+        default_provider: "openai",
+        providers: [{ name: "openai", default_model: "Vendor/Model" }]
+      })
+    })
+    expect(models[0].is_server_default).toBe(false)
+  })
+
+  it("matches a numbered provider's configuration alias to its canonical metadata identity", async () => {
+    const models = await getNormalizedTldwModels({
+      getModelsMetadata: async () => [
+        { name: "Vendor/Model", provider: "custom-openai-api-3", type: "chat" }
+      ],
+      getProviders: async () => ({
+        default_provider: "custom_openai_api_3",
+        providers: [
+          { name: "custom-openai-api-3", default_model: "Vendor/Model" }
+        ]
+      })
+    })
+    expect(models[0].is_server_default).toBe(true)
+  })
 })

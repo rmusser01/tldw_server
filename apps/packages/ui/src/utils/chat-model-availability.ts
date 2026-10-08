@@ -1,6 +1,8 @@
 import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   isAutoModelId,
+  normalizeApiProviderKey,
+  normalizeKnownApiProviderKey,
   parseProviderQualifiedModelSelection,
   resolveExplicitProviderForSelectedModel
 } from "./resolve-api-provider"
@@ -215,73 +217,8 @@ export function normalizeChatModelId(value: string | null | undefined): string {
   return trimmed.replace(/^tldw:/i, "")
 }
 
-const PROVIDER_ALIASES: Record<string, string> = {
-  "llama": "llama.cpp",
-  customopenai: "custom-openai-api",
-  custom_openai_api: "custom-openai-api",
-  custom_openai_api2: "custom-openai-api-2",
-  customopenai2: "custom-openai-api-2",
-  "custom-openai-api2": "custom-openai-api-2",
-  custom_openai_api_2: "custom-openai-api-2",
-  local: "local-llm",
-  local_llm: "local-llm",
-  localllm: "local-llm",
-  "llama-cpp": "llama.cpp",
-  llama_cpp: "llama.cpp",
-  llamacpp: "llama.cpp"
-}
-
 function normalizeProviderValue(value: unknown): string | null {
-  const provider = String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "")
-  if (!provider || provider === "unknown") return null
-  return PROVIDER_ALIASES[provider] ?? provider
-}
-
-const KNOWN_CHAT_PROVIDER_KEYS = new Set<string>([
-  "openai",
-  "anthropic",
-  "cohere",
-  "groq",
-  "qwen",
-  "openrouter",
-  "deepseek",
-  "mistral",
-  "google",
-  "gemini",
-  "huggingface",
-  "moonshot",
-  "zai",
-  "llama.cpp",
-  "kobold",
-  "ooba",
-  "tabbyapi",
-  "vllm",
-  "local-llm",
-  "ollama",
-  "aphrodite",
-  "mlx",
-  "custom-openai-api",
-  "custom-openai-api-2",
-  "custom",
-  "together",
-  "xai",
-  "siliconflow",
-  "volcengine",
-  "tencentcloud",
-  "alibabacloud",
-  "fireworks",
-  "novita",
-  "chutes",
-  "bedrock"
-])
-
-function normalizeKnownChatProviderKey(value: unknown): string | null {
-  const provider = normalizeProviderValue(value)
-  if (!provider || !KNOWN_CHAT_PROVIDER_KEYS.has(provider)) return null
-  return provider
+  return normalizeApiProviderKey(value) || null
 }
 
 function normalizeAvailableModelId(model: ModelDescriptor): string {
@@ -535,7 +472,7 @@ function normalizeProviderQualifiedChatModelId(
       return null
     }
 
-    const provider = normalizeKnownChatProviderKey(
+    const provider = normalizeKnownApiProviderKey(
       normalized.slice(0, separatorIndex)
     )
     const modelId = normalizeChatModelId(

@@ -1550,8 +1550,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
 
   // Model settings for model badge (UX-009)
-  const selectedModel = useStoreMessageOption((s) => s.selectedModel)
-  const setSelectedModel = useStoreMessageOption((s) => s.setSelectedModel)
   const chatScope = React.useMemo<ChatScope | undefined>(
     () =>
       workspaceId
@@ -1565,6 +1563,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   // Message option hook
   const {
+    selectedModel,
+    setSelectedModel,
     messages,
     setMessages,
     history,
@@ -1582,7 +1582,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     historyId,
     setHistoryId,
     serverChatId,
-    setServerChatId
+    setServerChatId,
+    selectedModelIsLoading
   } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
 
   // RAG state from store
@@ -3068,7 +3069,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       currentModel: selectedModel,
       models: composerModels,
       preferredModelIds: favoriteModels,
-      isCurrentModelHydrating: false,
+      isCurrentModelHydrating: selectedModelIsLoading,
       arePreferencesHydrating: favoriteModelsIsLoading
     })
     if (nextModel && typeof setSelectedModel === "function") {
@@ -3079,6 +3080,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     favoriteModels,
     favoriteModelsIsLoading,
     selectedModel,
+    selectedModelIsLoading,
     setSelectedModel
   ])
 

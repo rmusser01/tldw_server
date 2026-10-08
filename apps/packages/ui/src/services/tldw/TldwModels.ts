@@ -86,6 +86,7 @@ const hasUsableApiKey = (value: unknown): boolean => {
 
 export interface ModelInfo {
   id: string
+  isServerDefault?: boolean
   name: string
   provider: string
   type: 'chat' | 'embedding' | 'image' | 'other'
@@ -123,7 +124,7 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 4
+  private readonly CACHE_SCHEMA_VERSION = 5
   private readonly INVALIDATION_TOKEN_HISTORY_LIMIT = 64
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
@@ -675,6 +676,7 @@ export class TldwModelsService {
 
     return {
       id: tldwModel.id,
+      isServerDefault: toOptionalBoolean(tldwModel.is_server_default),
       name: tldwModel.name || tldwModel.id,
       provider: provider,
       type: type,

@@ -6,6 +6,7 @@ import { getDesignSystemState } from "@/design-system"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
+import { fetchChatModels } from "@/services/tldw-server"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const mockCheckConnectionOnce = vi.fn()
@@ -129,6 +130,9 @@ const workspaceStoreState = {
 }
 
 const messageOptionState = {
+  selectedModel: undefined as string | null | undefined,
+  setSelectedModel: mockSetSelectedModel,
+  selectedModelIsLoading: false,
   messages: [] as Array<{
     id: string
     isBot: boolean
@@ -235,7 +239,7 @@ vi.mock("@/store/model", () => ({
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: (...args: unknown[]) => {
     mockUseMessageOption(...args)
-    return messageOptionState
+    return { ...messageOptionState, selectedModel: messageOptionState.selectedModel !== undefined ? messageOptionState.selectedModel : messageOptionStoreState.selectedModel }
   }
 }))
 
@@ -363,10 +367,58 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     mockSetChatMode.mockReset()
     mockSetFileRetrievalEnabled.mockReset()
     mockSetSelectedModel.mockReset()
+    messageOptionState.selectedModel = undefined
+    messageOptionState.selectedModelIsLoading = false
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
+    vi.mocked(fetchChatModels).mockResolvedValue([{ api_provider: "ollama", id: "ollama:gemma3:1b", label: "gemma3:1b", value: "ollama:gemma3:1b" }])
 
     mockGetWorkspaceChatSession.mockImplementation((workspaceId: string) => {
       return workspaceSessions.get(workspaceId) ?? null
     })
+  })
+
+  it("waits for stored model hydration instead of claiming the catalog default", async () => {
+    messageOptionStoreState.selectedModel = null
+    messageOptionState.selectedModelIsLoading = true
+    vi.mocked(fetchChatModels).mockResolvedValue([
+      {
+        model: "tldw:default",
+        provider: "openai",
+        nickname: "Default model",
+        is_server_default: true
+      }
+    ])
+    const view = renderChatPane()
+    fireEvent.click(screen.getByTestId("model-selector"))
+    await screen.findByText("Default model")
+    expect(mockSetSelectedModel).not.toHaveBeenCalled()
+
+    messageOptionState.selectedModelIsLoading = false
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
+    view.rerender(
+      <MemoryRouter>
+        <ChatPane />
+      </MemoryRouter>
+    )
+    expect(mockSetSelectedModel).not.toHaveBeenCalled()
+  })
+
+  it("preserves a derived stored choice before the raw store's hydration effect publishes it", async () => {
+    messageOptionStoreState.selectedModel = null
+    messageOptionState.selectedModel = "ollama:gemma3:1b"
+    messageOptionState.selectedModelIsLoading = false
+    vi.mocked(fetchChatModels).mockResolvedValue([
+      {
+        model: "tldw:default",
+        provider: "openai",
+        nickname: "Default model",
+        is_server_default: true
+      }
+    ])
+    renderChatPane()
+    fireEvent.click(screen.getByTestId("model-selector"))
+    await screen.findByText("Default model")
+    expect(mockSetSelectedModel).not.toHaveBeenCalled()
   })
 
   it("shows stop button while streaming and triggers stopStreamingRequest", () => {
@@ -866,7 +918,8 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     renderChatPane()
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
-      scope: { type: "workspace", workspaceId: "workspace-a" }
+      scope: { type: "workspace", workspaceId: "workspace-a" },
+      hydrateServerChat: true
     })
   })
 

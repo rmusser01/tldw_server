@@ -97,6 +97,7 @@ export const isTldwServerRunning = async () => {
 
 const mapTldwModelToUi = (model: any) => ({
   id: model.id,
+  is_server_default: model.isServerDefault,
   name: `tldw:${model.id}`,
   model: `tldw:${model.id}`,
   provider: String(model.provider || "unknown").toLowerCase(),

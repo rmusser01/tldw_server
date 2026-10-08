@@ -12,6 +12,12 @@ import { Link } from "react-router-dom"
 import { useStorage } from "@plasmohq/storage/hook"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
+import {
+  getCanonicalModelKey,
+  getModelId,
+  getModelProvider,
+  resolveModelSelectorSelection
+} from "@/hooks/playground/modelSelectorUtils"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { Alert } from "@/components/ui/primitives/Alert"
 import type { GeneratedCharacter } from "@/services/character-generation"
@@ -196,10 +202,13 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
   const hasModels = Array.isArray(models) && models.length > 0
   const selectedModelData = React.useMemo(() => {
     if (!selectedModel || !models) return null
-    return models.find((m) => m.model === selectedModel)
+    const selected = resolveModelSelectorSelection(models, selectedModel).model
+    if (selected) return selected
+    const legacyMatches = models.filter((model) => model.model === selectedModel)
+    return legacyMatches.length === 1 ? legacyMatches[0] : null
   }, [selectedModel, models])
 
-  // Auto-select first model if none selected
+  // Preserve stored selection; otherwise use the verified catalog default.
   React.useEffect(() => {
     const nextModel = resolveStartupSelectedModel({
       currentModel: selectedModel,
@@ -213,9 +222,12 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
 
   const handleGenerate = () => {
     if (!concept.trim()) return
-    if (!selectedModel) return
-    const provider = selectedModelData?.provider
-    onGenerate(concept.trim(), selectedModel, provider)
+    if (!selectedModelData) return
+    onGenerate(
+      concept.trim(),
+      getModelId(selectedModelData),
+      getModelProvider(selectedModelData)
+    )
   }
 
   const handleRetry = () => {
@@ -250,22 +262,22 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
           </div>
         ),
         children: providerModels.map((model) => ({
-          key: model.model,
+          key: getCanonicalModelKey(model),
           label: (
             <div className="flex items-center justify-between gap-2">
               <span className="truncate">{model.nickname || model.model}</span>
-              {selectedModel === model.model && (
+              {selectedModelData === model && (
                 <Check className="h-4 w-4 text-primary flex-shrink-0" />
               )}
             </div>
           ),
-          onClick: () => setSelectedModel(model.model)
+          onClick: () => setSelectedModel(getCanonicalModelKey(model))
         }))
       })
     }
 
     return items
-  }, [hasModels, models, selectedModel, setSelectedModel])
+  }, [hasModels, models, selectedModelData, setSelectedModel])
 
   const selectedModelDisplay = React.useMemo(() => {
     if (!selectedModelData) {
@@ -501,7 +513,7 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
               type="primary"
               size="small"
               onClick={handleGenerate}
-              disabled={!concept.trim() || !selectedModel || isGenerating}
+              disabled={!concept.trim() || !selectedModelData || isGenerating}
               loading={isGenerating}
               icon={!isGenerating && <Sparkles className="w-3 h-3" />}>
               {isGenerating

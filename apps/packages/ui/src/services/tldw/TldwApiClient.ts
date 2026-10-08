@@ -869,6 +869,7 @@ export type UserProfileUpdateResponse = {
 
 export interface TldwModel {
   id: string
+  is_server_default?: boolean
   name: string
   provider: string
   description?: string

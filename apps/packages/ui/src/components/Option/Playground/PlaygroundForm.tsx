@@ -1580,7 +1580,7 @@ export const PlaygroundForm = ({
   }, [markOptionalPanelEngaged, setOptionalPanelVisible, voiceChatEnabled]);
 
   // Auto-select model on initial load when no model is selected
-  // Priority: 1) First favorite model, 2) First available model
+  // Priority: available favorite, verified server default, then available fallback.
   React.useEffect(() => {
     const nextModel = resolveStartupSelectedModel({
       currentModel: selectedModel,

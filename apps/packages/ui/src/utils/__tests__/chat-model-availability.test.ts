@@ -13,6 +13,30 @@ import {
 } from "../chat-model-availability"
 
 describe("chat model availability utilities", () => {
+  it.each([
+    "poe",
+    "minimax",
+    "tabby",
+    "custom-openai-api-3",
+    "custom-openai-api-99",
+    "custom_openai_api_3"
+  ])(
+    "admits an explicitly configured native character model from deployed provider %s",
+    (provider) => {
+      expect(
+        buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "TestBot" },
+          selectedModel: `${provider}:Vendor/Model:Q4`,
+          requireExplicitProvider: true,
+          availableModels: [
+            { model: "tldw:Vendor/Model:Q4", provider, is_configured: true }
+          ]
+        })
+      ).toMatchObject({ status: "ready" })
+    }
+  )
+
   it("blocks discovery failure with Retry instead of treating retained models as ready", () => {
     const input = { selectedModel: "openai:gpt-4o-mini", availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }], modelsError: true };
     expect(buildChatModelUsability(input)).toMatchObject({ status: "discovery_failed", canSend: false, recommendedAction: "retry" });

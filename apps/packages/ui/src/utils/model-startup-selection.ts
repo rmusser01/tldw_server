@@ -1,5 +1,13 @@
+import {
+  getCanonicalModelKey,
+  getFavoriteModelKeyCandidates
+} from "@/hooks/playground/modelSelectorUtils"
+import { normalizeKnownApiProviderKey } from "./resolve-api-provider"
+
 type StartupModelDescriptor = {
   model?: unknown
+  provider?: unknown
+  is_server_default?: unknown
 }
 
 type ResolveStartupSelectedModelParams = {
@@ -42,21 +50,20 @@ export const resolveStartupSelectedModel = ({
       .filter((id): id is string => Boolean(id))
   )
 
-  if (preferred.size > 0) {
-    for (const model of modelList) {
-      const modelId = normalizeModelId(model?.model)
-      if (modelId && preferred.has(modelId)) {
-        return modelId
-      }
-    }
-  }
+  const choice =
+    modelList.find(
+      (model) =>
+        normalizeModelId(model?.model) &&
+        getFavoriteModelKeyCandidates(model).some((key) => preferred.has(key))
+    ) ??
+    modelList.find(
+      (model) =>
+        model?.is_server_default === true && normalizeModelId(model.model)
+    ) ??
+    modelList.find((model) => normalizeModelId(model?.model))
 
-  for (const model of modelList) {
-    const modelId = normalizeModelId(model?.model)
-    if (modelId) {
-      return modelId
-    }
-  }
-
-  return null
+  if (!choice) return null
+  return normalizeKnownApiProviderKey(choice.provider)
+    ? getCanonicalModelKey(choice)
+    : normalizeModelId(choice.model)
 }

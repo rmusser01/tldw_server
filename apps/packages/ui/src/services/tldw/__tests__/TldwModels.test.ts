@@ -104,6 +104,65 @@ describe("TldwModelsService caching", () => {
     })
   })
 
+  it("preserves the server default while filtering unselectable models", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "blocked",
+        name: "Blocked",
+        provider: "ollama",
+        type: "chat",
+        is_configured: false,
+        is_server_default: true
+      },
+      {
+        id: "default",
+        name: "Default",
+        provider: "openai",
+        type: "chat",
+        is_server_default: true
+      },
+      {
+        id: "other",
+        name: "Other",
+        provider: "openai",
+        type: "chat",
+        is_server_default: false
+      }
+    ])
+    const { TldwModelsService } = await importService()
+    const models = await new TldwModelsService().getChatModels(true)
+    expect(
+      models.map((model) => ({
+        id: model.id,
+        isServerDefault: model.isServerDefault
+      }))
+    ).toEqual([
+      { id: "default", isServerDefault: true },
+      { id: "other", isServerDefault: false }
+    ])
+  })
+
+  it("refreshes a persisted catalog that predates server-default metadata", async () => {
+    mocks.storageValue = {
+      version: 4,
+      models: [{ id: "old", name: "Old", provider: "ollama", type: "chat" }],
+      timestamp: Date.now(),
+      scope: cacheScope("http://127.0.0.1:8000")
+    }
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "current",
+        name: "Current",
+        provider: "openai",
+        type: "chat",
+        is_server_default: true
+      }
+    ])
+    const { TldwModelsService } = await importService()
+    const models = await new TldwModelsService().getChatModels()
+    expect(models.map((model) => model.id)).toEqual(["current"])
+  })
+
   it.each(["advisory", "strict", "cached"])("retires a %s caller invalidated during config lookup before borrowing a new catalog", async mode => {
     const config = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "old-key" };
     const gate = deferred<typeof config>();
@@ -326,7 +385,7 @@ describe("TldwModelsService caching", () => {
       authSource: "cookie-session"
     })
     mocks.storageValue = {
-      version: 4,
+      version: 5,
       timestamp: Date.now() - age,
       scope: "http://localhost:3000|single-user|cookie|none",
       models: [{ id: "expired-cookie-model", name: "Old Model", provider: "llama", type: "chat" }]
@@ -386,7 +445,7 @@ describe("TldwModelsService caching", () => {
       authSource: "cookie-session"
     })
     mocks.storageValue = {
-      version: 4,
+      version: 5,
       timestamp: Date.now(),
       scope: "http://localhost:3000|single-user|cookie|none",
       models: [{ id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }]
@@ -1186,7 +1245,7 @@ describe("TldwModelsService caching", () => {
     const tombstoneStarted = deferred<void>()
     const releaseTombstone = deferred<void>()
     mocks.storageValue = {
-      version: 4,
+      version: 5,
       timestamp: Date.now(),
       scope: cacheScope("http://127.0.0.1:8000"),
       models: [
@@ -1276,7 +1335,7 @@ describe("TldwModelsService caching", () => {
 
   it("applies a startup tombstone without hydrating stale models", async () => {
     mocks.storageValue = {
-      version: 4,
+      version: 5,
       models: null,
       timestamp: 0,
       scope: null,
@@ -1505,7 +1564,7 @@ describe("TldwModelsService caching", () => {
 
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 4,
+      version: 5,
       timestamp: Date.now(),
       scope: cacheScope("http://127.0.0.1:8000"),
       models: [
