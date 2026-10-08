@@ -22,8 +22,18 @@ export type LocalRegistryBucket<T> = {
 
 const storage = createSafeStorage({ area: "local" })
 
-const withRecordLock = async <T>(key: string, operation: () => Promise<T>): Promise<T> => {
-  if (typeof navigator === "undefined" || !navigator.locks?.request) return operation()
+export const withRecordLock = async <T>(
+  key: string,
+  operation: () => Promise<T>,
+  required = false,
+): Promise<T> => {
+  if (typeof navigator === "undefined" || !navigator.locks?.request) {
+    if (required)
+      throw new Error(
+        "Safe local note persistence requires a record lock on this device.",
+      );
+    return operation();
+  }
   return navigator.locks.request(`tldw:local-registry:${key}`, operation)
 }
 

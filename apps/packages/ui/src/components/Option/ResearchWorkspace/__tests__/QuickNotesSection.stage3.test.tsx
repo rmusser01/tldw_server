@@ -3,9 +3,9 @@ vi.mock(
   () =>
     import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
 );
-import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import React from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   QuickNotesSection,
   rankKeywordSuggestions
@@ -167,8 +167,20 @@ vi.mock("antd", async () => {
 })
 
 describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.stubGlobal(
+      "navigator",
+      Object.create(window.navigator, {
+        locks: {
+          value: {
+            request: (_key: string, operation: () => unknown) =>
+              Promise.resolve().then(operation),
+          },
+        },
+      }),
+    );
+    vi.clearAllMocks();
     window.localStorage.clear();
     mockSetCurrentNote.mockImplementation((note) => {
       workspaceStoreState.currentNote = note;

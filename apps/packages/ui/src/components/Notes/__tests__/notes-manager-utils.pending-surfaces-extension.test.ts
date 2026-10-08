@@ -124,3 +124,69 @@ it("refuses extension durable readback failure and preserves failed-retirement i
   await owning.retireSurfaceOfflineDraft("alice", draft.key, "immutable-key");
   expect(await owning.readSurfaceOfflineDraftQueue("alice")).toEqual({});
 });
+
+it("retains later Quick Notes text and exact accepted base through installed Plasmo serialization", async () => {
+  const tails = new Map<string, Promise<unknown>>();
+  vi.stubGlobal(
+    "navigator",
+    Object.create(window.navigator, {
+      locks: {
+        value: {
+          request: (key: string, operation: () => unknown) => {
+            const next = (tails.get(key) ?? Promise.resolve()).then(operation);
+            tails.set(
+              key,
+              next.catch(() => undefined),
+            );
+            return next;
+          },
+        },
+      },
+    }),
+  );
+  const owning = await import("../notes-manager-utils");
+  const quick = {
+    ...draft,
+    key: 'surface:quick-notes:["workspace-a","workspace:a"]:draft-a',
+    metadata: {
+      quickNotesAuthorityId: "verified-service",
+      quickNotesWorkspaceId: "workspace-a",
+      quickNotesWorkspaceTag: "workspace:a",
+    },
+    pendingWrite: { ...draft.pendingWrite!, authorityId: "verified-service" },
+  };
+  await owning.retainSurfaceOfflineDraft("alice", quick);
+  vi.resetModules();
+  const second = await import("../notes-manager-utils");
+  await second.checkpointQuickNotesOfflineDraft(
+    "alice",
+    quick.key,
+    "immutable-key",
+    () => ({ ...quick, content: "Later local text", isDirty: true }),
+  );
+  await owning.checkpointQuickNotesOfflineDraft(
+    "alice",
+    quick.key,
+    "immutable-key",
+    () => null,
+    { id: String(draft.pendingWrite!.body.id), version: 2 },
+  );
+  const serialized =
+    entries["tldw:notesOfflineDraftQueue:v1:alice:" + quick.key];
+  expect(typeof serialized).toBe("string");
+  const retained = JSON.parse(serialized as string).value;
+  expect(retained).toMatchObject({
+    content: "Later local text",
+    noteId: draft.pendingWrite!.body.id,
+    baseVersion: 2,
+    metadata: {
+      quickNotesAuthorityId: "verified-service",
+      quickNotesAcceptedKey: "immutable-key",
+      quickNotesDirty: true,
+    },
+  });
+  expect(retained.pendingWrite).toBeUndefined();
+  expect(
+    (await second.readSurfaceOfflineDraftQueue("alice"))[quick.key],
+  ).toEqual(retained);
+});
