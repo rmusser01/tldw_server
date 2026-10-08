@@ -499,19 +499,19 @@ Ruling: continue the no-proof workflow exception using this official task and ow
 **Goal**: Real notice dismissal and shared task/activity reload regressions on unchanged476e source.
 **Success Criteria**: Each failure reaches the actual ownership/publication assertion with existing real fixtures; matching/legacy controls remain valid.
 **Tests**: Six existing hook/Dock/helper/policy/SQLite/officialPG test paths; record exact new inventory before RED.
-**Status**: In Progress
+**Status**: Complete
 
 ### Stage 2: Reuse existing owned operation guards
 **Goal**: Scope PATCH and shared reload to the captured owner, selected note and original event; preserve newer pending work and dirty drafts.
 **Success Criteria**: Current success clears only the original event; failures and revoked lifetimes do not publish or clear replacement/current state.
 **Tests**: Affected suites in both configured clients and normal native fixtures, existing600 outer/native300 case limits.
-**Status**: Not Started
+**Status**: Complete
 
 ### Stage 3: Review and commit this unit
 **Goal**: Verified minimal source/test changes committed locally with official tracking.
 **Success Criteria**: No new touched security/lint issues; exact reviewed actual/index/commit patch; normal hooks.
 **Tests**: Supported types/compile/scoped baseline-current checks and independent actual/staged review; retain prior unchanged results without replay.
-**Status**: Not Started
+**Status**: Complete
 
 ### Pre-RED test review and selective execution
 
@@ -871,19 +871,19 @@ ADR required: assess existing ADR049/050 ownership and draft protections first; 
 **Goal**: Trace actual preparation/dispatch/cleanup across each current consumer and establish causal failures on unchanged source.
 **Success Criteria**: New draft or account/view/attachment change cannot be cleared or dispatched by an old attempt; failure handling retains truthful accepted-turn identity.
 **Tests**: Held preparation, draft ABA, navigation/account revocation, attachment replacement, duplicate Send, failed/skipped/rejected dispatch and late success with newer context, plus legitimate optimistic Send/queue controls as affected.
-**Status**: In Progress
+**Status**: Complete
 
 ### Stage 2: Guard existing composer boundaries
 **Goal**: Minimal correction uses current owner/revision/attempt primitives at actual asynchronous boundaries.
 **Success Criteria**: Causal and affected UI/Web checks pass without lost drafts, duplicate admitted questions, or new context deletion.
 **Tests**: Red/green, touched shared composer/full-page/sidepanel/model consumers, configured types/lint/security as applicable; maximum3bounded attempts.
-**Status**: Not Started
+**Status**: Complete
 
 ### Stage 3: Review and local commit
 **Goal**: Fresh actual/staged review and normal hooks qualify exact scoped commit.
 **Success Criteria**: Only qualified source and associated notes staged; unrelated Sync WIP and all runtime gates preserved.
 **Tests**: Actual/staged review, scoped hooks, index/commit parity; actual43 acceptance remains separate.
-**Status**: Not Started
+**Status**: Complete
 
 
 ### Composer ownership first causal RED
@@ -1064,7 +1064,7 @@ Editor candidate1 local qualification: UI causal8passed/29excluded (2.752s), aff
 **Goal**: Implement only the smallest supported shared action using existing authoritative owner and durable receipt contracts.
 **Success Criteria**: Edited question/regeneration uses the selected context and canonical identities once; rejection retains original state/draft; older completion cannot replace a newer selection; local/native storage and replay authority remain.
 **Tests**: Causal red/green and genuinely affected component/controller/handler/service/backend consumers in both configured clients and official isolated PostgreSQL where applicable.
-**Status**: Not Started
+**Status**: In Progress
 
 #### Native action Stage 3: Review and local commit
 **Goal**: Qualify and independently review the scoped action fix before normal local commit.
@@ -1092,7 +1092,7 @@ Editor unit completed locally: independent actual+staged16-path reviews CLEAR; n
 **Goal**: Normally commit the independently reviewed minimal projection correction.
 **Success Criteria**: No new protocol/storage rule; TS-only BanditN/A, static/client types as affected, actual/staged reviews and normalhooks.
 **Tests**: Scoped checks and exact reviewed commit equality; real43 acceptance remains open.
-**Status**: In Progress
+**Status**: Complete
 
 ADR required: no; reuse existing localRAG eligibility semantics and ADR049 history boundary.
 
@@ -1103,3 +1103,85 @@ RAG projection corrected causalRED: proper updateMessageById fixture and genuine
 
 #### RAG projection local qualification
 RAG projection candidate1 qualified locally: configured UI16passed19excluded/natural0/2.110s and Web16passed19excluded/natural0/1.803s. Scope is two exact Save regressions, thirteen existing diagnostic eligibility controls including receipts/answered variants, and stable-ID Save/error control; independently unsupported EditSend and eighteen unrelated branch cases excluded. Full native outputs recovered/released, guarded source/test hashes unchanged; utility fixture before/after SHA5c0e6ff14c1c613837f12c4ebaf380f1d9d58023a6c2ca58b3d0a527e9379d60 matched. Production helper/signature unchanged; only shared existing eligibility call and import changed. Post-green import-only formatting preserves full TypeScript AST exactly (normalizedSHA1ab3b2b2ba0eb42d1643209cbe2d811693213e327c3e6b85a04f465169330cf1); final source4e70e0fec50ac648888220c4de3581d5a600fcb6fad765e392c60087b0576b74/test6d8f358b85dca5b2ca2166f1072622aa14e6461f9dbf38981ce4a34efd7f7fbb. Two touched TS parse0/ESLint0errors/no newwarnings, source2identical inheritedwarnings/test0, diffcheck0. TS/prose-only BanditN/A; no API/public type/storage contract change or unchanged broad compiler replay. Independent two-file source review CLEAR; final four-path actual/staged review/normalhooks/localcommit pending. Stage2Complete/Stage3InProgress. Controlled handler Save proof is not real DB/native/UAT acceptance; all43 real workflows open.
+
+
+### RAG post-commit closure and bounded Edit-and-Send specification
+
+RAG unit complete at db8417d32d5e5614e0e536c9e2e7bf19bbeec5dc. Actual and staged four-path reviews CLEAR; normal hooks 0/1.465s and commit 0/0.344s. Exact reviewed 23549-byte patch matches the commit (SHA256 1a85856494ec1820c7498f5e096c4e480770b7ef68bcf1d39e08bd3feefb1a95). Index empty; unrelated eleven-path Sync/ADR patch preserved. No publication or actual UAT acceptance.
+
+**Bounded task: selected-history Edit-and-Send.** Reuse ADR049 history selection and ADR050 lifecycle; ADR required: no new durable public contract for this existing append/settlement path. Regenerate remains separate: same-parent assistant sibling, no duplicated question, and a proposed versioned existing-input settlement requires its own ADR and backend qualification.
+
+- Capture the exact user target, owner, originating selected view and operation fence synchronously. Derive a detached before_message(target ID) selection from authoritative owner capture. Display text/index alone never grants ancestry authority.
+- Route the boundary through both live submit constructors and normal selected-send capture. Keep the originating display view/fence current while provider context uses the detached prefix. Never eagerly call choose or mutate the original question/answer/suffix.
+- Append one fresh edited user input through existing admission and settle one assistant through the current receipt. Preserve original rows and alternatives; follow the completed new branch only if the originating fence still owns publication.
+- Defer this action's optimistic selected projection until real admission acknowledgement so refusal preserves the mounted editor and draft. Inspect resolved failed/skipped submit results: they must reject the editor's save acknowledgement, not close it as fulfilled success.
+- Retain temporary/mode/rich-payload/tool/owner/account/navigation/lease gates and unknown-ack recovery semantics. A late operation cannot dispatch or overwrite a replacement view. Do not remove unsupported Regenerate guards.
+- Tests first on unchanged production: strengthen the actual mounted native Edit-and-Send fixture with stable IDs, exact provider prefix, original-row preservation and rejection retention; use actual selected controller/normal capture/pipeline tests for detached-boundary and stale-view causality. Existing unit doubles are component/control proof only. Root runs normal UI causal red; no production candidate before valid red. Maximum three production candidates; no unchanged qualified replay.
+
+Then qualify affected controls in both configured clients, configured types and scoped lint, independent actual and staged review, normal hooks and exact local commit. TS-only Bandit is not applicable; any genuinely touched Python requires baseline/current Bandit. All 43 real workflows remain open. No test/report/proof bundle files, model/auth/shared-cache actions, publication, queue mutation or Sync hold bypass.
+
+
+#### Native Edit-and-Send oracle correction before baseline
+
+Independent tests-first review found one Important timing gap: an immediate 409 and final editor state can miss pre-acknowledgement unmount/recreation. Correct only the refusal fixture: hold its selected-user admission response, require the same mounted busy editor with draft/suffix and exact original rows and zero provider calls, release the existing definitive 409, then require the same idle editor and drain before transport restoration. No production or behavioral execution; causal baseline waits for narrow rereview. Regenerate remains unchanged. All 43 real acceptance stays open.
+
+
+#### Native Edit-and-Send first causal baseline declared
+
+Narrow independent timing rereview ADDRESSED/CLEAR at fixture SHA256 96c01317d84058f66114fad581151c7125ab57c679a89bc37b84ec70e1b1df18. Declare only two mounted Edit-and-Send cases on unchanged db8417d production, normal configured UI Node20.19.5/Vitest4.0.18 workers, 600-second outer cap and 35 exact source/fixture guards. Regenerate excluded. Distinguish setup/transport errors from intended causal failures; no production candidate yet. Complete output remains in owned-process memory until recovered/released. All 43 real acceptance open.
+
+
+#### Native Edit-and-Send causal result and candidate 1
+
+First unchanged-production baseline completed naturally exit 1 in 44.502s: two failed, one Regenerate case excluded, all 35 exact source/fixture guards unchanged and stderr empty. Actual mounted editor and Save-and-Send reached; current unsupported user action guard prevents any completion/admission. This is causal action unavailability, not independent reproduction of the later prefix/timing assertions. Complete 23325-character native JSON recovered/released in process memory.
+
+Authorize minimal production candidate 1 of maximum three: derive before-target selection from the captured authoritative user row; preserve originating display/fence and draft until actual admission; return explicit branch submit outcomes through both live hooks; reuse existing append, settlement and follow-result. Author focused stale-origin and unknown-ack duplicate refusal checks before implementation. Existing unresolved dispatched intent must not become an ordinary repeat with fresh IDs; preserve existing recovery authority and keep uncertain results honest. No new public protocol for this frontend task, no Regenerate guard removal or original row mutation. New source and test controls remain unqualified until root execution and independent review. All 43 actual acceptance stays open.
+
+
+#### Owned stage label reconciliation
+
+Align Notes activity and Composer owned stage labels with their already recorded local completion. Historical narratives, exact scoped qualification limits, later commit records and all real acceptance gates remain intact. No tests or new qualification; no tracking-only commit.
+
+
+### Native Edit-and-Send candidate 1 and truthful test migration
+
+The mounted baseline failed twice before admission/provider dispatch at the unsupported-action guard (natural exit 1, 44.502s outer; Regenerate excluded). Candidate 1 is frozen for actual-source review and affected checks; no green result is claimed. New source-boundary/lost-ack tests are authored and unrun. Automatic review rejected a no-owner rewrite of the stale old-answer-exclusion test before execution. The safer owner-bound migration retains that requirement in exact provider context and leaves both RAG Save cases unchanged. All real UAT acceptance remains open.
+
+
+### Native candidate 1 review and failed affected run
+
+One configured UI run failed all four controls before their waited admission/capture/provider events (4 failed, 1 Regenerate excluded; natural exit 1, 78.915909s outer). Complete native output was recovered/released in memory with unchanged source guards. The independent eight-path review requires an Edit-only originating-view fence after admission and a deterministic before-target capture assertion; it endorses the behavior-preserving owner-bound legacy fixture. Candidate 1 remains frozen and unqualified while its early refusal is traced. No held-path or real UAT acceptance is claimed.
+
+
+### Native causal diagnosis and candidate 2
+
+The focused mounted diagnostic exposed the actual unsupported edit guard (1 failed, 5 excluded; natural 1, 25.168929s). Existing formatSelectedHistory gives every plain display row an empty metadata object. Two independent new controls on unchanged candidate 1 then failed as intended (2 failed, 21 excluded; natural 1, 1.858742s): real empty-metadata projection refused, and Edit-only stale view after admission dispatched once. Complete output recovered/released in process memory with unchanged source guards.
+
+Authorize candidate 2 of maximum 3: the existing nonempty-metadata rule and an Edit-only originating-view check before model dispatch, preserving accepted input/recovery and ordinary Send/Regenerate behavior. No new public protocol or replay claims. All 43 real acceptance stays open.
+
+### Native candidate 2 checks and additional causal controls
+Normal UI: 172 passed across six affected files, one Regenerate case excluded, natural exit 0, 21.287313s outer. Complete output recovered only in process memory and released. Candidate 2 remains unqualified for real UAT: independent review identified generic sidepanel freshness choosing a new view before explicit Edit, and ordinary local adapter metadata rejected by the public action handler. The direct-normal local test does not cover that entry point. Add two real-path controls before deciding candidate 3 (maximum three production candidates). No source repair or real UAT acceptance follows from these passing component checks.
+
+### Native real-path RED and final candidate
+Two new controls failed on candidate 2 (78 excluded; natural 1; 2.424265s): real freshness chose a-new before Edit, and real local capture/formatter/action refused first-user. Complete output recovered in memory and released. Candidate 3 of maximum 3 now authorized: explicit Edit bypasses only the ordinary composer freshness gate; local adapter metadata is allowed only for plain local payloads, with genuine rich/unknown state still refused. Preserve ordinary Send, ownership, selected target and Regenerate contracts. No further production candidate is available without reassessment. Both-client qualification, types, reviews and actual UAT remain open.
+
+### Edit-and-Send local qualification
+Final candidate 3: normal UI183 passed (one Regenerate excluded; 21.985178s) and Web183 passed (one Regenerate excluded; 24.450637s), natural 0. Full outputs recovered only in memory and released. UI types0/59.419710s; Web types0/10.849999s. All thirteen touched TS files parse clean; compact complete baseline/current lint comparison has no new diagnostics (one inherited pipeline-test error and existing warnings retained). New test-only hook naming/typing cleanup preserves normalized emitted JS, independently reconstructed from the prior exact hash; no UI replay. Initial truncated diagnostic display was not accepted. Actual thirteen-path independent review CLEAR. TS/prose Bandit N/A. Edit-and-Send reproduction and repair are complete locally; final staged review/hooks/commit remain. Regenerate and all 43 real UAT acceptance remain open; overall Native stages retain In Progress.
+
+#### Edit-and-Send bounded Stage 1: Causal diagnosis
+**Goal**: Reproduce action refusal, stale dispatch and actual local/freshness entry-point failures.
+**Success Criteria**: Real controls distinguish adapter defaults from rich state and preserve original branches.
+**Tests**: Recorded mounted and actual capture/freshness causal regressions.
+**Status**: Complete
+
+#### Edit-and-Send bounded Stage 2: Existing-contract repair
+**Goal**: Reuse detached selection and existing input admission/assistant settlement.
+**Success Criteria**: Both live hooks/local actions preserve target, draft and owner boundaries.
+**Tests**: 183 affected tests per configured client and configured types/lint.
+**Status**: Complete
+
+#### Edit-and-Send bounded Stage 3: Review and local commit
+**Goal**: Commit only the independently reviewed scoped unit.
+**Success Criteria**: Actual/staged clear, normal hooks, exact reviewed commit and unrelated WIP preserved.
+**Tests**: Staged review, normal hooks and commit patch equality.
+**Status**: In Progress
