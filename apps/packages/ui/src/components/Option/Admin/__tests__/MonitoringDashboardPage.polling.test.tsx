@@ -2,6 +2,7 @@
 
 import React from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import { QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -37,6 +38,21 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 import MonitoringDashboardPage from "../MonitoringDashboardPage"
+import { createAdminQueryClient } from "../AdminQueryProvider"
+import type { QueryClient } from "@tanstack/react-query"
+
+/**
+ * Render the page under a fresh admin query client so each test owns its
+ * cache (B-S4): reference-data queries now flow through react-query.
+ */
+const adminQueryClients: QueryClient[] = []
+const renderPage = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
+}
 
 type LoaderCounts = {
   stats: number
@@ -116,6 +132,7 @@ describe("MonitoringDashboardPage polling discipline (admin perf B-S2)", () => {
   })
 
   afterEach(() => {
+    adminQueryClients.splice(0).forEach((client) => client.clear())
     // Drop instance-level visibility overrides so later tests see jsdom defaults.
     delete (document as Partial<Document> & { hidden?: boolean }).hidden
     delete (document as Partial<Document> & {
@@ -124,7 +141,7 @@ describe("MonitoringDashboardPage polling discipline (admin perf B-S2)", () => {
   })
 
   it("auto refresh polls only live datasets (stats + security status)", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
     await flushAsync()
     expect(mocks.getSystemStats).toHaveBeenCalledTimes(1)
     expect(mocks.listAlertHistory).toHaveBeenCalledTimes(1)
@@ -150,7 +167,7 @@ describe("MonitoringDashboardPage polling discipline (admin perf B-S2)", () => {
   })
 
   it("does not poll while the tab is hidden and catches up live data when visible again", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
     await flushAsync()
     await enableAutoRefresh("30s")
 
@@ -178,7 +195,7 @@ describe("MonitoringDashboardPage polling discipline (admin perf B-S2)", () => {
   })
 
   it("requests alert history with an explicit limit of 200", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
     await flushAsync()
 
     expect(mocks.listAlertHistory).toHaveBeenCalledWith({ limit: 200 })

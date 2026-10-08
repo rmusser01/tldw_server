@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   Card,
   Table,
@@ -27,6 +28,11 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  adminKeys,
+  useAdminPermissions,
+  useAdminRoles
+} from "@/services/tldw/adminQueries"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 // ── Types ──
@@ -234,27 +240,24 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 
 const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
-  const [roles, setRoles] = useState<Role[]>([])
-  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
+  // Roles are shared admin reference data (B-S4/F11): the hook dedupes the
+  // fetch with Server Admin inside the stale window, and mutations below
+  // invalidate the shared key so every consumer refetches.
+  const rolesQuery = useAdminRoles()
+  const roles: Role[] = Array.isArray(rolesQuery.data)
+    ? rolesQuery.data
+    : ((rolesQuery.data as any)?.data ?? [])
+  const loading = rolesQuery.isFetching
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
   const [expandedPerms, setExpandedPerms] = useState<Record<number, any[]>>({})
 
-  const loadRoles = useCallback(async () => {
-    setLoading(true)
-    try {
-      const result = await tldwClient.listAdminRoles()
-      setRoles(Array.isArray(result) ? result : (result as any)?.data ?? [])
-    } catch (err) {
-      onGuardError(err)
-    } finally {
-      setLoading(false)
-    }
-  }, [onGuardError])
-
   useEffect(() => {
-    loadRoles()
-  }, [loadRoles])
+    if (rolesQuery.error) {
+      onGuardError(rolesQuery.error)
+    }
+  }, [rolesQuery.error, onGuardError])
 
   const handleCreate = useCallback(async () => {
     try {
@@ -263,24 +266,24 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
       await tldwClient.createAdminRole(values.name, values.description)
       message.success(t("settings:adminRbac.roleCreated", "Role created"))
       createForm.resetFields()
-      await loadRoles()
+      await queryClient.invalidateQueries({ queryKey: adminKeys.roles })
     } catch (err: any) {
       if (err?.errorFields) return
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleCreateFailed", "Failed to create role")))
     } finally {
       setCreating(false)
     }
-  }, [createForm, loadRoles])
+  }, [createForm, queryClient])
 
   const handleDelete = useCallback(async (roleId: number) => {
     try {
       await tldwClient.deleteAdminRole(roleId)
       message.success(t("settings:adminRbac.roleDeleted", "Role deleted"))
-      await loadRoles()
+      await queryClient.invalidateQueries({ queryKey: adminKeys.roles })
     } catch (err: any) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleDeleteFailed", "Failed to delete role")))
     }
-  }, [loadRoles])
+  }, [queryClient])
 
   const loadRolePerms = useCallback(async (roleId: number) => {
     try {
@@ -333,7 +336,7 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
     <Card
       title={t("settings:adminRbac.rolesCardTitle", "Roles")}
       extra={
-        <Button icon={<ReloadOutlined />} onClick={loadRoles} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={() => rolesQuery.refetch()} loading={loading}>
           {t("common:refresh", "Refresh")}
         </Button>
       }
@@ -403,9 +406,6 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
   const [userRoles, setUserRoles] = useState<any[]>([])
   const [rolesLoading, setRolesLoading] = useState(false)
 
-  // All roles for assignment
-  const [allRoles, setAllRoles] = useState<Role[]>([])
-
   // Overrides
   const [overrides, setOverrides] = useState<UserOverride[]>([])
   const [overridesLoading, setOverridesLoading] = useState(false)
@@ -413,9 +413,6 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
   // Effective permissions
   const [effectivePerms, setEffectivePerms] = useState<EffectivePerm[]>([])
   const [effectiveLoading, setEffectiveLoading] = useState(false)
-
-  // All permissions for override modal
-  const [allPermissions, setAllPermissions] = useState<Permission[]>([])
 
   // Modals
   const [addRoleModalOpen, setAddRoleModalOpen] = useState(false)
@@ -471,28 +468,17 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
     }
   }, [onGuardError])
 
-  // Load all roles and permissions once
-  useEffect(() => {
-    const loadMeta = async () => {
-      try {
-        const [rolesResult, permsResult] = await Promise.allSettled([
-          tldwClient.listAdminRoles(),
-          tldwClient.listPermissions()
-        ])
-        if (rolesResult.status === "fulfilled") {
-          const r = rolesResult.value
-          setAllRoles(Array.isArray(r) ? r : (r as any)?.data ?? [])
-        }
-        if (permsResult.status === "fulfilled") {
-          const p = permsResult.value
-          setAllPermissions(Array.isArray(p) ? p : (p as any)?.data ?? [])
-        }
-      } catch {
-        // non-critical
-      }
-    }
-    loadMeta()
-  }, [])
+  // All roles and permissions are shared admin reference data (B-S4/F11):
+  // the hooks reuse whatever Server Admin / the Roles tab already fetched
+  // inside the stale window. Failures stay non-critical here, as before.
+  const rolesQuery = useAdminRoles()
+  const permissionsQuery = useAdminPermissions()
+  const allRoles: Role[] = Array.isArray(rolesQuery.data)
+    ? rolesQuery.data
+    : ((rolesQuery.data as any)?.data ?? [])
+  const allPermissions: Permission[] = Array.isArray(permissionsQuery.data)
+    ? permissionsQuery.data
+    : ((permissionsQuery.data as any)?.data ?? [])
 
   const handleUserSelect = useCallback((userId: number) => {
     setSelectedUserId(userId)

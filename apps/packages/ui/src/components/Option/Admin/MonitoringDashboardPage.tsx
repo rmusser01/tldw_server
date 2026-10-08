@@ -33,6 +33,7 @@ import {
   type SandboxAdminRuntimeDiagnosticsItem,
   type SandboxAdminRuntimeDiagnosticsResponse
 } from "@/services/tldw/TldwApiClient"
+import { useSystemStats } from "@/services/tldw/adminQueries"
 import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
@@ -180,9 +181,12 @@ const MonitoringDashboardPage: React.FC = () => {
   // Current user ID for alert assignment
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
 
-  // System overview state
-  const [systemStats, setSystemStats] = useState<DashboardRecord | null>(null)
-  const [statsLoading, setStatsLoading] = useState(false)
+  // System overview state. System stats are shared admin reference data
+  // (B-S4/F11): the query hook dedupes fetches with the other admin
+  // surfaces inside the stale window; security status stays page-local.
+  const systemStatsQuery = useSystemStats()
+  const systemStats = (systemStatsQuery.data as DashboardRecord | null) ?? null
+  const statsLoading = systemStatsQuery.isFetching
   const [securityStatus, setSecurityStatus] = useState<DashboardRecord | null>(null)
   const [securityLoading, setSecurityLoading] = useState(false)
   const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
@@ -223,17 +227,13 @@ const MonitoringDashboardPage: React.FC = () => {
 
   // ── System Overview ──
 
-  const loadSystemStats = useCallback(async () => {
-    setStatsLoading(true)
-    try {
-      const stats = await tldwClient.getSystemStats()
-      setSystemStats(stats)
-    } catch (err) {
-      markAdminGuardFromError(err)
-    } finally {
-      setStatsLoading(false)
+  // Query errors surface the admin guard the same way the page-local
+  // loaders do (403/404 map to the guard states instead of an error wall).
+  useEffect(() => {
+    if (systemStatsQuery.error) {
+      markAdminGuardFromError(systemStatsQuery.error)
     }
-  }, [markAdminGuardFromError])
+  }, [systemStatsQuery.error, markAdminGuardFromError])
 
   const loadSecurityStatus = useCallback(async () => {
     setSecurityLoading(true)
@@ -391,11 +391,15 @@ const MonitoringDashboardPage: React.FC = () => {
   }, [markAdminGuardFromError])
 
   // Live datasets (system stats + security status) — cheap, polled by auto-refresh.
+  // The stats refetch is forced (it bypasses the shared stale window) so the
+  // B-S2 polling contract keeps seeing fresh numbers on every tick.
+  // `refetch` is observer-stable, so this callback doesn't churn the timers.
+  const refetchSystemStats = systemStatsQuery.refetch
   const refreshLive = useCallback(() => {
-    void loadSystemStats()
+    void refetchSystemStats()
     void loadSecurityStatus()
     setLastRefreshedAt(new Date())
-  }, [loadSystemStats, loadSecurityStatus])
+  }, [refetchSystemStats, loadSecurityStatus])
 
   // Deep datasets (sandbox diagnostics, alert rules, alert history, activity) —
   // loaded on mount and manual refresh only, never by the poller.
@@ -417,7 +421,8 @@ const MonitoringDashboardPage: React.FC = () => {
   useEffect(() => {
     if (initialLoadRef.current) return
     initialLoadRef.current = true
-    void loadSystemStats()
+    // System stats arrive via useSystemStats (mount fetch or shared cache);
+    // only the page-local deep datasets load here.
     void loadSecurityStatus()
     void loadSandboxDiagnostics()
     void loadAlertRules()
@@ -438,7 +443,7 @@ const MonitoringDashboardPage: React.FC = () => {
       },
       () => { /* non-critical */ }
     )
-  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
   // Track tab visibility so polling can pause while hidden
   useEffect(() => {

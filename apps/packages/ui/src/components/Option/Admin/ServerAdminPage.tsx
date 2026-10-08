@@ -24,6 +24,7 @@ import {
   type AdminRole,
   type MediaIngestionBudgetDiagnostics
 } from "@/services/tldw/TldwApiClient"
+import { useSystemStats } from "@/services/tldw/adminQueries"
 import { PageShell } from "@/components/Common/PageShell"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 import {
@@ -98,8 +99,14 @@ export const ServerAdminPage: React.FC = () => {
   const message = useAntdMessage()
   const { t } = useTranslation(["option", "settings"])
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
-  const [stats, setStats] = React.useState<any | null>(null)
-  const [loading, setLoading] = React.useState(false)
+  // System statistics are shared admin reference data (B-S4/F11): the query
+  // hook dedupes the fetch with the other admin surfaces inside the stale
+  // window. The stats request keeps its dedicated timeout cap.
+  const systemStatsQuery = useSystemStats({
+    timeoutMs: SYSTEM_STATS_TIMEOUT_MS
+  })
+  const stats = systemStatsQuery.data ?? null
+  const loading = systemStatsQuery.isFetching
   const [error, setError] = React.useState<string | null>(null)
   const [adminGuard, setAdminGuard] = React.useState<"forbidden" | "notFound" | null>(null)
   const [usersData, setUsersData] = React.useState<AdminUserListResponse | null>(null)
@@ -209,32 +216,28 @@ export const ServerAdminPage: React.FC = () => {
     [markAdminGuardFromError]
   )
 
-  const loadSystemStats = React.useCallback(async () => {
-    try {
-      setLoading(true)
-      const data = await tldwClient.getSystemStats({
-        timeoutMs: SYSTEM_STATS_TIMEOUT_MS
-      })
-      setStats(data)
+  // Query errors keep the page's guard + timeout messaging contract: 403/404
+  // map to the admin guard, timeouts get their dedicated retry hint, and the
+  // error clears once a fetch succeeds again.
+  React.useEffect(() => {
+    const err: unknown = systemStatsQuery.error
+    if (!err) {
       setError(null)
-    } catch (e: any) {
-      const baseError = sanitizeAdminErrorMessage(
-        e,
-        "Failed to load system statistics."
-      )
-      setError(
-        isTimeoutLikeError(e)
-          ? (t(
-              "settings:admin.systemStatsTimeout",
-              "System statistics took longer than 10 seconds. Retry to try again."
-            ) as string)
-          : baseError
-      )
-      markAdminGuardFromError(e)
-    } finally {
-      setLoading(false)
+      return
     }
-  }, [markAdminGuardFromError, t])
+    markAdminGuardFromError(err)
+    setError(
+      isTimeoutLikeError(err)
+        ? (t(
+            "settings:admin.systemStatsTimeout",
+            "System statistics took longer than 10 seconds. Retry to try again."
+          ) as string)
+        : sanitizeAdminErrorMessage(
+            err,
+            "Failed to load system statistics."
+          )
+    )
+  }, [systemStatsQuery.error, markAdminGuardFromError, t])
 
   React.useEffect(() => {
     let cancelled = false
@@ -257,12 +260,12 @@ export const ServerAdminPage: React.FC = () => {
   React.useEffect(() => {
     if (initialLoadRef.current) return
     initialLoadRef.current = true
-    void loadSystemStats()
+    // System stats arrive via useSystemStats (mount fetch or shared cache);
+    // the users table and roles stay on their page-local loaders.
     void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
     void loadRoles()
   }, [
     loadRoles,
-    loadSystemStats,
     loadUsers,
     userActiveFilter,
     userRoleFilter,
@@ -270,7 +273,7 @@ export const ServerAdminPage: React.FC = () => {
   ])
 
   const handleRefresh = async () => {
-    await loadSystemStats()
+    await systemStatsQuery.refetch()
     if (mediaBudgetUserId !== null && !adminGuard) {
       void loadMediaBudget(mediaBudgetUserId, mediaBudgetPolicyId)
     }

@@ -3,7 +3,22 @@ import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { App, message } from "antd"
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
 import ServerAdminPage from "../ServerAdminPage"
+import { createAdminQueryClient } from "../AdminQueryProvider"
+
+/**
+ * Render the page under a fresh admin query client so each test owns its
+ * cache (B-S4): system stats now flow through react-query.
+ */
+const adminQueryClients: QueryClient[] = []
+const renderPage = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
+}
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -134,7 +149,7 @@ describe("ServerAdminPage design-system states", () => {
 
   it("loads multi-user creation controls under Strict Mode", async () => {
     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
-    render(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
+    renderPage(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
     expect(await screen.findByRole("button", { name: "Create user" })).toBeVisible()
     expect(apiMock.getSystemStats).toHaveBeenCalledOnce()
   })
@@ -142,7 +157,7 @@ describe("ServerAdminPage design-system states", () => {
   it("does not start dashboard requests when a config lookup resolves after unmount", async () => {
     let resolveConfig!: (value: unknown) => void
     apiMock.getConfig.mockImplementation(() => new Promise((resolve) => { resolveConfig = resolve }))
-    const view = render(<ServerAdminPage />)
+    const view = renderPage(<ServerAdminPage />)
     view.unmount()
     const callsBeforeResolution = apiMock.getSystemStats.mock.calls.length
     await act(async () => {
@@ -158,7 +173,7 @@ describe("ServerAdminPage design-system states", () => {
     )
     apiMock.createAdminUser.mockResolvedValue({ id: 22, username: "alice", role: "user" })
     const staticSuccess = vi.spyOn(message, "success")
-    render(<App><ServerAdminPage /></App>)
+    renderPage(<App><ServerAdminPage /></App>)
     await waitFor(() => expect(apiMock.getConfig).toHaveBeenCalledOnce())
     await act(async () => {
       resolveConfig({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
@@ -181,7 +196,7 @@ describe("ServerAdminPage design-system states", () => {
   it("keeps create-user errors inside the modal without losing the form", async () => {
     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
     apiMock.createAdminUser.mockRejectedValue(new Error("Username already exists"))
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
     fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
     const dialog = await screen.findByRole("dialog")
     fireEvent.change(within(dialog).getByLabelText("Username"), { target: { value: "alice" } })
@@ -198,7 +213,7 @@ describe("ServerAdminPage design-system states", () => {
       Object.assign(new Error("Request failed: 403 Forbidden"), { status: 403 })
     )
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Permission denied")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Request access" }))
@@ -215,7 +230,7 @@ describe("ServerAdminPage design-system states", () => {
       Object.assign(new Error("Request failed: 404 Not Found"), { status: 404 })
     )
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Blocked")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Review server configuration" }))
@@ -241,7 +256,7 @@ describe("ServerAdminPage design-system states", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const errorLabel = await screen.findByText("Error")
     expect(errorLabel).toBeInTheDocument()
@@ -265,7 +280,7 @@ describe("ServerAdminPage design-system states", () => {
       pages: 0
     })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Empty")).toBeInTheDocument()
     expect(
@@ -276,7 +291,7 @@ describe("ServerAdminPage design-system states", () => {
   it("renders user-load errors as an error state with retry, without a false empty panel", async () => {
     apiMock.listAdminUsers.mockRejectedValueOnce(new Error("Users exploded"))
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Unable to load users")).toBeInTheDocument()
     expect(screen.getByText("Users exploded")).toBeInTheDocument()
@@ -292,7 +307,7 @@ describe("ServerAdminPage design-system states", () => {
   it("renders role-load errors through the design-system Alert primitive", async () => {
     apiMock.listAdminRoles.mockRejectedValueOnce(new Error("Roles exploded"))
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const alert = await expectDesignSystemAlertForTitle("Unable to load roles")
     expect(alert).toHaveTextContent("Roles exploded")
@@ -303,7 +318,7 @@ describe("ServerAdminPage design-system states", () => {
       new Error("Budget exploded")
     )
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const alert = await expectDesignSystemAlertForTitle(
       "Unable to load media ingestion budget diagnostics"
@@ -318,7 +333,7 @@ describe("ServerAdminPage design-system states", () => {
       message: "ok"
     })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const rowButton = (
       await screen.findAllByRole("button", { name: "Reset password" })

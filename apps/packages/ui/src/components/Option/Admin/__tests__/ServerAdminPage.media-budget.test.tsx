@@ -1,7 +1,27 @@
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import ServerAdminPage from "../ServerAdminPage"
+import { createAdminQueryClient } from "../AdminQueryProvider"
+
+/**
+ * Render the page under a fresh admin query client so each test owns its
+ * cache (B-S4): system stats now flow through react-query.
+ */
+const adminQueryClients: QueryClient[] = []
+const renderPage = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
+}
+
+afterEach(() => {
+  cleanup()
+  adminQueryClients.splice(0).forEach((client) => client.clear())
+})
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -110,7 +130,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
   })
 
   it("loads and renders media ingestion budget diagnostics for selected user", async () => {
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     await waitFor(() => {
       expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledWith({
@@ -140,7 +160,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
       sessions: { active: 1, unique_users: 1 }
     })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect((await screen.findAllByText("2 GiB")).length).toBeGreaterThanOrEqual(2)
     expect((await screen.findAllByText("4 GiB")).length).toBeGreaterThanOrEqual(1)
@@ -161,7 +181,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const timeoutMessage = await screen.findByText(
       "System statistics took longer than 10 seconds. Retry to try again."

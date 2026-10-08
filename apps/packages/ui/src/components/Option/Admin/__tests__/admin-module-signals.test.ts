@@ -15,6 +15,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 import { loadAdminModuleSignals } from "../admin-module-signals"
+import { getAdminQueryClient } from "../AdminQueryProvider"
 
 const resolveAllHealthy = () => {
   apiMock.getSystemStats.mockResolvedValue({ users: { total: 3 } })
@@ -28,6 +29,9 @@ const resolveAllHealthy = () => {
 describe("loadAdminModuleSignals", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // The probes share the admin query cache (B-S4); drop leftovers so each
+    // test exercises its own mocks instead of the previous test's cache.
+    getAdminQueryClient().clear()
     resolveAllHealthy()
   })
 
