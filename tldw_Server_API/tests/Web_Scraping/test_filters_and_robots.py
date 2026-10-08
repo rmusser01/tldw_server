@@ -148,6 +148,7 @@ async def test_public_robots_pins_every_redirect_and_preserves_logical_host(monk
 
     requests = []
     dispatched_hosts = []
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "example.com,robots.example")
     monkeypatch.setenv("HTTP_ALLOW_CROSS_HOST_REDIRECTS", "true")
     monkeypatch.setattr(
         egress, "_resolve_host_ips", lambda host, **kwargs: ["93.184.216.34"] if host == "example.com" else ["8.8.8.8"]

@@ -6687,5 +6687,555 @@
       },
       "qualification": "Test-only M1 scope; inherited jsdom localStorage warning and pages-directory advisory remain. M2 inherited warnings/style unchanged. No production/config/budget/dependency/runtime/browser changes, no51-suite/types/build/native repeats. Prior accepted production/native/extension receipts and all hosted/architecture/CSV/device qualifications remain historical and untouched. Bandit N/A for TypeScript test-only change; no new durable ADR rule. Current hosted amd64 gates remain pending."
     }
+  },
+  "pr3213_task8_broad_ci_repair": {
+    "base": "4de007597f8459dcc3c29ca288254a1cac57dc4a",
+    "status": "local verified; independent Task8 review and publication/current-head hosted gates remain controller-owned",
+    "worktree": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2",
+    "interpreter": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv-uat-fixall-py312-20261007/bin/python",
+    "bandit_interpreter": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+    "bandit_version": "1.9.3",
+    "fixture_allowlists": {
+      "test_public_robots_pins_every_redirect_and_preserves_logical_host": "example.com,robots.example",
+      "test_public_scope_isolated_concurrent_and_reset_after_failure": "127.0.0.1,example.com",
+      "test_public_profile_attested_browser_blocks_private_subresource": "article.example,127.0.0.1"
+    },
+    "checks": [
+      {
+        "name": "RED five exact assertions",
+        "command": "WORKFLOWS_EGRESS_ALLOWLIST=93.184.216.34,does-not-resolve.invalid,example.com python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py::test_public_robots_pins_every_redirect_and_preserves_logical_host tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py::test_public_scope_isolated_concurrent_and_reset_after_failure tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py::test_public_profile_attested_browser_blocks_private_subresource tldw_Server_API/tests/Privileges/test_privilege_introspection.py::test_privilege_registry_snapshot_matches_live_app tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py::test_import_inventory_artifact_matches_current_import_surface",
+        "exit": 1,
+        "result": "5 failed,33 warnings,22.34s",
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-red-20261008.log",
+          "bytes": 17910,
+          "sha256": "6877f1f432ad92c2b4794cc3ebc4da41e1cdb9a52f69b3a4a65e5f2b35c2af8f"
+        }
+      },
+      {
+        "name": "Unedited default diagnostic",
+        "command": "python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py::test_public_robots_pins_every_redirect_and_preserves_logical_host tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py::test_public_scope_isolated_concurrent_and_reset_after_failure tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py::test_public_profile_attested_browser_blocks_private_subresource",
+        "exit": 0,
+        "result": "3 passed,5 warnings,0.68s; preceding edit script failed assertion before any write; this is pre-edit default diagnostic, not GREEN",
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-fixture-green-20261008.log",
+          "bytes": 9965,
+          "sha256": "9d40afc36ae8a67ada9f49e0767aa127c5ddff43ed75bf667ab341f71e3169b0"
+        }
+      },
+      {
+        "name": "GREEN three fixtures CI",
+        "command": "WORKFLOWS_EGRESS_ALLOWLIST=93.184.216.34,does-not-resolve.invalid,example.com python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py::test_public_robots_pins_every_redirect_and_preserves_logical_host tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py::test_public_scope_isolated_concurrent_and_reset_after_failure tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py::test_public_profile_attested_browser_blocks_private_subresource",
+        "exit": 0,
+        "result": "3 passed,5 warnings,0.76s",
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-fixture-green-ci-20261008.log",
+          "bytes": 9964,
+          "sha256": "16e5817ae74b2f8ea5514531181f1bf8c838b48b9cf7eda89a0eb4c27d71e10d"
+        }
+      },
+      {
+        "name": "GREEN owning and compatibility CI",
+        "command": "WORKFLOWS_EGRESS_ALLOWLIST=93.184.216.34,does-not-resolve.invalid,example.com python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py tldw_Server_API/tests/Web_Scraping/test_phase3_article_preflight_facade.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Security/test_egress_global_env.py tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py tldw_Server_API/tests/http_client/test_http_client.py tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py tldw_Server_API/tests/http_client/test_redirect_header_hardening.py tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py tldw_Server_API/tests/Privileges/test_privilege_introspection.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py",
+        "exit": 0,
+        "result": "486 passed,40 warnings,37.51s",
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-owning-ci-20261008.log",
+          "bytes": 7865,
+          "sha256": "ddf2016ff5fc29510cc331c55b2f59d96529b5a27f6ce0221938e639565e741c"
+        }
+      },
+      {
+        "name": "GREEN orchestration CI",
+        "command": "WORKFLOWS_EGRESS_ALLOWLIST=93.184.216.34,does-not-resolve.invalid,example.com python -m pytest -q --tb=short  tldw_Server_API/tests/Web_Scraping/test_phase4_article_orchestration.py",
+        "exit": 0,
+        "result": "58 passed,5 warnings,1.31s",
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-orchestration-ci-20261008.log",
+          "bytes": 7176,
+          "sha256": "5396b4dcee167e38b13247613e60e858678cfe52401ede5fe61f6156a3bca2e1"
+        }
+      },
+      {
+        "name": "GREEN owning and compatibility normal default",
+        "command": "env -u WORKFLOWS_EGRESS_ALLOWLIST python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py tldw_Server_API/tests/Web_Scraping/test_phase3_article_preflight_facade.py tldw_Server_API/tests/Web_Scraping/test_phase4_article_orchestration.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Security/test_egress_global_env.py tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py tldw_Server_API/tests/http_client/test_http_client.py tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py tldw_Server_API/tests/http_client/test_redirect_header_hardening.py tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py tldw_Server_API/tests/Privileges/test_privilege_introspection.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py",
+        "exit": 0,
+        "result": "544 passed,39 warnings,42.73s",
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-owning-default-20261008.log",
+          "bytes": 8105,
+          "sha256": "f4b7a350cb5ec0e75ecb93f785e83c880954a8021d8b5a1ff750c28a106f6532"
+        }
+      }
+    ],
+    "generators": [
+      {
+        "command": "python Helper_Scripts/update_privilege_registry_snapshot.py",
+        "exit": 0,
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-generator-privilege-20261008.log",
+          "bytes": 49661,
+          "sha256": "ef7159cba4e8e775efb94396a29d44cb9c48dfca4512645bd22371e293ba4580"
+        }
+      },
+      {
+        "command": "python Helper_Scripts/web_scraping_refactor_inventory.py --root . --json Docs/Design/web_scraping_refactor_import_inventory.json --markdown Docs/Design/WebScraping_Refactor_Import_Inventory.md",
+        "exit": 0,
+        "receipt": {
+          "path": "/private/tmp/knowledge-pr3213-broad-ci-generator-import-20261008.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    ],
+    "generator_field_deltas": {
+      "privilege": {
+        "any": {
+          "removed": [],
+          "added": [],
+          "changed": [
+            {
+              "path": "/api/v1/media/ingest-web-content",
+              "methods": [
+                "POST"
+              ],
+              "fields": {
+                "rate_limit_resources": {
+                  "base": [],
+                  "current": [
+                    "media.create"
+                  ]
+                },
+                "dependencies": {
+                  "base": [
+                    {
+                      "id": "DB_Deps.get_media_db_for_user",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "User_DB_Handling.get_request_user",
+                      "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps._checker",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "backpressure.guard_backpressure_and_quota",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.backpressure",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "personalization_deps.get_usage_event_logger",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+                      "type": "dependency"
+                    }
+                  ],
+                  "current": [
+                    {
+                      "id": "DB_Deps.get_media_db_for_user",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "User_DB_Handling.get_request_user",
+                      "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps._checker",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps._dep",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps.require_expected_user",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "backpressure.guard_backpressure_and_quota",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.backpressure",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "personalization_deps.get_usage_event_logger",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+                      "type": "dependency"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "media.ingest": {
+          "removed": [],
+          "added": [],
+          "changed": [
+            {
+              "path": "/api/v1/media/ingest-web-content",
+              "methods": [
+                "POST"
+              ],
+              "fields": {
+                "rate_limit_resources": {
+                  "base": [],
+                  "current": [
+                    "media.create"
+                  ]
+                },
+                "dependencies": {
+                  "base": [
+                    {
+                      "id": "DB_Deps.get_media_db_for_user",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "User_DB_Handling.get_request_user",
+                      "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps._checker",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "backpressure.guard_backpressure_and_quota",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.backpressure",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "personalization_deps.get_usage_event_logger",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+                      "type": "dependency"
+                    }
+                  ],
+                  "current": [
+                    {
+                      "id": "DB_Deps.get_media_db_for_user",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "User_DB_Handling.get_request_user",
+                      "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps._checker",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps._dep",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "auth_deps.require_expected_user",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "backpressure.guard_backpressure_and_quota",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.backpressure",
+                      "type": "dependency"
+                    },
+                    {
+                      "id": "personalization_deps.get_usage_event_logger",
+                      "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+                      "type": "dependency"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "imports": {
+        "ua_profiles": {
+          "removed": [],
+          "added": [
+            {
+              "import_kind": "from",
+              "imported_name": "build_browser_headers",
+              "line": 263,
+              "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
+              "path": "tldw_Server_API/app/core/Web_Scraping/filters.py",
+              "target_name": "ua_profiles"
+            }
+          ]
+        },
+        "scraper_router": {
+          "removed": [
+            {
+              "import_kind": "from",
+              "imported_name": "DEFAULT_HANDLER",
+              "line": 47,
+              "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
+              "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+              "target_name": "scraper_router"
+            },
+            {
+              "import_kind": "from",
+              "imported_name": "ScraperRouter",
+              "line": 47,
+              "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
+              "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+              "target_name": "scraper_router"
+            }
+          ],
+          "added": [
+            {
+              "import_kind": "from",
+              "imported_name": "DEFAULT_HANDLER",
+              "line": 48,
+              "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
+              "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+              "target_name": "scraper_router"
+            },
+            {
+              "import_kind": "from",
+              "imported_name": "ScraperRouter",
+              "line": 48,
+              "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
+              "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+              "target_name": "scraper_router"
+            }
+          ]
+        },
+        "enhanced_web_scraping": {
+          "removed": [
+            {
+              "import_kind": "from",
+              "imported_name": "enhanced_web_scraping",
+              "line": 677,
+              "module": "tldw_Server_API.app.core.Web_Scraping",
+              "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_characterization.py",
+              "target_name": "enhanced_web_scraping"
+            }
+          ],
+          "added": [
+            {
+              "import_kind": "from",
+              "imported_name": "enhanced_web_scraping",
+              "line": 678,
+              "module": "tldw_Server_API.app.core.Web_Scraping",
+              "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_characterization.py",
+              "target_name": "enhanced_web_scraping"
+            }
+          ]
+        },
+        "handlers": {
+          "removed": [
+            {
+              "import_kind": "from",
+              "imported_name": "resolve_handler",
+              "line": 23,
+              "module": "tldw_Server_API.app.core.Web_Scraping.handlers",
+              "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+              "target_name": "handlers"
+            }
+          ],
+          "added": [
+            {
+              "import_kind": "from",
+              "imported_name": "resolve_handler",
+              "line": 24,
+              "module": "tldw_Server_API.app.core.Web_Scraping.handlers",
+              "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
+              "target_name": "handlers"
+            }
+          ]
+        }
+      }
+    },
+    "attribution": "Ingest adds existing require_expected_user and media_create_dependencies, producing auth_deps._dep/require_expected_user and media.create rate resources in any/media.ingest only. ua_profiles adds filters.py:263 build_browser_headers for credential-free robots negotiation. article.py public_url_policy_scope import shifts handlers23\u219224 and scraper_router47\u219248. Approved characterization signature credential_free field shifts enhanced import677\u2192678. No routes added/removed, no permissions weakened, no optional-router drift, inventory assertions unchanged.",
+    "sensitivity": {
+      "receipt": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-scope-sensitivity-20261008.json",
+        "bytes": 2376,
+        "sha256": "96118220244b577ffc93db12eaf57236e454bcda047531a5fd9d79683d212604"
+      },
+      "command_description": "Direct two owning async test functions with pytest.MonkeyPatch; observe real central URL decisions, then process-local replace only public_url_policy_scope with nullcontext and require expected assertion failures; no repo edits",
+      "exit": 0,
+      "result": "Both live private refusals address_forbidden; without scope loopback allowed, concurrency case AssertionError, browser DID NOT RAISE ArticleFailure"
+    },
+    "quality": {
+      "ruff_findings_current_and_base": 0,
+      "black_added_line_ranges_exit": 0,
+      "receipt": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-quality-20261008-receipts.json",
+        "bytes": 3956,
+        "sha256": "51e9dd087316fd76e93454bc231408a947f110b674d870354690f45272b8d5d6"
+      },
+      "bandit_exit_current_and_base": 1,
+      "bandit_findings": {
+        "B101": 330,
+        "B404": 1,
+        "B603": 3,
+        "B105": 1
+      },
+      "bandit_errors": 0,
+      "bandit_new_findings": 0,
+      "bandit_comparison": "Content,code,ID,message,severity,confidence match BASE after normalizing only source line numbers; all335 inherited. No scan exclusions or test assertions removed.",
+      "bandit_current": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-bandit-current-20261008.json",
+        "bytes": 293456,
+        "sha256": "fa15c393ebb8c919ce1519835059a3c51fb014670c317e5a62479b8922807f58"
+      },
+      "bandit_base": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-bandit-base-20261008.json",
+        "bytes": 314748,
+        "sha256": "ff70c77425bcd93377e9bbcf674b5e661584f7e98d6fe5228a245d2167caac34"
+      }
+    },
+    "production_equality": {
+      "base": "4de007597f8459dcc3c29ca288254a1cac57dc4a",
+      "all_unchanged_tracked_blobs_checked": 26966,
+      "excluded_changed_test_and_record_files": [
+        "Docs/Design/WebScraping_Refactor_Import_Inventory.md",
+        "Docs/Design/web_scraping_refactor_import_inventory.json",
+        "IMPLEMENTATION_PLAN_knowledge_capture_refresh_20261007.md",
+        "backlog/tasks/task-13530.1 - Complete-explicit-external-web-source-capture-and-refresh-for-Research.md",
+        "tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py",
+        "tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py",
+        "tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json"
+      ],
+      "mismatches": [],
+      "production_sha256_count": 8055,
+      "all_production_sha256_equal": true,
+      "bandit_finding_content_equal_after_line_number_normalization": true,
+      "bandit_counts": {
+        "B101": 330,
+        "B404": 1,
+        "B603": 3,
+        "B105": 1
+      }
+    },
+    "source_and_config_fingerprints": {
+      "tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py",
+        "bytes": 6975,
+        "sha256": "d5f1b2af32e7dd64e121acc89bd161fdf48d0d4123ff31d240c39cf3a1de7363"
+      },
+      "tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py",
+        "bytes": 33406,
+        "sha256": "46e464afae5d6f381cf7ff851c5e76707973bcb667a1dfeeb79b4230b8304f99"
+      },
+      "tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py",
+        "bytes": 97302,
+        "sha256": "2380c365375a4d073d2beac1400aa5d72ae57fbb4a739e8953f7aced8fba3f87"
+      },
+      ".github/workflows/ci.yml": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/.github/workflows/ci.yml",
+        "bytes": 450162,
+        "sha256": "f06e840b76275a20f80e3a3e55fe7b021f75cc7088e2b3c364332fd34c1b6dee"
+      },
+      "pyproject.toml": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/pyproject.toml",
+        "bytes": 101387,
+        "sha256": "7bbde5139406658a60fa049b879755d28184ae389b0ec06e79680b6934375948"
+      },
+      "tldw_Server_API/tests/conftest.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/tests/conftest.py",
+        "bytes": 48461,
+        "sha256": "bdac77e18bb2e70c3c22b2df679e95c9612a1984d335ddc3565770b6e47f19a6"
+      },
+      "Helper_Scripts/update_privilege_registry_snapshot.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/Helper_Scripts/update_privilege_registry_snapshot.py",
+        "bytes": 4352,
+        "sha256": "2cb35f19f6aa435d6b947641bb91320046b2804389d6a9c5531476cc815c1eb1"
+      },
+      "Helper_Scripts/web_scraping_refactor_inventory.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/Helper_Scripts/web_scraping_refactor_inventory.py",
+        "bytes": 10365,
+        "sha256": "e2c3e126b0facfb4c3630ff295517105f172185b4e6bda0aa75c70fe69da838b"
+      },
+      "tldw_Server_API/app/core/Security/egress.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/app/core/Security/egress.py",
+        "bytes": 35396,
+        "sha256": "a9b1d09373ce0fc8b04afd07d9c36171e940bf2520d27f0fbf3fe8f54e6825fc"
+      },
+      "tldw_Server_API/app/core/http_client.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/app/core/http_client.py",
+        "bytes": 261638,
+        "sha256": "57ab6e069b600095644e7957b21530d5f60802a0b10d76bac71bd4a7b92abb0d"
+      },
+      "tldw_Server_API/app/core/Web_Scraping/policy/probe.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/app/core/Web_Scraping/policy/probe.py",
+        "bytes": 4459,
+        "sha256": "4d4b92133883c9826420cc898428e1600bca61a7378b608f1f7c058ca4d2024e"
+      },
+      "tldw_Server_API/app/core/Web_Scraping/orchestration/article_browser.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/app/core/Web_Scraping/orchestration/article_browser.py",
+        "bytes": 48639,
+        "sha256": "ac018765e7618dbedcf82fbe35c7805bf34bc59443c168c0bf84467fb7258245"
+      },
+      "tldw_Server_API/app/core/Web_Scraping/filters.py": {
+        "path": "/Users/macbook-dev/.codex/worktrees/knowledge-capture-refresh-20261007/tldw_server2/tldw_Server_API/app/core/Web_Scraping/filters.py",
+        "bytes": 13131,
+        "sha256": "4c1aeef0ef8986e3d07bd7b764bd70587b81acdbac5ddead4e499bde6276db52"
+      }
+    },
+    "raw_hosted_private_receipts": [
+      {
+        "path": "/private/tmp/knowledge-pr3213-final-ci-113285297060.log",
+        "bytes": 6343720,
+        "sha256": "caed01ce336787ee5573223c579d432455767f1605259a24fa85657eb3e9b94f"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-final-ci-113285321703.log",
+        "bytes": 4868842,
+        "sha256": "01ef0043e683869103149c20c8527ccb9474d1bff343a3bbface49c2e582c4fd"
+      }
+    ],
+    "report_path": "/private/tmp/knowledge-pr3213-broad-ci-repair-report.md",
+    "adr_check": "ADR required:no; fixture/environment and snapshot completion follows existing ADR026/042/066; no durable rule changed.",
+    "qualifications": "Warning counts retained; repository pytest addopts disables warning summaries, unchanged. All prior native/device13512, historical CSV13532, default/broader failures, public429, actual runtime/live capture, earlier receipt rulings and600/900KiB budgets remain unchanged. No builds/browser/runtime/public acquisition/whole-UI/prior broad replay/helpers/push/PR mutation/merge/cleanup. Bandit installed only in existing project venv; manual normal scoped pre_commit required because configured hooksPath has no installed pre-commit; normal git commit will still run existing post-commit hook. No hook policy change/bypass.",
+    "sensitivity_restoration": {
+      "command": "PYTHONPATH=. python /private/tmp/knowledge-pr3213-broad-ci-scope-restoration-20261008.py",
+      "exit": 0,
+      "script": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-scope-restoration-20261008.py",
+        "bytes": 2631,
+        "sha256": "2d2e0b9868dc525234f3054bf491cd6ce3e5f20314ac193be8b8322eefd6cde8"
+      },
+      "log": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-scope-restoration-20261008.log",
+        "bytes": 33485,
+        "sha256": "37c2271ee4c8a559bf28b60985fbff8dc7298b6bbaee14cc1af862f7560cfcc5"
+      },
+      "proof": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-scope-restoration-20261008.json",
+        "bytes": 3312,
+        "sha256": "5b99d1f51a188ced7adc875fac7f79b3bb3da687ae950f92c34b442e8a321abe"
+      },
+      "result": "After each live/fault case original scope/evaluator function identities restored, context false; repository policy source SHA256 unchanged before/after."
+    },
+    "normal_hooks": {
+      "command": "python -m pre_commit run --files Docs/Design/WebScraping_Refactor_Import_Inventory.md Docs/Design/web_scraping_refactor_import_inventory.json Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md Docs/Reviews/artifacts/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.json IMPLEMENTATION_PLAN_knowledge_capture_refresh_20261007.md 'backlog/tasks/task-13530.1 - Complete-explicit-external-web-source-capture-and-refresh-for-Research.md' tldw_Server_API/tests/Web_Scraping/test_filters_and_robots.py tldw_Server_API/tests/Web_Scraping/test_phase3_probe_egress.py tldw_Server_API/tests/Web_Scraping/test_phase4_article_browser.py tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json",
+      "exit": 0,
+      "receipt": {
+        "path": "/private/tmp/knowledge-pr3213-broad-ci-hooks-20261008.log",
+        "bytes": 1288,
+        "sha256": "5171a5453e748db5d3f793c9120475961fd2440120778aa858daaae9dc3fffae"
+      },
+      "result": "All10 applicable hooks passed; yaml/toml/wizard Ruff/Black legitimately skipped by path filters; scoped Black/full touched Ruff separately pass. Configured shared hooksPath contains no installed pre-commit, preserved; normal post-commit hook still active."
+    }
   }
 }

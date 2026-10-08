@@ -977,6 +977,7 @@ async def test_evaluate_target_propagates_policy_cancellation() -> None:
 
 @pytest.mark.asyncio
 async def test_public_scope_isolated_concurrent_and_reset_after_failure(monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1,example.com")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
     scope = _required_attribute(egress, "public_url_policy_scope")
     entered = asyncio.Event()

@@ -2734,6 +2734,7 @@ async def test_public_profile_attested_browser_blocks_private_subresource(monkey
     from tldw_Server_API.app.core.Security import egress
     from tldw_Server_API.app.core.Web_Scraping.policy import DefaultProbeEgressGuard
 
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "article.example,127.0.0.1")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
     runtime = _FakeBrowserRuntime(dispatches=[("http", _TARGET), ("http", "http://127.0.0.1/secret")])
