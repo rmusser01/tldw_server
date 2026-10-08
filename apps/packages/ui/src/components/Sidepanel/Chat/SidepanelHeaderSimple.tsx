@@ -216,10 +216,10 @@ export const SidepanelHeaderSimple = ({
     <div
       data-istemporary-chat={temporaryChat}
       data-testid="chat-header"
-      className="absolute top-0 z-10 flex h-11 w-full items-center justify-between border-b border-border bg-surface/95 px-3 py-2 text-body text-text backdrop-blur data-[istemporary-chat='true']:bg-purple-50 data-[istemporary-chat='true']:dark:bg-purple-900/30"
+      className="absolute top-0 z-10 flex h-11 w-full items-center justify-between border-b border-border bg-surface/95 px-2 py-2 sm:px-3 text-body text-text backdrop-blur data-[istemporary-chat='true']:bg-purple-50 data-[istemporary-chat='true']:dark:bg-purple-900/30"
     >
       {/* Left: Sidebar toggle + Status dot + Logo + Title */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-1 pr-1 sm:gap-2">
         <Tooltip
           title={sidebarToggleLabel}>
           <button
@@ -227,14 +227,15 @@ export const SidepanelHeaderSimple = ({
             aria-label={sidebarToggleLabel}
             aria-expanded={sidebarOpen}
             onClick={handleSidebarToggle}
-            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text"
+            className="shrink-0 rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text"
             title={sidebarToggleLabel}
           >
             <Menu className="size-4" />
           </button>
         </Tooltip>
         <StatusDot />
-        <div className="flex items-center text-text">
+        <div
+          className={`${activeTitle ? "hidden sm:flex" : "flex"} shrink-0 items-center text-text`}>
           <img
             className="h-5 w-auto"
             src={logoSrc}
@@ -245,7 +246,7 @@ export const SidepanelHeaderSimple = ({
           </span>
         </div>
         {activeTitle && (
-          <div className="ml-2 hidden max-w-[12rem] sm:inline">
+          <div className="min-w-0 max-w-[12rem] flex-1 sm:ml-2">
             {isEditingTitle && onRenameTitle ? (
               <input
                 ref={titleInputRef}
@@ -285,22 +286,25 @@ export const SidepanelHeaderSimple = ({
                 <button
                   type="button"
                   onClick={startTitleEdit}
-                  className="group flex max-w-full items-center gap-1 text-caption text-text-muted hover:text-text"
+                  className="group flex min-h-8 w-full min-w-0 items-center gap-1 text-left text-caption text-text-muted hover:text-text"
                   title={activeTitle}
                   aria-label={t(
                     "sidepanel:header.renameTitle",
                     "Rename conversation"
                   )}
                 >
-                  <span className="truncate">{activeTitle}</span>
-                  <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-80" />
+                  <span className="min-w-0 flex-1 truncate">{activeTitle}</span>
+                  <Pencil
+                    className="hidden h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-80 sm:block"
+                    aria-hidden="true"
+                  />
                 </button>
               ) : (
                 <span
-                  className="flex max-w-full items-center gap-1 text-caption text-text-muted"
+                  className="flex min-w-0 items-center gap-1 text-caption text-text-muted"
                   title={activeTitle}
                 >
-                  <span className="truncate">{activeTitle}</span>
+                  <span className="min-w-0 flex-1 truncate">{activeTitle}</span>
                 </span>
               )
             )}
@@ -309,13 +313,13 @@ export const SidepanelHeaderSimple = ({
       </div>
 
       {/* Right: Full-screen + Settings */}
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center sm:gap-1">
         <Tooltip title={t("playground:ttsClips.title", "TTS clips")}>
           <button
             type="button"
             onClick={() => setTtsClipsOpen(true)}
             aria-label={t("playground:ttsClips.title", "TTS clips")}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
             title={t("playground:ttsClips.title", "TTS clips")}
             data-testid="chat-open-tts-clips"
           >
@@ -327,7 +331,7 @@ export const SidepanelHeaderSimple = ({
             <Link
               to="/persona"
               aria-label={t("sidepanel:persona.openPersona", "Open Persona Garden") as string}
-              className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+              className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
               title={t("sidepanel:persona.openPersona", "Open Persona Garden")}
               data-testid="chat-open-persona"
             >
@@ -340,7 +344,7 @@ export const SidepanelHeaderSimple = ({
             type="button"
             onClick={openDashboard}
             aria-label={t("sidepanel:header.openDashboard", "Open dashboard")}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
             title={t("sidepanel:header.openDashboard", "Open dashboard")}
             data-testid="chat-open-dashboard"
           >
@@ -354,7 +358,7 @@ export const SidepanelHeaderSimple = ({
             disabled={!chatReady}
             aria-describedby={fullChatHandoffDescriptionId}
             aria-label={openFullChatLabel}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
             title={openFullChatDescription}
             data-testid="chat-open-full-screen"
           >
@@ -368,7 +372,7 @@ export const SidepanelHeaderSimple = ({
           <Link
             to="/settings"
             aria-label={t("sidepanel:header.openSettingsAria") as string}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
             title={t("sidepanel:header.settingsShortLabel", "Settings")}
           >
             <CogIcon className="size-4" aria-hidden="true" />
