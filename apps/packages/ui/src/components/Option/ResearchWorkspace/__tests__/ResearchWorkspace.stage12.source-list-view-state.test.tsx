@@ -8,6 +8,25 @@ import { ResearchWorkspace } from "../index"
 import type { SourceListViewState } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (
+    _ids: unknown,
+    options: { signal: AbortSignal }
+  ) => ({
+    requestScope: {
+      config: {
+        serverUrl: "https://saved-views.test",
+        authMode: "single-user",
+        expectedSingleUserApiKeyScope: "fixture-key-scope"
+      },
+      userId: null
+    },
+    scopeSignal: options.signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
+}))
+
 const savedViewHarness = vi.hoisted(() => ({
   hookInvocations: vi.fn(),
   paneControllers: [] as unknown[],
@@ -24,6 +43,17 @@ const savedViewHarness = vi.hoisted(() => ({
   deleteWorkspaceSourceView: vi.fn()
 }))
 
+const scopedOptions = expect.objectContaining({
+  requestScope: {
+    config: {
+      serverUrl: "https://saved-views.test",
+      authMode: "single-user",
+      expectedSingleUserApiKeyScope: "fixture-key-scope"
+    },
+    userId: null
+  },
+  signal: expect.any(AbortSignal)
+})
 const wireState = (
   overrides: Partial<WorkspaceSourceSavedViewStateV1> = {}
 ): WorkspaceSourceSavedViewStateV1 => ({
@@ -557,7 +587,8 @@ describe("ResearchWorkspace source list view state", () => {
 
     await waitFor(() =>
       expect(savedViewHarness.listWorkspaceSourceViews).toHaveBeenCalledWith(
-        "workspace-1"
+        "workspace-1",
+        scopedOptions
       )
     )
     expect(savedViewHarness.getWorkspaceSources).toHaveBeenCalledWith(
@@ -604,7 +635,8 @@ describe("ResearchWorkspace source list view state", () => {
     await act(async () => upsertB.resolve({ id: "workspace-2" }))
     await waitFor(() =>
       expect(savedViewHarness.listWorkspaceSourceViews).toHaveBeenCalledWith(
-        "workspace-2"
+        "workspace-2",
+        scopedOptions
       )
     )
   })
@@ -727,7 +759,8 @@ describe("ResearchWorkspace source list view state", () => {
       expect.anything()
     )
     expect(savedViewHarness.listWorkspaceSourceViews).not.toHaveBeenCalledWith(
-      "local"
+      "local",
+      scopedOptions
     )
     expect(screen.getByRole("button", { name: "Save source view" })).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Save source view" }))

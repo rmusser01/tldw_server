@@ -1694,24 +1694,29 @@ export const workspaceApiMethods = {
   },
 
   async listWorkspaceSourceViews(
-    workspaceId: string
+    workspaceId: string,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceSavedViewListResponse> {
     return await bgRequest<WorkspaceSourceSavedViewListResponse>({
       path: workspacePath(workspaceId, "/source-views"),
       method: "GET",
       // Reconciliation must not join an older in-flight list request.
-      abortSignal: new AbortController().signal
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal ?? new AbortController().signal
     })
   },
 
   async createWorkspaceSourceView(
     workspaceId: string,
-    data: WorkspaceSourceSavedViewCreateRequest
+    data: WorkspaceSourceSavedViewCreateRequest,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceSavedViewResponse> {
     return await bgRequest<WorkspaceSourceSavedViewResponse>({
       path: workspacePath(workspaceId, "/source-views"),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: data,
       expectedStatuses: [409]
     })
@@ -1720,13 +1725,16 @@ export const workspaceApiMethods = {
   async updateWorkspaceSourceView(
     workspaceId: string,
     viewId: string,
-    data: WorkspaceSourceSavedViewPatchRequest
+    data: WorkspaceSourceSavedViewPatchRequest,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceSavedViewResponse> {
     const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
     return await bgRequest<WorkspaceSourceSavedViewResponse>({
       path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: data,
       expectedStatuses: [404, 409]
     })
@@ -1734,12 +1742,15 @@ export const workspaceApiMethods = {
 
   async deleteWorkspaceSourceView(
     workspaceId: string,
-    viewId: string
+    viewId: string,
+    options?: ScopedRequestOptions
   ): Promise<void> {
     const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
     await bgRequest<unknown>({
       path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       expectedStatuses: [404]
     })
   },

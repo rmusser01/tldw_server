@@ -1,5 +1,6 @@
 import React from "react"
 import {
+  act,
   fireEvent,
   render as rtlRender,
   screen,
@@ -1406,4 +1407,83 @@ describe("SourceViewControls", () => {
       await screen.findByRole("dialog", { name: "Delete saved view?" })
     ).toBeInTheDocument()
   })
+
+  it.each(["Cancel", "Close", "Escape"])(
+      "dismisses a rapid reopened native Save via %s",
+      async (action) => {
+        const user = userEvent.setup()
+        rtlRender(
+          <Harness
+            model={controller({ announcement: "Saved view no longer exists." })}
+          />
+        )
+        const invoker = screen.getByRole("button", { name: "Save source view" })
+        await user.click(invoker)
+        const first = await screen.findByRole("dialog")
+        await waitFor(() =>
+          expect(first.className).toContain("ant-zoom-appear-active")
+        )
+        fireEvent(first, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(first)
+        await waitFor(() => expect(first.className).not.toContain("ant-zoom"))
+        await user.type(
+          screen.getByRole("textbox", { name: "View name" }),
+          "Old draft"
+        )
+        await user.click(within(first).getByRole("button", { name: "Cancel" }))
+        invoker.focus()
+        await user.keyboard("{Enter}")
+        const input = await screen.findByRole("textbox", { name: "View name" })
+        expect(input).toHaveValue("")
+        const current = input.closest("[role=dialog]")!
+        await waitFor(() =>
+          expect(current.className).toContain("ant-zoom-enter-active")
+        )
+        fireEvent(current, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(current)
+        await waitFor(() => expect(current.className).not.toContain("ant-zoom"))
+        if (action === "Escape") {
+          fireEvent.keyDown(current, {
+            key: "Escape",
+            code: "Escape",
+            keyCode: 27,
+            which: 27
+          })
+        } else
+          await user.click(within(current).getByRole("button", { name: action }))
+        await waitFor(() =>
+          expect(current.className).toContain("ant-zoom-leave-active")
+        )
+        fireEvent(current, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(current)
+        await waitFor(() => expect(current).not.toBeInTheDocument())
+      }
+    )
+
+  it("does not restore a rejected unopened request after host teardown", async () => {
+      vi.useFakeTimers()
+      try {
+        rtlRender(<button data-source-view-trigger>Current source views</button>)
+        const fallback = screen.getByRole("button", {
+          name: "Current source views"
+        })
+        const { unmount } = rtlRender(
+          <SourceViewOverlayHost
+            controller={controller({ generation: 2 })}
+            request={{
+              id: 987654,
+              kind: "save",
+              generation: 1,
+              invoker: document.createElement("button")
+            }}
+            onRequestHandled={vi.fn()}
+          />
+        )
+        unmount()
+        await act(async () => vi.runOnlyPendingTimers())
+        expect(fallback).not.toHaveFocus()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
 })

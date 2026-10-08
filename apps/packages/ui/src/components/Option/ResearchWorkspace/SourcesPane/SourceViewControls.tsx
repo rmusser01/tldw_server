@@ -405,6 +405,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   const [nameTouched, setNameTouched] = React.useState(false)
   const nameErrorId = React.useId()
   const inputRef = React.useRef<React.ComponentRef<typeof Input>>(null)
+  const mountedRef = React.useRef(false)
   const handledRequestIdRef = React.useRef<number | null>(null)
   const announcementAtOpenRef = React.useRef<string | null>(null)
   const mutationCycleObservedRef = React.useRef(false)
@@ -455,12 +456,13 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
     )
   }
 
-  React.useLayoutEffect(
-    () => () => {
+  React.useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
       pendingFocusRestoreRef.current = null
-    },
-    []
-  )
+    }
+  }, [])
 
   React.useLayoutEffect(() => {
     if (pendingFocusRestoreRef.current?.generation !== controller.generation) {
@@ -477,7 +479,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
     ) {
       restoreOverlayFocus(
         request.invoker,
-        () => handledRequestIdRef.current === request.id
+        () => mountedRef.current && handledRequestIdRef.current === request.id
       )
       onRequestHandled()
       return

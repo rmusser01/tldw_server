@@ -443,3 +443,108 @@ describe("public article capture through actual scoped direct transport", () => 
     }
   )
 })
+
+
+describe("saved source views through scoped client transport", () => {
+  const cases = [
+    [
+      "GET",
+      "/api/v1/workspaces/ws/source-views",
+      (
+        client: TldwApiClient,
+        options: import("../tldw/TldwApiClient").ScopedRequestOptions
+      ) => client.listWorkspaceSourceViews("ws", options)
+    ],
+    [
+      "POST",
+      "/api/v1/workspaces/ws/source-views",
+      (
+        client: TldwApiClient,
+        options: import("../tldw/TldwApiClient").ScopedRequestOptions
+      ) => client.createWorkspaceSourceView("ws", {} as never, options)
+    ],
+    [
+      "PATCH",
+      "/api/v1/workspaces/ws/source-views/view",
+      (
+        client: TldwApiClient,
+        options: import("../tldw/TldwApiClient").ScopedRequestOptions
+      ) => client.updateWorkspaceSourceView("ws", "view", {} as never, options)
+    ],
+    [
+      "DELETE",
+      "/api/v1/workspaces/ws/source-views/view",
+      (
+        client: TldwApiClient,
+        options: import("../tldw/TldwApiClient").ScopedRequestOptions
+      ) => client.deleteWorkspaceSourceView("ws", "view", options)
+    ]
+  ] as const
+  it.each(cases)(
+    "dispatches %s %s directly under verified authority",
+    async (method, path, call) => {
+      const signal = new AbortController().signal
+      await call(new TldwApiClient(), { requestScope, signal })
+      expect(boundary.fetch).toHaveBeenCalledTimes(1)
+      const [url, init] = boundary.fetch.mock.calls[0]
+      expect(String(url)).toBe("https://clips.example" + path)
+      expect(init.method).toBe(method)
+      expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
+      expect(init.signal).toBeInstanceOf(AbortSignal)
+    }
+  )
+  it.each(cases)(
+    "forwards %s %s to the shared extension worker",
+    async (method, path, call) => {
+      boundary.runtimeId = "extension-fixture"
+      await call(new TldwApiClient(), {
+        requestScope,
+        signal: new AbortController().signal
+      })
+      expect(boundary.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "tldw:request",
+          payload: expect.objectContaining({
+            path,
+            method,
+            servicePromptConfig: { ...requestScope.config, expectedUserId: 7 }
+          })
+        })
+      )
+      expect(boundary.fetch).not.toHaveBeenCalled()
+    }
+  )
+  it.each(cases)(
+    "rejects %s %s after authority withdrawal before dispatch",
+    async (_method, _path, call) => {
+      boundary.get.mockResolvedValue(null)
+      await expect(
+        call(new TldwApiClient(), { requestScope })
+      ).rejects.toMatchObject({ status: 412 })
+      expect(boundary.fetch).not.toHaveBeenCalled()
+      expect(boundary.sendMessage).not.toHaveBeenCalled()
+    }
+  )
+  it.each([
+    ["DELETE", "/api/v1/workspaces/ws/source-views"],
+    ["GET", "/api/v1/workspaces/ws/source-views/view"],
+    ["POST", "/api/v1/workspaces/ws/source-views/view"],
+    ["PATCH", "/api/v1/workspaces/ws/source-views/view/extra"],
+    ["POST", "/api/v1/workspaces/ws/source-views/../sources"],
+    ["POST", "/api/v1/workspaces/ws/source-views%2fextra"],
+    ["POST", "/api/v1/workspaces/ws/source-views\n"],
+    ["POST", "/api/v1/workspaces/ws/source-views\t"]
+  ])(
+    "denies raw scoped %s %s before either transport",
+    async (method, path) => {
+      for (const runtimeId of [null, "extension-fixture"]) {
+        boundary.runtimeId = runtimeId
+        await expect(
+          bgRequest({ path, method, ...requestScopeFields(requestScope) })
+        ).rejects.toBeDefined()
+      }
+      expect(boundary.fetch).not.toHaveBeenCalled()
+      expect(boundary.sendMessage).not.toHaveBeenCalled()
+    }
+  )
+})
