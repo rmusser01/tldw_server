@@ -1,7 +1,7 @@
 ---
 id: TASK-13533
 title: Restore production WebUI bundle budget after Knowledge changes
-status: In Progress
+status: Done
 labels:
 - frontend
 - performance
@@ -18,7 +18,7 @@ PR3213 production Turbopack container and Onboarding builds exceed the unchanged
 <!-- AC:BEGIN -->
 - [x] #1 Actual production build evidence identifies the over-budget route and existing cold optional import boundary without a raised budget or hidden required first-render bytes.
 - [x] #2 The minimal repair preserves Mermaid rendering and preview open/close/reopen keyboard and focus behavior, with meaningful regressions and existing shared UI compatibility.
-- [ ] #3 Production build, token parity and unchanged bundle gates pass with exact profile/inputs; affected native browser and extension evidence is accurate or precisely qualified.
+- [x] #3 Production build, token parity and unchanged bundle gates pass with exact profile/inputs; affected native browser and extension evidence is accurate or precisely qualified.
 - [x] #4 PR3213, task13514 and canonical workstream evidence accurately record this CI repair and remaining qualifications.
 <!-- AC:END -->
 
@@ -32,17 +32,18 @@ Final exact9-file manual pre_commit hooks exit0; git diff --check0. Canonical so
 Independent scoped review approved0Critical/0Important with M1Minor: absence after import release could still be Suspense fallback. Fix round1 authorized only owning lazy test: wait for observable committed Modal mount including open=false before absence/reopen. Fault-inject removal of existing source-change setPreviewOpen(false), require meaningful RED, restore exact product bytes before GREEN. No production/build/browser/runtime changes, no51-suite rerun. Unique round1 receipts and normal scoped lint/style/hooks/commit; M2 inherited warnings/style remain qualified.
 M1 round1: owning lazy test now waits for committed Modal marker even open=false after real import before absence/reopen. Fault-injected only source-change setPreviewOpen(false) removal: RED exit1 finds actual dialog at pre-reopen absence. Exact product bytes restored SHA7f920a86b2e77e89a9167cf4ea339de49a929a4ef898938c71a385cdf32cea15; focused GREEN1/1 exit0, scoped lint/style0. Unique round1 logs/report; original report SHA1ce6e725 remains exact. Canonical evidence extends only scoped M1 history; no product/config/budgets/builds/browser/runtime/51-suite/types repeats, M2 debt and all previous qualifications untouched. TS-test-only Bandit N/A; no durable ADR change. Normal scoped hooks/commit required; current hosted amd64 gates still pending.
 2026-10-08 final local publication reconciliation: PR3213 https://github.com/rmusser01/tldw_server/pull/3213 product/test head1e895f8e8312d8c299c2f42dd8006bc1a314c80b contains all locally approved CI repairs. Fixture417 review Approved0Critical0Important (99 owning/59 native quota cases), five-matrix exact inventory3b4 review Approved0Critical0Important, optional preview692 and test-only1e895 round1 independently Approved0Critical0Important/newMinor0. Actual production Docker on local Linux/aarch64 passes unchanged595.0/600 shared and874.5/900 route gates; actual native111/111 scripts/focus/reset pass, new extension native preview qualified. Guard-removal RED now proves committed pending-source retirement and exact product bytes remain unchanged. This supersedes earlier independent-review-pending wording; current hosted amd64/seven exact-head required statuses, requester-written Change summary and merge remain gates. Original public429/default/broad/CSV/native/device qualifications remain. Fresh origin/dev2c5f19d is ancestor, MERGE_QUEUE unset; Qodo billing blocked and requester authorized merge after checks without it. No new durable ADR decision; governing066 and CI/shared-UI contracts unchanged. No new suite/build/runtime replay, no merge/cleanup.
+2026-10-08 publication reconciliation: PR3213 https://github.com/rmusser01/tldw_server/pull/3213 Task8 commit283849d37ca444a8a5b4a178268ec7742c7a8348 independently spec/quality Approved,0Critical0Important, inherited warning Minor only; review /private/tmp/knowledge-pr3213-broad-ci-review.md SHA256 60e8d105e4cc52aab9121e3eaa4e02f04b6fd120b7d153e98764d1e7f63d7b61. Root matched43 final manifest fingerprints, actual RED5/GREEN CI486+58/default544, normal hooks/commit and all25 retained canonical fields. Three finite test-local allowlists plus native generated artifacts, no production/security/workflow/assertion relaxation. Prior seven required SUCCESS statuses at4de are historical; fresh publication-head seven statuses and the two previously failing broad shards remain merge checks. Requester-written Change summary is now supplied, saved verbatim and readback-verified SHA2566a0770a5536192e448f06deaf7b72220756612b872dd2e602e894136fc3ced44; this supersedes earlier human-summary-pending wording. Hosted Linux/amd64 WebUI production run37768510155 job113282687581 at4de passed actual595.0/600 shared and874.5/900 route budgets; complete log SHA25609c8d30c6572534742aab5956baea056884f5252eaf9abf10c28f26607451a09. Product bytes unchanged through Task8. Original historical failures/public429/default/native/CSV qualifications remain; no claim of fresh hosted acceptance or merge. ADR026/042/066 govern; no new durable decision.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Optional Mermaid preview now genuinely loads on first use and stays mounted for native close/focus. Independent original and M1 scoped reviews approve; guard-removal RED proves pending source retirement, restored owning1/1 passes with exact product bytes unchanged. Actual local Linux/aarch64 production/token/budgets595.0/874.5 and native111/111 scripts/focus/reset pass; hostedamd64/new-extension native preview remain qualified. Current seven exact-head required statuses and integration gates remain; no budget/dependency relaxation.
+Optional Mermaid preview loads on first use and retains native close/focus behavior. Independent original and M1 reviews approve; committed-render counterfactual proves pending-source retirement with unchanged product bytes. Actual local Linux/aarch64 and hosted Linux/amd64 production/token/budgets pass595.0/600 shared and874.5/900 route. Native111/111 loaded scripts/focus/reset pass; new extension native preview remains qualified. No budget/dependency relaxation; PR3213 carries integration.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

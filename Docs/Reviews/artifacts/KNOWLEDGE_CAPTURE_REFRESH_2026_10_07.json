@@ -7237,5 +7237,34 @@
       },
       "result": "All10 applicable hooks passed; yaml/toml/wizard Ruff/Black legitimately skipped by path filters; scoped Black/full touched Ruff separately pass. Configured shared hooksPath contains no installed pre-commit, preserved; normal post-commit hook still active."
     }
+  },
+  "pr3213_publication_reconciliation_20261008": {
+    "task8_head": "283849d37ca444a8a5b4a178268ec7742c7a8348",
+    "task8_spec": "Approved",
+    "task8_quality": "Approved",
+    "critical": 0,
+    "important": 0,
+    "inherited_minor": "Warning noise retained",
+    "review_sha256": "60e8d105e4cc52aab9121e3eaa4e02f04b6fd120b7d153e98764d1e7f63d7b61",
+    "requester_summary_sha256": "6a0770a5536192e448f06deaf7b72220756612b872dd2e602e894136fc3ced44",
+    "hosted_budget": {
+      "head": "4de007597f8459dcc3c29ca288254a1cac57dc4a",
+      "run": 37768510155,
+      "job": 113282687581,
+      "arch": "linux/amd64",
+      "shared_kib": 595.0,
+      "shared_limit_kib": 600,
+      "route_kib": 874.5,
+      "route_limit_kib": 900,
+      "log_sha256": "09c8d30c6572534742aab5956baea056884f5252eaf9abf10c28f26607451a09"
+    },
+    "fresh_head_ci_and_merge": "pending at publication; prior statuses are historical",
+    "open_qualifications": [
+      "TASK13512 native/assistive/device/participant",
+      "TASK13532 historical CSV diagnosis",
+      "public429",
+      "Web live dispatch/retry",
+      "default/broad failure receipts"
+    ]
   }
 }
