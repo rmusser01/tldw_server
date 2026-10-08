@@ -43,13 +43,15 @@ describe("serverSupportsPath", () => {
   it("test_failure_is_cached_short_term", async () => {
     fetchMock.mockRejectedValue(new Error("network down"))
 
+    // A failed probe is UNKNOWN (null), not "absent": the caller decides how
+    // to proceed; only a fetched spec may answer false.
     await expect(
       serverSupportsPath(SERVER_URL, "/api/v1/admin/billing/overview")
-    ).resolves.toBe(false)
-    // Second call inside the failure TTL answers false without refetching.
+    ).resolves.toBeNull()
+    // Second call inside the failure TTL answers null without refetching.
     await expect(
       serverSupportsPath(SERVER_URL, "/api/v1/admin/billing/overview")
-    ).resolves.toBe(false)
+    ).resolves.toBeNull()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

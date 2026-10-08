@@ -474,9 +474,10 @@ const BillingDashboardPage: React.FC = () => {
   }, [])
 
   // Capability probe through the shared session cache (one openapi.json fetch
-  // per server URL). The 4s failsafe bounds only the probe: a hung or absent
-  // answer leaves the runtime endpoints to report their own errors instead of
-  // holding the page back.
+  // per server URL). Tri-state: false = the fetched spec definitively lacks
+  // the billing routes (downgrade in place); null = probe unknown/failed or
+  // the 4s failsafe fired - no downgrade, the runtime endpoints report their
+  // own errors instead of the probe gating the render.
   useEffect(() => {
     if (connectionConfigLoading) return
     const serverUrl = connectionConfig?.serverUrl?.trim()
@@ -487,7 +488,7 @@ const BillingDashboardPage: React.FC = () => {
       timeoutId = setTimeout(() => resolve(null), 4000)
     })
     void Promise.race([
-      serverSupportsPath(serverUrl, BILLING_OVERVIEW_PATH).catch(() => false),
+      serverSupportsPath(serverUrl, BILLING_OVERVIEW_PATH).catch(() => null),
       probeTimedOut
     ]).then((supported) => {
       if (!cancelled && supported !== null) setBillingSupported(supported)
@@ -509,7 +510,15 @@ const BillingDashboardPage: React.FC = () => {
     </span>
   )
 
-  if (adminGuard === "forbidden") {
+  // Once the probe has DEFINITIVELY ruled the billing routes absent, a 404
+  // from the speculative overview call is route absence, not an anomaly:
+  // suppress the page-level notFound guard so the inline downgrade notice is
+  // the durable end state, whichever of the two resolves first. Forbidden
+  // (403) always passes through.
+  const effectiveAdminGuard =
+    adminGuard === "notFound" && billingSupported === false ? null : adminGuard
+
+  if (effectiveAdminGuard === "forbidden") {
     return (
       <div style={{ padding: 24 }}>
         {pageHeading}
@@ -520,7 +529,7 @@ const BillingDashboardPage: React.FC = () => {
     )
   }
 
-  if (adminGuard === "notFound") {
+  if (effectiveAdminGuard === "notFound") {
     return (
       <div style={{ padding: 24 }}>
         {pageHeading}

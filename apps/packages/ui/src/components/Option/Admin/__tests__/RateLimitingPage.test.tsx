@@ -147,6 +147,24 @@ describe("RateLimitingPage", () => {
     expect(mocks.listAdminRateLimits).not.toHaveBeenCalled()
   })
 
+  it("still calls the rate-limits endpoint when the capability probe fails (unknown, not absent)", async () => {
+    // A failed probe is null = unknown; the page must fall back to calling
+    // the endpoint and let its own 404/405 speak (restores pre-probe
+    // behavior) instead of declaring it unavailable.
+    fetchMock.mockRejectedValue(new Error("probe network down"))
+    mocks.listAdminRateLimits.mockResolvedValueOnce([
+      { scope: "user", id: 1, resource: "chat", limit_per_min: 10, burst: 20 }
+    ])
+
+    render(<RateLimitingPage />)
+
+    expect(await screen.findByText("chat")).toBeInTheDocument()
+    expect(mocks.listAdminRateLimits).toHaveBeenCalledTimes(1)
+    expect(
+      screen.queryByText("Rate limits listing endpoint is not available on this server.")
+    ).not.toBeInTheDocument()
+  })
+
   it("reads the diag coverage payload's real field names (protected_routes/counts)", async () => {
     // Regression: the page read coverage.protected/unprotected while the diag
     // endpoint returns protected_routes/unprotected_routes (+ counts), so it

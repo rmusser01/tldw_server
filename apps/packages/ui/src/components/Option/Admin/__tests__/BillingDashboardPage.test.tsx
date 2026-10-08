@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -85,6 +85,60 @@ describe("BillingDashboardPage", () => {
     // ...while the lazy Subscriptions/Events tabs never mount at all.
     expect(mocks.listAllSubscriptions).not.toHaveBeenCalled()
     expect(mocks.listBillingEvents).not.toHaveBeenCalled()
+  })
+
+  it("keeps the in-place downgrade when the speculative overview 404 lands after the probe rules the routes absent", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        paths: {}
+      })
+    })
+    // Sequence the race deterministically: the probe downgrades first, the
+    // speculative overview rejects 404 afterwards.
+    let rejectOverview!: (reason: unknown) => void
+    mocks.getBillingOverview.mockImplementation(
+      () => new Promise((_, reject) => { rejectOverview = reject })
+    )
+    mocks.getStorageQuotaSummary.mockResolvedValue({})
+
+    render(<BillingDashboardPage />)
+
+    // Probe outcome: tabs + inline unavailable notice.
+    expect(await screen.findAllByRole("tab")).toHaveLength(3)
+    await expectDesignSystemAlertForTitle("Not available on this server")
+
+    // The late 404 must not flip the page into the full-page notFound guard:
+    // the inline downgrade is the durable end state.
+    await act(async () => {
+      rejectOverview({ status: 404 })
+    })
+
+    expect(screen.getAllByRole("tab")).toHaveLength(3)
+    await expectDesignSystemAlertForTitle("Not available on this server")
+  })
+
+  it("recovers the in-place downgrade when the speculative 404 lands before the probe rules the routes absent", async () => {
+    let resolveProbe!: (spec: { ok: boolean; json: () => Promise<unknown> }) => void
+    fetchMock.mockImplementation(() => new Promise((resolve) => { resolveProbe = resolve }))
+    mocks.getBillingOverview.mockRejectedValue({ status: 404 })
+    mocks.getStorageQuotaSummary.mockResolvedValue({})
+
+    render(<BillingDashboardPage />)
+
+    // The 404 trips the page-level notFound guard while the probe is pending
+    // (no tabs in that state)...
+    await expectDesignSystemAlertForTitle("Not available on this server")
+    expect(screen.queryAllByRole("tab")).toHaveLength(0)
+
+    // ...then the probe definitively rules billing absent: the guard must
+    // give way to the in-place downgrade (tabs + inline notice).
+    await act(async () => {
+      resolveProbe({ ok: true, json: async () => ({ paths: {} }) })
+    })
+
+    expect(await screen.findAllByRole("tab")).toHaveLength(3)
+    await expectDesignSystemAlertForTitle("Not available on this server")
   })
 
   it("renders the tabs before the capability probe resolves", async () => {

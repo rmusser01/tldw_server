@@ -88,9 +88,15 @@ const RateLimitingPage: React.FC = () => {
     setRateLimitsError(null)
     try {
       // Shared capability probe (session-cached openapi.json) instead of a
-      // per-mount spec fetch.
+      // per-mount spec fetch. Tri-state: false = the fetched spec definitively
+      // lacks the route (downgrade in place); null = probe failed/unknown -
+      // fall through and let the endpoint's own 404/405 speak (the pre-probe
+      // behavior).
       const serverUrl = connectionConfig?.serverUrl?.trim()
-      if (serverUrl && !(await serverSupportsPath(serverUrl, ADMIN_RATE_LIMITS_PATH))) {
+      const supported = serverUrl
+        ? await serverSupportsPath(serverUrl, ADMIN_RATE_LIMITS_PATH)
+        : null
+      if (supported === false) {
         setRateLimits([])
         setRateLimitsError(ADMIN_RATE_LIMITS_UNAVAILABLE_MESSAGE)
         return

@@ -4,15 +4,20 @@
 // in-flight requests are deduplicated by storing the promise, and failures
 // are held against a short TTL so an unreachable server is not hammered.
 
-type ProbeResult = { supported: boolean; checkedAt: number }
 const specCache = new Map<string, Promise<Set<string>>>()   // serverUrl -> paths
 const failures = new Map<string, number>()                  // serverUrl -> monotonic-ish ms
 const FAILURE_RETRY_MS = 60_000
 
-export async function serverSupportsPath(serverUrl: string, path: string): Promise<boolean> {
+// Tri-state answer: true = spec advertises the path; false = spec was fetched
+// and definitively lacks the path; null = the probe itself failed (network
+// error / non-ok response), so support is UNKNOWN - callers must not present
+// null as "not available on this server".
+export async function serverSupportsPath(serverUrl: string, path: string): Promise<boolean | null> {
   const cached = specCache.get(serverUrl)
-  if (cached) return (await cached).has(path)
-  if (Date.now() - (failures.get(serverUrl) ?? 0) < FAILURE_RETRY_MS) return false
+  if (cached) {
+    try { return (await cached).has(path) } catch { return null }
+  }
+  if (Date.now() - (failures.get(serverUrl) ?? 0) < FAILURE_RETRY_MS) return null
   const p = (async () => {
     const res = await fetch(`${serverUrl}/openapi.json`)
     if (!res.ok) throw new Error(`openapi probe ${res.status}`)
@@ -20,6 +25,6 @@ export async function serverSupportsPath(serverUrl: string, path: string): Promi
     return new Set(Object.keys(spec?.paths ?? {}))
   })()
   specCache.set(serverUrl, p)
-  try { return (await p).has(path) } catch { specCache.delete(serverUrl); failures.set(serverUrl, Date.now()); return false }
+  try { return (await p).has(path) } catch { specCache.delete(serverUrl); failures.set(serverUrl, Date.now()); return null }
 }
 export function clearCapabilityProbeCacheForTests(): void { specCache.clear(); failures.clear() }
