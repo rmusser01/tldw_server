@@ -1076,6 +1076,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       }
 
       try {
+        if (activeSource?.statusDetails?.statusReason === "capture_unavailable")
+          throw new Error("Exact capture version unavailable");
         if (activeSource?.webCapture)
           scope = await loadServicePromptSnapshot([], {
             signal: controller.signal

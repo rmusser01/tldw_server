@@ -1015,3 +1015,24 @@ it("capture and refresh are explicit actions while pinned previews request the e
   )
   expect(await screen.findByText("exact article")).toBeInTheDocument()
 })
+
+
+it("refuses current preview when recovered capture evidence is unavailable", async () => {
+  vi.clearAllMocks();
+  workspaceStoreState.sources = [
+    {
+      ...defaultSources[0],
+      status: "error",
+      statusDetails: {
+        statusReason: "capture_unavailable",
+        retryEligible: false,
+      },
+    },
+  ];
+  render(<SourcesPane />);
+  fireEvent.click(screen.getByTestId("preview-source-s1"));
+  expect(
+    (await screen.findByText("Exact capture version unavailable")).textContent,
+  ).toBe("Exact capture version unavailable");
+  expect(mockGetWorkspaceSourcePreview).not.toHaveBeenCalled();
+});

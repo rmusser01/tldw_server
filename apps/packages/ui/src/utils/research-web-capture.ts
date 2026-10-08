@@ -23,7 +23,8 @@ const trimCaptureText = (text: string): string =>
 export class WebCaptureNotCurrentError extends Error {
   constructor(
     message: string,
-    public sourceId?: string
+    public sourceId?: string,
+    public captureEvidenceKnown = false
   ) {
     super(message)
   }
@@ -134,9 +135,11 @@ function validateTime(value: string): void {
   )
     throw new Error("Capture time must be valid ISO UTC.")
 }
-function descriptorOf(body: WebClipperSaveRequest): WebCaptureDescriptor {
+function descriptorOf(
+  body: Pick<WebClipperSaveRequest, "source_url" | "capture_metadata">,
+): WebCaptureDescriptor {
   const descriptor = body.capture_metadata
-    ?.web_capture_v1 as WebCaptureDescriptor
+    ?.web_capture_v1 as WebCaptureDescriptor;
   if (
     !descriptor ||
     Object.keys(descriptor).sort().join(",") !==
@@ -146,10 +149,10 @@ function descriptorOf(body: WebClipperSaveRequest): WebCaptureDescriptor {
     !/^[0-9a-f]{64}$/.test(descriptor.content_sha256) ||
     (descriptor.refresh_of !== null && !uuidPattern.test(descriptor.refresh_of))
   )
-    fail()
-  validateUrl(descriptor.requested_url)
-  validateTime(descriptor.captured_at)
-  return { ...descriptor }
+    fail();
+  validateUrl(descriptor.requested_url);
+  validateTime(descriptor.captured_at);
+  return { ...descriptor };
 }
 function assertScope(options: ScopedRequestOptions): void {
   options.signal?.throwIfAborted()
@@ -261,6 +264,164 @@ async function verifyVersion(
   )
     fail()
 }
+async function verifyClipPlacement(
+  clipId: string,
+  workspaceId: string,
+  options: ScopedRequestOptions,
+  check: () => void,
+): Promise<void> {
+  const status = await tldwClient.getWebClipStatus(clipId, options);
+  check();
+  if (
+    status.clip_id !== clipId ||
+    !["saved", "saved_with_warnings"].includes(status.status) ||
+    typeof status.note?.id !== "string" ||
+    !status.note.id.trim() ||
+    !status.workspace_placements.some(
+      (p) =>
+        p.workspace_id === workspaceId && p.source_note_id === status.note.id,
+    )
+  )
+    fail();
+}
+
+/** Recover only unique, intact canonical history; an absent checkpoint proves nothing. */
+export async function recoverWebCapturePin(
+  source: WorkspaceSourceApiResponse,
+  options: ScopedRequestOptions,
+  assertCurrent: () => void,
+  known?: WebArticleCapturePin,
+): Promise<WebArticleCapturePin | undefined> {
+  const check = () => {
+    assertScope(options);
+    assertCurrent();
+  };
+  check();
+  let captureEvidenceKnown = Boolean(known);
+  try {
+    const clipId = source.id.slice("web-clipper:".length);
+    verifySource(source, clipId, source.workspace_id, source.url ?? "");
+    await verifyClipPlacement(clipId, source.workspace_id, options, check);
+    let accepted: MediaDocumentVersion | undefined;
+    let descriptor: WebCaptureDescriptor | undefined;
+    if (known) {
+      if (
+        known.clipId !== clipId ||
+        known.mediaId !== source.media_id ||
+        known.requestedUrl !== source.url
+      )
+        fail();
+      descriptor = descriptorOf({
+        source_url: source.url!,
+        capture_metadata: {
+          web_capture_v1: {
+            mode: "server_article",
+            requested_url: known.requestedUrl,
+            captured_at: known.capturedAt,
+            content_sha256: known.contentSha256,
+            refresh_of: known.refreshOf,
+          },
+        },
+      });
+      accepted = {
+        media_id: source.media_id,
+        version_number: known.versionNumber,
+        uuid: known.versionUuid,
+        created_at: known.capturedAt,
+      };
+    } else {
+      let ordinary = false;
+      let previousNumber = Infinity;
+      const limit = 10;
+      for (let page = 1; ; page++) {
+        const versions = await tldwClient.listMediaDocumentVersions(
+          source.media_id,
+          options,
+          { limit, page },
+        );
+        check();
+        if (!Array.isArray(versions) || versions.length > limit) fail();
+        for (const version of versions) {
+          if (
+            version.media_id !== source.media_id ||
+            !Number.isSafeInteger(version.version_number) ||
+            version.version_number <= 0 ||
+            version.version_number >= previousNumber
+          )
+            fail();
+          previousNumber = version.version_number;
+          const md = version.safe_metadata;
+          const capture =
+            md?.capture_metadata as WebClipperSaveRequest["capture_metadata"];
+          if (capture && "web_capture_v1" in capture) {
+            captureEvidenceKnown = true;
+            if (accepted) fail();
+            descriptor = descriptorOf({
+              source_url: source.url!,
+              capture_metadata: capture,
+            });
+            await verifyVersion(
+              version,
+              source.media_id,
+              clipId,
+              source.workspace_id,
+              descriptor,
+            );
+            check();
+            accepted = version;
+          } else if (
+            md?.source === "web_clipper" &&
+            md.clip_id === clipId &&
+            md.workspace_id === source.workspace_id &&
+            md.source_url === source.url
+          ) {
+            ordinary = true;
+          }
+        }
+        if (versions.length < limit) break;
+      }
+      if (!accepted && ordinary) return undefined;
+    }
+    if (!accepted || !descriptor) fail();
+    const exact = await tldwClient.getMediaDocumentVersion(
+      source.media_id,
+      accepted.version_number,
+      options,
+    );
+    check();
+    if (
+      exact.version_number !== accepted.version_number ||
+      exact.uuid !== accepted.uuid
+    )
+      fail();
+    await verifyVersion(
+      exact,
+      source.media_id,
+      clipId,
+      source.workspace_id,
+      descriptor,
+    );
+    check();
+    return {
+      clipId,
+      requestedUrl: descriptor.requested_url,
+      capturedAt: descriptor.captured_at,
+      contentSha256: descriptor.content_sha256,
+      refreshOf: descriptor.refresh_of,
+      mediaId: source.media_id,
+      versionNumber: exact.version_number,
+      versionUuid: exact.uuid!,
+    };
+  } catch (reason) {
+    check();
+    throw new WebCaptureNotCurrentError(
+      reason instanceof Error ? reason.message : "Capture history unavailable",
+      source.id,
+      captureEvidenceKnown,
+    );
+  }
+}
+
 export async function confirmWebCaptureAcceptance(
   body: WebClipperSaveRequest,
   options: ScopedRequestOptions,
@@ -286,19 +447,7 @@ export async function confirmWebCaptureAcceptance(
   )
     fail()
   check()
-  const status = await tldwClient.getWebClipStatus(clipId, options)
-  check()
-  if (
-    status.clip_id !== clipId ||
-    !["saved", "saved_with_warnings"].includes(status.status) ||
-    typeof status.note?.id !== "string" ||
-    !status.note.id.trim() ||
-    !status.workspace_placements.some(
-      (p) =>
-        p.workspace_id === workspaceId && p.source_note_id === status.note.id
-    )
-  )
-    fail()
+  await verifyClipPlacement(clipId, workspaceId, options, check);
   const sources = await tldwClient.getWorkspaceSources(workspaceId, options)
   check()
   const source = sources.find((row) => row.id === `web-clipper:${clipId}`)

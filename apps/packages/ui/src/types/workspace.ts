@@ -85,6 +85,7 @@ export interface WebArticleCapturePin {
 
 export interface WorkspaceSource {
   webCapture?: WebArticleCapturePin
+  captureOwnerScope?: string
   id: string
   mediaId: number // Server-side media ID
   knowledgeQaEvidence?: KnowledgeNoteEvidence
