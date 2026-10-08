@@ -51,12 +51,15 @@ vi.mock("antd", () => ({
     children: React.ReactNode
     open: boolean
     title: string
-  }) =>
-    open ? (
-      <div role="dialog" aria-label={title}>
-        {children}
-      </div>
-    ) : null,
+  }) => (
+    <div data-testid="mermaid-preview-mounted">
+      {open ? (
+        <div role="dialog" aria-label={title}>
+          {children}
+        </div>
+      ) : null}
+    </div>
+  ),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 vi.mock("@/store/artifacts", () => ({
@@ -78,6 +81,7 @@ it("loads preview only on first use and retires a pending open when the source c
     previewLoad.release()
     await previewLoad.ready
   })
+  await screen.findByTestId("mermaid-preview-mounted")
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
 
   fireEvent.click(screen.getByRole("button", { name: "Open Mermaid preview" }))

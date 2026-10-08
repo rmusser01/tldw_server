@@ -6626,6 +6626,66 @@
         "sha256": "3901a38bf379d0a01891fe4ccca12714bc91d1f047e338c098fa206a946464c3"
       },
       "qualification": "Exact9-file scoped manual hooks pass; normal commit hooks also required. Python/YAML/TOML format/security checks skip because no applicable files."
+    },
+    "review_fix_round1": {
+      "finding": "M1 Minor: pending-source absence could precede lazy module/committed Modal completion",
+      "review": {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-budget-review.md",
+        "sha256": "7cfa239ccb0cd40ad2bad4183429247c7e19cf2f0744ec9e4a1f0cb9f9a5859e"
+      },
+      "base": "69256f56302380c01bcb86c40bcb048e6519c9c5",
+      "change": "Only owning lazy test: test-only Modal mount marker exists for either open state; await committed marker after release/real import and before absence/reopen. Real MermaidPreviewDialog remains imported through importOriginal. No fixed wait or loading assertion substitutes for real dialog absence.",
+      "product_sha256": "7f920a86b2e77e89a9167cf4ea339de49a929a4ef898938c71a385cdf32cea15",
+      "product_bytes_equal_to_base": true,
+      "fault_injection": "Remove only existing source-change setPreviewOpen(false); RED exit1 finds real dialog at pre-reopen absence assertion. Finally restore exact original product bytes; GREEN exit0,1/1. Temporary mutation is not committed.",
+      "checks": [
+        {
+          "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+          "cwd": "apps/tldw-frontend",
+          "exit": 1,
+          "kind": "guard fault-injection RED",
+          "receipt": {
+            "path": "/private/tmp/knowledge-pr3213-mermaid-round1-red.log",
+            "bytes": 9108,
+            "sha256": "b7e92362f0be16676c4fd9c769ce03eb2f7d14e71ed125e7cf2f6afc29531095"
+          }
+        },
+        {
+          "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+          "cwd": "apps/tldw-frontend",
+          "exit": 0,
+          "kind": "restored exact product GREEN1/1",
+          "receipt": {
+            "path": "/private/tmp/knowledge-pr3213-mermaid-round1-green.log",
+            "bytes": 665,
+            "sha256": "3c22a707d5e9ada9b5f0dc28d3e844ad2635ed07e119497f22fad51e3fdc0ae1"
+          }
+        },
+        {
+          "command": "apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+          "exit": 0,
+          "receipt": {
+            "path": "/private/tmp/knowledge-pr3213-mermaid-round1-lint.log",
+            "bytes": 331,
+            "sha256": "6f82b00606242dded2e0cc6b14b4e0a155a1fe2899355d7c6c0a56138cff9c1d"
+          }
+        },
+        {
+          "command": "apps/tldw-frontend/node_modules/.bin/prettier --check --no-semi --trailing-comma none --single-quote false apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+          "exit": 0,
+          "receipt": {
+            "path": "/private/tmp/knowledge-pr3213-mermaid-round1-format.log",
+            "bytes": 66,
+            "sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+          }
+        }
+      ],
+      "fault_receipt": {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-round1-red-exit.json",
+        "bytes": 276,
+        "sha256": "a1df00bc653ce2164823b0b9d8e45e5fc0729e4b70cc9c1c42d6a82c021a653a"
+      },
+      "qualification": "Test-only M1 scope; inherited jsdom localStorage warning and pages-directory advisory remain. M2 inherited warnings/style unchanged. No production/config/budget/dependency/runtime/browser changes, no51-suite/types/build/native repeats. Prior accepted production/native/extension receipts and all hosted/architecture/CSV/device qualifications remain historical and untouched. Bandit N/A for TypeScript test-only change; no new durable ADR rule. Current hosted amd64 gates remain pending."
     }
   }
 }
