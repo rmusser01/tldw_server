@@ -216,6 +216,8 @@ Task5 verification: qualified native-resolution407/407; default383passed24failed
 - [ ] Run focused and four owning suites, current client typechecks, scoped lint/format/hooks and applicable security/browser checks. Record qualified/default environment outcomes; independent task review before Task6 final reconciliation. No inaccurate TASK12116 assignment or broad-green claim.
 - [ ] Record final evidence and status via backlog-py; Task6 includes this scoped unit in final report and current reviewed validation.
 
+Task7 fix2: shared saved-view dialog focus now restores from existing native close-completion callback with pending token/generation retirement. Final51 owning/default6 focused/both types/scopedlint/hooks pass; independent scoped review approved3f610227de. Original successful acknowledgments and outside/new-dialog/removed-invoker guards retained. Actual rebuilt both-client normal CSS acceptance and tracking remain Task6; Stage4 stays In Progress until that proof.
+
 ## Stage 5: Integrated verification and accurate tracking
 **Goal:** Reviewable feature evidence and honest remaining followups.
 **Success Criteria:** Owning test/type/build/security gates pass; CDP confirms both clients; tasks and ADR accurately describe implemented behavior and outstanding human/device checks.
