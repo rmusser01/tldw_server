@@ -148,6 +148,7 @@ export type State = {
       | ((prev: ChatHistory) => ChatHistory)
   ) => void
   streaming: boolean
+  detachedHistoryResponse: { originalReply?: Pick<Message, "id" | "message" | "isBot"> } | null
   setStreaming: (streaming: boolean) => void
   isFirstMessage: boolean
   setIsFirstMessage: (isFirstMessage: boolean) => void

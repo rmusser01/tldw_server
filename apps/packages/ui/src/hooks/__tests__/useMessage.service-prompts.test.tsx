@@ -273,6 +273,10 @@ vi.mock("~/store/option", async (importOriginal) => {
           ? actual.useStoreMessageOption(selector ?? (state => state))
           : selector ? selector(mocks.storeState) : mocks.storeState,
       {
+        setState: (update: Record<string, unknown> | ((state: typeof mocks.storeState) => Record<string, unknown>)) => {
+          if (mocks.useRealQueueState) actual.useStoreMessageOption.setState(update)
+          else Object.assign(mocks.storeState, typeof update === "function" ? update(mocks.storeState) : update)
+        },
         getState: () => mocks.useRealQueueState
           ? actual.useStoreMessageOption.getState() : mocks.storeState,
         subscribe: (listener: Parameters<typeof actual.useStoreMessageOption.subscribe>[0]) =>

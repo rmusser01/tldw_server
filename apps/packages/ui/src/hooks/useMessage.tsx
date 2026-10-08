@@ -7,7 +7,8 @@ import {
   chatSubmitFailed,
   chatSubmitSkipped,
   chatSubmitSubmitted,
-  createSelectedForkAction
+  createSelectedForkAction,
+  withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils";
 import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
@@ -2396,7 +2397,7 @@ export const useMessage = () => {
     }
   };
 
-  const onSubmit = async ({
+  const submitResponse = async ({
     message,
     image,
     isRegenerate,
@@ -2445,7 +2446,7 @@ export const useMessage = () => {
     greetingIsCurrent?: () => boolean;
     historyEditResend?: NativeHistoryEditResend;
     assertCurrent?: () => void;
-  }) => {
+  }, beginResponse: () => void) => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
     // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
     // onto the chat's latest message (or the send is held) before a new turn,
@@ -2659,6 +2660,7 @@ export const useMessage = () => {
       }
     }
 
+    beginResponse();
     if (!usesLegacySidepanelRag) setAbortController(activeController);
     activeNormalControllerRef.current = activeController;
     const releaseNormalControllerIfOwned = () => {
@@ -3154,6 +3156,8 @@ export const useMessage = () => {
       }
     }
   };
+
+  const onSubmit = withDetachedHistoryResponse(submitResponse);
 
   const stopStreamingRequest = (options?: unknown) => {
     const discardTurn =

@@ -9,6 +9,7 @@ import {
   act,
   completionMessages,
   createFakeTldwServer,
+  deferred,
   HARNESS_WAIT,
   openSavedServerChat,
   renderPlayground,
@@ -16,6 +17,7 @@ import {
   screen,
   SidebarServerChatButton,
   visibleNotifications,
+  within,
   waitFor,
   withUnhandledRejectionsRecorded
 } from "./harness/playground-harness"
@@ -71,6 +73,56 @@ describe(
   () => {
     beforeEach(async () => {
       await resetPlaygroundHarness()
+    })
+
+    it("a held edited reply keeps the original assistant passive and the composer Stop active", async () => {
+      const view = await renderWithSavedChat()
+      const hold = deferred()
+      view.server.planCompletion({ gate: hold.promise })
+      try {
+        await view.user.click(
+          screen.getAllByRole("button", { name: "Edit" })[0]
+        )
+        const editor = document.querySelector<HTMLTextAreaElement>(
+          "form[data-chat-message-editor] textarea"
+        )!
+        await view.user.clear(editor)
+        await view.user.type(editor, "Edited question")
+        await view.user.click(
+          screen.getByRole("button", { name: "Save & Send" })
+        )
+        await waitFor(
+          () => expect(view.server.completionRequests()).toHaveLength(1),
+          HARNESS_WAIT
+        )
+        expect(useStoreMessageOption.getState().streaming).toBe(true)
+        const source = screen
+          .getAllByTestId("chat-message")
+          .find((row) => row.getAttribute("data-role") === "assistant")!
+        expect(source).toHaveTextContent("Saved answer")
+        expect(source).not.toHaveAttribute("aria-busy")
+        expect(
+          within(source).queryByTestId("chat-message-stop-streaming")
+        ).not.toBeInTheDocument()
+        expect(
+          within(source).queryByTestId("playground-streaming-plain-text")
+        ).not.toBeInTheDocument()
+        expect(
+          within(source).queryByText(/Generating response|Processing\.\.\./)
+        ).not.toBeInTheDocument()
+        expect(
+          screen.getByRole("button", { name: /Stop streaming/i })
+        ).toBeEnabled()
+        expect(
+          screen.getByRole("button", { name: "Save & Send" })
+        ).toBeDisabled()
+      } finally {
+        hold.resolve()
+        await waitFor(
+          () => expect(useStoreMessageOption.getState().streaming).toBe(false),
+          HARNESS_WAIT
+        )
+      }
     })
 
     it("final edited-result publication cannot overwrite a synchronous replacement draft", async () => {

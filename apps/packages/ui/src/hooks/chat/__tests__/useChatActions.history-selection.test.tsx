@@ -162,6 +162,7 @@ vi.mock("@/store/option", async (original) => {
         ) => unknown
       ) => actual.useStoreMessageOption(select),
       {
+        setState: actual.useStoreMessageOption.setState,
         getState: () => ({
           ...actual.useStoreMessageOption.getState(),
           ...messageStoreState.value,
@@ -4485,7 +4486,9 @@ it.each(["current", "newer edit", "Cancel", "interrupted"])(
     const origin = h1.controller.getCurrent().view
     let editorCurrent = true
     const isCurrent = () => editorCurrent
+    const store = (await import("@/store/option")).useStoreMessageOption
     h1.wire.mockImplementation(async function* (request) {
+      expect(store.getState().detachedHistoryResponse).toBeTruthy()
       const selection = request.tldw_history_selection_v1
       yield {
         tldw_history_admission_v1: {
@@ -4520,6 +4523,7 @@ it.each(["current", "newer edit", "Cancel", "interrupted"])(
         isCurrent
       )
     })
+    expect(store.getState().detachedHistoryResponse).toBeNull()
     expect(h1.wire).toHaveBeenCalledOnce()
     const request = h1.wire.mock.calls[0][0]
     expect(request).toMatchObject({
@@ -4590,3 +4594,109 @@ it("native edit-resend refuses Compare without local or provider writes", async 
   expect(options.setHistory).not.toHaveBeenCalled()
   expect(options.messages).toEqual(original)
 })
+
+
+it.each([false, true])(
+  "a rejected full callback edited=%s cannot replace a held response marker",
+  async (edited) => {
+    const store = (await import("@/store/option")).useStoreMessageOption
+    const current = {}
+    store.setState({ detachedHistoryResponse: current })
+    const options = ordinaryOptions()
+    const hook = renderHook(() => useChatActions(options as any))
+    options.setStreaming.mockClear()
+    await act(async () => {
+      await expect(
+        hook.result.current.onSubmit({
+          message: "Rejected callback",
+          image: "",
+          ...(edited ? { historyEditResend: {} as any } : {}),
+          assertCurrent: () => {
+            throw new Error("retired source")
+          }
+        })
+      ).rejects.toThrow("retired source")
+    })
+    expect(store.getState().detachedHistoryResponse).toBe(current)
+    expect(options.setStreaming).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    store.setState({ detachedHistoryResponse: null })
+  }
+)
+
+
+it.each([false, true])(
+  "held full character edit survives a rejected second callback edited=%s",
+  async (edited) => {
+    const store = (await import("@/store/option")).useStoreMessageOption
+    const options = createHookOptions()
+    options.messages = [
+      { id: "u-old", isBot: false, message: "old question", sources: [] },
+      { id: "a1", isBot: true, message: "same answer", sources: [] }
+    ] as any
+    messageStoreState.editRows = () => options.messages
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    h1.wire.mockImplementation(async function* (request) {
+      await gate
+      const selection = request.tldw_history_selection_v1
+      yield {
+        tldw_history_admission_v1: {
+          version: 1,
+          owner_key: h1.controller.getCurrent().view.owner_key,
+          conversation_id: nativeChatId,
+          input_message_id: "edited-input",
+          input_message_revision: "input-r",
+          selection_digest: selection.selection_digest,
+          messages: selection.messages,
+          originating_selection_revision: selection.selection_revision
+        }
+      }
+      yield { choices: [{ delta: { content: "Edited answer" } }] }
+      yield {
+        tldw_message_id: "edited-answer",
+        tldw_conversation_id: nativeChatId
+      }
+    })
+    const hook = renderHook(() => useChatActions(options as any))
+    let pending!: ReturnType<typeof hook.result.current.editMessage>
+    try {
+      act(() => {
+        pending = hook.result.current.editMessage(
+          0,
+          "Edited question",
+          true,
+          true,
+          () => true
+        )
+      })
+      await waitFor(() => expect(h1.wire).toHaveBeenCalledOnce())
+      const marker = store.getState().detachedHistoryResponse
+      const controllerCalls = options.setAbortController.mock.calls.length
+      expect(marker).toBeTruthy()
+      await act(async () => {
+        await expect(
+          hook.result.current.onSubmit({
+            message: "Rejected",
+            image: "",
+            ...(edited ? { historyEditResend: {} as any } : {}),
+            assertCurrent: () => {
+              throw new Error("retired source")
+            }
+          })
+        ).rejects.toThrow("retired source")
+      })
+      expect(store.getState().detachedHistoryResponse).toBe(marker)
+      expect(options.setAbortController).toHaveBeenCalledTimes(controllerCalls)
+      expect(h1.wire).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await act(async () => {
+        await pending
+      })
+    }
+    expect(store.getState().detachedHistoryResponse).toBeNull()
+  }
+)

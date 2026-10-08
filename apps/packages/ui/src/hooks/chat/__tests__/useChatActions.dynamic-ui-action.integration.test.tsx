@@ -126,7 +126,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: {
-    getState: () => storeOptionState.value
+    getState: () => storeOptionState.value,
+    setState: (update: Record<string, unknown> | ((state: typeof storeOptionState.value) => Record<string, unknown>)) => {
+      Object.assign(storeOptionState.value, typeof update === "function" ? update(storeOptionState.value) : update)
+    }
   }
 }))
 

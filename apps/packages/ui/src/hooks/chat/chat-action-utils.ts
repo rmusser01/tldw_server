@@ -1,3 +1,5 @@
+import { useStoreMessageOption } from "@/store/option";
+import type { NativeHistoryEditResend } from "@/types/chat-modes";
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup";
 import {
   isImageGenerationMessageType,
@@ -73,6 +75,34 @@ export type ChatSubmitResult =
   | { status: "submitted" }
   | { status: "failed"; errorMessage: string }
   | { status: "skipped"; reason: string };
+
+// A detached reply owns request locks, but does not make any saved row active.
+export const withDetachedHistoryResponse =
+  <T extends { historyEditResend?: NativeHistoryEditResend }, R>(
+    submit: (params: T, beginResponse: () => void) => Promise<R>
+  ) =>
+  async (params: T): Promise<R> => {
+    let token: {
+      originalReply?: Pick<Message, "id" | "message" | "isBot">
+    } | null = null
+    const beginResponse = () => {
+      token = params.historyEditResend
+        ? { originalReply: useStoreMessageOption.getState().messages.at(-1) }
+        : null
+      useStoreMessageOption.setState({ detachedHistoryResponse: token })
+    }
+    try {
+      return await submit(params, beginResponse)
+    } finally {
+      if (token) {
+        useStoreMessageOption.setState((state) =>
+          state.detachedHistoryResponse === token
+            ? { detachedHistoryResponse: null }
+            : state
+        )
+      }
+    }
+  }
 
 export const chatSubmitSubmitted = (): ChatSubmitResult => ({
   status: "submitted",

@@ -14,6 +14,10 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 
 const storedPreferences = vi.hoisted(() => new Map<string, unknown>())
+const detachedPresentation = vi.hoisted(() => ({ token: null as ({ originalReply?: { id?: string; message: string; isBot: boolean } }) | null, busy: false }))
+const automaticActions = vi.hoisted(() => ({ speak: vi.fn(), copy: vi.fn(), skill: vi.fn(), skillsEnabled: false }))
+
+afterEach(() => { detachedPresentation.token = null; detachedPresentation.busy = false; automaticActions.skillsEnabled = false; storedPreferences.clear() })
 
 const decodeChatErrorPayloadMock = vi.hoisted(() => vi.fn(() => null))
 const updateChatModelSettingMock = vi.hoisted(() => vi.fn())
@@ -76,10 +80,6 @@ vi.mock("@/components/Common/Markdown", () => ({
   )
 }))
 
-vi.mock("../ActionInfo", () => ({
-  LoadingStatus: () => null
-}))
-
 vi.mock("@/components/Sidepanel/Chat/FeedbackModal", () => ({
   FeedbackModal: () => null
 }))
@@ -108,7 +108,7 @@ vi.mock("@/hooks/useTTS", () => ({
   useTTS: () => ({
     cancel: vi.fn(),
     isSpeaking: false,
-    speak: vi.fn()
+    speak: automaticActions.speak
   })
 }))
 
@@ -172,18 +172,20 @@ vi.mock("@/store/ui-mode", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
+  useStoreMessageOption: Object.assign((
     selector: (state: {
       setReplyTarget: (...args: unknown[]) => void
       ragPinnedResults: unknown[]
+      detachedHistoryResponse: object | null
       setMessages: (...args: unknown[]) => void
     }) => unknown
   ) =>
     selector({
       setReplyTarget: vi.fn(),
       ragPinnedResults: [],
+      detachedHistoryResponse: detachedPresentation.token,
       setMessages: vi.fn()
-    })
+    }), { getState: () => ({ streaming: detachedPresentation.busy, isProcessing: detachedPresentation.busy }) })
 }))
 
 vi.mock("@/store/model", () => ({
@@ -205,7 +207,7 @@ vi.mock("@/store", () => ({
 
 vi.mock("@/hooks/useDiscoSkills", () => ({
   useDiscoSkills: () => ({
-    enabled: false,
+    enabled: automaticActions.skillsEnabled,
     stats: null,
     triggerProbabilityBase: 0,
     persistComments: false
@@ -221,7 +223,7 @@ vi.mock("@/utils/feedback", () => ({
 }))
 
 vi.mock("@/utils/clipboard", () => ({
-  copyToClipboard: vi.fn(async () => undefined)
+  copyToClipboard: automaticActions.copy
 }))
 
 vi.mock("@/utils/chat-style", () => ({
@@ -241,7 +243,7 @@ vi.mock("@/utils/color", () => ({
 }))
 
 vi.mock("@/utils/disco-skill-check", () => ({
-  attemptSkillTrigger: vi.fn(),
+  attemptSkillTrigger: automaticActions.skill,
   buildSkillPrompt: vi.fn(() => ""),
   createSkillComment: vi.fn(() => null)
 }))
@@ -318,6 +320,51 @@ describe("PlaygroundMessage error recovery integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("keeps the last saved reply passive during detached %s", async activeFlag => {
+    detachedPresentation.token = {}
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} onStopStreaming={vi.fn()} />)
+    expect(screen.getByTestId("chat-message")).not.toHaveAttribute("aria-busy")
+    expect(screen.queryByTestId("chat-message-stop-streaming")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("playground-streaming-plain-text")).not.toBeInTheDocument()
+    expect(await screen.findByTestId("mock-markdown")).toHaveTextContent("Sample assistant output")
+    expect(screen.queryByText(/Generating response|Processing\.\.\./)).not.toBeInTheDocument()
+    // The source row also stays passive if the timeline remounts while the request is held.
+    view.unmount()
+    const remounted = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    remounted.rerender(<PlaygroundMessage {...baseProps} />)
+    detachedPresentation.token = null
+    remounted.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it("clears a previous response announcement when a detached request begins", () => {
+    const view = render(<PlaygroundMessage {...baseProps} isStreaming />)
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.getByText("Response complete")).toBeInTheDocument()
+    detachedPresentation.token = {}
+    view.rerender(<PlaygroundMessage {...baseProps} isProcessing />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    detachedPresentation.token = null
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it("keeps a saved empty reply notice during detached generation", () => {
+    detachedPresentation.token = {}
+    render(<PlaygroundMessage {...baseProps} message="" metadataExtra={{ generation_status: "complete" }} isStreaming isProcessing />)
+    expect(screen.getByText("No response text was returned.")).toBeInTheDocument()
+    expect(screen.queryByText("Generating...")).not.toBeInTheDocument()
+    expect(screen.queryByText("Generating response...")).not.toBeInTheDocument()
+  })
+
+  it("keeps a reasoning-only reply warning during detached generation", () => {
+    detachedPresentation.token = {}
+    render(<PlaygroundMessage {...baseProps} message="<think>Only reasoning</think>" isStreaming isProcessing />)
+    expect(screen.getByRole("status")).toHaveTextContent("Interrupted")
+    expect(screen.queryByText("Generating response...")).not.toBeInTheDocument()
   })
 
   it.each(["isStreaming", "isProcessing"] as const)("announces successful completion after %s ends", activeFlag => {
@@ -1427,4 +1474,126 @@ it("reads recorded response metadata after the actual compact server mapper", ()
     { role: "assistant", content: "Saved compact partial." }
   ])
   expect(source).toEqual(before)
+})
+
+
+describe("saved reply recovery during detached work", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+  it.each(["", "<think>Only reasoning</think>"])(
+    "keeps the old notice without mutating recovery actions for %s",
+    (text) => {
+      detachedPresentation.token = {}
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          message={text}
+          isStreaming
+          isProcessing
+        />
+      )
+      expect(
+        screen.queryByRole("button", { name: "Retry same model" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Try provider fallback" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Switch model" })
+      ).not.toBeInTheDocument()
+      expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("a retained provider fallback cannot mutate or retry before the new busy render", () => {
+    const onRegenerate = vi.fn()
+    const view = render(
+      <PlaygroundMessage
+        {...baseProps}
+        message="<think>Only reasoning</think>"
+        onRegenerate={onRegenerate}
+      />
+    )
+    const action = screen.getByRole("button", { name: "Try provider fallback" })
+    detachedPresentation.token = {}
+    detachedPresentation.busy = true
+    fireEvent.click(action)
+    expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+    expect(onRegenerate).not.toHaveBeenCalled()
+    view.rerender(
+      <PlaygroundMessage
+        {...baseProps}
+        message="<think>Only reasoning</think>"
+        onRegenerate={onRegenerate}
+        isStreaming
+      />
+    )
+    expect(
+      screen.queryByRole("button", { name: "Try provider fallback" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("a non-followed detached reply never replays automatic actions on its unchanged source", async () => {
+    storedPreferences.set("autoCopyResponseToClipboard", true)
+    storedPreferences.set("isTTSAutoPlayEnabled", true)
+    automaticActions.skillsEnabled = true
+    detachedPresentation.token = {
+      originalReply: { message: baseProps.message, isBot: true }
+    }
+    const view = render(
+      <PlaygroundMessage {...baseProps} isTTSEnabled isStreaming isProcessing />
+    )
+    view.rerender(<PlaygroundMessage {...baseProps} isTTSEnabled />)
+    detachedPresentation.token = null
+    view.rerender(<PlaygroundMessage {...baseProps} isTTSEnabled />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(automaticActions.copy).not.toHaveBeenCalled()
+    expect(automaticActions.speak).not.toHaveBeenCalled()
+    expect(automaticActions.skill).not.toHaveBeenCalled()
+  })
+})
+
+
+it("a newly installed edited reply can run automatic actions once", async () => {
+  vi.clearAllMocks()
+  storedPreferences.set("autoCopyResponseToClipboard", true)
+  storedPreferences.set("isTTSAutoPlayEnabled", true)
+  automaticActions.skillsEnabled = true
+  detachedPresentation.token = {
+    originalReply: { id: "source", message: baseProps.message, isBot: true }
+  }
+  const view = render(
+    <PlaygroundMessage
+      {...baseProps}
+      messageId="source"
+      isTTSEnabled
+      isStreaming
+      isProcessing
+    />
+  )
+  view.rerender(
+    <PlaygroundMessage
+      {...baseProps}
+      messageId="new-result"
+      message="Edited answer"
+      isTTSEnabled
+    />
+  )
+  detachedPresentation.token = null
+  view.rerender(
+    <PlaygroundMessage
+      {...baseProps}
+      messageId="new-result"
+      message="Edited answer"
+      isTTSEnabled
+    />
+  )
+  await waitFor(() => {
+    expect(automaticActions.copy).toHaveBeenCalledOnce()
+    expect(automaticActions.speak).toHaveBeenCalledOnce()
+    expect(automaticActions.skill).toHaveBeenCalledOnce()
+  })
 })

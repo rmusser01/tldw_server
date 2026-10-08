@@ -5,7 +5,8 @@ import type { GreetingSeed } from "@/utils/character-greetings"
 import {
   captureLocalMutationOwner,
   createSelectedForkAction,
-  getCompareBranchBoundaryId
+  getCompareBranchBoundaryId,
+  withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils"
 import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
@@ -3273,7 +3274,7 @@ export const useChatActions = ({
     return validateBeforeSubmit(effectiveSelectedModel || "", t, notification)
   }
 
-  const onSubmit = async ({
+  const submitResponse = async ({
     message,
     image,
     isRegenerate = false,
@@ -3340,7 +3341,7 @@ export const useChatActions = ({
      */
     historyRetryAdmission?: HistoryAdmissionReferenceV1
     historyEditResend?: NativeHistoryEditResend
-  }): Promise<ChatSubmitResult> => {
+  }, beginResponse: () => void): Promise<ChatSubmitResult> => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     assertCurrent?.()
     controller?.signal.throwIfAborted()
@@ -3389,6 +3390,7 @@ export const useChatActions = ({
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
     )
+    beginResponse()
     setStreaming(true)
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
@@ -4536,6 +4538,8 @@ export const useChatActions = ({
       }
     }
   }
+
+  const onSubmit = withDetachedHistoryResponse(submitResponse)
 
   const sendPerModelReply = async ({
     clusterId,

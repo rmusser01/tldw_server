@@ -1,6 +1,6 @@
 import React from "react"
 import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
-import { act, render, renderHook, screen } from "@testing-library/react"
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => {
@@ -258,7 +258,13 @@ vi.mock("~/store/option", () => ({
   useStoreMessageOption: Object.assign(
     (selector?: (state: Record<string, unknown>) => unknown) =>
       selector ? selector(mocks.storeState) : mocks.storeState,
-    { getState: () => ({ ...mocks.storeState, ...mocks.draftFields?.() }), subscribe: () => () => {} }
+    {
+      getState: () => ({ ...mocks.storeState, ...mocks.draftFields?.() }),
+      setState: (update: Record<string, unknown> | ((state: typeof mocks.storeState) => Record<string, unknown>)) => {
+        Object.assign(mocks.storeState, typeof update === "function" ? update(mocks.storeState) : update)
+      },
+      subscribe: () => () => {}
+    }
   )
 }))
 
@@ -614,6 +620,7 @@ beforeEach(async () => {
     }
   } })
   mocks.draftFields = null
+  mocks.storeState.detachedHistoryResponse = null
   h1.auth = new AbortController()
   h1.native = false
   h1.persona = false
@@ -2142,10 +2149,13 @@ describe("side-panel send gate (XP-08)", () => {
 
   it("holds a send the gate refuses before anything reaches the server", async () => {
     const gate = vi.fn<SidepanelSendGate>(async () => ({ proceed: false, refreshed: false }))
+    const current = {}
+    mocks.storeState.detachedHistoryResponse = current
     const { result } = renderHook(() => useMessage(), { wrapper: withGate(gate) })
     await act(async () => {
       await result.current.onSubmit({ message: "next", image: "" })
     })
+    expect(mocks.storeState.detachedHistoryResponse).toBe(current)
     expect(gate).toHaveBeenCalledWith({ message: "next" })
     expect(h1.capture).not.toHaveBeenCalled()
     expect(h1.append).not.toHaveBeenCalled()
@@ -2313,6 +2323,7 @@ it.each(
         current?.() !== false
     )
     h1.wire.mockImplementation(async function* (request) {
+      expect(mocks.storeState.detachedHistoryResponse).toBeTruthy()
       if (mode === "character") {
         const selection = request.tldw_history_selection_v1
         yield {
@@ -2350,6 +2361,7 @@ it.each(
         isCurrent
       )
     })
+    expect(mocks.storeState.detachedHistoryResponse).toBeNull()
     expect(h1.wire).toHaveBeenCalledOnce()
     const branch =
       mode === "character"
@@ -2396,5 +2408,117 @@ it.each(
         })
       )
     }
+  }
+)
+
+
+it.each([false, true])(
+  "a rejected compact callback edited=%s cannot replace a held response marker",
+  async (edited) => {
+    const current = {}
+    mocks.storeState.detachedHistoryResponse = current
+    const hook = renderHook(() => useMessage())
+    await act(async () => {
+      await expect(
+        hook.result.current.onSubmit({
+          message: "Rejected callback",
+          image: "",
+          ...(edited ? { historyEditResend: {} as any } : {}),
+          assertCurrent: () => {
+            throw new Error("retired source")
+          }
+        })
+      ).rejects.toThrow("retired source")
+    })
+    expect(mocks.storeState.detachedHistoryResponse).toBe(current)
+    expect(mocks.setStreaming).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+  }
+)
+
+
+it.each([false, true])(
+  "held compact character edit survives a rejected second callback edited=%s",
+  async (edited) => {
+    h1.native = true
+    mocks.storeState.messages = [
+      {
+        id: "u-old",
+        isBot: false,
+        name: "You",
+        message: "old question",
+        sources: []
+      },
+      {
+        id: "a1",
+        isBot: true,
+        name: "Assistant",
+        message: "same answer",
+        sources: []
+      }
+    ]
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    h1.wire.mockImplementation(async function* (request) {
+      await gate
+      const selection = request.tldw_history_selection_v1
+      yield {
+        tldw_history_admission_v1: {
+          version: 1,
+          owner_key: h1.controller.getCurrent().view.owner_key,
+          conversation_id: nativeChatId,
+          input_message_id: "edited-input",
+          input_message_revision: "input-r",
+          selection_digest: selection.selection_digest,
+          messages: selection.messages,
+          originating_selection_revision: selection.selection_revision
+        }
+      }
+      yield { choices: [{ delta: { content: "Edited answer" } }] }
+      yield {
+        tldw_message_id: "edited-answer",
+        tldw_conversation_id: nativeChatId
+      }
+    })
+    const hook = renderHook(() => useMessage())
+    let pending!: ReturnType<typeof hook.result.current.editMessage>
+    try {
+      act(() => {
+        pending = hook.result.current.editMessage(
+          0,
+          "Edited question",
+          true,
+          true,
+          () => true
+        )
+      })
+      await waitFor(() => expect(h1.wire).toHaveBeenCalledOnce())
+      const marker = mocks.storeState.detachedHistoryResponse
+      const controllerCalls = mocks.setAbortController.mock.calls.length
+      expect(marker).toBeTruthy()
+      await act(async () => {
+        await expect(
+          hook.result.current.onSubmit({
+            message: "Rejected",
+            image: "",
+            ...(edited ? { historyEditResend: {} as any } : {}),
+            assertCurrent: () => {
+              throw new Error("retired source")
+            }
+          })
+        ).rejects.toThrow("retired source")
+      })
+      expect(mocks.storeState.detachedHistoryResponse).toBe(marker)
+      expect(mocks.setAbortController).toHaveBeenCalledTimes(controllerCalls)
+      expect(h1.wire).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await act(async () => {
+        await pending
+      })
+    }
+    expect(mocks.storeState.detachedHistoryResponse).toBeNull()
   }
 )

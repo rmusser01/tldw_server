@@ -34,7 +34,7 @@ const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
   useStoreMessageOption.setState((state) => ({
     chatDraftAddress: null, chatDraftTransition: null, chatDraftRevision: state.chatDraftRevision + 1,
     messages: [], history: [], historyId: null, queuedMessages: [],
-    isFirstMessage: true, isLoading: false, isProcessing: false, streaming: false,
+    isFirstMessage: true, isLoading: false, isProcessing: false, streaming: false, detachedHistoryResponse: null,
     isEmbedding: false, isSearchingInternet: false,
     selectedKnowledge: null, selectedSystemPrompt: null, selectedQuickPrompt: null,
     quickPromptRevision: state.quickPromptRevision + 1,

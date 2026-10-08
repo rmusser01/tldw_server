@@ -19,6 +19,7 @@ export const createCoreSlice: StoreSlice<
     | "history"
     | "setHistory"
     | "streaming"
+    | "detachedHistoryResponse"
     | "setStreaming"
     | "isFirstMessage"
     | "setIsFirstMessage"
@@ -115,6 +116,7 @@ export const createCoreSlice: StoreSlice<
           : historyOrUpdater
     }),
   streaming: false,
+  detachedHistoryResponse: null,
   setStreaming: (streaming) => set({ streaming }),
   isFirstMessage: true,
   setIsFirstMessage: (isFirstMessage) => set({ isFirstMessage }),
