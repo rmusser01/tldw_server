@@ -1,5 +1,5 @@
 import type { GreetingSeed } from "@/utils/character-greetings"
-import { createChatWithRecovery, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
+import { createChatWithRecovery, acknowledgeChatCreation, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { chatDraftAddressKey, isChatDraftHandle, type ChatDraftHandle } from "@/utils/chat-draft-address"
 import type { Dispatch, SetStateAction } from "react"
@@ -194,27 +194,49 @@ export const sendNativeHistoryCharacter = async (
         if (!sourceDraft || sourceDraft.kind !== "fresh") throw new Error("chat_creation_source_invalid")
         creationHandle = privateHandle ?? { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
         const created = await createChatWithRecovery({
-          snapshot, handle: creationHandle, scope: creationScope, surface: params.surface,
-          inputText: params.message, setup: { characterId: params.characterId, provider, model,
-            temperature: settings.temperature, topP: settings.topP },
-          isCurrent: () => params.originIsCurrent() && greetingCurrent() && leaseValid(),
-          create: () => tldwClient.createChat(
-          {
-            character_id: params.characterId,
+          snapshot,
+          handle: creationHandle,
+          scope: creationScope,
+          surface: params.surface,
+          inputText: params.message,
+          setup: {
+            characterId: params.characterId,
             provider,
             model,
-            ...(settings.temperature != null ? { temperature: settings.temperature } : {}),
-            ...(settings.topP != null ? { top_p: settings.topP } : {}),
+            temperature: settings.temperature,
+            topP: settings.topP
           },
-          {
-            scope: creationScope,
-            signal: snapshot.scopeSignal,
-            requestScope: snapshot.requestScope,
-            ...(greetingSeed ? { seedFirstMessage: true, greetingStrategy: greetingSeed.greetingStrategy,
-              ...(greetingSeed.greetingStrategy === "alternate_index" ? { alternateIndex: greetingSeed.alternateIndex } : {}) } : {})
-          }
-          )
+          isCurrent: () =>
+            params.originIsCurrent() && greetingCurrent() && leaseValid(),
+          create: (id) =>
+            tldwClient.createChat(
+              {
+                id,
+                character_id: params.characterId,
+                provider,
+                model,
+                ...(settings.temperature != null
+                  ? { temperature: settings.temperature }
+                  : {}),
+                ...(settings.topP != null ? { top_p: settings.topP } : {})
+              },
+              {
+                scope: creationScope,
+                signal: snapshot.scopeSignal,
+                requestScope: snapshot.requestScope,
+                ...(greetingSeed
+                  ? {
+                      seedFirstMessage: true,
+                      greetingStrategy: greetingSeed.greetingStrategy,
+                      ...(greetingSeed.greetingStrategy === "alternate_index"
+                        ? { alternateIndex: greetingSeed.alternateIndex }
+                        : {})
+                    }
+                  : {})
+              }
+            )
         })
+
         // A late creation ACK must never bind the newly opened view or account.
         if (!params.originIsCurrent() || !greetingCurrent() || !leaseValid())
           throw new Error("stale_selection")
@@ -583,6 +605,8 @@ export const sendNativeHistoryCharacter = async (
 export const reviewNativeChatCreation = async (params: {
   controller: HistorySelectionController
   handle: ChatDraftHandle
+  expectedOperationId: string
+  expectedClientChatId?: string
   isCurrent: () => boolean
   onAccepted: (chat: Awaited<ReturnType<typeof tldwClient.getChat>>) => void
   retainInput?: () => Promise<boolean>
@@ -591,50 +615,147 @@ export const reviewNativeChatCreation = async (params: {
 }) => {
   const source = useStoreMessageOption.getState()
   const address = source.chatDraftAddress
-  if (!address || address.kind !== "fresh" || chatDraftAddressKey(address) !== chatDraftAddressKey(params.handle.address)) return false
+  if (
+    !address ||
+    address.kind !== "fresh" ||
+    chatDraftAddressKey(address) !== chatDraftAddressKey(params.handle.address)
+  )
+    return false
   const session = usePlaygroundSessionStore.getState()
   if (session.serverChatSelectionIntent) return false
   const sourceFence = params.controller.fence()
-  const navigationCurrent = () => useStoreMessageOption.getState().serverChatId === source.serverChatId &&
-    usePlaygroundSessionStore.getState().serverChatSelectionIntent === session.serverChatSelectionIntent &&
-    usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
-    usePlaygroundSessionStore.getState().sourceSelectionRevision === session.sourceSelectionRevision
+  const navigationCurrent = () =>
+    useStoreMessageOption.getState().serverChatId === source.serverChatId &&
+    usePlaygroundSessionStore.getState().serverChatSelectionIntent ===
+      session.serverChatSelectionIntent &&
+    usePlaygroundSessionStore.getState().restoreRevision ===
+      session.restoreRevision &&
+    usePlaygroundSessionStore.getState().sourceSelectionRevision ===
+      session.sourceSelectionRevision
   let bind = captureChatDraftLoad("bind")
   if (params.retainInput && !(await params.retainInput())) return false
-  if (!bind.isCurrent() || !params.isCurrent() || !sourceFence() || !navigationCurrent()) return false
+  if (
+    !bind.isCurrent() ||
+    !params.isCurrent() ||
+    !sourceFence() ||
+    !navigationCurrent()
+  )
+    return false
   const snapshot = await loadServicePromptSnapshot([])
-  const authCurrent = () => !snapshot.scopeSignal.aborted && !snapshot.scopeInvalidatedSignal.aborted
-  const current = () => bind.isCurrent() && params.isCurrent() && authCurrent() && navigationCurrent()
+  const authCurrent = () =>
+    !snapshot.scopeSignal.aborted && !snapshot.scopeInvalidatedSignal.aborted
+  const current = () =>
+    bind.isCurrent() &&
+    params.isCurrent() &&
+    authCurrent() &&
+    navigationCurrent()
   const preparing = () => sourceFence() && current()
   try {
-    if (!preparing() || chatDraftOwnerKey(snapshot.requestScope) !== params.handle.ownerHash || params.handle.address.kind !== "fresh") return false
+    if (
+      !preparing() ||
+      chatDraftOwnerKey(snapshot.requestScope) !== params.handle.ownerHash ||
+      params.handle.address.kind !== "fresh"
+    )
+      return false
     const attempt = await readChatCreationRecovery(params.handle)
-    if (!attempt?.chatId || attempt.state === "unconfirmed" || !preparing()) return false
-    if (attempt.state === "settled" || (params.inputText !== undefined && params.inputText !== attempt.inputText)) {
+    if (
+      !attempt ||
+      attempt.handle.address.kind !== "fresh" ||
+      attempt.operationId !== params.expectedOperationId ||
+      attempt.clientChatId !== params.expectedClientChatId ||
+      !preparing()
+    )
+      return false
+    const chatId =
+      attempt.chatId ??
+      (attempt.state === "unconfirmed" ? attempt.clientChatId : undefined)
+    if (!chatId) return false
+    const sameAttempt = async () => {
+      const now = await readChatCreationRecovery(params.handle)
+      return (
+        now?.operationId === attempt.operationId &&
+        now.clientChatId === attempt.clientChatId &&
+        chatDraftAddressKey(now.handle.address) ===
+          chatDraftAddressKey(attempt.handle.address) &&
+        (now.chatId ??
+          (now.state === "unconfirmed" ? now.clientChatId : undefined)) ===
+          chatId
+      )
+    }
+    if (
+      attempt.state === "settled" ||
+      (params.inputText !== undefined && params.inputText !== attempt.inputText)
+    ) {
       // Different retained input is a separate draft, not this chat's original first-ID bind.
-      if (!params.copyInput || !(await params.copyInput()) || !preparing()) return false
+      if (!params.copyInput || !(await params.copyInput()) || !preparing())
+        return false
       bind = captureChatDraftLoad("switch")
     }
-    const scope = structuredClone(params.handle.address.scope)
-    const chat = await tldwClient.getChat(attempt.chatId, { scope, requestScope: snapshot.requestScope, signal: snapshot.scopeSignal })
-    if (!preparing() || chat.id !== attempt.chatId) return false
+    if (!(await sameAttempt()) || !preparing()) return false
+    const scope = structuredClone(attempt.handle.address.scope)
+    const chat = await tldwClient.getChat(chatId, {
+      scope,
+      requestScope: snapshot.requestScope,
+      signal: snapshot.scopeSignal
+    })
+    if (
+      !preparing() ||
+      chat.id !== chatId ||
+      !(await sameAttempt()) ||
+      !preparing()
+    )
+      return false
+    if (
+      !(await acknowledgeChatCreation(attempt, chatId)) ||
+      !(await sameAttempt()) ||
+      !preparing()
+    )
+      return false
     let acceptedReceipt: HistoryLoadReceipt | undefined
     let phase: "preparing" | "accepted" | "rejected" = "preparing"
-    const loaded = await params.controller.loadConversation({ serverChatId: attempt.chatId, scope, isCurrent: () => bind.isCurrent() && (phase === "accepted" || (phase === "preparing" && current())) }, null, receipt => {
-      phase = "rejected"
-      const now = params.controller.getCurrent()
-      if (!current() || receipt.owner !== now.owner || receipt.view !== now.view || receipt.owner.kind !== "native" ||
-        receipt.owner.conversation_id !== attempt.chatId || chatDraftOwnerKey(receipt.owner.request_scope) !== params.handle.ownerHash) return
-      phase = "preparing"
-      if (!receipt.owner.validate_lease() || !bind(receipt)) { phase = "rejected"; return }
-      acceptedReceipt = receipt
-      phase = "accepted"
-      params.onAccepted(chat)
-    })
+    const loaded = await params.controller.loadConversation(
+      {
+        serverChatId: chatId,
+        scope,
+        isCurrent: () =>
+          bind.isCurrent() &&
+          (phase === "accepted" || (phase === "preparing" && current()))
+      },
+      null,
+      (receipt) => {
+        phase = "rejected"
+        const now = params.controller.getCurrent()
+        if (
+          !current() ||
+          receipt.owner !== now.owner ||
+          receipt.view !== now.view ||
+          receipt.owner.kind !== "native" ||
+          receipt.owner.conversation_id !== chatId ||
+          chatDraftOwnerKey(receipt.owner.request_scope) !==
+            params.handle.ownerHash
+        )
+          return
+        phase = "preparing"
+        if (!receipt.owner.validate_lease() || !bind(receipt)) {
+          phase = "rejected"
+          return
+        }
+        acceptedReceipt = receipt
+        phase = "accepted"
+        params.onAccepted(chat)
+      }
+    )
     if (!loaded || !acceptedReceipt || !bind.isCurrent()) return false
     const destination = params.controller.fence()
-    await markChatCreationBound(attempt.handle, attempt.chatId)
+    await markChatCreationBound(attempt.handle, chatId, attempt.operationId)
     const now = params.controller.getCurrent()
-    return destination() && bind.isCurrent() && now.owner === acceptedReceipt.owner && now.view === acceptedReceipt.view
-  } finally { snapshot.release() }
+    return (
+      destination() &&
+      bind.isCurrent() &&
+      now.owner === acceptedReceipt.owner &&
+      now.view === acceptedReceipt.view
+    )
+  } finally {
+    snapshot.release()
+  }
 }

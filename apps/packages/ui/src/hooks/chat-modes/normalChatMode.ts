@@ -747,14 +747,25 @@ const captureNormalHistoryTurn = async (
         throw new Error("chat_creation_source_invalid")
       creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
       const created = await createChatWithRecovery({
-        snapshot, handle: creationHandle, scope, surface: params.surface,
-        inputText: message, setup: {},
+        snapshot,
+        handle: creationHandle,
+        scope,
+        surface: params.surface,
+        inputText: message,
+        setup: {},
         isCurrent: () => originIsCurrent() && preparationIsCurrent(),
-        create: () => tldwClient.createChat(
-          { title: message.trim().slice(0, 80) || "Untitled Chat", source: scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE },
-          { scope, signal, requestScope: snapshot.requestScope }
-        )
+        create: (id) =>
+          tldwClient.createChat(
+            {
+              id,
+              title: message.trim().slice(0, 80) || "Untitled Chat",
+              source:
+                scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE
+            },
+            { scope, signal, requestScope: snapshot.requestScope }
+          )
       })
+
       // The recovery record keeps a late ACK even when this view can no longer bind.
       if (!originIsCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
       serverId = created.id

@@ -358,3 +358,48 @@ describe("draft account verification recovery", () => {
     expect(retry).not.toHaveBeenCalled()
   })
 })
+
+
+it.each([false, true])(
+  "client UUID unknown recovery discloses the exact Check action with copy required %s",
+  async (copyInputRequired) => {
+    const review = vi.fn().mockResolvedValue(false)
+    const id = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14"
+    render(
+      <ChatDraftRecovery
+        listDrafts={vi.fn()}
+        copyDraft={vi.fn()}
+        onReviewCreatedChat={review}
+        creationRecovery={{
+          unavailable: false,
+          copyInputRequired,
+          active: {
+            version: 1,
+            operationId: id,
+            clientChatId: id,
+            surface: "playground",
+            createdAt: 1,
+            state: "unconfirmed",
+            inputText: "ORIGINAL INPUT",
+            handle: {
+              ...draft.handle,
+              address: { ...draft.handle.address, temporary: false }
+            }
+          }
+        }}
+      />
+    )
+    expect(screen.getByText("Server save unconfirmed")).toBeInTheDocument()
+    expect(review).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: copyInputRequired
+          ? "Copy draft and check server"
+          : "Check server for this chat"
+      })
+    )
+    await waitFor(() => expect(review).toHaveBeenCalledOnce())
+    expect(screen.getByText("ORIGINAL INPUT")).toBeInTheDocument()
+    expect(screen.queryByText("Chat already created")).not.toBeInTheDocument()
+  }
+)

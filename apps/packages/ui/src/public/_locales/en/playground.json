@@ -4073,6 +4073,12 @@
   "characterChatReadiness_routeSetupFailed_description": {
     "message": "Your current chat and draft are still here. Review the setup error, then retry."
   },
+  "draftRecovery_checkCreated": {
+    "message": "Check server for this chat"
+  },
+  "draftRecovery_copyAndCheckCreated": {
+    "message": "Copy draft and check server"
+  },
   "draftRecovery_copyAndReviewCreated": {
     "message": "Copy draft and review saved chat"
   },

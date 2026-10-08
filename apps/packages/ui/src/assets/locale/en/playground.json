@@ -1455,6 +1455,8 @@
     "reviewCreated": "Review created chat",
     "creationStorageUnavailable": "Creation recovery could not be read. Keep your draft and check retained drafts before starting again.",
     "creationDraftHelp": "Open this draft to review its creation before sending. Starting another chat may create a duplicate.",
+    "checkCreated": "Check server for this chat",
+    "copyAndCheckCreated": "Copy draft and check server",
     "copyAndReviewCreated": "Copy draft and review saved chat",
     "savedChatDraft": "Retained message for a saved chat",
     "accountPending": "Checking your account before restoring or saving drafts…",

@@ -111,6 +111,13 @@ import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { readChatCreationRecovery } from "@/services/pending-chat-promotion"
 import type { ChatDraftHandle } from "@/utils/chat-draft-address"
 
+let newServerId = "new-server"
+const createdServerChat = async (body: { id?: string }) => {
+  if (!body.id) throw new Error("fixture requires the reserved client chat ID")
+  newServerId = body.id
+  return { id: body.id } as never
+}
+
 const ACCOUNT = '["https://chat.test","multi-user","manual",null,"alice",null]'
 const snapshot = (): ServicePromptSnapshot => ({
   scopeKey: "alice-scope", requestScope: structuredClone(prompt.scope),
@@ -152,7 +159,7 @@ const send = (controller: HistorySelectionController, options: {
 }
 const publicHistory = (id: string): HistoryInfo => ({ id, title: "Imported", createdAt: 1, is_rag: false, message_source: "web-ui" })
 const savedMessages = async (): Promise<Message[]> => await storage.tables.messages.toArray() as Message[]
-const emptyServerCapture = (request: Parameters<typeof tldwClient.captureHistorySelection>[1], id = "new-server") => {
+const emptyServerCapture = (request: Parameters<typeof tldwClient.captureHistorySelection>[1], id = newServerId) => {
   const view = { ...request.view, owner_key: "server-owner" }
   return {
     status: "captured", purpose: request.purpose, view, rows: [], selected_content: [],
@@ -164,6 +171,7 @@ const emptyServerCapture = (request: Parameters<typeof tldwClient.captureHistory
 }
 
 beforeEach(() => {
+  newServerId = "new-server"
   vi.restoreAllMocks()
   localStorage.clear(); sessionStorage.clear()
   useStoreMessageOption.getState().startNewChatDraft()
@@ -212,7 +220,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
     const stopped = new AbortController()
     const auth = new AbortController()
     Object.assign(scoped, { scopeSignal: stopped.signal, scopeInvalidatedSignal: auth.signal })
-    vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
     let finish!: () => void
     const waiting = new Promise<void>(resolve => { finish = resolve })
     const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
@@ -241,12 +249,12 @@ describe("normal Chat owned history creation and H1 admission", () => {
 
   it("does not admit after a qualified native receipt is followed by an epoch-only load change", async () => {
     const mounted = renderHook(() => useHistorySelection())
-    vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
     const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => emptyServerCapture(request))
     const admission = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, value) => {
       const selection = value.tldw_history_selection_v1
       return { id: value.id, ...(selection ? { tldw_history_admission_v1: {
-        version: 1, owner_key: "server-owner", conversation_id: "new-server", input_message_id: value.id,
+        version: 1, owner_key: "server-owner", conversation_id: newServerId, input_message_id: value.id,
         input_message_revision: "1", selection_digest: selection.selection_digest,
         messages: selection.messages, originating_selection_revision: selection.selection_revision
       } } : {}) } as never
@@ -260,7 +268,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
     } }
     const adopt = vi.fn()
     await act(async () => { await expect(send(changed, { setServerChatId: adopt, originIsCurrent: controller.fence() })).rejects.toThrow("stale_selection") })
-    expect(adopt).toHaveBeenCalledWith("new-server")
+    expect(adopt).toHaveBeenCalledWith(newServerId)
     expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
     const owner = mounted.result.current.getCurrent().owner
     expect(owner?.kind === "native" && owner.validate_lease()).toBe(false)
@@ -296,10 +304,10 @@ describe("normal Chat owned history creation and H1 admission", () => {
       let finish!: () => void
       const waiting = new Promise<void>(resolve => { finish = resolve })
       let current = true
-      const create = vi.spyOn(tldwClient, "createChat").mockImplementation(async () => {
+      const create = vi.spyOn(tldwClient, "createChat").mockImplementation(async body => {
         await waiting
         if (boundary === "creation failure") throw new Error("create unavailable")
-        return { id: boundary === "missing ACK" ? "" : "late-chat" } as never
+        return boundary === "missing ACK" ? { id: "" } as never : createdServerChat(body)
       })
       const adopt = vi.fn()
       let pending!: ReturnType<typeof send>
@@ -326,13 +334,13 @@ describe("normal Chat owned history creation and H1 admission", () => {
     const stopped = new AbortController()
     const scoped = { ...snapshot(), scopeSignal: stopped.signal }
     const rows: Array<{ id: string; role: string; content: string; parent_message_id: string | null }> = []
-    const create = vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+    const create = vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
     vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
       const view = { ...request.view, owner_key: "server-owner" }
       const nodes = rows.map(row => ({ id: row.id, role: row.role, parent_id: row.parent_message_id, revision: "1", settled: true }))
       return {
         status: "captured", purpose: request.purpose, view,
-        snapshot: { version: 1, owner_key: view.owner_key, conversation_id: "new-server", nodes,
+        snapshot: { version: 1, owner_key: view.owner_key, conversation_id: newServerId, nodes,
           fences: { conversation: "1", history: "1", settings: "1" }, source_digest: "source",
           storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" } },
         rows: view.cursor.kind === "empty" ? [] : nodes,
@@ -344,7 +352,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
       rows.push({ id: body.id!, role: body.role, content: body.content!, parent_message_id: body.parent_message_id ?? null })
       const selection = body.tldw_history_selection_v1
       return { id: body.id, ...(selection ? { tldw_history_admission_v1: {
-        version: 1, owner_key: "server-owner", conversation_id: "new-server", input_message_id: body.id,
+        version: 1, owner_key: "server-owner", conversation_id: newServerId, input_message_id: body.id,
         input_message_revision: "1", selection_digest: selection.selection_digest,
         messages: selection.messages, originating_selection_revision: selection.selection_revision
       } } : {}) } as never
@@ -363,11 +371,11 @@ describe("normal Chat owned history creation and H1 admission", () => {
     })
     expect(create).toHaveBeenCalledOnce()
     expect(create.mock.calls[0][1]).toMatchObject({ requestScope: prompt.scope, signal: expect.any(AbortSignal) })
-    expect(adopt).toHaveBeenCalledWith("new-server")
-    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "new-server", ownerKey: "server-owner" })
+    expect(adopt).toHaveBeenCalledWith(newServerId)
+    expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: newServerId, ownerKey: "server-owner" })
     expect(useStoreMessageOption.getState().chatDraftTransition).toMatchObject({ kind: "bind", sourceAddress })
-    expect(await readChatCreationRecovery(source)).toMatchObject({ state: "settled", chatId: "new-server", inputText: "" })
-    expect(mounted.result.current.owner).toMatchObject({ kind: "native", conversation_id: "new-server" })
+    expect(await readChatCreationRecovery(source)).toMatchObject({ state: "settled", chatId: newServerId, inputText: "" })
+    expect(mounted.result.current.owner).toMatchObject({ kind: "native", conversation_id: newServerId })
     stopped.abort()
     const owner = mounted.result.current.getCurrent().owner
     expect(owner?.kind === "native" && owner.validate_lease()).toBe(true)
@@ -380,7 +388,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
     const reference = mounted.result.current.getReference()!
     mounted.unmount()
     const reopened = renderHook(() => useHistorySelection())
-    await act(async () => { await reopened.result.current.loadConversation({ serverChatId: "new-server" }, reference) })
+    await act(async () => { await reopened.result.current.loadConversation({ serverChatId: newServerId }, reference) })
     expect(reopened.result.current.status).toBe("ready")
     expect(reopened.result.current.capture?.status === "captured" && reopened.result.current.capture.selected_content.map(row => row.message)).toEqual(["First question", answer])
     reopened.unmount()
@@ -588,7 +596,7 @@ describe("ordinary native creation recovery and preparation", () => {
     Object.assign(scoped, boundary === "account" ? { scopeInvalidatedSignal: abort.signal } : { scopeSignal: abort.signal })
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
-    const create = vi.spyOn(tldwClient, "createChat").mockImplementation(async () => { await held; return { id: "late-server" } as never })
+    const create = vi.spyOn(tldwClient, "createChat").mockImplementation(async body => { await held; return createdServerChat(body) })
     const adopt = vi.fn()
     let pending!: ReturnType<typeof send>
     act(() => { pending = send(mounted.result.current, { setServerChatId: adopt, snapshot: scoped, originIsCurrent: mounted.result.current.fence() }) })
@@ -600,7 +608,7 @@ describe("ordinary native creation recovery and preparation", () => {
       } else abort.abort()
     })
     await act(async () => { release(); await expect(pending).rejects.toThrow("stale_selection") })
-    expect(await readChatCreationRecovery(source)).toMatchObject({ state: "acknowledged", chatId: "late-server", inputText: "First question" })
+    expect(await readChatCreationRecovery(source)).toMatchObject({ state: "acknowledged", chatId: newServerId, inputText: "First question" })
     expect(adopt).not.toHaveBeenCalled()
     expect(mounted.result.current.getCurrent().owner).toBeNull()
     expect(tldwChat.streamMessage).not.toHaveBeenCalled()
@@ -613,9 +621,9 @@ describe("ordinary native creation recovery and preparation", () => {
     let enter!: () => void, release!: () => void
     const entered = new Promise<void>(resolve => { enter = resolve })
     const held = new Promise<void>(resolve => { release = resolve })
-    vi.spyOn(tldwClient, "createChat").mockImplementation(async () => {
+    vi.spyOn(tldwClient, "createChat").mockImplementation(async body => {
       if (stage === "create") { enter(); await held }
-      return { id: "new-server" } as never
+      return createdServerChat(body)
     })
     vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
       if (stage === "capture") { enter(); await held }
@@ -661,7 +669,7 @@ it.each(["new", "ABA"])("captures the source before awaited service setup crosse
   const entered = new Promise<void>(resolve => { enter = resolve })
   const held = new Promise<void>(resolve => { release = resolve })
   vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockImplementation(async () => { enter(); await held; return snapshot() })
-  const create = vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+  const create = vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
   vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => emptyServerCapture(request))
   let pending!: Promise<unknown>
   act(() => { pending = send(mounted.result.current, { setServerChatId: vi.fn(), snapshot: null }).catch(error => error) })
@@ -683,7 +691,7 @@ it.each([false, true])("keeps original ordinary input bound when the assistant s
   const serverReplies: unknown[] = []
   const source = creationSource()
   const mounted = renderHook(() => useHistorySelection())
-  vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+  vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
   vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => emptyServerCapture(request))
   const append = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, body) => {
     if (body.role === "assistant") {
@@ -692,7 +700,7 @@ it.each([false, true])("keeps original ordinary input bound when the assistant s
     }
     const selection = body.tldw_history_selection_v1!
     return { id: body.id, tldw_history_admission_v1: {
-      version: 1, owner_key: "server-owner", conversation_id: "new-server", input_message_id: body.id,
+      version: 1, owner_key: "server-owner", conversation_id: newServerId, input_message_id: body.id,
       input_message_revision: "1", selection_digest: selection.selection_digest,
       messages: selection.messages, originating_selection_revision: selection.selection_revision
     } } as never
@@ -706,14 +714,14 @@ it.each([false, true])("keeps original ordinary input bound when the assistant s
     state: "generated_unsaved", input_text: "First question", result_text: "First answer"
   }) })])
   expect(retained[0].turn.outcome).toBeUndefined()
-  expect(await readChatCreationRecovery(source)).toMatchObject({ state: "bound", chatId: "new-server", inputText: "First question" })
+  expect(await readChatCreationRecovery(source)).toMatchObject({ state: "bound", chatId: newServerId, inputText: "First question" })
   mounted.unmount()
 })
 
-it.each(["new-server", "newer-server"])("a held ordinary bound-record write cannot dispatch after a newer H1 load of %s", async nextId => {
+it.each(["same-chat", "newer-server"])("a held ordinary bound-record write cannot dispatch after a newer H1 load of %s", async nextChoice => {
   const source = creationSource()
   const mounted = renderHook(() => useHistorySelection())
-  vi.spyOn(tldwClient, "createChat").mockResolvedValue({ id: "new-server" } as never)
+  vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
   vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (id, request) => {
     return emptyServerCapture(request, id)
   })
@@ -729,7 +737,7 @@ it.each(["new-server", "newer-server"])("a held ordinary bound-record write cann
   let pending!: ReturnType<typeof send>
   act(() => { pending = send(mounted.result.current, { setServerChatId: vi.fn() }) })
   await entered
-  await act(async () => { await mounted.result.current.loadConversation({ serverChatId: nextId }) })
+  await act(async () => { await mounted.result.current.loadConversation({ serverChatId: nextChoice === "same-chat" ? newServerId : nextChoice }) })
   const newer = mounted.result.current.getCurrent()
   await act(async () => { release(); await expect(pending).rejects.toThrow("stale_selection") })
   expect(mounted.result.current.getCurrent().owner).toBe(newer.owner)
@@ -791,3 +799,37 @@ it.each(["cleanup", "navigation", "account"])("retains an acknowledged local ass
   }
   mounted.unmount()
 })
+
+
+it.each(["playground", "sidepanel"] as const)(
+  "client UUID ordinary %s create sends its durable journal ID even if the response is lost",
+  async (surface) => {
+    const source = creationSource()
+    const mounted = renderHook(() => useHistorySelection())
+    const create = vi
+      .spyOn(tldwClient, "createChat")
+      .mockRejectedValue(new Error("Response lost"))
+    await act(async () => {
+      await expect(
+        send(mounted.result.current, { setServerChatId: vi.fn(), surface })
+      ).rejects.toMatchObject({ code: "chat_creation_unconfirmed" })
+    })
+    const attempt = await readChatCreationRecovery(source)
+    expect(create.mock.calls[0][0]).toMatchObject({
+      id: attempt?.operationId,
+      title: "First question",
+      source: "webui-chat"
+    })
+    expect(attempt).toMatchObject({
+      clientChatId: attempt?.operationId,
+      state: "unconfirmed",
+      inputText: "First question"
+    })
+    expect(create.mock.calls[0][0].id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    )
+    expect(create).toHaveBeenCalledOnce()
+    expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+    mounted.unmount()
+  }
+)

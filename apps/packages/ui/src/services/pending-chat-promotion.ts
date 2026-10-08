@@ -179,6 +179,7 @@ export const waitForChatPromotion = async (
 export type ChatCreationRecovery = {
   version: 1
   operationId: string
+  clientChatId?: string
   handle: ChatDraftHandle
   surface: "playground" | "sidepanel"
   createdAt: number
@@ -197,16 +198,38 @@ const creationRecovery = createLocalRegistryBucket<ChatCreationRecovery | Creati
 const creationKey = (handle: ChatDraftHandle) => `${handle.ownerHash}:${chatDraftAddressKey(handle.address)}`
 const validCreationHandle = (handle: unknown): handle is ChatDraftHandle => isChatDraftHandle(handle) &&
   handle.address.kind === "fresh" && !handle.address.temporary
+const validClientChatId = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+    value
+  ) &&
+  value !== "00000000-0000-0000-0000-000000000000" &&
+  value !== "ffffffff-ffff-ffff-ffff-ffffffffffff"
 const validCreationRecord = (value: unknown): value is ChatCreationRecovery => {
   if (!value || typeof value !== "object") return false
   const record = value as ChatCreationRecovery
-  return record.version === 1 && validCreationHandle(record.handle) &&
-    typeof record.operationId === "string" && /^[a-f0-9-]{36}$/.test(record.operationId) &&
+  return (
+    record.version === 1 &&
+    validCreationHandle(record.handle) &&
+    typeof record.operationId === "string" &&
+    /^[a-f0-9-]{36}$/.test(record.operationId) &&
+    (record.clientChatId === undefined ||
+      (validClientChatId(record.clientChatId) &&
+        record.clientChatId === record.operationId &&
+        (record.chatId === undefined ||
+          record.chatId === record.clientChatId))) &&
     (record.surface === "playground" || record.surface === "sidepanel") &&
-    typeof record.createdAt === "number" && Number.isFinite(new Date(record.createdAt).getTime()) && typeof record.inputText === "string" &&
-    ["prepared", "unconfirmed", "acknowledged", "bound", "settled"].includes(record.state) &&
-    (["prepared", "unconfirmed"].includes(record.state) || (typeof record.chatId === "string" && record.chatId.trim().length > 0))
+    typeof record.createdAt === "number" &&
+    Number.isFinite(new Date(record.createdAt).getTime()) &&
+    typeof record.inputText === "string" &&
+    ["prepared", "unconfirmed", "acknowledged", "bound", "settled"].includes(
+      record.state
+    ) &&
+    (["prepared", "unconfirmed"].includes(record.state) ||
+      (typeof record.chatId === "string" && record.chatId.trim().length > 0))
+  )
 }
+
 const sameCreationScope = (a: ChatDraftHandle, b: ChatDraftHandle) => a.ownerHash === b.ownerHash &&
   a.address.kind === "fresh" && b.address.kind === "fresh" && a.address.scope.type === b.address.scope.type &&
   (a.address.scope.type !== "workspace" || (b.address.scope.type === "workspace" && a.address.scope.workspaceId === b.address.scope.workspaceId))
@@ -284,7 +307,54 @@ const unavailableCreationError = () => Object.assign(new Error(
   "Chat creation paused: recovery storage could not be verified. Your draft is kept. Check retained drafts or reconnect before starting another chat."
 ), { code: "chat_creation_recovery_unavailable" })
 
-/** Persist uncertainty before a single create; never replay an ordinary UUID creation. */
+/** Record an owned creation fact without downgrading a matching later state. */
+export const acknowledgeChatCreation = async (
+  attempt: Pick<
+    ChatCreationRecovery,
+    "handle" | "operationId" | "clientChatId"
+  >,
+  chatId: string
+): Promise<boolean> => {
+  const matches = (value: unknown): value is ChatCreationRecovery =>
+    validCreationRecord(value) &&
+    creationKey(value.handle) === creationKey(attempt.handle) &&
+    value.operationId === attempt.operationId &&
+    value.clientChatId === attempt.clientChatId &&
+    (value.clientChatId === undefined || value.clientChatId === chatId)
+  const acknowledged = (value: unknown) =>
+    matches(value) &&
+    ["acknowledged", "bound", "settled"].includes(value.state) &&
+    value.chatId === chatId
+  try {
+    const current = await readChatCreationRecovery(attempt.handle)
+    if (!matches(current)) return false
+    const key = creationKey(current.handle)
+    const record = await creationRecovery.get(key, { failClosed: true })
+    if (!record || !matches(record.value)) return false
+    if (acknowledged(record.value)) return true
+    if (record.value.state !== "unconfirmed" || !record.value.clientChatId)
+      return false
+    if (
+      await creationRecovery.set(
+        key,
+        { ...record.value, state: "acknowledged", chatId },
+        record.updatedAt,
+        record
+      )
+    ) {
+      notifyCreationRecovery()
+      return true
+    }
+    // An explicit lookup or the original late response may have won the same CAS.
+    return acknowledged(
+      (await creationRecovery.get(key, { failClosed: true }))?.value
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Persist the client UUID before a single create; never replay uncertain creation. */
 export const createChatWithRecovery = async <T extends { id: string }>(params: {
   snapshot: ServicePromptSnapshot
   handle: ChatDraftHandle
@@ -293,7 +363,7 @@ export const createChatWithRecovery = async <T extends { id: string }>(params: {
   inputText: string
   setup: Pick<ChatCreationRecovery, "characterId" | "provider" | "model" | "temperature" | "topP">
   isCurrent: () => boolean
-  create: () => Promise<T>
+  create: (clientChatId: string) => Promise<T>
 }): Promise<T> => {
   const handle = structuredClone(params.handle)
   if (!validCreationHandle(handle) || handle.ownerHash !== chatDraftOwnerKey(params.snapshot.requestScope))
@@ -313,10 +383,24 @@ export const createChatWithRecovery = async <T extends { id: string }>(params: {
   const expected = existing ? await creationRecovery.get(key, { failClosed: true }) : null
   if (existing && (!expected || !validCreationRecord(expected.value) || expected.value.operationId !== existing.operationId || expected.value.state !== "prepared")) throw uncertainCreationError()
   const now = Date.now()
-  const value: ChatCreationRecovery = { version: 1, operationId: existing?.operationId ?? crypto.randomUUID(), handle: canonical,
-    surface: params.surface, createdAt: existing?.createdAt ?? now, state: "prepared", inputText: params.inputText,
-    characterId: params.setup.characterId, provider: params.setup.provider, model: params.setup.model,
-    temperature: params.setup.temperature, topP: params.setup.topP }
+  const clientChatId = existing?.operationId ?? crypto.randomUUID()
+  if (!validClientChatId(clientChatId)) throw unavailableCreationError()
+  const value: ChatCreationRecovery = {
+    version: 1,
+    operationId: clientChatId,
+    clientChatId,
+    handle: canonical,
+    surface: params.surface,
+    createdAt: existing?.createdAt ?? now,
+    state: "prepared",
+    inputText: params.inputText,
+    characterId: params.setup.characterId,
+    provider: params.setup.provider,
+    model: params.setup.model,
+    temperature: params.setup.temperature,
+    topP: params.setup.topP
+  }
+
   if (!current()) throw new Error("stale_selection")
   if (!(await creationRecovery.set(key, value, now, expected))) throw unavailableCreationError()
   notifyCreationRecovery()
@@ -332,21 +416,36 @@ export const createChatWithRecovery = async <T extends { id: string }>(params: {
     throw new Error("stale_selection")
   }
   let created: T
-  try { created = await params.create() } catch (cause) { throw Object.assign(uncertainCreationError(), { cause }) }
-  if (typeof created?.id !== "string" || !created.id.trim()) throw uncertainCreationError()
+  try { created = await params.create(clientChatId) } catch (cause) { throw Object.assign(uncertainCreationError(), { cause }) }
+  if (created?.id !== clientChatId) throw uncertainCreationError()
   // A late ACK belongs to this private attempt even if its originating view retired.
-  if (!(await creationRecovery.set(key, { ...dispatched, state: "acknowledged", chatId: created.id }, now, { value: dispatched, updatedAt: now })))
-    throw uncertainCreationError()
-  notifyCreationRecovery()
+  if (!(await acknowledgeChatCreation(dispatched, created.id))) throw uncertainCreationError()
   return created
 }
-export const markChatCreationBound = async (handle: ChatDraftHandle, chatId: string) => {
+export const markChatCreationBound = async (
+  handle: ChatDraftHandle,
+  chatId: string,
+  expectedOperationId?: string
+) => {
   const attempt = await readChatCreationRecovery(handle)
   if (!attempt) return false
   const key = creationKey(attempt.handle)
   const record = await creationRecovery.get(key, { failClosed: true })
-  if (!record || !validCreationRecord(record.value) || record.value.state !== "acknowledged" || record.value.chatId !== chatId) return false
-  const bound = await creationRecovery.set(key, { ...record.value, state: "bound" }, record.updatedAt, record)
+  if (
+    !record ||
+    !validCreationRecord(record.value) ||
+    record.value.state !== "acknowledged" ||
+    record.value.chatId !== chatId ||
+    (expectedOperationId !== undefined &&
+      record.value.operationId !== expectedOperationId)
+  )
+    return false
+  const bound = await creationRecovery.set(
+    key,
+    { ...record.value, state: "bound" },
+    record.updatedAt,
+    record
+  )
   if (bound) notifyCreationRecovery()
   return bound
 }

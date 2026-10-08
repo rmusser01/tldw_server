@@ -19,17 +19,17 @@ beforeEach(() => {
 })
 describe("actual private first-create record contract", () => {
   it("retains whitelisted original input before POST and admits only one concurrent same-source create", async () => {
-    const create = vi.fn(async () => {
+    const create = vi.fn(async (id: string) => {
       const record = await readChatCreationRecovery(handle())
       expect(record).toMatchObject({ state: "unconfirmed", inputText: "ORIGINAL INPUT", temperature: 0, topP: 0 })
       expect(JSON.stringify(record)).not.toContain("NEVER-PERSIST-SECRET")
       expect(JSON.stringify(record)).not.toContain("requestScope")
-      return { id: "created-once" }
+      return { id }
     })
     const results = await Promise.allSettled([createChatWithRecovery({ ...args(), create }), createChatWithRecovery({ ...args(), create })])
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1)
     expect(create).toHaveBeenCalledOnce()
-    expect(await readChatCreationRecovery(handle())).toMatchObject({ state: "acknowledged", chatId: "created-once" })
+    expect(await readChatCreationRecovery(handle())).toMatchObject({ state: "acknowledged", chatId: create.mock.calls[0][0] })
   })
   it("keeps a missing acknowledgement blocked without replay", async () => {
     const create = vi.fn(async () => ({} as { id: string }))
@@ -42,13 +42,13 @@ describe("actual private first-create record contract", () => {
     let enter!: () => void, release!: () => void
     const started = new Promise<void>(resolve => { enter = resolve })
     const held = new Promise<void>(resolve => { release = resolve })
-    const original = createChatWithRecovery({ ...args(), create: async () => { enter(); await held; return { id: "late-created" } } })
+    const original = createChatWithRecovery({ ...args(), create: async id => { enter(); await held; return { id } } })
     await started
     const copied = handle("new-copied-UUID")
     expect(await copyChatCreationRecovery(handle(), copied)).toBe(true)
     expect(await readChatCreationRecovery(copied)).toMatchObject({ state: "unconfirmed", inputText: "ORIGINAL INPUT" })
-    release(); await original
-    expect(await readChatCreationRecovery(structuredClone(copied))).toMatchObject({ state: "acknowledged", chatId: "late-created" })
+    release(); const created = await original
+    expect(await readChatCreationRecovery(structuredClone(copied))).toMatchObject({ state: "acknowledged", chatId: created.id })
     const create = vi.fn()
     await expect(createChatWithRecovery({ ...args(copied), inputText: "edited after copy", create })).rejects.toMatchObject({ code: "chat_creation_unconfirmed" })
     expect(create).not.toHaveBeenCalled()
@@ -88,8 +88,8 @@ describe("actual private first-create record contract", () => {
     expect(create).not.toHaveBeenCalled()
     expect(await readChatCreationRecovery(handle())).toMatchObject({ state: "prepared", inputText: "ORIGINAL INPUT" })
     current = true
-    create.mockResolvedValue({ id: "safe-new-attempt" })
-    await expect(createChatWithRecovery({ ...args(), create })).resolves.toMatchObject({ id: "safe-new-attempt" })
+    create.mockImplementation(async (id: string) => ({ id }))
+    await expect(createChatWithRecovery({ ...args(), create })).resolves.toMatchObject({ id: (await readChatCreationRecovery(handle()))?.operationId })
     expect(create).toHaveBeenCalledOnce()
   })
   it("keeps an empty attempted input reachable without applying the composer TTL", async () => {
@@ -102,12 +102,188 @@ describe("actual private first-create record contract", () => {
 
 
 it("retains a bound chat's unsent original input until verified settlement", async () => {
-  await createChatWithRecovery({ ...args(), create: async () => ({ id: "created-chat" }) })
-  expect(await markChatCreationBound(handle(), "created-chat")).toBe(true)
+  const created = await createChatWithRecovery({ ...args(), create: async id => ({ id }) })
+  expect(await markChatCreationBound(handle(), created.id)).toBe(true)
   expect((await listChatCreationRecovery(handle().ownerHash, { type: "global" })).attempts).toMatchObject([{ state: "bound", inputText: "ORIGINAL INPUT" }])
   expect(await markChatCreationSettled(handle(), "other-chat")).toBe(false)
   expect((await readChatCreationRecovery(handle()))?.inputText).toBe("ORIGINAL INPUT")
-  expect(await markChatCreationSettled(handle(), "created-chat")).toBe(true)
+  expect(await markChatCreationSettled(handle(), created.id)).toBe(true)
   expect((await listChatCreationRecovery(handle().ownerHash, { type: "global" })).attempts).toEqual([])
-  expect(await readChatCreationRecovery(handle())).toMatchObject({ state: "settled", inputText: "", chatId: "created-chat" })
+  expect(await readChatCreationRecovery(handle())).toMatchObject({ state: "settled", inputText: "", chatId: created.id })
 })
+
+
+describe("client UUID creation recovery", () => {
+  it("persists the exact client UUID before the single POST and requires its acknowledgement", async () => {
+    const create = vi.fn(async (id: string) => {
+      const record = await readChatCreationRecovery(handle())
+      expect(id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      )
+      expect(record).toMatchObject({
+        state: "unconfirmed",
+        operationId: id,
+        clientChatId: id,
+        inputText: "ORIGINAL INPUT"
+      })
+      return { id }
+    })
+    const results = await Promise.allSettled([
+      createChatWithRecovery({ ...args(), create }),
+      createChatWithRecovery({ ...args(), create })
+    ])
+    expect(
+      results.filter((result) => result.status === "fulfilled")
+    ).toHaveLength(1)
+    expect(create).toHaveBeenCalledOnce()
+    expect(await readChatCreationRecovery(handle())).toMatchObject({
+      state: "acknowledged",
+      chatId: create.mock.calls[0][0]
+    })
+  })
+
+  it("retains uncertainty when the ACK names a different chat", async () => {
+    const create = vi.fn(async () => ({ id: "different-chat" }))
+    await expect(
+      createChatWithRecovery({ ...args(), create })
+    ).rejects.toMatchObject({ code: "chat_creation_unconfirmed" })
+    expect(await readChatCreationRecovery(handle())).toMatchObject({
+      state: "unconfirmed",
+      inputText: "ORIGINAL INPUT"
+    })
+    await expect(
+      createChatWithRecovery({ ...args(), create })
+    ).rejects.toMatchObject({ code: "chat_creation_unconfirmed" })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it.each(["legacy", "prepared"])(
+    "preserves %s records without inferring a dispatched client ID",
+    async (state) => {
+      const source = handle()
+      const operationId = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14"
+      const storage = new Storage({ area: "local" })
+      await storage.set(
+        "registry:chat-creation:" +
+          source.ownerHash +
+          ":" +
+          chatDraftAddressKey(source.address),
+        {
+          value: {
+            version: 1,
+            handle: source,
+            operationId,
+            surface: "playground",
+            createdAt: 1,
+            state: state === "legacy" ? "unconfirmed" : "prepared",
+            inputText: "OLD ORIGINAL"
+          },
+          updatedAt: 1
+        }
+      )
+      const create = vi.fn(async (id: string) => ({ id }))
+      if (state === "legacy") {
+        await expect(
+          createChatWithRecovery({ ...args(), create })
+        ).rejects.toMatchObject({ code: "chat_creation_unconfirmed" })
+        expect(create).not.toHaveBeenCalled()
+        expect(await readChatCreationRecovery(source)).toMatchObject({
+          operationId,
+          inputText: "OLD ORIGINAL"
+        })
+        expect(
+          (await readChatCreationRecovery(source))?.clientChatId
+        ).toBeUndefined()
+      } else {
+        await createChatWithRecovery({ ...args(), create })
+        expect(create).toHaveBeenCalledWith(operationId)
+        expect(await readChatCreationRecovery(source)).toMatchObject({
+          operationId,
+          clientChatId: operationId,
+          state: "acknowledged"
+        })
+      }
+    }
+  )
+
+  it.each([
+    "c".repeat(36),
+    "00000000-0000-0000-0000-000000000000",
+    "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a15"
+  ])(
+    "refuses an invalid or mismatched persisted client UUID %s",
+    async (clientChatId) => {
+      const source = handle()
+      const storage = new Storage({ area: "local" })
+      const key =
+        "registry:chat-creation:" +
+        source.ownerHash +
+        ":" +
+        chatDraftAddressKey(source.address)
+      await storage.set(key, {
+        value: {
+          version: 1,
+          operationId: "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14",
+          clientChatId,
+          handle: source,
+          surface: "playground",
+          createdAt: 1,
+          inputText: "KEPT",
+          state: "unconfirmed"
+        },
+        updatedAt: 1
+      })
+      const before = localStorage.getItem(key)
+      await expect(readChatCreationRecovery(source)).rejects.toThrow()
+      expect(localStorage.getItem(key)).toBe(before)
+    }
+  )
+})
+
+it.each(["acknowledged", "bound", "settled"] as const)(
+  "client UUID late ACK preserves the canonical alias's %s fact",
+  async (state) => {
+    const { acknowledgeChatCreation } =
+      await import("../pending-chat-promotion")
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const create = vi.fn(async (id: string) => {
+      entered()
+      await held
+      return { id }
+    })
+    const original = createChatWithRecovery({ ...args(), create })
+    await ready
+    const alias = handle("copied-cold")
+    expect(await copyChatCreationRecovery(handle(), alias)).toBe(true)
+    const attempt = (await readChatCreationRecovery(structuredClone(alias)))!
+    expect(await acknowledgeChatCreation(attempt, attempt.clientChatId!)).toBe(
+      true
+    )
+    if (state !== "acknowledged")
+      expect(await markChatCreationBound(alias, attempt.clientChatId!)).toBe(
+        true
+      )
+    if (state === "settled")
+      expect(await markChatCreationSettled(alias, attempt.clientChatId!)).toBe(
+        true
+      )
+    release()
+    await expect(original).resolves.toEqual({ id: attempt.clientChatId })
+    expect(await readChatCreationRecovery(handle())).toMatchObject({
+      state,
+      chatId: attempt.clientChatId,
+      inputText: state === "settled" ? "" : "ORIGINAL INPUT"
+    })
+    expect(await readChatCreationRecovery(alias)).toEqual(
+      await readChatCreationRecovery(handle())
+    )
+    expect(create).toHaveBeenCalledOnce()
+  }
+)

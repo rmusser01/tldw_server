@@ -181,6 +181,25 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+let nativeChatId = "tracked-chat-1"
+const createdNativeChat = (body: { id?: string }) => {
+  if (!body.id) throw new Error("fixture requires the reserved client chat ID")
+  nativeChatId = body.id
+  return { id: body.id }
+}
+const creationReviewIdentity = async (
+  handle: import("@/utils/chat-draft-address").ChatDraftHandle
+) => {
+  const { readChatCreationRecovery } =
+    await import("@/services/pending-chat-promotion")
+  const attempt = await readChatCreationRecovery(handle)
+  if (!attempt) throw new Error("expected creation fixture")
+  return {
+    expectedOperationId: attempt.operationId,
+    expectedClientChatId: attempt.clientChatId
+  }
+}
+
 const createHookOptions = () => ({
   t: (_key: string, fallback?: string) => fallback || _key,
   notification: {
@@ -220,7 +239,7 @@ const createHookOptions = () => ({
   ragEnableCitations: true,
   ragSources: [],
   ragAdvancedOptions: {},
-  serverChatId: "tracked-chat-1",
+  serverChatId: nativeChatId,
   serverChatTitle: "Tracked character chat",
   serverChatCharacterId: "char-tracked",
   serverChatAssistantKind: "character" as const,
@@ -398,7 +417,7 @@ const captureFor = (view: any) => {
     snapshot: {
       version: 1,
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       fences: { conversation: "1", history: "1", settings: "1" },
       nodes,
       source_digest: "source",
@@ -421,7 +440,7 @@ const makeController = () => {
   let current: any = {
     owner: {
       kind: "native",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       request_scope: {
         config: { serverUrl: "https://server.test", authMode: "multi-user" },
         userId: "alice"
@@ -430,7 +449,7 @@ const makeController = () => {
     },
     view: {
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       view_session_id: "origin",
       selection_revision: 1,
       interpretation: { kind: "parent_graph_v1" },
@@ -464,6 +483,7 @@ const makeController = () => {
 afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
+  nativeChatId = "tracked-chat-1"
   h1.connected = false
   h1.recover.mockReset()
   h1.dismiss.mockReset()
@@ -503,7 +523,7 @@ beforeEach(async () => {
           tldw_history_admission_v1: {
             version: 1,
             owner_key: "native-key",
-            conversation_id: "tracked-chat-1",
+            conversation_id: nativeChatId,
             input_message_id: body.id,
             input_message_revision: "accepted-r",
             selection_digest: body.tldw_history_selection_v1.selection_digest,
@@ -580,14 +600,14 @@ it("removes a server-backed message from its exact mirror after canonical deleti
   current.capture = null
   const options = {
     ...ordinaryOptions(),
-    serverChatId: "tracked-chat-1",
+    serverChatId: nativeChatId,
     messages: [{ id: "local-message", serverMessageId: "server-message", serverMessageVersion: 1, isBot: true, message: "answer", sources: [] }]
   }
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => { await result.current.deleteMessage(0) })
-  expect(api.deleteMessage).toHaveBeenCalledWith("server-message", 1, "tracked-chat-1")
+  expect(api.deleteMessage).toHaveBeenCalledWith("server-message", 1, nativeChatId)
   expect(mirror.removeAcknowledgedServerMirrorMessage).toHaveBeenCalledWith({
-    historyId: "history-character", chatId: "tracked-chat-1",
+    historyId: "history-character", chatId: nativeChatId,
     localMessageId: "local-message", serverMessageId: "server-message"
   })
   expect(helpers.removeMessageById).not.toHaveBeenCalled()
@@ -678,7 +698,7 @@ it("mounted native character sends A1 selection and only new input, following th
       tldw_history_admission_v1: {
         version: 1,
         owner_key: "native-key",
-        conversation_id: "tracked-chat-1",
+        conversation_id: nativeChatId,
         input_message_id: "native-input",
         input_message_revision: "r",
         selection_digest: request.tldw_history_selection_v1.selection_digest,
@@ -689,7 +709,7 @@ it("mounted native character sends A1 selection and only new input, following th
     yield { choices: [{ delta: { content: "native answer" } }] }
     yield {
       tldw_message_id: "native-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   const { result } = renderHook(() => useChatActions(options as any))
@@ -700,7 +720,7 @@ it("mounted native character sends A1 selection and only new input, following th
   const request = h1.wire.mock.calls[0][0]
   expect(request).toMatchObject({
     save_to_db: true,
-    conversation_id: "tracked-chat-1",
+    conversation_id: nativeChatId,
     model: "deepseek-chat",
     api_provider: "openai"
   })
@@ -753,7 +773,7 @@ it("native owner capability survives display navigation while a held result sett
   })
   expect(displayed).toEqual([{ id: "new-view", message: "keep" }])
   expect(addChatMessageMock.mock.calls[1].slice(0, 2)).toMatchObject([
-    "tracked-chat-1",
+    nativeChatId,
     {
       content: "old result",
       tldw_history_admission_v1: {
@@ -780,7 +800,7 @@ it("unknown admission after navigation retains immutable original intent and dis
   expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
     state: "unknown",
     origin_view: {
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       view_session_id: "origin"
     },
     input_text: "next",
@@ -798,7 +818,7 @@ it.each(["direct", "clear cached target"])("connected fresh saved normal send ad
     getCurrent: () => current,
     fence: () => { const origin = current; return () => current === origin },
     loadConversation: vi.fn(async (target, _reference, onLoaded) => {
-      expect(target).toMatchObject({ serverChatId: "tracked-chat-1" })
+      expect(target).toMatchObject({ serverChatId: nativeChatId })
       expect(options.setServerChatId).not.toHaveBeenCalled()
       current = makeController().getCurrent()
       current.view = { ...current.view, cursor: { kind: "empty" } }
@@ -808,7 +828,7 @@ it.each(["direct", "clear cached target"])("connected fresh saved normal send ad
     }),
     followResult: vi.fn(async () => true)
   }
-  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  createChatMock.mockImplementation(createdNativeChat)
   options.setServerChatId.mockImplementation(() => {
     expect(current.owner.kind).toBe("native")
   })
@@ -820,9 +840,9 @@ it.each(["direct", "clear cached target"])("connected fresh saved normal send ad
   const hook = renderHook(() => useChatActions(options as any))
   await act(async () => { expect(await hook.result.current.onSubmit({ message: "first", image: "", ...(target === "clear cached target" ? { requestOverrides: { historyId: null, serverChatId: null } } : {}) })).toEqual({ status: "submitted" }) })
   const draftStore = (await vi.importActual<typeof import("@/store/option")>("@/store/option")).useStoreMessageOption
-  expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   expect(createChatMock).toHaveBeenCalledOnce()
-  expect(options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
+  expect(options.setServerChatId).toHaveBeenCalledWith(nativeChatId)
   expect(h1.saveHistory).not.toHaveBeenCalled()
   expect(addChatMessageMock).toHaveBeenCalledTimes(2)
   expect(h1.wire).toHaveBeenCalledOnce()
@@ -1028,7 +1048,7 @@ describe("fresh-chat submit with a selection another conversation left behind (C
   it("keeps the selection of a turn that addresses its conversation", async () => {
     const reset = vi.fn()
     h1.controller = { ...h1.controller, reset }
-    const { result } = renderActions({ ...ordinaryOptions(), serverChatId: "tracked-chat-1" })
+    const { result } = renderActions({ ...ordinaryOptions(), serverChatId: nativeChatId })
     await act(async () => {
       await result.current.onSubmit({ message: "next", image: "" })
     })
@@ -1313,7 +1333,7 @@ it.each(["preface", "replace"])(
 const nativeAdmission = (request: any) => ({
   version: 1,
   owner_key: "native-key",
-  conversation_id: "tracked-chat-1",
+  conversation_id: nativeChatId,
   input_message_id: "native-input",
   input_message_revision: "native-r",
   selection_digest: request.tldw_history_selection_v1.selection_digest,
@@ -1719,14 +1739,14 @@ it("native before-first sends no historical content and retains unacknowledged t
     persistence: "server",
     state: "generated_unsaved",
     owner_key: "native-key",
-    conversation_id: "tracked-chat-1",
+    conversation_id: nativeChatId,
     origin_view: {
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       view_session_id: "origin"
     },
     admission: {
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       input_message_id: "native-input"
     },
     input_id: "native-input",
@@ -1763,7 +1783,7 @@ it.each(["wrong-selection", "result-before-admission", "wrong-conversation"])(
       yield {
         tldw_message_id: "forged-result",
         tldw_conversation_id:
-          failure === "wrong-conversation" ? "other" : "tracked-chat-1"
+          failure === "wrong-conversation" ? "other" : nativeChatId
       }
     })
     const { result } = renderHook(() => useChatActions(options as any))
@@ -1794,7 +1814,7 @@ it("native selection navigation preserves server ownership and never overwrites 
     yield { choices: [{ delta: { content: "old result" } }] }
     yield {
       tldw_message_id: "owner-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   await act(async () => {
@@ -1804,7 +1824,7 @@ it("native selection navigation preserves server ownership and never overwrites 
   expect(h1.controller.followResult).not.toHaveBeenCalled()
   expect(h1.dismiss).toHaveBeenCalledWith(
     expect.anything(),
-    expect.objectContaining({ conversation_id: "tracked-chat-1" }),
+    expect.objectContaining({ conversation_id: nativeChatId }),
     expect.any(String),
     "completed"
   )
@@ -1844,7 +1864,7 @@ it.each(["account change", "disconnect"])(
       yield { choices: [{ delta: { content: "new account must not see" } }] }
       yield {
         tldw_message_id: "late-result",
-        tldw_conversation_id: "tracked-chat-1"
+        tldw_conversation_id: nativeChatId
       }
     })
     const { result } = renderHook(() => useChatActions(options as any))
@@ -1858,14 +1878,14 @@ it.each(["account change", "disconnect"])(
       persistence: "server",
       state: "accepted_unsent",
       owner_key: "native-key",
-      conversation_id: "tracked-chat-1",
+      conversation_id: nativeChatId,
       origin_view: {
-        conversation_id: "tracked-chat-1",
+        conversation_id: nativeChatId,
         view_session_id: "origin"
       },
       admission: {
         owner_key: "native-key",
-        conversation_id: "tracked-chat-1",
+        conversation_id: nativeChatId,
         input_message_id: "native-input"
       },
       input_id: "native-input",
@@ -1891,7 +1911,7 @@ it("a disconnect after the native owner ACK preserves the completed outcome", as
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield {
       tldw_message_id: "owner-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
     throw new Error("late disconnect")
   })
@@ -1964,10 +1984,10 @@ it.each([
     }
     let origin = true
     let current: any = { owner: null, view: null, status: "idle" }
-    const ready = makeController().getCurrent()
-    ready.view.cursor = { kind: "empty" }
-    ready.capture = captureFor(ready.view)
     const load = vi.fn(async (_target, _reference, onLoaded) => {
+      const ready = makeController().getCurrent()
+      ready.view.cursor = { kind: "empty" }
+      ready.capture = captureFor(ready.view)
       current = ready
       onLoaded({ owner: current.owner, view: current.view })
       return true
@@ -1979,15 +1999,15 @@ it.each([
       followResult: vi.fn(async () => true),
       refreshRecovery: vi.fn()
     }
-    createChatMock.mockImplementation(async () => {
+    createChatMock.mockImplementation(async body => {
       if (navigate) origin = false
-      return { id: "tracked-chat-1" }
+      return createdNativeChat(body)
     })
     h1.wire.mockImplementation(async function* (request) {
       yield { tldw_history_admission_v1: nativeAdmission(request) }
       yield {
         tldw_message_id: "native-result",
-        tldw_conversation_id: "tracked-chat-1"
+        tldw_conversation_id: nativeChatId
       }
     })
     const { result } = renderHook(() => useChatActions(options as any))
@@ -1997,8 +2017,8 @@ it.each([
     expect(createChatMock).toHaveBeenCalledOnce()
     expect(createChatMock).toHaveBeenCalledWith(
       defaults
-        ? { character_id: "12", provider, model: modelId }
-        : { character_id: "12", provider, model: modelId, temperature: 0, top_p: 0 },
+        ? { id: nativeChatId, character_id: "12", provider, model: modelId }
+        : { id: nativeChatId, character_id: "12", provider, model: modelId, temperature: 0, top_p: 0 },
       expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) })
     )
     if (navigate) {
@@ -2011,7 +2031,7 @@ it.each([
       expect(
         h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
       ).toEqual([])
-      expect(options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
+      expect(options.setServerChatId).toHaveBeenCalledWith(nativeChatId)
     }
     expect(h1.live).not.toHaveBeenCalled()
     expect(addChatMessageMock).not.toHaveBeenCalled()
@@ -2029,7 +2049,7 @@ it("native dispatch freezes workspace routing independently of the view owner", 
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield {
       tldw_message_id: "owner-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   const { result } = renderHook(() => useChatActions(options as any))
@@ -2067,7 +2087,7 @@ it("an older native completion cannot release a newer operation's Stop control",
     await firstHeld
     yield {
       tldw_message_id: "first-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   h1.wire.mockImplementationOnce(async function* (request) {
@@ -2076,7 +2096,7 @@ it("an older native completion cannot release a newer operation's Stop control",
     await secondHeld
     yield {
       tldw_message_id: "second-result",
-      tldw_conversation_id: "tracked-chat-1"
+      tldw_conversation_id: nativeChatId
     }
   })
   const { result } = renderHook(() => useChatActions(options as any))
@@ -2307,7 +2327,7 @@ it("native plain edit/delete reject before any mutation or display change", asyn
   ]
   const options = {
     ...ordinaryOptions(),
-    serverChatId: "tracked-chat-1",
+    serverChatId: nativeChatId,
     messages: visible
   }
   const { result } = renderHook(() => useChatActions(options as any))
@@ -2623,11 +2643,11 @@ const mountedNativeOpening = async () => {
   h1.controller = selection.result.current
   const options = { ...createHookOptions(), historyId: null, serverChatId: null, serverChatCharacterId: null,
     selectedAssistant: { kind: "character", id: "12", name: "Saved", metadata: { selectionMode: "tracked" } } }
-  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  createChatMock.mockImplementation(createdNativeChat)
   h1.capture.mockImplementation(async (id, request) => openingCapture(id, request))
   h1.wire.mockImplementation(async function* (request) {
     yield { tldw_history_admission_v1: nativeAdmission(request) }
-    yield { tldw_message_id: "native-result", tldw_conversation_id: "tracked-chat-1" }
+    yield { tldw_message_id: "native-result", tldw_conversation_id: nativeChatId }
   })
   const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
   return { draftStore, modelStore, toolsStore, sourceDraft, memory, onCapture, selection, options, hook }
@@ -2672,12 +2692,12 @@ it("a refused first native turn preserves acknowledged bound creation and its ex
   })
   expect(creation).toMatchObject({
     state: "bound",
-    chatId: "tracked-chat-1",
+    chatId: nativeChatId,
     inputText: "  FIRST ORIGINAL INPUT  "
   })
   expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({
     kind: "native",
-    id: "tracked-chat-1"
+    id: nativeChatId
   })
   const [recovered] = await actual.loadHistoryTurnRecoveries(
     { ...selected.bookmarkScope, client_session_id: "reopened" },
@@ -2743,7 +2763,7 @@ it.each(["capture", "bookmark"].flatMap(stage =>
   mounted.selection.unmount()
 })
 
-it.each(["tracked-chat-1", "newer-chat"])("late native first-load retirement preserves a newer load of %s", async nextId => {
+it.each(["same-chat", "newer-chat"])("late native first-load retirement preserves a newer load of %s", async nextChoice => {
   const mounted = await mountedNativeOpening()
   let entered!: () => void, release!: () => void
   const ready = new Promise<void>(resolve => { entered = resolve })
@@ -2756,7 +2776,7 @@ it.each(["tracked-chat-1", "newer-chat"])("late native first-load retirement pre
   await act(async () => {
     pending = mounted.hook.result.current.onSubmit({ message: "first", image: "" })
     await ready
-    expect(await mounted.selection.result.current.loadConversation({ serverChatId: nextId })).toBe(true)
+    expect(await mounted.selection.result.current.loadConversation({ serverChatId: nextChoice === "same-chat" ? nativeChatId : nextChoice })).toBe(true)
   })
   const accepted = mounted.selection.result.current.getCurrent()
   await act(async () => { release(); await pending })
@@ -2776,8 +2796,8 @@ it("an accepted native first load keeps its saved owner after later settings and
   await act(async () => { await mounted.hook.result.current.onSubmit({ message: "first", image: "" }) })
   const accepted = mounted.selection.result.current.getCurrent().owner
   expect(h1.wire).toHaveBeenCalledOnce()
-  expect(mounted.options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
-  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(mounted.options.setServerChatId).toHaveBeenCalledWith(nativeChatId)
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   act(() => {
     mounted.modelStore.setState({ temperature: 0.42 })
     mounted.toolsStore.getState().setTools([])
@@ -2813,7 +2833,7 @@ it.each(["new", "account"])("native first-create keeps a late ACK as a private l
   let enter!: () => void, release!: () => void
   const ready = new Promise<void>(resolve => { enter = resolve })
   const held = new Promise<void>(resolve => { release = resolve })
-  createChatMock.mockImplementation(async () => { enter(); await held; return { id: "late-created-chat" } })
+  createChatMock.mockImplementation(async body => { enter(); await held; return createdNativeChat(body) })
   let operation!: Promise<unknown>
   await act(async () => { operation = mounted.hook.result.current.onSubmit({ message: "RETAINED INPUT", image: "" }); await ready })
   act(() => { if (boundary === "new") mounted.draftStore.getState().startNewChatDraft(); else h1.auth.abort() })
@@ -2821,7 +2841,7 @@ it.each(["new", "account"])("native first-create keeps a late ACK as a private l
   const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
   const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
   const handle = { address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "alice" }) }
-  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "acknowledged", chatId: "late-created-chat", inputText: "RETAINED INPUT" })
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "acknowledged", chatId: nativeChatId, inputText: "RETAINED INPUT" })
   expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
   expect(h1.capture).not.toHaveBeenCalled()
   expect(h1.wire).not.toHaveBeenCalled()
@@ -2850,7 +2870,7 @@ it.each(["accept", "new-during-metadata", "foreign-metadata"])("explicit known-I
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
   await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "RETAINED UNSENT INPUT", setup: { characterId: "12" },
-    isCurrent: () => true, create: async () => ({ id: "tracked-chat-1" }) })
+    isCurrent: () => true, create: async id => createdNativeChat({ id }) })
   const { tldwClient } = await import("@/services/tldw/TldwApiClient")
   const getChat = vi.mocked(tldwClient.getChat)
   if (boundary === "foreign-metadata") getChat.mockResolvedValueOnce({ id: "other-chat" } as Awaited<ReturnType<typeof tldwClient.getChat>>)
@@ -2863,7 +2883,7 @@ it.each(["accept", "new-during-metadata", "foreign-metadata"])("explicit known-I
   const { reviewNativeChatCreation } = await import("../native-history-character-send")
   let accepted = false
   await act(async () => {
-    const reviewing = reviewNativeChatCreation({ controller: mounted.selection.result.current, handle, isCurrent: () => composerCurrent, onAccepted })
+    const reviewing = reviewNativeChatCreation({ controller: mounted.selection.result.current, handle, ...(await creationReviewIdentity(handle)), isCurrent: () => composerCurrent, onAccepted })
     if (boundary === "new-during-metadata") { await ready; mounted.draftStore.getState().startNewChatDraft(); release() }
     accepted = await reviewing
   })
@@ -2873,7 +2893,7 @@ it.each(["accept", "new-during-metadata", "foreign-metadata"])("explicit known-I
   expect(h1.wire).not.toHaveBeenCalled()
   expect(await readChatCreationRecovery(handle)).toMatchObject({ inputText: "RETAINED UNSENT INPUT", state: boundary === "accept" ? "bound" : "acknowledged" })
   if (boundary === "accept") {
-    expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+    expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
     composerCurrent = false
     const owner = mounted.selection.result.current.getCurrent().owner
     expect(owner?.kind === "native" && owner.validate_lease()).toBe(true)
@@ -2907,7 +2927,7 @@ it("native first-create does not adopt a newer cancelled load epoch during bound
   })
   await act(async () => { release(); await pending })
   expect(h1.wire).not.toHaveBeenCalled()
-  expect(mounted.selection.result.current.getCurrent().owner?.conversation_id).toBe("tracked-chat-1")
+  expect(mounted.selection.result.current.getCurrent().owner?.conversation_id).toBe(nativeChatId)
   write.mockRestore(); mounted.hook.unmount(); mounted.selection.unmount()
 })
 
@@ -2922,7 +2942,7 @@ it.each(["newer-H1", "selection-intent"])("held creation recovery GET does not s
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
   await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "RETAINED INPUT", setup: {},
-    isCurrent: () => true, create: async () => ({ id: "tracked-chat-1" }) })
+    isCurrent: () => true, create: async id => createdNativeChat({ id }) })
   const { tldwClient } = await import("@/services/tldw/TldwApiClient")
   let release!: () => void, enter!: () => void
   const ready = new Promise<void>(resolve => { enter = resolve })
@@ -2931,7 +2951,7 @@ it.each(["newer-H1", "selection-intent"])("held creation recovery GET does not s
   const { reviewNativeChatCreation } = await import("../native-history-character-send")
   const onAccepted = vi.fn()
   let reviewing!: Promise<boolean>
-  await act(async () => { reviewing = reviewNativeChatCreation({ controller: mounted.selection.result.current, handle, isCurrent: () => true, onAccepted }); await ready })
+  await act(async () => { reviewing = reviewNativeChatCreation({ controller: mounted.selection.result.current, handle, ...(await creationReviewIdentity(handle)), isCurrent: () => true, onAccepted }); await ready })
   let newer: ReturnType<typeof mounted.selection.result.current.getCurrent> | undefined
   await act(async () => {
     if (boundary === "newer-H1") {
@@ -2945,7 +2965,7 @@ it.each(["newer-H1", "selection-intent"])("held creation recovery GET does not s
     release(); expect(await reviewing).toBe(false)
   })
   expect(onAccepted).not.toHaveBeenCalled()
-  expect(h1.capture.mock.calls.some(([id]) => id === "tracked-chat-1")).toBe(false)
+  expect(h1.capture.mock.calls.some(([id]) => id === nativeChatId)).toBe(false)
   if (newer) expect(mounted.selection.result.current.getCurrent().owner).toBe(newer.owner)
   else expect(sessions.getState().serverChatSelectionIntent?.chatId).toBe("newer-chat")
   expect(createChatMock).not.toHaveBeenCalled(); expect(h1.wire).not.toHaveBeenCalled()
@@ -2963,10 +2983,10 @@ it.each(["newer-H1", "source-intent"])("creation Review does not adopt %s during
   sessions.setState({ serverChatSelectionIntent: null })
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
-  await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "ORIGINAL ATTEMPT", setup: {}, isCurrent: () => true, create: async () => ({ id: "tracked-chat-1" }) })
+  await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "ORIGINAL ATTEMPT", setup: {}, isCurrent: () => true, create: async id => createdNativeChat({ id }) })
   const { useComposerText } = await import("@/components/Chat/composer/hooks/useComposerText")
   const composer = renderHook(() => useComposerText({ draftKey: "review-retain", draftAddress: mounted.sourceDraft!, textareaRef: React.createRef<HTMLTextAreaElement>() }))
-  await waitFor(() => expect(composer.result.current.creationRecovery.active?.chatId).toBe("tracked-chat-1"))
+  await waitFor(() => expect(composer.result.current.creationRecovery.active?.chatId).toBe(nativeChatId))
   act(() => composer.result.current.setMessageValue("NEXT UNSENT INPUT"))
   const { Storage } = await import("@plasmohq/storage")
   const original = Storage.prototype.set
@@ -2988,7 +3008,7 @@ it.each(["newer-H1", "source-intent"])("creation Review does not adopt %s during
   })
   const { tldwClient } = await import("@/services/tldw/TldwApiClient")
   expect(tldwClient.getChat).not.toHaveBeenCalled()
-  expect(h1.capture.mock.calls.some(([id]) => id === "tracked-chat-1")).toBe(false)
+  expect(h1.capture.mock.calls.some(([id]) => id === nativeChatId)).toBe(false)
   if (newer) expect(mounted.selection.result.current.getCurrent().owner).toBe(newer.owner)
   expect(mounted.draftStore.getState().chatDraftAddress).toBe(mounted.sourceDraft)
   write.mockRestore(); composer.unmount(); snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
@@ -3016,7 +3036,7 @@ it.each(["scope", "actor"].flatMap(stage => ["model", "settings", "tools", "new"
       }),
       followResult: vi.fn(async () => true)
     }
-    createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+    createChatMock.mockImplementation(createdNativeChat)
     let enter!: () => void, release!: () => void
     const entered = new Promise<void>(resolve => { enter = resolve })
     const held = new Promise<void>(resolve => { release = resolve })
@@ -3079,8 +3099,8 @@ it.each(["playground", "sidepanel"] as const)("explicit greeting startup on %s b
   await act(async () => { await startGreetingOnMountedNative(mounted, { greetingStrategy: "default", rawText: "Saved opening" }, surface) })
   expect(createChatMock).toHaveBeenCalledWith(expect.objectContaining({ character_id: "12", provider: "deepseek", model: "deepseek-chat", temperature: 0, top_p: 0 }), expect.objectContaining({ seedFirstMessage: true, greetingStrategy: "default", requestScope: expect.any(Object) }))
   expect(mounted.onCapture).toHaveBeenCalledOnce()
-  expect(mounted.selection.result.current.capture).toMatchObject({ status: "captured", rows: [{ id: "opening-tracked-chat-1", role: "assistant", settled: true }] })
-  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(mounted.selection.result.current.capture).toMatchObject({ status: "captured", rows: [{ id: "opening-" + nativeChatId, role: "assistant", settled: true }] })
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   expect(addChatMessageMock).not.toHaveBeenCalled()
   expect(h1.wire).not.toHaveBeenCalled()
   expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
@@ -3110,7 +3130,7 @@ it("explicit greeting startup rejects a missing stored seed before capture publi
   expect(h1.wire).not.toHaveBeenCalled()
   const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
   const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
-  expect(await readChatCreationRecovery({ address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "alice" }) })).toMatchObject({ state: "acknowledged", chatId: "tracked-chat-1", inputText: "" })
+  expect(await readChatCreationRecovery({ address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "alice" }) })).toMatchObject({ state: "acknowledged", chatId: nativeChatId, inputText: "" })
   mounted.selection.unmount(); mounted.hook.unmount()
 })
 
@@ -3214,7 +3234,7 @@ it.each(["owned", "outside"])("assistant-only bind respects %s keyboard focus", 
       readContext: () => [], preflight: () => {}, focusComposer })
   })
   await act(async () => { await starter.result.current.start({ id: "default", text: "Saved opening", index: 0, seed: { greetingStrategy: "default", rawText: "Saved opening" } }, () => true) })
-  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "tracked-chat-1" })
+  expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   expect(focusComposer).toHaveBeenCalledTimes(focus === "owned" ? 1 : 0)
   expect(document.activeElement).toBe(focus === "owned" ? textarea : other)
   expect(h1.wire).not.toHaveBeenCalled()
@@ -3285,12 +3305,12 @@ it.each(["accepted", "bound-next", "image", "clipboard-denied", "newer-input", "
   sessions.setState({ serverChatSelectionIntent: null })
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: mounted.sourceDraft!, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
-  await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "FIRST SENT", setup: {}, isCurrent: () => true, create: async () => ({ id: "tracked-chat-1" }) })
-  await markChatCreationBound(handle, "tracked-chat-1")
-  if (boundary !== "bound-next") await markChatCreationSettled(handle, "tracked-chat-1")
+  await createChatWithRecovery({ snapshot, handle, surface: "playground", inputText: "FIRST SENT", setup: {}, isCurrent: () => true, create: async id => createdNativeChat({ id }) })
+  await markChatCreationBound(handle, nativeChatId)
+  if (boundary !== "bound-next") await markChatCreationSettled(handle, nativeChatId)
   const root = "tldw:playgroundChatDraft"
   const sourceKey = `${conversationDraftKey(root, handle.address)}:owner:${handle.ownerHash}`
-  const destination = { kind: "native" as const, id: "tracked-chat-1", ownerKey: "native-key", scope: { type: "global" as const } }
+  const destination = { kind: "native" as const, id: nativeChatId, ownerKey: "native-key", scope: { type: "global" as const } }
   const destinationKey = `${conversationDraftKey(root, destination)}:owner:${handle.ownerHash}`
   const bucket = createLocalRegistryBucket<{ content: string; metadata: Record<string, unknown> }>({ prefix: "registry:draft:" })
   await bucket.set(sourceKey, { content: "  NEXT UNSENT\nExact spacing  ", metadata: { chatDraftHandle: handle } })
@@ -3378,10 +3398,10 @@ it.each([false, true])("private bound retry settles only the exact original inpu
   })
   await act(async () => { await send("  ORIGINAL INPUT  ").catch(() => {}) })
   expect(h1.wire).not.toHaveBeenCalled()
-  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "bound", inputText: "  ORIGINAL INPUT  ", chatId: "tracked-chat-1" })
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "bound", inputText: "  ORIGINAL INPUT  ", chatId: nativeChatId })
   preparationCurrent = true
   h1.capture.mockImplementation(async (id, request) => openingCapture(id, request))
-  await act(async () => { await send(changed ? "DIFFERENT INPUT" : "  ORIGINAL INPUT  ", "tracked-chat-1") })
+  await act(async () => { await send(changed ? "DIFFERENT INPUT" : "  ORIGINAL INPUT  ", nativeChatId) })
   expect(h1.wire).toHaveBeenCalledOnce()
   expect(createChatMock).toHaveBeenCalledOnce()
   expect(await readChatCreationRecovery(handle)).toMatchObject({ state: changed ? "bound" : "settled", inputText: changed ? "  ORIGINAL INPUT  " : "" })
@@ -3407,7 +3427,7 @@ it("private first-create reports the actual qualification read failure and keeps
     t: ((key: string) => key) as import("i18next").TFunction, setServerChatId: vi.fn(), setMessages: vi.fn(), releaseActivity: vi.fn()
   }).catch(cause => cause) })
   expect((error as Error).message).toBe("owned_read_unavailable")
-  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "acknowledged", chatId: "tracked-chat-1", inputText: "  KEPT EXACT INPUT  " })
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "acknowledged", chatId: nativeChatId, inputText: "  KEPT EXACT INPUT  " })
   expect(h1.wire).not.toHaveBeenCalled()
   snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
 })
@@ -3428,7 +3448,7 @@ const mountInterruptedRetry = async (local = false, invalidCompare = false) => {
     h1.localCapture.mockImplementation(authority.captureLocalHistorySnapshot)
   }
   const selection = renderHook(() => useHistorySelection())
-  await act(async () => { expect(await selection.result.current.loadConversation(local ? { historyId: "history-1" } : { serverChatId: "tracked-chat-1" })).toBe(true) })
+  await act(async () => { expect(await selection.result.current.loadConversation(local ? { historyId: "history-1" } : { serverChatId: nativeChatId })).toBe(true) })
   h1.controller = selection.result.current
   const current = selection.result.current.getCurrent()
   const admission = { version: 1, owner_key: current.view!.owner_key, conversation_id: current.view!.conversation_id, input_message_id: "u-old", input_message_revision: "r1", selection_digest: "accepted", messages: [], originating_selection_revision: 1 }
@@ -3613,6 +3633,479 @@ it.each([false, true])(
     expect(h1.wire).not.toHaveBeenCalled()
     expect(mounted.options.setServerChatId).not.toHaveBeenCalled()
     read.mockRestore()
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+  }
+)
+
+
+it.each(["playground", "sidepanel"] as const)(
+  "client UUID character greeting %s sends the durable ID without replay after a lost response",
+  async (surface) => {
+    const mounted = await mountedNativeOpening()
+    createChatMock.mockRejectedValue(new Error("Response lost"))
+    await act(async () => {
+      await expect(
+        startGreetingOnMountedNative(
+          mounted,
+          {
+            greetingStrategy: "alternate_index",
+            alternateIndex: 0,
+            rawText: "Saved opening"
+          },
+          surface
+        )
+      ).rejects.toMatchObject({ code: "chat_creation_unconfirmed" })
+    })
+    const { readChatCreationRecovery } =
+      await import("@/services/pending-chat-promotion")
+    const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+    const attempt = await readChatCreationRecovery({
+      address: mounted.sourceDraft!,
+      ownerHash: chatDraftOwnerKey({
+        config: { serverUrl: "https://server.test", authMode: "multi-user" },
+        userId: "alice"
+      })
+    })
+    expect(createChatMock.mock.calls[0][0]).toMatchObject({
+      id: attempt?.operationId,
+      character_id: "12",
+      provider: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0,
+      top_p: 0
+    })
+    expect(createChatMock.mock.calls[0][1]).toMatchObject({
+      seedFirstMessage: true,
+      greetingStrategy: "alternate_index",
+      alternateIndex: 0
+    })
+    expect(attempt).toMatchObject({
+      clientChatId: attempt?.operationId,
+      state: "unconfirmed",
+      inputText: ""
+    })
+    expect(createChatMock.mock.calls[0][0].id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    )
+    expect(createChatMock).toHaveBeenCalledOnce()
+    expect(h1.wire).not.toHaveBeenCalled()
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+  }
+)
+
+const mountClientUUIDRecovery = async (workspace = false) => {
+  const mounted = await mountedNativeOpening()
+  const { Storage } = await import("@plasmohq/storage")
+  const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+  const { chatDraftAddressKey } = await import("@/utils/chat-draft-address")
+  const { loadServicePromptSnapshot } =
+    await import("@/services/service-prompts")
+  const { usePlaygroundSessionStore: sessions } =
+    await import("@/store/playground-session")
+  sessions.setState({ serverChatSelectionIntent: null })
+  if (workspace)
+    mounted.draftStore.getState().setChatDraftAddress({
+      ...mounted.sourceDraft!,
+      scope: { type: "workspace", workspaceId: "owned-workspace" }
+    })
+  const snapshot = await loadServicePromptSnapshot([])
+  const handle = {
+    address: mounted.draftStore.getState().chatDraftAddress!,
+    ownerHash: chatDraftOwnerKey(snapshot.requestScope)
+  }
+  const operationId = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14"
+  const attempt = {
+    version: 1 as const,
+    operationId,
+    clientChatId: operationId,
+    handle,
+    surface: "playground" as const,
+    createdAt: 1,
+    state: "unconfirmed" as const,
+    inputText: "  ORIGINAL ATTEMPT  "
+  }
+  const storage = new Storage({ area: "local" })
+  const key =
+    "registry:chat-creation:" +
+    handle.ownerHash +
+    ":" +
+    chatDraftAddressKey(handle.address)
+  await storage.set(key, { value: attempt, updatedAt: 1 })
+  const { reviewNativeChatCreation } =
+    await import("../native-history-character-send")
+  const onAccepted = vi.fn()
+  const review = (
+    extra: Partial<Parameters<typeof reviewNativeChatCreation>[0]> = {}
+  ) =>
+    reviewNativeChatCreation({
+      controller: mounted.selection.result.current,
+      handle,
+      expectedOperationId: operationId,
+      expectedClientChatId: operationId,
+      inputText: attempt.inputText,
+      isCurrent: () => true,
+      onAccepted,
+      ...extra
+    })
+  return {
+    ...mounted,
+    handle,
+    attempt,
+    snapshot,
+    storage,
+    key,
+    review,
+    onAccepted
+  }
+}
+
+it.each([false, true])(
+  "client UUID explicit lookup binds the exact owned chat in workspace %s without create or provider replay",
+  async (workspace) => {
+    const mounted = await mountClientUUIDRecovery(workspace)
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const { readChatCreationRecovery } =
+      await import("@/services/pending-chat-promotion")
+    await act(async () => {
+      expect(await mounted.review()).toBe(true)
+    })
+    expect(tldwClient.getChat).toHaveBeenCalledWith(
+      mounted.attempt.clientChatId,
+      expect.objectContaining({
+        scope: mounted.handle.address.scope,
+        requestScope: mounted.snapshot.requestScope,
+        signal: expect.any(AbortSignal)
+      })
+    )
+    expect(mounted.onAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: mounted.attempt.clientChatId })
+    )
+    expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({
+      kind: "native",
+      id: mounted.attempt.clientChatId
+    })
+    expect(await readChatCreationRecovery(mounted.handle)).toMatchObject({
+      state: "bound",
+      inputText: mounted.attempt.inputText,
+      chatId: mounted.attempt.clientChatId
+    })
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    mounted.snapshot.release()
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+  }
+)
+
+it.each([
+  "404",
+  "410",
+  "transport",
+  "mismatched",
+  "new",
+  "account",
+  "input",
+  "newer-H1",
+  "record",
+  "storage",
+  "locks",
+  "copy-failed",
+  "copy"
+])("client UUID lookup preserves recovery across %s", async (boundary) => {
+  const mounted = await mountClientUUIDRecovery()
+  const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+  const { readChatCreationRecovery } =
+    await import("@/services/pending-chat-promotion")
+  const getChat = vi.mocked(tldwClient.getChat)
+  let current = true
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const delayed = ["new", "account", "input", "newer-H1", "record"].includes(
+    boundary
+  )
+  getChat.mockImplementationOnce(async (id) => {
+    if (delayed) {
+      entered()
+      await held
+    }
+    if (["404", "410", "transport"].includes(boundary))
+      throw Object.assign(new Error("lookup failed"), {
+        status: Number(boundary) || undefined
+      })
+    return {
+      id: boundary === "mismatched" ? "foreign-chat" : id,
+      title: "Actual owned chat"
+    } as Awaited<ReturnType<typeof tldwClient.getChat>>
+  })
+  const { Storage } = await import("@plasmohq/storage")
+  const originalSet = Storage.prototype.set
+  if (boundary === "storage")
+    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (
+      this: Storage,
+      key,
+      value
+    ) {
+      if (key === mounted.key && value.value?.state === "acknowledged")
+        throw new Error("ACK storage failed")
+      return originalSet.call(this, key, value)
+    })
+  if (boundary === "locks")
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: undefined
+    })
+  const copyInput = vi.fn(async () => boundary !== "copy-failed")
+  let result = false
+  await act(async () => {
+    const reviewing = mounted
+      .review({
+        isCurrent: () => current,
+        ...(["copy", "copy-failed"].includes(boundary)
+          ? { inputText: "  DIFFERENT UNSENT TEXT  ", copyInput }
+          : {})
+      })
+      .catch((error) => {
+        if (!["404", "410", "transport"].includes(boundary)) throw error
+        return false
+      })
+    if (delayed) {
+      await ready
+      if (boundary === "new") mounted.draftStore.getState().startNewChatDraft()
+      else if (boundary === "account") h1.auth.abort()
+      else if (boundary === "input") current = false
+      else if (boundary === "newer-H1")
+        await mounted.selection.result.current.loadConversation({
+          serverChatId: "newer-chat"
+        })
+      else {
+        const operationId = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a15"
+        await mounted.storage.set(mounted.key, {
+          value: {
+            ...mounted.attempt,
+            operationId,
+            clientChatId: operationId,
+            inputText: "NEWER ORIGINAL"
+          },
+          updatedAt: 2
+        })
+      }
+      release()
+    }
+    result = await reviewing
+  })
+  expect(result).toBe(boundary === "copy")
+  expect(mounted.onAccepted).toHaveBeenCalledTimes(boundary === "copy" ? 1 : 0)
+  expect(createChatMock).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  const record = await readChatCreationRecovery(mounted.handle)
+  expect(record).toMatchObject({
+    state: boundary === "copy" ? "bound" : "unconfirmed",
+    inputText:
+      boundary === "record" ? "NEWER ORIGINAL" : mounted.attempt.inputText
+  })
+  if (boundary === "copy-failed") expect(getChat).not.toHaveBeenCalled()
+  if (["copy", "copy-failed"].includes(boundary))
+    expect(copyInput).toHaveBeenCalledOnce()
+  if (boundary === "newer-H1")
+    expect(
+      mounted.selection.result.current.getCurrent().owner?.conversation_id
+    ).toBe("newer-chat")
+  mounted.snapshot.release()
+  mounted.hook.unmount()
+  mounted.selection.unmount()
+})
+
+it("client UUID retained composer Check cannot adopt a replacement operation at the same address", async () => {
+  const mounted = await mountClientUUIDRecovery()
+  const { useComposerText } =
+    await import("@/components/Chat/composer/hooks/useComposerText")
+  const composer = renderHook(() =>
+    useComposerText({
+      draftKey: "uuid-operation",
+      draftAddress: mounted.handle.address,
+      textareaRef: React.createRef<HTMLTextAreaElement>()
+    })
+  )
+  await waitFor(() =>
+    expect(composer.result.current.creationRecovery.active?.operationId).toBe(
+      mounted.attempt.operationId
+    )
+  )
+  const review = composer.result.current.reviewCreatedChat
+  const operationId = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a15"
+  await mounted.storage.set(mounted.key, {
+    value: {
+      ...mounted.attempt,
+      operationId,
+      clientChatId: operationId,
+      chatId: operationId,
+      state: "acknowledged",
+      inputText: "NEWER ORIGINAL"
+    },
+    updatedAt: 2
+  })
+  await act(async () => {
+    expect(await review()).toBe(false)
+  })
+  const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+  expect(tldwClient.getChat).not.toHaveBeenCalled()
+  expect(mounted.onAccepted).not.toHaveBeenCalled()
+  expect(mounted.draftStore.getState().chatDraftAddress).toBe(
+    mounted.handle.address
+  )
+  composer.unmount()
+  mounted.snapshot.release()
+  mounted.hook.unmount()
+  mounted.selection.unmount()
+})
+
+it.each([false, true])(
+  "client UUID alias review wins before original POST resolves and preserves settlement %s",
+  async (settle) => {
+    const mounted = await mountedNativeOpening()
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    createChatMock.mockImplementation(async (body) => {
+      entered()
+      await held
+      return createdNativeChat(body)
+    })
+    let original!: Promise<unknown>
+    await act(async () => {
+      original = mounted.hook.result.current.onSubmit({
+        message: "ORIGINAL PRIVATE INPUT",
+        image: ""
+      })
+      await ready
+    })
+    const {
+      readChatCreationRecovery,
+      copyChatCreationRecovery,
+      markChatCreationSettled
+    } = await import("@/services/pending-chat-promotion")
+    const { chatDraftOwnerKey } = await import("@/hooks/useChatDraftOwner")
+    const ownerHash = chatDraftOwnerKey({
+      config: { serverUrl: "https://server.test", authMode: "multi-user" },
+      userId: "alice"
+    })
+    const source = { address: mounted.sourceDraft!, ownerHash }
+    const alias = {
+      address: { ...mounted.sourceDraft!, id: "copied-uuid-recovery" },
+      ownerHash
+    }
+    expect(await copyChatCreationRecovery(source, alias)).toBe(true)
+    act(() => mounted.draftStore.getState().setChatDraftAddress(alias.address))
+    const attempt = (await readChatCreationRecovery(alias))!
+    const { reviewNativeChatCreation } =
+      await import("../native-history-character-send")
+    let reviewed = false
+    await act(async () => {
+      reviewed = await reviewNativeChatCreation({
+        controller: mounted.selection.result.current,
+        handle: alias,
+        expectedOperationId: attempt.operationId,
+        expectedClientChatId: attempt.clientChatId,
+        inputText: attempt.inputText,
+        isCurrent: () => true,
+        onAccepted: vi.fn()
+      })
+      if (reviewed && settle)
+        expect(
+          await markChatCreationSettled(alias, attempt.clientChatId!)
+        ).toBe(true)
+      release()
+      await original
+    })
+    expect(reviewed).toBe(true)
+    expect(await readChatCreationRecovery(source)).toMatchObject({
+      state: settle ? "settled" : "bound",
+      chatId: attempt.clientChatId,
+      inputText: settle ? "" : "ORIGINAL PRIVATE INPUT"
+    })
+    expect(await readChatCreationRecovery(alias)).toEqual(
+      await readChatCreationRecovery(source)
+    )
+    expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({
+      kind: "native",
+      id: attempt.clientChatId
+    })
+    expect(createChatMock).toHaveBeenCalledOnce()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+  }
+)
+
+it.each(["H1", "input", "edit-undo"])(
+  "client UUID rendered Check rejects %s replacement before invocation",
+  async (boundary) => {
+    const mounted = await mountClientUUIDRecovery()
+    const { useComposerText } =
+      await import("@/components/Chat/composer/hooks/useComposerText")
+    const clipboard = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboard }
+    })
+    const composer = renderHook(() =>
+      useComposerText({
+        draftKey: "uuid-rendered",
+        draftAddress: mounted.handle.address,
+        textareaRef: React.createRef<HTMLTextAreaElement>()
+      })
+    )
+    await waitFor(() =>
+      expect(composer.result.current.creationRecovery.active?.operationId).toBe(
+        mounted.attempt.operationId
+      )
+    )
+    act(() =>
+      composer.result.current.setMessageValue(mounted.attempt.inputText)
+    )
+    const review = composer.result.current.reviewCreatedChat
+    let pending!: Promise<boolean>
+    act(() => {
+      if (boundary === "H1") mounted.selection.result.current.beginLoad()
+      else {
+        composer.result.current.setMessageValue("NEWER UNSENT INPUT")
+        if (boundary === "edit-undo")
+          composer.result.current.setMessageValue(mounted.attempt.inputText)
+      }
+      pending = review()
+    })
+    await act(async () => {
+      expect(await pending).toBe(false)
+    })
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const { readChatCreationRecovery } =
+      await import("@/services/pending-chat-promotion")
+    expect(tldwClient.getChat).not.toHaveBeenCalled()
+    expect(clipboard).not.toHaveBeenCalled()
+    expect(h1.capture).not.toHaveBeenCalled()
+    expect(mounted.draftStore.getState().chatDraftAddress).toBe(
+      mounted.handle.address
+    )
+    expect(await readChatCreationRecovery(mounted.handle)).toMatchObject({
+      state: "unconfirmed",
+      inputText: mounted.attempt.inputText
+    })
+    composer.unmount()
+    mounted.snapshot.release()
     mounted.hook.unmount()
     mounted.selection.unmount()
   }

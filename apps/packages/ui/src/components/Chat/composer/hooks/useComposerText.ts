@@ -508,6 +508,7 @@ export function useComposerText(
     return () => { mounted = false; generation++; stop() }
   }, [ownerKey, draftAddress, draftRevision, isCurrent, canonicalCreationHandle])
   const creationOperationId = creationRecovery.active?.operationId
+  const creationClientChatId = creationRecovery.active?.clientChatId
   const creationRevision = creationStatus.revision
   const copyCreationText = React.useCallback(async () => {
     if (!ownerKey || !draftAddress || draftAddress.kind !== "fresh" || !creationOperationId || !isCurrent()) return false
@@ -521,33 +522,79 @@ export function useComposerText(
       return current()
     } catch (error) { if (current()) throw error; return false }
   }, [ownerKey, draftAddress, creationOperationId, creationRevision, isCurrent])
+  const creationRenderedHistoryFence = historySelection?.fence()
+  const creationRenderedInputRevision = getRevision()
   const reviewCreatedChat = React.useCallback(async () => {
-    if (getValues().image || !ownerKey || !draftAddress || draftAddress.kind !== "fresh" || !historySelection || !isCurrent() || !requestSettingsNavigation("/chat")) return false
+    if (
+      !creationRenderedHistoryFence?.() ||
+      getRevision() !== creationRenderedInputRevision ||
+      !creationOperationId ||
+      getValues().image ||
+      !ownerKey ||
+      !draftAddress ||
+      draftAddress.kind !== "fresh" ||
+      !historySelection ||
+      !isCurrent() ||
+      !requestSettingsNavigation("/chat")
+    )
+      return false
     const inputRevision = getRevision()
     const raw = getValues().message
-    const current = () => isCurrent() && useStoreMessageOption.getState().chatDraftAddress === draftAddress &&
-      useStoreMessageOption.getState().chatDraftRevision === creationRevision && getRevision() === inputRevision
+    const current = () =>
+      isCurrent() &&
+      useStoreMessageOption.getState().chatDraftAddress === draftAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === creationRevision &&
+      getRevision() === inputRevision
     if (!current()) return false
-    return reviewNativeChatCreation({ controller: historySelection, handle: { address: draftAddress, ownerHash: ownerKey }, isCurrent: current, inputText: raw,
-      retainInput: async () => !raw || retainDraft(`${draftKey}:owner:${ownerKey}`, { content: raw, metadata: metadata() }),
+    return reviewNativeChatCreation({
+      controller: historySelection,
+      handle: { address: draftAddress, ownerHash: ownerKey },
+      expectedOperationId: creationOperationId,
+      expectedClientChatId: creationClientChatId,
+      isCurrent: current,
+      inputText: raw,
+      retainInput: async () =>
+        !raw ||
+        retainDraft(`${draftKey}:owner:${ownerKey}`, {
+          content: raw,
+          metadata: metadata()
+        }),
       copyInput: async () => {
         if (!current()) return false
         if (raw) await navigator.clipboard.writeText(raw)
         return current()
       },
-      onAccepted: chat => {
+      onAccepted: (chat) => {
         const state = useStoreMessageOption.getState()
         state.setServerChatId(chat.id)
         state.setServerChatTitle(chat.title ?? "")
         state.setServerChatCharacterId(chat.character_id ?? null)
-        state.setServerChatAssistantKind(chat.character_id != null ? "character" : null)
+        state.setServerChatAssistantKind(
+          chat.character_id != null ? "character" : null
+        )
         state.setServerChatMetaLoaded(true)
         state.setServerChatState(normalizeConversationState(chat.state))
         state.setServerChatSource(chat.source ?? null)
         state.setServerChatVersion(chat.version ?? null)
       }
     })
-  }, [ownerKey, draftAddress, creationRevision, historySelection, isCurrent, getValues, getRevision, retainDraft, draftKey, metadata])
+  }, [
+    ownerKey,
+    draftAddress,
+    creationOperationId,
+    creationClientChatId,
+    creationRevision,
+    creationRenderedHistoryFence,
+    creationRenderedInputRevision,
+    historySelection,
+    isCurrent,
+    getValues,
+    getRevision,
+    retainDraft,
+    draftKey,
+    metadata
+  ])
+
   const beginPromptAssistReset = React.useCallback(() => {
     flushDraft()
     const attemptId = ++nextPromptAssistAttemptIdRef.current
