@@ -72,7 +72,7 @@ request = IngestWebContentRequest(
 **Goal:** Save verified capture descriptors and preview exact historical versions.
 **Success Criteria:** Mismatched capture text rejected; old active version remains previewable without current chunks; unavailable pin cannot resolve latest.
 **Tests:** WebClipper service/API/Sync/tenancy, Workspace preview/core/API and Media versions.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 2: Descriptor validation and pinned source preview
 
