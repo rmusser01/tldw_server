@@ -158,6 +158,7 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
   onOpenOverlay
 }) => {
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const menuTriggerRef = React.useRef<HTMLButtonElement>(null)
 
   const openOverlay = React.useCallback(
     (
@@ -319,6 +320,7 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
       }
     }
     setMenuOpen(false)
+    menuTriggerRef.current?.focus()
   }
 
   const unavailableDescriptionId = React.useId()
@@ -332,10 +334,18 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
         menu={{
           items: menuItems,
           onClick: handleMenuClick,
+          onKeyDown: (event) => {
+            if (event.key !== "Escape") return
+            event.preventDefault()
+            event.stopPropagation()
+            setMenuOpen(false)
+            menuTriggerRef.current?.focus()
+          },
           selectable: false
         }}
       >
         <Button
+          ref={menuTriggerRef}
           size="small"
           data-source-view-trigger
           aria-label="Source views"

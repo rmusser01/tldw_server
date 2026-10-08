@@ -1457,7 +1457,7 @@ describe("workspace store snapshot persistence", () => {
     }
 
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(localStorage, "setItem")
       .mockImplementation(() => {
         throw quotaError
       })
@@ -1473,6 +1473,8 @@ describe("workspace store snapshot persistence", () => {
       )
     ).resolves.toBeUndefined()
 
+    expect(setItemSpy).toHaveBeenCalled()
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     expect(quotaEvents).toHaveLength(1)
     expect(quotaEvents[0]?.detail.key).toBe(STORAGE_KEY)
 

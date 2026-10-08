@@ -1,6 +1,13 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { ConfigProvider } from "antd"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
 import {
@@ -10,6 +17,16 @@ import {
 } from "../SourcesPane/SourceViewControls"
 import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
+
+// Keep real Ant Design dialogs and menus; jsdom never completes CSS leave motion.
+const render = (ui: React.ReactElement) =>
+  rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        {children}
+      </ConfigProvider>
+    )
+  })
 
 const validView = (
   overrides: Partial<WorkspaceSourceSavedViewResponse> = {}
@@ -164,12 +181,15 @@ describe("SourceViewControls", () => {
     const model = controller()
     const applyState = vi.fn()
     render(
-      <SourceViewControls
-        controller={model}
-        sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
-        onApplySourceListViewState={applyState}
-        onOpenOverlay={vi.fn()}
-      />
+      <>
+        <SourceViewControls
+          controller={model}
+          sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+          onApplySourceListViewState={applyState}
+          onOpenOverlay={vi.fn()}
+        />
+        <button>Outside destination</button>
+      </>
     )
 
     const trigger = screen.getByRole("button", { name: "Source views" })
@@ -199,6 +219,7 @@ describe("SourceViewControls", () => {
     })
     activateMenuItemByKeyboard(needsReview)
     expect(applyState).toHaveBeenCalledTimes(1)
+    expect(trigger).toHaveFocus()
 
     trigger.focus()
     await user.keyboard(" ")
@@ -206,8 +227,27 @@ describe("SourceViewControls", () => {
     const pdfs = screen.getByRole("menuitem", { name: "PDFs" })
     activateMenuItemByKeyboard(pdfs)
     expect(applyState).toHaveBeenCalledTimes(2)
-    fireEvent.keyDown(document, { key: "Escape" })
+    expect(trigger).toHaveFocus()
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+
+    // Escape must close an open menu, not merely observe selection's prior close.
+    trigger.focus()
+    await user.keyboard("{Enter}")
+    const openMenu = await screen.findByRole("menu")
+    const focusedItem = within(openMenu).getByRole("menuitem", { name: "PDFs" })
+    focusedItem.focus()
+    fireEvent.keyDown(focusedItem, {
+      key: "Escape", code: "Escape", keyCode: 27, which: 27
+    })
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    expect(await screen.findByRole("menu")).toBeInTheDocument()
+    const outside = screen.getByRole("button", { name: "Outside destination" })
+    await user.click(outside)
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+    expect(outside).toHaveFocus()
   })
 
   it("keeps built-ins enabled while disabling save for a null workspace", async () => {
@@ -353,6 +393,7 @@ describe("SourceViewControls", () => {
     })
     fireEvent.click(save)
     await waitFor(() => expect(createView).toHaveBeenCalledWith("My PDFs"))
+    expect(dialog).toBeInTheDocument() // A resolved mutation is not server confirmation.
 
     rerender(
       <Harness
@@ -857,7 +898,9 @@ describe("SourceViewControls", () => {
     expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument()
 
-    fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
+    fireEvent.keyDown(dialog, {
+      key: "Escape", code: "Escape", keyCode: 27, which: 27
+    })
     expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
 
     const wrapper = dialog.closest(".ant-modal-wrap")
