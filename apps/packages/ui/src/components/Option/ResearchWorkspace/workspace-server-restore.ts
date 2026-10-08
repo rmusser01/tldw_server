@@ -225,8 +225,9 @@ export const restoreMigratedResearchWorkspace = async (options: {
     assertCurrent();
     const displayState = useWorkspaceStore.getState();
     const previousSnapshot = displayState.workspaceSnapshots[workspaceId];
+    const authoritativeSources = snapshot.sources;
     snapshot.sources = retainResearchWebCapturePins(
-      snapshot.sources,
+      authoritativeSources,
       captureRecords,
       displayState.workspaceId === workspaceId
         ? displayState.sources
@@ -267,7 +268,9 @@ export const restoreMigratedResearchWorkspace = async (options: {
           throw new Error("Known capture history unavailable");
         if (pin)
           snapshot.sources[index] = {
-            ...source,
+            ...(source.statusDetails?.statusReason === "capture_unavailable"
+              ? authoritativeSources[index]
+              : source),
             webCapture: pin,
             captureOwnerScope: owner,
           };
