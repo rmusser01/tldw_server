@@ -1804,5 +1804,100 @@
         }
       }
     ]
+  },
+  "hostedPR3211Lineage": {
+    "head": "bef4c6eeacc7d009aeb6a90dda602f52d3513608",
+    "broaderFinal": {
+      "run": 37664143689,
+      "attempt": 2,
+      "conclusion": "success",
+      "successfulJobs": 216,
+      "skippedJobs": 8
+    },
+    "sync": {
+      "conclusion": "success",
+      "head_sha": "bef4c6eeacc7d009aeb6a90dda602f52d3513608",
+      "html_url": "https://github.com/rmusser01/tldw_server/actions/runs/37664143689/job/112940568005",
+      "id": 112940568005,
+      "name": "Full Suite shard (Ubuntu / Python 3.12 / sync-core)",
+      "run_attempt": 1,
+      "run_id": 37664143689,
+      "passed": 2610,
+      "skipped": 1,
+      "logSummaryLine": 2010
+    },
+    "database": {
+      "conclusion": "success",
+      "head_sha": "bef4c6eeacc7d009aeb6a90dda602f52d3513608",
+      "html_url": "https://github.com/rmusser01/tldw_server/actions/runs/37664143689/job/112940584598",
+      "id": 112940584598,
+      "name": "Full Suite shard (Ubuntu / Python 3.12 / db-privileges)",
+      "run_attempt": 1,
+      "run_id": 37664143689,
+      "passed": 3026,
+      "skipped": 14,
+      "logSummaryLine": 2257,
+      "namedPostgresqlCases": 1027,
+      "namedPostgresqlSkipped": 14,
+      "namedPostgresqlFailed": 0,
+      "namedPostgresqlPassed": 1013,
+      "sqliteSchemaRegressionsPassed": 5
+    },
+    "optionalWatchlists": {
+      "conclusion": "success",
+      "head_sha": "bef4c6eeacc7d009aeb6a90dda602f52d3513608",
+      "html_url": "https://github.com/rmusser01/tldw_server/actions/runs/37664143589",
+      "id": 37664143589,
+      "name": "UI Watchlists Extension E2E",
+      "run_attempt": 3,
+      "strictGatePassed": 14,
+      "strictGateSkipped": 0,
+      "strictGateUnexpected": 0,
+      "strictGateFlaky": 0,
+      "logGateLine": 3569
+    },
+    "qualification": "Successful source Sync/DB jobs originate in attempt1 of broader run; final aggregate success is attempt2. Optional Watchlists attempt3 is separate. No hosted suite rerun; metadata read-only and exact retained log/receipt hashes.",
+    "inputManifest": [
+      {
+        "name": "knowledge-burndown-3211-ci-full-receipt.json",
+        "bytes": 1030797,
+        "sha256": "1ec1f7b32fa3f16712134158cf5951bc19666070987a7a5cf02e7d698ddbec69"
+      },
+      {
+        "name": "knowledge-burndown-3211-ci-db-receipt.json",
+        "bytes": 1221,
+        "sha256": "5deee91063a50a82264b029c954a709aaf910b1ef00863c13d68e51853a090c4"
+      },
+      {
+        "name": "knowledge-burndown-3211-job-112940568005.log",
+        "bytes": 189506,
+        "sha256": "562b0beaddcd2eaae95ee76633bc18dd82db1c9131f9156998dafaaf7f4443bc"
+      },
+      {
+        "name": "knowledge-burndown-3211-job-112940584598.log",
+        "bytes": 670109,
+        "sha256": "49fd22ee32dca9a781aace89ac36ec9fc28d10c17fc1e5ec5a075a6a96710414"
+      },
+      {
+        "name": "knowledge-burndown-3211-watchlists-green.log",
+        "bytes": 801163,
+        "sha256": "1518b5ae60418066a38ff7af7015734831965945c5389da5b07ee20e640c618d"
+      },
+      {
+        "name": "knowledge-capture-task6-fix1-sync-job.json",
+        "bytes": 291,
+        "sha256": "d474a0e85daa2b7eee047928788b9892a703fb1f3c532d63db52a5a2642ae553"
+      },
+      {
+        "name": "knowledge-capture-task6-fix1-db-job.json",
+        "bytes": 295,
+        "sha256": "c51212efba1d77e71903febb34ff297e74525f95e22c6e0ba1847af31509e765"
+      },
+      {
+        "name": "knowledge-capture-task6-fix1-watchlists-run.json",
+        "bytes": 228,
+        "sha256": "38967b42d83ea3010f7cd2d3d340974eab1263a0daaffc342418b55400126590"
+      }
+    ]
   }
 }
