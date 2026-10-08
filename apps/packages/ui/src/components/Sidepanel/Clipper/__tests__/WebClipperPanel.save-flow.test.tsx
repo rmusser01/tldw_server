@@ -1044,6 +1044,7 @@ describe("WebClipperPanel save flow", () => {
     const stored = window.sessionStorage.getItem("tldw:web-clipper:pendingAnalyze")
     expect(stored).not.toBeNull()
     expect(JSON.parse(String(stored))).toMatchObject({
+      ownerKey: '["https://owner.test","multi-user","manual",null,"owner",null]',
       clipId: "clip-123",
       pageUrl: "https://example.com/screenshot",
       pageTitle: "Screenshot Story",
