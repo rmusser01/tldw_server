@@ -939,7 +939,10 @@ describe("background effective extension auth", () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it("aborts a started scoped worker request after target drift", async () => {
+  it.each([
+    ["/api/v1/service-prompts/chat.rag.answer", "PUT"],
+    ["/api/v1/media/ingest-web-content", "POST"]
+  ])("aborts a started scoped worker request %s after target drift", async (path, method) => {
     storageState.persistent.set("tldwConfig", {
       serverUrl: "https://api.example.test",
       authMode: "multi-user",
@@ -966,8 +969,8 @@ describe("background effective extension auth", () => {
       type: "tldw:request",
       payload: {
         requestId,
-        path: "/api/v1/service-prompts/chat.rag.answer",
-        method: "PUT",
+        path,
+        method,
         body: { parts: {}, expected_revision: null },
         servicePromptConfig: {
           serverUrl: "https://api.example.test",
@@ -977,7 +980,12 @@ describe("background effective extension auth", () => {
       }
     })
 
-    await fetchStarted
+    await Promise.race([
+      fetchStarted,
+      pending.then((response) => {
+        if (!response.ok) throw new Error(response.error)
+      })
+    ])
     storageState.persistent.set("tldwConfig", {
       serverUrl: "https://other.example.test",
       authMode: "multi-user",
@@ -1785,4 +1793,171 @@ describe("background effective extension auth", () => {
       })
     }))
   })
+
+  it.each([
+    ["/api/v1/media/ingest-web-content", "POST"],
+    ["/api/v1/web-clipper/925871f6-30fa-470b-a2c4-2272051f2373", "GET"],
+    ["/api/v1/web-clipper/clip%20with%20spaces/", "GET"],
+    ["/api/v1/media/71/versions?include_content=true", "GET"],
+    ["/api/v1/media/71/versions/7?include_content=true", "GET"],
+    ["/api/v1/workspaces/workspace%20with%20spaces/sources", "GET"],
+    [
+      "/api/v1/workspaces/ws/sources/web-clipper%3A925871f6-30fa-470b-a2c4-2272051f2373/preview?version_number=7",
+      "GET"
+    ]
+  ])(
+    "admits exact capture request %s %s through the real worker",
+    async (path, method) => {
+      const capturedConfig = Object.freeze({
+        serverUrl: "https://api.example.test",
+        authMode: "multi-user",
+        authSource: "manual",
+        expectedUserId: 42,
+        expectedRefreshToken: "capture-refresh"
+      })
+      storageState.persistent.set("tldwConfig", {
+        serverUrl: capturedConfig.serverUrl,
+        authMode: "multi-user",
+        authSource: "manual",
+        accessToken: jwtForUser(42),
+        refreshToken: "capture-refresh"
+      })
+      storageState.persistent.delete("tldwCookieSessionConfig")
+      const body =
+        method === "POST"
+          ? { urls: ["https://example.com/story"], credential_free: true }
+          : undefined
+      const fetchSpy = vi.fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(JSON.stringify({ capture: "canonical" }), {
+            headers: { "content-type": "application/json" }
+          })
+      )
+      vi.stubGlobal("fetch", fetchSpy)
+      await expect(
+        sendRuntimeMessage({
+          type: "tldw:request",
+          payload: {
+            path,
+            method,
+            body,
+            servicePromptConfig: capturedConfig,
+            headers: { "X-TLDW-Expected-User-ID": "42" }
+          }
+        })
+      ).resolves.toMatchObject({
+        ok: true,
+        status: 200,
+        data: { capture: "canonical" }
+      })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchSpy.mock.calls[0]
+      expect(String(url)).toBe(`https://api.example.test${path}`)
+      expect(init?.method).toBe(method)
+      expect(new Headers(init?.headers).get("Authorization")).toBe(
+        `Bearer ${jwtForUser(42)}`
+      )
+      expect(new Headers(init?.headers).get("X-TLDW-Expected-User-ID")).toBe("42")
+      if (body) expect(JSON.parse(String(init?.body))).toEqual(body)
+    }
+  )
+
+  it.each([
+    ["/api/v1/media/ingest-web-content", "GET"],
+    ["/api/v1/media/ingest-web-content/extra", "POST"],
+    ["/api/v1/media/71/versions", "POST"],
+    ["/api/v1/media/71/versions/0", "GET"],
+    ["/api/v1/media/71/versions/advanced", "GET"],
+    ["/api/v1/media/71/versions/7/metadata", "GET"],
+    ["/api/v1/workspaces/ws/sources", "POST"],
+    ["/api/v1/workspaces/ws/sources/src/preview", "DELETE"],
+    ["/api/v1/workspaces/ws/sources/status", "GET"],
+    ["/api/v1/workspaces/ws/sources/src/preview/extra", "GET"],
+    ["/api/v1/workspaces/../ws/sources", "GET"],
+    ["/api/v1/workspaces/%2e%2e/sources", "GET"],
+    ["/api/v1/workspaces/ws%2fforeign/sources", "GET"],
+    ["/api/v1/workspaces/ws/sources/a%5cb/preview", "GET"],
+    ["/api/v1/workspaces/ws%zz/sources", "GET"],
+    ["/api/v1/web-clipper/clip/enrichments", "GET"],
+    ["https://api.example.test/api/v1/media/ingest-web-content", "POST"]
+  ])(
+    "rejects capture sibling or malformed request %s %s in the worker before HTTP",
+    async (path, method) => {
+      const fetchSpy = vi.fn()
+      vi.stubGlobal("fetch", fetchSpy)
+      await expect(
+        sendRuntimeMessage({
+          type: "tldw:request",
+          payload: {
+            path,
+            method,
+            servicePromptConfig: {
+              serverUrl: "https://api.example.test",
+              authMode: "single-user",
+              authSource: "manual",
+              expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
+            }
+          }
+        })
+      ).resolves.toMatchObject({ ok: false, status: 400 })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["principal", "origin", "refresh", "key"])(
+    "rejects changed capture %s in worker before HTTP",
+    async (change) => {
+      const fetchSpy = vi.fn()
+      vi.stubGlobal("fetch", fetchSpy)
+      if (change !== "key") {
+        storageState.persistent.set("tldwConfig", {
+          serverUrl:
+            change === "origin"
+              ? "https://other.example.test"
+              : "https://api.example.test",
+          authMode: "multi-user",
+          authSource: "manual",
+          accessToken: jwtForUser(change === "principal" ? 84 : 42),
+          refreshToken:
+            change === "refresh" ? "changed-refresh" : "capture-refresh"
+        })
+        storageState.persistent.delete("tldwCookieSessionConfig")
+      }
+      await expect(
+        sendRuntimeMessage({
+          type: "tldw:request",
+          payload: {
+            path: "/api/v1/media/ingest-web-content",
+            method: "POST",
+            body: { urls: ["https://example.com"] },
+            servicePromptConfig:
+              change === "key"
+                ? {
+                    serverUrl: "https://api.example.test",
+                    authMode: "single-user",
+                    authSource: "manual",
+                    expectedSingleUserApiKeyScope:
+                      deriveSingleUserApiKeyCredentialScope(
+                        "single-user",
+                        "captured-other-key"
+                      )
+                  }
+                : {
+                    serverUrl: "https://api.example.test",
+                    authMode: "multi-user",
+                    authSource: "manual",
+                    expectedUserId: 42,
+                    expectedRefreshToken: "capture-refresh"
+                  }
+          }
+        })
+      ).resolves.toMatchObject({
+        ok: false,
+        status: 412,
+        data: { detail: { code: "request_config_scope_changed" } }
+      })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    }
+  )
+
 })

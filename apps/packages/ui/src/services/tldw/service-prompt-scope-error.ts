@@ -114,6 +114,13 @@ export const isServicePromptRequestPath = (
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
+  if (pathname === "/api/v1/media/ingest-web-content")
+    return requestMethod === "POST"
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/web-clipper\/[^/]+\/?$/.test(pathname) ||
+    /^\/api\/v1\/media\/[0-9]+\/versions(?:\/[1-9][0-9]*)?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources(?:\/[^/]+\/preview)?$/.test(pathname)
+  )) return true
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
   if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
