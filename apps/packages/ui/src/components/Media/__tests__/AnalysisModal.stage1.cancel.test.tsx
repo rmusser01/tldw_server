@@ -217,11 +217,14 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
   })
 
   it('treats cancellation differently from real generation failures', async () => {
-    mocks.bgStream.mockImplementation(() =>
-      (async function* () {
-        throw new Error('stream failed')
-      })()
-    )
+    mocks.bgStream.mockImplementation(() => ({
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: async () => {
+        throw new Error("stream failed");
+      },
+    }));
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       if (request.path === '/api/v1/chat/completions' && request.method === 'POST') {
         throw new Error('fallback failed')

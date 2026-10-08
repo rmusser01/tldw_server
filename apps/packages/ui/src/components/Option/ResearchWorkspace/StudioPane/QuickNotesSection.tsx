@@ -540,7 +540,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         const notes = pickNotesArray(response)
         const prioritized = prioritizeWorkspaceNotes(notes, workspaceTag)
         setWorkspaceNotes(normalizeNotesForDisplay(prioritized, workspaceTag))
-      } catch (error) {
+      } catch {
         if (isCurrent()) setWorkspaceNotes([])
       } finally {
         setIsLoadingWorkspaceNotes(false)

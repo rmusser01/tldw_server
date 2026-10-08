@@ -114,7 +114,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 let current: ReturnType<typeof useKnowledgeQA>
 function Probe() {
-  current = useKnowledgeQA()
+  const context = useKnowledgeQA();
+  React.useEffect(() => {
+    current = context;
+  }, [context]);
   const [exportOpen, setExportOpen] = React.useState(false)
   return (
     <>
