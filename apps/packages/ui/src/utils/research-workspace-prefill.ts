@@ -343,24 +343,34 @@ export const readResearchWebCaptures = async (
   workspaceId: string
 ): Promise<ResearchWebCapture[]> => {
   await pendingPrefillWrite.catch(() => {})
-  const records = await storage.get<Record<string, ResearchWebCapture>>(
-    `${prefillKey(owner)}:web-captures`
-  )
-  return Object.values(records || {})
+  const key = `${prefillKey(owner)}:web-captures`;
+  const records =
+    (await storage.get<Record<string, ResearchWebCapture>>(key)) || {};
+  // Plasmo getAll returns serialized values; the WebUI shim returns parsed values.
+  for (const recordKey of Object.keys(await storage.getAll())) {
+    if (!recordKey.startsWith(`${key}:`)) continue;
+    const record = await storage.get<ResearchWebCapture>(recordKey);
+    if (
+      record?.ownerScope === owner &&
+      recordKey === `${key}:${record.body?.clip_id}`
+    )
+      records[record.body.clip_id] = record;
+  }
+  return Object.values(records)
     .filter(
       (record) =>
-        record.ownerScope === owner && record.workspaceId === workspaceId
+        record.ownerScope === owner && record.workspaceId === workspaceId,
     )
     .map((record) => {
       // These are the closed, credential-free acceptance objects produced by prepareWebCaptureAcceptance.
-      Object.freeze(record.body.content)
-      Object.freeze(record.body.workspace)
-      Object.freeze(record.body.enhancements)
-      Object.freeze(record.body.capture_metadata?.web_capture_v1)
-      Object.freeze(record.body.capture_metadata)
-      Object.freeze(record.body)
-      return record
-    })
+      Object.freeze(record.body.content);
+      Object.freeze(record.body.workspace);
+      Object.freeze(record.body.enhancements);
+      Object.freeze(record.body.capture_metadata?.web_capture_v1);
+      Object.freeze(record.body.capture_metadata);
+      Object.freeze(record.body);
+      return record;
+    });
 }
 
 export const saveResearchWebCapture = async (
@@ -377,17 +387,22 @@ export const saveResearchWebCapture = async (
     const key = `${prefillKey(checkpoint.ownerScope)}:web-captures`
     const records =
       (await storage.get<Record<string, ResearchWebCapture>>(key)) || {}
-    const previous = records[checkpoint.body.clip_id]
+    const recordKey = `${key}:${checkpoint.body.clip_id}`;
+    const previous =
+      (await storage.get<ResearchWebCapture>(recordKey)) ||
+      records[checkpoint.body.clip_id];
     if (
       previous &&
       (previous.workspaceId !== checkpoint.workspaceId ||
         JSON.stringify(previous.body) !== JSON.stringify(checkpoint.body))
     )
       throw new Error("Accepted capture cannot change; retry the original body")
-    await storage.set(key, {
-      ...records,
-      [checkpoint.body.clip_id]: checkpoint
-    })
+    await storage.set(recordKey, checkpoint);
+    const saved = await createSafeStorage({ area: "local" }).get(recordKey);
+    if (JSON.stringify(saved) !== JSON.stringify(checkpoint))
+      throw new Error(
+        "Could not retain capture checkpoint. Enable browser storage and retry.",
+      );
   })
 }
 
@@ -395,7 +410,8 @@ export const saveResearchWebCapture = async (
 export const retainResearchWebCapturePins = (
   sources: WorkspaceSource[],
   records: ResearchWebCapture[],
-  previousSources: WorkspaceSource[] = []
+  previousSources: WorkspaceSource[] = [],
+  ownerScope?: string,
 ): WorkspaceSource[] =>
   sources.map((source) => {
     const record = records.find(
@@ -403,10 +419,36 @@ export const retainResearchWebCapturePins = (
         item.pin &&
         source.id === `web-clipper:${item.pin.clipId}` &&
         source.mediaId === item.pin.mediaId &&
-        source.url === item.pin.requestedUrl
-    )
-    if (!record?.pin) return source
-    const pin = record.pin
+        source.url === item.pin.requestedUrl,
+    );
+    const ownedPrevious = previousSources.find(
+      (item) =>
+        ownerScope &&
+        item.captureOwnerScope === ownerScope &&
+        item.id === source.id &&
+        item.mediaId === source.mediaId &&
+        item.url === source.url,
+    );
+    const previousPin = ownedPrevious?.webCapture;
+    const pin =
+      record?.pin ??
+      (previousPin &&
+      source.id === `web-clipper:${previousPin.clipId}` &&
+      source.mediaId === previousPin.mediaId &&
+      source.url === previousPin.requestedUrl
+        ? previousPin
+        : undefined);
+    if (!pin)
+      return ownedPrevious?.statusDetails?.statusReason ===
+        "capture_unavailable"
+        ? {
+            ...source,
+            captureOwnerScope: ownerScope,
+            status: "error",
+            statusMessage: ownedPrevious.statusMessage,
+            statusDetails: ownedPrevious.statusDetails,
+          }
+        : source;
     const previous = previousSources.find(
       (item) =>
         item.id === source.id &&
@@ -416,21 +458,22 @@ export const retainResearchWebCapturePins = (
         item.statusDetails?.statusReason === "capture_head_changed" &&
         Object.entries(pin).every(
           ([key, value]) =>
-            item.webCapture?.[key as keyof WebArticleCapturePin] === value
-        )
-    )
+            item.webCapture?.[key as keyof WebArticleCapturePin] === value,
+        ),
+    );
     return {
       ...source,
       webCapture: pin,
+      captureOwnerScope: ownerScope,
       ...(previous
         ? {
             status: previous.status,
             statusMessage: previous.statusMessage,
-            statusDetails: previous.statusDetails
+            statusDetails: previous.statusDetails,
           }
-        : {})
-    }
-  })
+        : {}),
+    };
+  });
 
 const truncate = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 1)}...` : value

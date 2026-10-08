@@ -1,3 +1,4 @@
+import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
 import {
   getResearchWorkspaceOwner,
   readResearchWebCaptures,
@@ -219,10 +220,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
-    const captureRecords = await readResearchWebCaptures(
-      await getResearchWorkspaceOwner(scope.requestScope),
-      workspaceId,
-    );
+    const owner = await getResearchWorkspaceOwner(scope.requestScope);
+    const captureRecords = await readResearchWebCaptures(owner, workspaceId);
     assertCurrent();
     const displayState = useWorkspaceStore.getState();
     const previousSnapshot = displayState.workspaceSnapshots[workspaceId];
@@ -234,13 +233,73 @@ export const restoreMigratedResearchWorkspace = async (options: {
         : previousSnapshot?.workspaceId === workspaceId
           ? previousSnapshot.sources
           : [],
+      owner,
     );
+    for (const [index, source] of snapshot.sources.entries()) {
+      if (!source.id.startsWith("web-clipper:")) continue;
+      const checkpoint = captureRecords.some(
+        (record) =>
+          record.pin &&
+          record.pin.clipId === source.webCapture?.clipId &&
+          record.pin.mediaId === source.mediaId &&
+          record.pin.requestedUrl === source.url,
+      );
+      if (checkpoint) continue;
+      try {
+        const pin = await recoverWebCapturePin(
+          context.sources.items[index],
+          {
+            requestScope: scope.requestScope,
+            signal: scope.scopeSignal,
+          },
+          assertCurrent,
+          source.webCapture,
+        );
+        assertCurrent();
+        if (
+          !pin &&
+          (source.statusDetails?.statusReason === "capture_unavailable" ||
+            captureRecords.some(
+              (record) =>
+                record.body?.clip_id === source.id.slice("web-clipper:".length),
+            ))
+        )
+          throw new Error("Known capture history unavailable");
+        if (pin)
+          snapshot.sources[index] = {
+            ...source,
+            webCapture: pin,
+            captureOwnerScope: owner,
+          };
+      } catch (reason) {
+        assertCurrent();
+        snapshot.sources[index] = {
+          ...source,
+          // Unknown lookup failure blocks this attempt but cannot label an ordinary clip forever.
+          captureOwnerScope:
+            source.captureOwnerScope ??
+            (reason instanceof WebCaptureNotCurrentError &&
+            reason.captureEvidenceKnown
+              ? owner
+              : undefined),
+          status: "error",
+          statusMessage:
+            "Capture evidence is unavailable. Retry or recapture before Ask.",
+          statusDetails: {
+            statusReason: "capture_unavailable",
+            retryEligible: false,
+          },
+        };
+      }
+    }
     snapshot.selectedSourceIds = local.selectedSourceIds.filter(
       (id) =>
         !snapshot.sources.some(
           (source) =>
             source.id === id &&
-            source.statusDetails?.statusReason === "capture_head_changed",
+            ["capture_head_changed", "capture_unavailable"].includes(
+              source.statusDetails?.statusReason ?? "",
+            ),
         ),
     );
     snapshot.generatedArtifacts = local.artifacts;
