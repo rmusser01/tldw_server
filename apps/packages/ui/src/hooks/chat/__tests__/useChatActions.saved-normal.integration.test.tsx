@@ -1181,7 +1181,16 @@ describe("saved normal Chat pipeline with autosave", () => {
       { id: "shared-model", provider: "openai", capabilities: [] },
       { id: "shared-model", provider: "custom_openai_api", capabilities: [] }
     ])
-    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
+    mocks.ragSearch.mockResolvedValue({ documents: [{
+      content: "Evidence",
+      metadata: {
+        media_id: 42,
+        source: "media_db",
+        title: "Distinctive media 42 evidence",
+        type: "text",
+        url: "https://sources.test/media-42-evidence"
+      }
+    }] })
     mocks.streamMessage.mockImplementation(async function* () {
       yield "Grounded answer"
     })
@@ -1201,7 +1210,20 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(mocks.streamMessage.mock.calls[0][0].at(-1).content).toContain("Evidence")
     expect(view.result.current.state.messages.at(-1)?.message).toBe("Grounded answer")
     expect(view.result.current.state.messages.at(-1)?.sources).toEqual([
-      expect.objectContaining({ pageContent: "Evidence", mode: "rag" })
+      {
+        name: "Distinctive media 42 evidence",
+        type: "text",
+        mode: "rag",
+        url: "https://sources.test/media-42-evidence",
+        pageContent: "Evidence",
+        metadata: {
+          media_id: 42,
+          source: "media_db",
+          title: "Distinctive media 42 evidence",
+          type: "text",
+          url: "https://sources.test/media-42-evidence"
+        }
+      }
     ])
     view.unmount()
   })
