@@ -4159,7 +4159,7 @@ async def build_context_and_messages(
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
     history_selection = getattr(request_data, "tldw_history_selection_v1", None)
-    if history_selection is not None and reuse_saved_turn:
+    if history_selection is not None and explicit_failed_retry:
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None
     history_runtime = runtime_state or {}
@@ -4183,21 +4183,90 @@ async def build_context_and_messages(
             tuple[dict[str, Any] | None, int | None, dict[str, Any]],
         ]:
             with chat_db.transaction() as conn:
-                state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
-                    owner_client_id=history_runtime["history_owner_client_id"])
-                snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
-                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                state = chat_db.get_roleplay_resume_state(
+                    final_conversation_id,
+                    conn=conn,
+                    lock_for_update=True,
+                    owner_client_id=history_runtime["history_owner_client_id"],
+                )
+                snap, content = chat_db.validate_history_selection(
+                    final_conversation_id,
+                    selection,
+                    owner_client_id=history_runtime["history_owner_client_id"],
+                    owner_key=owner,
+                    conn=conn,
+                )
                 context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
                 for item in content:
                     _saved_image_details(item.get("extra_metadata"), len(item["images"]))
-                accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
-                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn,
-                    history_branch=getattr(request_data, "tldw_history_branch", None))
+                if regenerate_reply_id is not None:
+                    if getattr(request_data, "tldw_history_branch", None) is not True:
+                        raise HistorySelectionError("unsupported_history_regeneration")
+                    inputs = [
+                        message.model_dump(exclude_none=True)
+                        for message in request_data.messages
+                        if message.role != "system"
+                    ]
+                    if len(inputs) != 1 or inputs[0].get("role") != "user":
+                        raise HistorySelectionError("invalid_regeneration_input")
+                    accepted = chat_db.reuse_selected_history_admission(
+                        final_conversation_id,
+                        selection,
+                        regenerate_reply_id,
+                        owner_client_id=history_runtime["history_owner_client_id"],
+                        owner_key=owner,
+                        conn=conn,
+                    )
+                    original = next(item for item in content if item["id"] == accepted["input_message_id"])
+                    extra = original.get("extra_metadata") or {}
+                    if (
+                        original.get("tool_calls") is not None
+                        or extra.get("function_call") is not None
+                        or extra.get("tool_call_id") is not None
+                    ):
+                        raise HistorySelectionError("unsupported_history_regeneration")
+                    text = _saved_image_text(
+                        {
+                            "sender": "user",
+                            "version": original["_message_version"],
+                            "content": original["message"],
+                            "images": original["images"],
+                        },
+                        extra,
+                    )
+                    details = _saved_image_details(extra, len(original["images"]))
+                    parts = ([{"type": "text", "text": text}] if text else []) + [
+                        {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                        for image, detail in zip(original["images"], details)
+                    ]
+                    if (
+                        _retry_content_components(inputs[0].get("content")) != _retry_content_components(parts)
+                        or any(
+                            inputs[0].get(key) is not None for key in ("tool_calls", "function_call", "tool_call_id")
+                        )
+                        or inputs[0].get("name") not in (None, extra.get("sender_name"))
+                    ):
+                        raise HistorySelectionError("regeneration_input_changed")
+                    content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+                else:
+                    accepted = chat_db.append_selected_history_inputs(
+                        final_conversation_id,
+                        selection,
+                        history_runtime["history_inputs"],
+                        owner_client_id=history_runtime["history_owner_client_id"],
+                        owner_key=owner,
+                        conn=conn,
+                        history_branch=getattr(request_data, "tldw_history_branch", None),
+                    )
                 return snap, content, accepted, state["conversation"], context
         try:
             history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
         except HistorySelectionError as exc:
-            failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+            failure = (
+                "unsupported_history_capability"
+                if (exc.code.startswith("unsupported_history_context") or exc.code == "unsupported_history_regeneration")
+                else "stale_selection"
+            )
             raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
@@ -4510,7 +4579,7 @@ async def build_context_and_messages(
     retry_user_message_id: str | None = None
     saved_retry_system_messages: list[dict[str, Any]] = []
     legacy_regenerated_reply: dict[str, Any] | None = None
-    if regenerate_reply_id:
+    if regenerate_reply_id and not versioned:
         if not request_messages:
             raise HTTPException(status_code=409, detail="Regeneration requires the saved user turn.")
         if any(message.get("role") != "system" for message in request_messages[:-1]):
@@ -4680,6 +4749,8 @@ async def build_context_and_messages(
                         )
 
     if versioned:
+        if regenerate_reply_id is not None:
+            overlap_cut = len(request_messages)
         source_nodes = {row["id"]: row for row in history_snapshot.nodes}
         for item in selected_content:
             extra = item.get("extra_metadata") or {}

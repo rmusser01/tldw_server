@@ -46036,6 +46036,7 @@ for _message_store_method in (
     "validate_history_selection",
     "append_selected_history_input",
     "append_selected_history_inputs",
+    "reuse_selected_history_admission",
     "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",

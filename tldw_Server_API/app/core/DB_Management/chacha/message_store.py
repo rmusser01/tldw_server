@@ -916,6 +916,65 @@ class MessageStore:
                 self._write_history_authority(active, item["id"], authority)
             return admission
 
+    def reuse_selected_history_admission(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        reply_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Reuse a protected user behind the selected reply without rewriting its authority."""
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionV1
+
+        body = dict(selection)
+        if (
+            body.get("owner_key") != owner_key
+            or body.get("conversation_id") != conversation_id
+            or body.get("purpose") != "send"
+        ):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if body.get("interpretation", {}).get("kind") != "parent_graph_v1":
+            raise HistorySelectionError("unsupported_history_regeneration")
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            fresh, _ = self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            path = body["messages"]
+            if len(path) < 2 or path[-1]["id"] != reply_id:
+                raise HistorySelectionError("invalid_regeneration_target")
+            nodes = {node["id"]: node for node in fresh.nodes}
+            target, user = nodes[reply_id], nodes[path[-2]["id"]]
+            if target["role"] != "assistant" or user["role"] != "user" or target["parent_id"] != user["id"]:
+                raise HistorySelectionError("unsupported_history_regeneration")
+            row = active.execute(
+                "SELECT history_admission_json FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+                (user["id"], conversation_id),
+            ).fetchone()
+            if row is None:
+                raise HistorySelectionError("stale_parent")
+            try:
+                authority = json.loads(row["history_admission_json"] or "null")
+            except (TypeError, ValueError) as exc:
+                raise HistorySelectionError("invalid_admission") from exc
+            if not isinstance(authority, dict) or not isinstance(authority.get("admission"), dict):
+                raise HistorySelectionError("unsupported_history_regeneration")
+            try:
+                admission = HistoryAdmissionV1.model_validate(authority["admission"]).model_dump(mode="json")
+            except ValidationError as exc:
+                raise HistorySelectionError("invalid_admission") from exc
+            if admission["input_message_id"] != user["id"]:
+                raise HistorySelectionError("invalid_admission")
+            self._validate_history_parent(
+                conversation_id, admission, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            return admission
+
     def _validate_history_parent(
         self,
         conversation_id: str,
@@ -935,17 +994,41 @@ class MessageStore:
         ).fetchone()
         if row is None or str(row["version"]) != reference["input_message_revision"]:
             raise HistorySelectionError("stale_parent")
-        authority = json.loads(row["history_admission_json"] or "null")
-        if not isinstance(authority, dict) or any(
-            authority.get("admission", {}).get(key) != value for key, value in reference.items()
+        try:
+            authority = json.loads(row["history_admission_json"] or "null")
+        except (TypeError, ValueError) as exc:
+            raise HistorySelectionError("invalid_admission") from exc
+        if (
+            not isinstance(authority, dict)
+            or authority.get("version") != 1
+            or not isinstance(authority.get("admission"), dict)
+            or not isinstance(authority.get("input_state_digest"), str)
+            or not authority["input_state_digest"]
+            or not isinstance(authority.get("scope"), dict)
+            or set(authority["scope"]) != {"scope_type", "workspace_id"}
+            or not isinstance(authority.get("interpretation"), dict)
+            or not isinstance(authority["interpretation"].get("kind"), str)
+            or authority["interpretation"].get("kind") not in {"parent_graph_v1", "legacy_linear_v1"}
+            or any(authority["admission"].get(key) != value for key, value in reference.items())
+        ):
+            raise HistorySelectionError("invalid_admission")
+        chain = authority.get("input_chain", [])
+        if not isinstance(chain, list) or any(
+            not isinstance(item, dict)
+            or any(not isinstance(item.get(key), str) or not item[key] for key in ("id", "version", "state"))
+            for item in chain
         ):
             raise HistorySelectionError("invalid_admission")
         state = self._history_message_state(
-            conversation_id, reference["input_message_id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=conn
+            conversation_id,
+            reference["input_message_id"],
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            conn=conn,
         )
         if state != authority["input_state_digest"]:
             raise HistorySelectionError("stale_parent")
-        for item in authority.get("input_chain", []):
+        for item in chain:
             version = conn.execute(
                 "SELECT version FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
                 (item["id"], conversation_id),
@@ -958,7 +1041,9 @@ class MessageStore:
             if state != item["state"]:
                 raise HistorySelectionError("stale_parent")
         scope = dict(
-            conn.execute("SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            conn.execute(
+                "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
         )
         if scope != authority["scope"]:
             raise HistorySelectionError("stale_scope")

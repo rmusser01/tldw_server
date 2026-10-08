@@ -208,11 +208,14 @@ def test_materialized_author_note_gates_only_substantive_active_state(note, unsu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("metadata", [
-    {"tldw_retry_failed_turn": True},
-    {"tldw_regenerate_from_message_id": "reply"},
-])
-async def test_legacy_retry_flags_cannot_mutate_a_versioned_history_selection(metadata):
+@pytest.mark.parametrize(
+    "metadata,code",
+    [
+        ({"tldw_retry_failed_turn": True}, "unsupported_history_legacy_retry"),
+        ({"tldw_regenerate_from_message_id": "reply"}, "missing_authenticated_history_binding"),
+    ],
+)
+async def test_versioned_actions_require_qualified_admission_before_storage(metadata, code):
     from types import SimpleNamespace
     from fastapi import HTTPException
     from tldw_Server_API.app.core.Chat.chat_service import build_context_and_messages
@@ -222,11 +225,14 @@ async def test_legacy_retry_flags_cannot_mutate_a_versioned_history_selection(me
         await build_context_and_messages(
             chat_db=object(),
             request_data=SimpleNamespace(metadata=metadata, tldw_history_selection_v1=object()),
-            loop=None, metrics=None, default_save_to_db=True,
-            final_conversation_id="conversation", save_message_fn=None,
+            loop=None,
+            metrics=None,
+            default_save_to_db=True,
+            final_conversation_id="conversation",
+            save_message_fn=None,
         )
     assert failure.value.status_code == 409
-    assert failure.value.detail["code"] == "unsupported_history_legacy_retry"
+    assert failure.value.detail["code"] == code
 
 
 @pytest.mark.unit
