@@ -18,6 +18,7 @@ import { createServicePromptScopeChangedError } from "@/services/tldw/service-pr
 import {
   createEmptyWorkspaceSnapshot,
   createSlug,
+  useWorkspaceStore,
   type WorkspaceState,
 } from "@/store/workspace";
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api";
@@ -223,11 +224,25 @@ export const restoreMigratedResearchWorkspace = async (options: {
       workspaceId,
     );
     assertCurrent();
+    const displayState = useWorkspaceStore.getState();
+    const previousSnapshot = displayState.workspaceSnapshots[workspaceId];
     snapshot.sources = retainResearchWebCapturePins(
       snapshot.sources,
       captureRecords,
+      displayState.workspaceId === workspaceId
+        ? displayState.sources
+        : previousSnapshot?.workspaceId === workspaceId
+          ? previousSnapshot.sources
+          : [],
     );
-    snapshot.selectedSourceIds = local.selectedSourceIds;
+    snapshot.selectedSourceIds = local.selectedSourceIds.filter(
+      (id) =>
+        !snapshot.sources.some(
+          (source) =>
+            source.id === id &&
+            source.statusDetails?.statusReason === "capture_head_changed",
+        ),
+    );
     snapshot.generatedArtifacts = local.artifacts;
     snapshot.workspaceBanner = {
       ...snapshot.workspaceBanner,

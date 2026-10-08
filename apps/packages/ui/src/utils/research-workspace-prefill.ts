@@ -394,7 +394,8 @@ export const saveResearchWebCapture = async (
 /** Only decorate authoritative owned membership; a checkpoint never restores a removed source. */
 export const retainResearchWebCapturePins = (
   sources: WorkspaceSource[],
-  records: ResearchWebCapture[]
+  records: ResearchWebCapture[],
+  previousSources: WorkspaceSource[] = []
 ): WorkspaceSource[] =>
   sources.map((source) => {
     const record = records.find(
@@ -404,7 +405,31 @@ export const retainResearchWebCapturePins = (
         source.mediaId === item.pin.mediaId &&
         source.url === item.pin.requestedUrl
     )
-    return record?.pin ? { ...source, webCapture: record.pin } : source
+    if (!record?.pin) return source
+    const pin = record.pin
+    const previous = previousSources.find(
+      (item) =>
+        item.id === source.id &&
+        item.mediaId === source.mediaId &&
+        item.url === source.url &&
+        item.status === "error" &&
+        item.statusDetails?.statusReason === "capture_head_changed" &&
+        Object.entries(pin).every(
+          ([key, value]) =>
+            item.webCapture?.[key as keyof WebArticleCapturePin] === value
+        )
+    )
+    return {
+      ...source,
+      webCapture: pin,
+      ...(previous
+        ? {
+            status: previous.status,
+            statusMessage: previous.statusMessage,
+            statusDetails: previous.statusDetails
+          }
+        : {})
+    }
   })
 
 const truncate = (value: string, max: number): string =>

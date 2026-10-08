@@ -1,12 +1,19 @@
 import { webcrypto } from "node:crypto"
 import { sha256Text } from "@/store/workspace-migration"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
-import type { WebArticleCapturePin } from "@/types/workspace"
+import type { WebArticleCapturePin, WorkspaceSource } from "@/types/workspace"
+import { create, type StoreApi, type UseBoundStore } from "zustand"
+import type { WorkspaceState } from "@/store/workspace"
+import { createSourcesSlice } from "@/store/workspace-slices/sources-slice"
+import { WebCaptureNotCurrentError } from "@/utils/research-web-capture"
+import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status"
+
+let realSourcesStore: UseBoundStore<StoreApi<WorkspaceState>> | null = null
 
 const mockCheckConnectionOnce = vi.fn()
 const mockSaveWorkspaceChatSession = vi.fn()
@@ -27,8 +34,13 @@ const mockEditMessage = vi.fn()
 const mockGetMediaDetails = vi.fn()
 const mockCaptureHead = vi.fn()
 const mockVersion = vi.fn()
+const mockWorkspaceSources = vi.fn()
+const mockMediaVersions = vi.fn()
 const mockScope = vi.fn()
-vi.mock("@/utils/research-web-capture", () => ({
+vi.mock("@/utils/research-web-capture", async () => ({
+  ...(await vi.importActual<typeof import("@/utils/research-web-capture")>(
+    "@/utils/research-web-capture"
+  )),
   assertWebCaptureHeadCurrent: (...args: unknown[]) => mockCaptureHead(...args)
 }))
 vi.mock("@/services/service-prompts", () => ({
@@ -175,11 +187,22 @@ vi.mock("@/store/connection", () => ({
   ) => selector(connectionStoreState)
 }))
 
-vi.mock("@/store/workspace", () => ({
+vi.mock("@/store/workspace", async () => ({
+  ...(await vi.importActual<typeof import("@/store/workspace")>(
+    "@/store/workspace"
+  )),
   useWorkspaceStore: Object.assign(
     (selector: (state: typeof workspaceStoreState) => unknown) =>
-      selector(workspaceStoreState),
-    { getState: () => workspaceStoreState, subscribe: () => () => {} }
+      realSourcesStore
+        ? realSourcesStore(
+            selector as unknown as (state: WorkspaceState) => unknown
+          )
+        : selector(workspaceStoreState),
+    {
+      getState: () => realSourcesStore?.getState() ?? workspaceStoreState,
+      subscribe: (listener: () => void) =>
+        realSourcesStore?.subscribe(listener) ?? (() => {})
+    }
   )
 }))
 
@@ -249,6 +272,9 @@ vi.mock("../source-location-copy", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getMediaDocumentVersion: (...args: unknown[]) => mockVersion(...args),
+    getWorkspaceSources: (...args: unknown[]) => mockWorkspaceSources(...args),
+    listMediaDocumentVersions: (...args: unknown[]) =>
+      mockMediaVersions(...args),
     getMediaDetails: (...args: unknown[]) =>
       (mockGetMediaDetails as (...inner: unknown[]) => unknown)(...args),
     getChatLorebookDiagnostics: vi.fn(async () => ({
@@ -328,6 +354,7 @@ function renderChatPane() {
 describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    realSourcesStore = null
     Object.defineProperty(globalThis, "crypto", {
       value: webcrypto,
       configurable: true
@@ -402,7 +429,10 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       release: vi.fn()
     })
     mockCaptureHead.mockRejectedValue(
-      new Error("Snapshot changed outside refresh")
+      new WebCaptureNotCurrentError(
+        "Snapshot changed outside refresh",
+        "capture"
+      )
     )
     const view = renderChatPane()
     fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
@@ -418,7 +448,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     expect(workspaceStoreState.setSourceStatusById).toHaveBeenCalledWith(
       source.id,
       "error",
-      "Snapshot changed outside refresh"
+      "Snapshot changed outside refresh",
+      undefined,
+      { statusReason: "capture_head_changed", retryEligible: false }
     )
     // The accepted refresh appends a new pin and preserves selected old evidence.
     const fresh = {
@@ -437,7 +469,10 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     workspaceStoreState.getSelectedSources = () => workspaceStoreState.sources
     mockCaptureHead.mockImplementation(async (item) => {
       if (item.id === source.id)
-        throw new Error("Snapshot changed outside refresh")
+        throw new WebCaptureNotCurrentError(
+          "Snapshot changed outside refresh",
+          "capture"
+        )
     })
     view.unmount()
     renderChatPane()
@@ -448,6 +483,392 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledOnce())
     expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([102])
     expect(workspaceStoreState.sources[0].webCapture).toEqual(source.webCapture)
+  })
+
+  const setupRealCapture = async () => {
+    const originalText = "Original accepted snapshot text"
+    const pin: WebArticleCapturePin = {
+      clipId: "89ed590f-9d1a-4ce8-a738-6870a0df788c",
+      requestedUrl: "https://example.org/article",
+      capturedAt: "2026-10-07T00:00:00Z",
+      contentSha256: await sha256Text(originalText),
+      refreshOf: null,
+      mediaId: 101,
+      versionNumber: 1,
+      versionUuid: "9263eb39-0737-4a33-84e7-c766a7b454f8"
+    }
+    const source: WorkspaceSource = {
+      id: `web-clipper:${pin.clipId}`,
+      mediaId: 101,
+      title: "Captured article",
+      type: "website",
+      status: "ready",
+      url: pin.requestedUrl,
+      addedAt: new Date(pin.capturedAt),
+      webCapture: pin
+    }
+    const originalVersion = {
+      media_id: 101,
+      version_number: 1,
+      uuid: pin.versionUuid,
+      content: originalText,
+      safe_metadata: {
+        source: "web_clipper",
+        clip_type: "article",
+        clip_id: pin.clipId,
+        workspace_id: "workspace-a",
+        source_url: pin.requestedUrl,
+        capture_metadata: {
+          web_capture_v1: {
+            mode: "server_article",
+            requested_url: pin.requestedUrl,
+            captured_at: pin.capturedAt,
+            content_sha256: pin.contentSha256,
+            refresh_of: null
+          }
+        }
+      }
+    }
+    const original: WorkspaceSource = {
+      id: "retrieved-result",
+      mediaId: 100,
+      title: "Original result",
+      type: "website",
+      status: "ready",
+      addedAt: new Date(pin.capturedAt),
+      knowledgeQaEvidence: {
+        importId: "import",
+        threadId: null,
+        snapshot: true,
+        sources: [
+          {
+            originalId: "result",
+            mediaId: null,
+            title: "Original result",
+            type: "website",
+            excerpt: "Retrieved excerpt",
+            sourceType: "web"
+          }
+        ]
+      }
+    }
+    realSourcesStore = create<WorkspaceState>(
+      (set, get) =>
+        ({
+          ...workspaceStoreState,
+          ...createSourcesSlice(set, get),
+          sources: [source, original],
+          selectedSourceIds: [source.id]
+        }) as unknown as WorkspaceState
+    )
+    const owner = new AbortController()
+    mockScope.mockResolvedValue({
+      requestScope: {},
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: owner.signal,
+      release: vi.fn()
+    })
+    mockWorkspaceSources.mockResolvedValue([
+      {
+        id: source.id,
+        workspace_id: "workspace-a",
+        media_id: 101,
+        url: pin.requestedUrl
+      }
+    ])
+    mockMediaVersions.mockResolvedValue([originalVersion])
+    mockVersion.mockImplementation(async (mediaId, version) => {
+      if (mediaId !== 101 || version !== 1) throw new Error("Wrong exact pin")
+      return originalVersion
+    })
+    const actual = await vi.importActual<
+      typeof import("@/utils/research-web-capture")
+    >("@/utils/research-web-capture")
+    mockCaptureHead.mockImplementation(actual.assertWebCaptureHeadCurrent)
+    return {
+      store: realSourcesStore,
+      source,
+      owner,
+      originalText,
+      originalVersion,
+      original
+    }
+  }
+
+  const sendQuestion = () => {
+    fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
+      target: { value: "Explain" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  }
+
+  it("keeps real-store stale refusal visible after authorized deselection", async () => {
+    const { store, source } = await setupRealCapture()
+    mockMediaVersions.mockResolvedValue([
+      {
+        media_id: 101,
+        version_number: 2,
+        uuid: "a5259cb8-86c6-4d24-b3a5-24ad28d3ee91"
+      }
+    ])
+    renderChatPane()
+    sendQuestion()
+    await waitFor(() => expect(store.getState().selectedSourceIds).toEqual([]))
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(
+      screen.getAllByText(/Snapshot changed outside refresh/).length
+    ).toBeGreaterThan(0)
+    expect(store.getState().sources[0].webCapture).toBe(source.webCapture)
+  })
+
+  it("retains the exact old pin and exclusion after queued canonical readiness", async () => {
+    const { store, source, originalText, original } = await setupRealCapture()
+    mockMediaVersions.mockResolvedValue([
+      {
+        media_id: 101,
+        version_number: 2,
+        uuid: "a5259cb8-86c6-4d24-b3a5-24ad28d3ee91"
+      }
+    ])
+    const stop = store.subscribe((state) => {
+      if (state.sources[0]?.status === "error") {
+        stop()
+        queueMicrotask(() =>
+          store.getState().setSourceStatusByMediaId(
+            101,
+            "processing",
+            "Text search is available while vector indexing continues.",
+            {
+              metadata_ready: true,
+              text_extracted: true,
+              fts_ready: true,
+              vector_ready: false,
+              citation_ready: false,
+              summary_ready: false,
+              tool_accessible: true
+            },
+            {
+              lifecycleState: "partially_queryable",
+              sourceOfTruth: "workspace-status-projection"
+            }
+          )
+        )
+      }
+    })
+    const view = renderChatPane()
+    sendQuestion()
+    await waitFor(() => expect(mockMediaVersions).toHaveBeenCalledOnce())
+    await act(async () => {})
+    const stale = store.getState().sources[0]
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(stale.statusMessage).toBe("Snapshot changed outside refresh")
+    expect(stale.status).toBe("error")
+    expect(store.getState().selectedSourceIds).toEqual([])
+    expect(isWorkspaceSourceSelectable(stale)).toBe(false)
+    act(() => store.getState().toggleSourceSelection(source.id))
+    expect(store.getState().selectedSourceIds).toEqual([])
+    expect(stale.webCapture).toBe(source.webCapture)
+    expect(store.getState().sources[1]).toBe(original)
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const old = await tldwClient.getMediaDocumentVersion(
+      101,
+      stale.webCapture!.versionNumber
+    )
+    expect(old.content).toBe(originalText)
+    expect(old.uuid).toBe(source.webCapture!.versionUuid)
+
+    // A fresh recapture has its own source/pin; original snapshot remains evidence.
+    const fresh = {
+      ...source,
+      id: "web-clipper:fresh",
+      mediaId: 102,
+      webCapture: {
+        ...source.webCapture!,
+        clipId: "fresh",
+        mediaId: 102,
+        refreshOf: source.webCapture!.clipId
+      }
+    }
+    act(() => store.setState({ sources: [stale, original, fresh] }))
+    act(() => store.getState().setSelectedSourceIds([source.id, fresh.id]))
+    expect(store.getState().selectedSourceIds).toEqual([fresh.id])
+    mockCaptureHead.mockResolvedValue(undefined)
+    view.unmount()
+    renderChatPane()
+    sendQuestion()
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledOnce())
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([102])
+    expect(store.getState().sources[0].webCapture).toBe(source.webCapture)
+    expect(store.getState().sources[1].knowledgeQaEvidence).toBe(
+      original.knowledgeQaEvidence
+    )
+  })
+
+  it.each([
+    { fullSource: false, priorChecks: 1 },
+    { fullSource: true, priorChecks: 1 },
+    { fullSource: true, priorChecks: 2 }
+  ])(
+    "retains refusal for a later head change (full=$fullSource, prior=$priorChecks)",
+    async ({ fullSource, priorChecks }) => {
+      const { store, originalVersion } = await setupRealCapture()
+      mockMediaVersions.mockResolvedValue([
+        {
+          ...originalVersion,
+          version_number: 2,
+          uuid: "a5259cb8-86c6-4d24-b3a5-24ad28d3ee91"
+        }
+      ])
+      for (let check = 0; check < priorChecks; check++) {
+        mockMediaVersions.mockResolvedValueOnce([originalVersion])
+      }
+      renderChatPane()
+      if (fullSource)
+        fireEvent.click(
+          screen.getByRole("checkbox", { name: "Include full source contents" })
+        )
+      sendQuestion()
+      await waitFor(() =>
+        expect(mockMediaVersions).toHaveBeenCalledTimes(priorChecks + 1)
+      )
+      await act(async () => {})
+      expect(mockOnSubmit).not.toHaveBeenCalled()
+      expect(store.getState().sources[0].statusMessage).toBe(
+        "Snapshot changed outside refresh"
+      )
+      expect(store.getState().selectedSourceIds).toEqual([])
+      expect(
+        screen.getAllByText(/Snapshot changed outside refresh/).length
+      ).toBeGreaterThan(0)
+    }
+  )
+
+  it.each(["version", "digest", "transport"])(
+    "preserves exact-read %s refusal classification",
+    async (failure) => {
+      const { store, originalVersion } = await setupRealCapture()
+      if (failure === "transport")
+        mockVersion.mockRejectedValue(
+          new Error("Exact read unavailable. Retry.")
+        )
+      else
+        mockVersion.mockResolvedValue({
+          ...originalVersion,
+          ...(failure === "version"
+            ? { version_number: 2 }
+            : { content: "Different bytes" })
+        })
+      renderChatPane()
+      fireEvent.click(
+        screen.getByRole("checkbox", { name: "Include full source contents" })
+      )
+      sendQuestion()
+      await waitFor(() => expect(mockVersion).toHaveBeenCalledOnce())
+      await act(async () => {})
+      expect(mockOnSubmit).not.toHaveBeenCalled()
+      if (failure === "transport") {
+        expect(
+          screen.getByText(/Exact read unavailable\. Retry\./)
+        ).toBeInTheDocument()
+        expect(isWorkspaceSourceSelectable(store.getState().sources[0])).toBe(
+          true
+        )
+      } else {
+        expect(store.getState().sources[0].statusMessage).toBe(
+          "Snapshot changed outside refresh"
+        )
+        expect(store.getState().selectedSourceIds).toEqual([])
+      }
+    }
+  )
+
+  it.each(["selection", "workspace", "source", "owner"])(
+    "real %s retirement prevents a late head failure from changing feedback",
+    async (retirement) => {
+      const { store, owner } = await setupRealCapture()
+      let reject!: (reason: Error) => void
+      mockMediaVersions.mockImplementation(
+        () =>
+          new Promise((_, fail) => {
+            reject = fail
+          })
+      )
+      renderChatPane()
+      sendQuestion()
+      await waitFor(() => expect(mockMediaVersions).toHaveBeenCalledOnce())
+      await act(async () => {
+        if (retirement === "selection") store.getState().deselectAllSources()
+        if (retirement === "workspace")
+          store.setState({ workspaceId: "workspace-b" })
+        if (retirement === "source") store.setState({ sources: [] })
+        if (retirement === "owner") owner.abort()
+        reject(new Error("late head failure"))
+      })
+      expect(mockOnSubmit).not.toHaveBeenCalled()
+      expect(screen.queryByText(/Snapshot changed outside refresh/)).toBeNull()
+      expect(
+        store.getState().sources.every((source) => source.status === "ready")
+      ).toBe(true)
+    }
+  )
+
+  it("transient head read failure leaves the capture selectable for a legitimate retry", async () => {
+    const { store } = await setupRealCapture()
+    mockMediaVersions.mockRejectedValueOnce(
+      new Error("Service temporarily unavailable. Retry.")
+    )
+    renderChatPane()
+    sendQuestion()
+    await waitFor(() => expect(mockMediaVersions).toHaveBeenCalledOnce())
+    await act(async () => {})
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(store.getState().selectedSourceIds).toEqual([
+      store.getState().sources[0].id
+    ])
+    expect(isWorkspaceSourceSelectable(store.getState().sources[0])).toBe(true)
+    expect(
+      screen.getByText(/Service temporarily unavailable\. Retry\./)
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Service temporarily unavailable\. Retry\./)
+      ).toBeNull()
+    )
+    sendQuestion()
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledOnce())
+  })
+
+  it("generic readiness still recovers ordinary errors and unaffected captures", async () => {
+    const { store, source } = await setupRealCapture()
+    const ordinary = {
+      ...source,
+      id: "ordinary",
+      mediaId: 103,
+      webCapture: undefined
+    }
+    act(() => store.setState({ sources: [source, ordinary] }))
+    act(() => {
+      store
+        .getState()
+        .setSourceStatusById(
+          ordinary.id,
+          "error",
+          "Snapshot changed outside refresh",
+          undefined,
+          { statusReason: "capture_head_changed" }
+        )
+      store.getState().setSourceStatusByMediaId(103, "ready")
+      store
+        .getState()
+        .setSourceStatusById(source.id, "error", "Temporary read failure")
+      store.getState().setSourceStatusByMediaId(101, "ready")
+      store.getState().setSelectedSourceIds([source.id, ordinary.id])
+    })
+    expect(store.getState().getSelectedMediaIds()).toEqual([101, 103])
+    renderChatPane()
+    sendQuestion()
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledOnce())
   })
 
   it("uses exact capture version text and rechecks before dispatch", async () => {
@@ -642,7 +1063,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         scopeInvalidatedSignal: new AbortController().signal,
         release: vi.fn()
       })
-      mockCaptureHead.mockRejectedValue(Error("changed"))
+      mockCaptureHead.mockRejectedValue(
+        new WebCaptureNotCurrentError("changed", "capture")
+      )
       renderChatPane()
       fireEvent.click(screen.getByRole("button", { name: action }))
       await waitFor(() =>

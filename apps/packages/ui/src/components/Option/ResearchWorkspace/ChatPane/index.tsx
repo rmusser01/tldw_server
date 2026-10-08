@@ -1,7 +1,10 @@
 import { sha256Text } from "@/store/workspace-migration"
 import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
-import { assertWebCaptureHeadCurrent } from "@/utils/research-web-capture"
+import {
+  assertWebCaptureHeadCurrent,
+  WebCaptureNotCurrentError
+} from "@/utils/research-web-capture"
 import type { ScopedRequestOptions } from "@/services/tldw/TldwApiClient"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -2321,23 +2324,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         signal: scope.scopeSignal
       }
       for (const source of captures) {
+        await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+        assertCurrent()
+      }
+      return await action(options, assertCurrent, controller)
+    } catch (reason) {
+      if (reason instanceof WebCaptureNotCurrentError) {
         try {
-          await assertWebCaptureHeadCurrent(source, workspaceId!, options)
-        } catch (reason) {
           assertCurrent()
+        } catch {
+          return false
+        }
+        const source = captures.find((item) => item.id === reason.sourceId)
+        if (source) {
+          // Publish while current, before the error setter retires selection.
+          setSubmitError("Snapshot changed outside refresh")
           useWorkspaceStore
             .getState()
             .setSourceStatusById(
               source.id,
               "error",
-              "Snapshot changed outside refresh"
+              "Snapshot changed outside refresh",
+              undefined,
+              { statusReason: "capture_head_changed", retryEligible: false }
             )
-          throw new Error("Snapshot changed outside refresh", { cause: reason })
+          return false
         }
-        assertCurrent()
       }
-      return await action(options, assertCurrent, controller)
-    } catch (reason) {
       if (!controller.signal.aborted)
         setSubmitError(
           reason instanceof Error
@@ -2388,10 +2401,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 version.version_number !== source.webCapture.versionNumber ||
                 typeof version.content !== "string"
               )
-                throw new Error("Snapshot changed outside refresh")
+                throw new WebCaptureNotCurrentError(
+                  "Snapshot changed outside refresh",
+                  source.id
+                )
               const digest = await sha256Text(version.content)
               assertCurrent()
-              if (digest !== source.webCapture.contentSha256) throw new Error("Snapshot changed outside refresh")
+              if (digest !== source.webCapture.contentSha256)
+                throw new WebCaptureNotCurrentError(
+                  "Snapshot changed outside refresh",
+                  source.id
+                )
               return { source, fullText: version.content }
             }
             const detail = await tldwClient.getMediaDetails(source.mediaId, {
@@ -2410,14 +2430,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         )
 
         assertCurrent()
-        if (
-          detailResults.some(
-            (result, index) =>
-              result.status === "rejected" &&
-              queryableSelectedSources[index].webCapture
-          )
+        const captureFailure = detailResults.find(
+          (result, index) =>
+            result.status === "rejected" &&
+            queryableSelectedSources[index].webCapture
         )
-          throw new Error("Snapshot changed outside refresh")
+        if (captureFailure?.status === "rejected") throw captureFailure.reason
         const resolvedSourceContexts: Array<{
           source: WorkspaceSource
           fullText: string

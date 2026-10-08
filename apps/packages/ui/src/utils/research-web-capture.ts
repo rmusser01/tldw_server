@@ -20,8 +20,17 @@ const trimCaptureText = (text: string): string =>
     /^[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g,
     ""
   )
+export class WebCaptureNotCurrentError extends Error {
+  constructor(
+    message: string,
+    public sourceId?: string
+  ) {
+    super(message)
+  }
+}
+
 const fail = (): never => {
-  throw new Error(
+  throw new WebCaptureNotCurrentError(
     "Web capture is unconfirmed or no longer current. Retry or recapture before Ask."
   )
 }
@@ -339,45 +348,50 @@ export async function assertWebCaptureHeadCurrent(
   workspaceId: string,
   options: ScopedRequestOptions
 ): Promise<void> {
-  assertScope(options)
-  const pin = source.webCapture
-  if (
-    !pin ||
-    source.id !== `web-clipper:${pin.clipId}` ||
-    source.mediaId !== pin.mediaId ||
-    source.url !== pin.requestedUrl
-  )
-    fail()
-  const sources = await tldwClient.getWorkspaceSources(workspaceId, options)
-  assertScope(options)
-  verifySource(
-    sources.find((row) => row.id === source.id),
-    pin.clipId,
-    workspaceId,
-    pin.requestedUrl,
-    pin.mediaId
-  )
-  const versions = await tldwClient.listMediaDocumentVersions(
-    pin.mediaId,
-    options
-  )
-  assertScope(options)
-  const head = versions.reduce<MediaDocumentVersion | undefined>(
-    (best, v) => (!best || v.version_number > best.version_number ? v : best),
-    undefined
-  )
-  if (
-    !head ||
-    head.version_number !== pin.versionNumber ||
-    head.uuid !== pin.versionUuid
-  )
-    fail()
-  await verifyVersion(head, pin.mediaId, pin.clipId, workspaceId, {
-    mode: "server_article",
-    requested_url: pin.requestedUrl,
-    captured_at: pin.capturedAt,
-    content_sha256: pin.contentSha256,
-    refresh_of: pin.refreshOf
-  })
-  assertScope(options)
+  try {
+    assertScope(options)
+    const pin = source.webCapture
+    if (
+      !pin ||
+      source.id !== `web-clipper:${pin.clipId}` ||
+      source.mediaId !== pin.mediaId ||
+      source.url !== pin.requestedUrl
+    )
+      fail()
+    const sources = await tldwClient.getWorkspaceSources(workspaceId, options)
+    assertScope(options)
+    verifySource(
+      sources.find((row) => row.id === source.id),
+      pin.clipId,
+      workspaceId,
+      pin.requestedUrl,
+      pin.mediaId
+    )
+    const versions = await tldwClient.listMediaDocumentVersions(
+      pin.mediaId,
+      options
+    )
+    assertScope(options)
+    const head = versions.reduce<MediaDocumentVersion | undefined>(
+      (best, v) => (!best || v.version_number > best.version_number ? v : best),
+      undefined
+    )
+    if (
+      !head ||
+      head.version_number !== pin.versionNumber ||
+      head.uuid !== pin.versionUuid
+    )
+      fail()
+    await verifyVersion(head, pin.mediaId, pin.clipId, workspaceId, {
+      mode: "server_article",
+      requested_url: pin.requestedUrl,
+      captured_at: pin.capturedAt,
+      content_sha256: pin.contentSha256,
+      refresh_of: pin.refreshOf
+    })
+    assertScope(options)
+  } catch (reason) {
+    if (reason instanceof WebCaptureNotCurrentError) reason.sourceId = source.id
+    throw reason
+  }
 }
