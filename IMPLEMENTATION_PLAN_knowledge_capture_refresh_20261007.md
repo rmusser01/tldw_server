@@ -142,7 +142,7 @@ const confirmed = await confirmWebCaptureAcceptance(body, options, assertCurrent
 **Goal:** Users can preview/save/refresh/retry captures and Ask only on a current owned snapshot.
 **Success Criteria:** Explicit UI actions, honest extraction/version labels, no accidental save, retained original evidence and safe retirement/recovery.
 **Tests:** SourcesPane and capture workflow, prefill/provenance/import/export/restore tests.
-**Status:** Complete
+**Status:** In Progress
 
 ### Task 4: Integrate capture and refresh in Research
 
@@ -200,6 +200,19 @@ t('option:notesSearch.latestAssistPrefix', { defaultValue: 'Latest AI assist' })
 - [x] Repair the confirmed empty-prompt root in existing application.getPrompt for WEB_CLIPPER_ANALYZE_MESSAGE_TYPE using existing DEFAULT_CUSTOM_PROMPT; retain unknown/custom behavior and transport validation. Bind the existing transient pending Analyze record to producer verified serverChatMirrorOwnerKey, normalize unowned requests fail closed, and fence current owner/origin/view before dispatch and post-await retirement/notification. Preserve saved clips and conditional replacement identity; add actual producer/normalizer/same-owner, cross-account/origin and retired same-ID replacement RED/GREEN, then verify rebuilt real transport/SSE. No new wire API, persistence subsystem or history authority.
 
 Task5 verification: qualified native-resolution407/407; default383passed24failed+32errors remains qualified. Both types/Chrome build/manual hooks pass; zero new lint diagnostics (inherited1error71warnings). Actual built Clipper save200→singlecompletions200/SSEsuccess/DONE verified and pending retired; independent spec+quality review approved49701beaec. Native/spoken/device/participant evidence remains open.
+
+### Task 7: Burn down inherited Research assertion failures
+
+**Associated task:** TASK-13531 (separate reviewable maintenance unit).
+
+**Files:** Owning workspace storage, saved-normal Chat, ChatPane.stage1 and SourceViewControls test files; existing shared production roots only if actual defects are proved.
+
+**Interfaces:** Existing selected-source persistence/quota feedback, exact selected provider identity, workspace chat ownership/hydration and accessible saved-view keyboard/dialog lifecycle. No new feature, store, dependency, persistence authority or durable policy.
+
+- [ ] Diagnose the ten exact failures reproduced on canonical dev2c5f19d (233 cases,223 passed10 failed) and feature621. Distinguish obsolete fixtures/expectations from actual defects through current contracts and real behavior; retain exact baseline receipts.
+- [ ] Use behavioral RED/GREEN and the existing minimal primitives; preserve meaningful keyboard, focus, busy state, server confirmation, owner/retirement and stale-submit assertions. Correct obsolete structural expectations only with explicit contract evidence; never skip, weaken security checks, blanket mock UI or enlarge timeouts without a diagnosed cause.
+- [ ] Run focused and four owning suites, current client typechecks, scoped lint/format/hooks and applicable security/browser checks. Record qualified/default environment outcomes; independent task review before Task6 final reconciliation. No inaccurate TASK12116 assignment or broad-green claim.
+- [ ] Record final evidence and status via backlog-py; Task6 includes this scoped unit in final report and current reviewed validation.
 
 ## Stage 5: Integrated verification and accurate tracking
 **Goal:** Reviewable feature evidence and honest remaining followups.
