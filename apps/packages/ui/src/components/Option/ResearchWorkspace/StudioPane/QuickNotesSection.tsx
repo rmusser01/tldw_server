@@ -1176,6 +1176,33 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         });
       }
       acknowledged = true;
+      // An accepted create still needs a recoverable canonical binding before
+      // its immutable operation can be removed. Known UUID updates already
+      // have that independent identity; migration never recreates snapshots.
+      if (
+        !(
+          canonicalUpdateBound &&
+          canonicalWikilinkNoteId(String(saved.id)) === canonicalNoteId
+        )
+      ) {
+        const persistence = useWorkspaceStore.persist.getOptions();
+        const persistedWorkspace = await persistence.storage?.getItem(
+          persistence.name,
+        );
+        if (!isCurrent()) return;
+        const persistedSnapshot = workspaceId
+          ? persistedWorkspace?.state?.workspaceSnapshots?.[workspaceId]
+          : undefined;
+        if (
+          saved.id == null ||
+          persistedSnapshot?.workspaceTag !== draftWorkspaceTag ||
+          String(persistedSnapshot.currentNote?.id) !== String(saved.id) ||
+          persistedSnapshot.currentNote?.pendingNoteWriteKey !== pending.entry.key
+        )
+          throw new Error(
+            "Could not retain the accepted note identity in this Workspace. Retry the same saved operation.",
+          );
+      }
       await retireSurfaceOfflineDraft(
         authorityScope,
         pending.entry.key,
