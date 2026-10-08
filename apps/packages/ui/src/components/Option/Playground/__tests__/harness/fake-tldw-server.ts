@@ -483,6 +483,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     }
     if ((path === "/api/v1/chats/" || path === "/api/v1/chats") && method === "POST") {
       const chat = createChat(String(body?.title ?? "Untitled"), {
+        ...(body?.id !== undefined ? { id: body.id } : {}),
         state: String(body?.state ?? "in-progress"),
         source: body?.source ?? null
       })

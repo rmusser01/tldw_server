@@ -366,7 +366,7 @@ export function HistorySelectionReview({
             {text("review", "Review conversation history")}
           </Button>
         )}
-        {selection.status === "ready" && (
+        {selection.status === "ready" && nodes.length > 0 && (
           <Button
             variant="ghost"
             size="sm"

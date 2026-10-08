@@ -548,7 +548,10 @@ it.each(["wrong-owner", "history-null", "messages-null"])(
 
 it("defers a fresh handle while owner verification is pending, then rejects another account", async () => {
   let finish!: (value: typeof verifiedScope) => void
-  mocks.ownerScope.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const pendingScope = new Promise<typeof verifiedScope>((resolve) => {
+    finish = resolve
+  })
+  mocks.ownerScope.mockReturnValue(pendingScope)
   usePlaygroundSessionStore.getState().saveSession({
     chatDraftHandle: { address: { kind: "fresh", id: "private", scope: { type: "global" }, temporary: false }, ownerHash }, scopeKey: "current"
   })
@@ -588,7 +591,10 @@ it("does not persist a target ID while the draft still addresses its source", as
 
 it("does not publish the automatic fresh allocation before a retained handle is verified", async () => {
   let finish!: (value: typeof verifiedScope) => void
-  mocks.ownerScope.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const pendingScope = new Promise<typeof verifiedScope>((resolve) => {
+    finish = resolve
+  })
+  mocks.ownerScope.mockReturnValue(pendingScope)
   const address = { kind: "fresh" as const, id: "retained", scope: { type: "global" as const }, temporary: true }
   usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address, ownerHash }, scopeKey: "current" })
   useStoreMessageOption.getState().startNewChatDraft()

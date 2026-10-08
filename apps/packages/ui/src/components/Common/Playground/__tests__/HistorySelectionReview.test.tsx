@@ -368,3 +368,86 @@ it.each(['dispatching', 'unknown', 'partial'] as const)('scopes %s copy guarante
   expect(screen.getByText(/connection failure may have left multiple server copies/)).toBeVisible()
   expect(screen.queryByText(/No copy will be retried automatically/)).toBeNull()
 })
+
+
+describe("available history-path actions (TASK-13550)", () => {
+  it("hides both history choices for a ready empty source", () => {
+    const selection = {
+      ...controller(),
+      status: "ready",
+      capture: { snapshot: { nodes: [], source_digest: "empty" } }
+    } as unknown as HistorySelectionController
+    render(<HistorySelectionReview selection={selection} />)
+    expect(
+      screen.queryByRole("button", { name: "Use no prior messages" })
+    ).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Review conversation history" })
+    ).toBeNull()
+  })
+
+  it("retains the empty-path action for a ready nonempty source", () => {
+    const selection = {
+      ...controller(),
+      status: "ready",
+      capture: { snapshot: { nodes: [nodes[0]], source_digest: "one" } }
+    } as unknown as HistorySelectionController
+    render(<HistorySelectionReview selection={selection} />)
+    expect(
+      screen.getByRole("button", { name: "Review conversation history" })
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use no prior messages" })
+    )
+    expect(selection.choose).toHaveBeenCalledWith({ kind: "empty" })
+  })
+
+  it("retains expansion and recovery when there is no history to omit", () => {
+    const selection = {
+      ...controller(),
+      status: "ready",
+      capture: { snapshot: { nodes: [], source_digest: "empty" } },
+      recoveries: [
+        {
+          scope: { profile_id: "profile", client_session_id: "session" },
+          turn: {
+            operation_id: "retained",
+            state: "generated_unsaved",
+            input_text: "question",
+            result_text: "Retained answer"
+          }
+        }
+      ],
+      dismissRecovery: vi.fn()
+    } as unknown as HistorySelectionController
+    const onExpand = vi.fn()
+    render(<HistorySelectionReview selection={selection} onExpand={onExpand} />)
+    expect(screen.getByText("Retained answer")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    expect(onExpand).toHaveBeenCalledOnce()
+    expect(
+      screen.getByRole("button", { name: "Dismiss recovery" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Use no prior messages" })
+    ).toBeNull()
+  })
+
+  it.each([
+    { status: "loading", title: "Loading selected history" },
+    { status: "stale_selection", title: "Conversation history changed" },
+    {
+      status: "unsupported_history_capability",
+      title: "Selected history unavailable"
+    }
+  ])("retains $status feedback for an empty source", ({ status, title }) => {
+    const selection = {
+      ...controller(),
+      status,
+      error: "source_changed",
+      capture: { snapshot: { nodes: [], source_digest: "empty" } }
+    } as unknown as HistorySelectionController
+    render(<HistorySelectionReview selection={selection} />)
+    expect(screen.getByText(title)).toBeInTheDocument()
+  })
+})
