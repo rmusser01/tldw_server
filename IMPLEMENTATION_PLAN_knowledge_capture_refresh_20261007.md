@@ -224,6 +224,17 @@ Task7 fix2: shared saved-view dialog focus now restores from existing native clo
 **Tests:** Integrated backend/sharedUI tests, builds, OpenAPI drift, lint, Bandit, pre-commit, CDP workflows.
 **Status:** In Progress
 
+### TASK-13533: Genuine optional Mermaid preview loading
+**Goal:** Restore the unchanged production Turbopack route budget by deferring only the optional preview dialog.
+**Success Criteria:** Initial diagram render does not load preview; first use loads real SVG, closed dialog stays mounted for native close/focus, source change retires pending open; unchanged 600/900 KiB gates pass on exact tracked Docker inputs.
+**Tests:** Focused RED/GREEN cold-module and preview lifecycle, affected Mermaid/Markdown tests, existing client types, exact Dockerfile production build and new owned CDP tab/network/native QA.
+**Status:** In Progress; hosted amd64 validation remains controller-owned.
+**ADR check:** ADR required: no; searched ADR README, reuse existing CommandPaletteHost React.lazy/Suspense first-use retained mount convention without a new durable decision.
+
+- [x] RED regression and minimum genuine optional boundary.
+- [x] Affected shared tests, client types and scoped checks.
+- [x] Exact tracked production Docker artifact/token/budget gates, owned cold-network/native QA, extension development build and accurate qualified receipts/tracking. Local aarch64595.0/600 and874.5/900;111/111 loaded-byte matches; hosted amd64/controller review/publication remain pending. Redundant test-only frozen-install build canceled, no replacement.
+
 ### TASK-13530.1: PR3213 media shard inventory completion
 **Goal:** Keep the new current-media deletion regression in every existing media-core-api shard and its exact inventory contract.
 **Success Criteria:** All five workflow matrices and the exact-once contract agree on the regression path.

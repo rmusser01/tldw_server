@@ -6171,5 +6171,461 @@
       "prior_diffcheck_fingerprint": "Unavailable to this worker; no hash or byte count asserted.",
       "qualification": "Current copies are preserved under unique names. Do not read current content at reused paths as historical receipts. No tests rerun for this evidence correction; scoped documentation/task hooks passed to validate record changes."
     }
+  },
+  "pr3213_mermaid_budget_repair": {
+    "status": "Locally validated; independently reviewed publication and current hosted amd64 checks pending",
+    "task": "TASK-13533",
+    "base": "3b4d624b42537bf60ce06f75a1fa411c3ab15151",
+    "adr_check": {
+      "required": false,
+      "reason": "Searched Docs/ADR/README.md; reuse existing Common/CommandPaletteHost React.lazy/Suspense first-use retained mounting convention, no new durable rule. Existing accepted ADR066/007/036/042 workstream policy unchanged."
+    },
+    "repair": "Only optional MermaidPreviewDialog import deferred until first preview action; latch retains mounted dialog on close/source replacement for native motion and focus. Inline renderer/download/copy/artifact/reset paths unchanged. Existing URL test fixture preserves real constructor needed by dynamic import. Cold pending-source regression loads real dialog; new native E2E covers SVG/pan/Escape/focus/reopen/reset/Close and real offscreen renderer viewport prerequisite.",
+    "production": {
+      "dockerfile": "Dockerfiles/Dockerfile.webui",
+      "command": "docker build --progress=plain -f /private/tmp/knowledge-pr3213-mermaid-context-20261008/Dockerfiles/Dockerfile.webui -t knowledge-pr3213-mermaid:20261008 /private/tmp/knowledge-pr3213-mermaid-context-20261008",
+      "accepted_receipt": "docker-build-2.log",
+      "exit": 0,
+      "platform": "linux/aarch64 (Docker reports image arm64); hosted CI amd64 remains unverified",
+      "profile": "production Turbopack, Bun1.3.2 frozen graph, Next16.1.4, default quickstart; no API keys/private env/buildargs",
+      "shared_kib_gzip": 595.0,
+      "shared_budget_kib": 600,
+      "route": "/__debug__/mermaid-chat-cards",
+      "route_kib_gzip": 874.5,
+      "route_budget_kib": 900,
+      "token_sync": "pass",
+      "image": "sha256:cb65a10a47dd822f7c0099c3d76b882bc39d1c29dad28349bd1991b5ebb3d9b1",
+      "source": {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-input-manifest.json",
+        "bytes": 1460553,
+        "sha256": "60fdaa3897c524ded1d7d7001ebb2c4372ae4eeefd53573a857cabc36f964acd"
+      },
+      "source_qualification": "Passing build2 and native QA use final product/config/lock inputs. New cold test subsequently received only lint-required component naming/types; E2E subsequently received only real offscreen scroll prerequisite. Current manifest test hashes describe final reviewable tests, not original build2 test bytes. Original Git archive remains immutable. Build3 test-only reconciliation was canceled; no final rebuild success claimed.",
+      "newest_build_exit": 130,
+      "newest_build_qualification": "Redundant frozen-install test-only reconciliation canceled; no replacement; existing successful final-product artifact remains valid."
+    },
+    "native": {
+      "receipt": {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa-3.json",
+        "bytes": 72703,
+        "sha256": "ce2665406a5a87170a9f4d7c6f8184df753f6f982f205ee668d5aa075403e84e"
+      },
+      "partial_failed_receipt": {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa-2.json",
+        "bytes": 69304,
+        "sha256": "c8a183eb5743e1ddf34cb068484fe127f3cfc826c8578f495ff03bcafac598ae"
+      },
+      "target": "A7EFD3A86099690ECF24C07ABCEE8254",
+      "url": "http://127.0.0.1:19260/__debug__/mermaid-chat-cards",
+      "script_matches": 111,
+      "initial_scripts": 107,
+      "initial_preview_requests": 0,
+      "first_use_new_scripts": 4,
+      "first_use_new_script_bytes": 104118,
+      "dynamic_scripts": [
+        {
+          "stage": "first preview",
+          "url": "http://127.0.0.1:19260/_next/static/chunks/948e9d91e7241d48.js",
+          "bytes": 7201,
+          "sha256": "ca1d03f199764cf5a7ec68033bebdb26db97f16a2d864e75ef9ed36f5ac5c331",
+          "artifactSha256": "ca1d03f199764cf5a7ec68033bebdb26db97f16a2d864e75ef9ed36f5ac5c331",
+          "matched": true,
+          "gzipBytes": 2383
+        },
+        {
+          "stage": "first preview",
+          "url": "http://127.0.0.1:19260/_next/static/chunks/92099ee97c2ef934.js",
+          "bytes": 23746,
+          "sha256": "686fc31c7bdf66fdc07d1da4a7efd057d49bfae82570ce70c936f453432cd106",
+          "artifactSha256": "686fc31c7bdf66fdc07d1da4a7efd057d49bfae82570ce70c936f453432cd106",
+          "matched": true,
+          "gzipBytes": 8046
+        },
+        {
+          "stage": "first preview",
+          "url": "http://127.0.0.1:19260/_next/static/chunks/68ef0af2992b22d6.js",
+          "bytes": 25931,
+          "sha256": "5d9343c715148773447da2b3a670c9a90700121811a876d9ff465fb2294cc90a",
+          "artifactSha256": "5d9343c715148773447da2b3a670c9a90700121811a876d9ff465fb2294cc90a",
+          "matched": true,
+          "gzipBytes": 8834
+        },
+        {
+          "stage": "first preview",
+          "url": "http://127.0.0.1:19260/_next/static/chunks/06d3f7368281ed1f.js",
+          "bytes": 47240,
+          "sha256": "2d4ba94d1ddf40e833501e58408405dbaa55a4fe9b2332592294356623358617",
+          "artifactSha256": "2d4ba94d1ddf40e833501e58408405dbaa55a4fe9b2332592294356623358617",
+          "matched": true,
+          "gzipBytes": 16034
+        }
+      ],
+      "stages": [
+        {
+          "name": "initial",
+          "requests": 116,
+          "previewRequests": []
+        },
+        {
+          "name": "first preview",
+          "requests": 120,
+          "previewRequests": [
+            "http://127.0.0.1:19260/_next/static/chunks/948e9d91e7241d48.js"
+          ]
+        },
+        {
+          "name": "keyboard pan, zoom, Escape and completed native close focus",
+          "passed": true
+        },
+        {
+          "name": "reopen reset, warm retained preview, Close completed native focus",
+          "passed": true
+        }
+      ],
+      "page_errors": 0,
+      "console_errors": 0,
+      "request_failures": 0,
+      "qualification": "Current ordinary production quickstart image; separate from earlier development advanced capture artifact/profile. Playwright over existing CDP19258 only, same new owned tab retained; no seeds, fake canonical writes, public capture fetches or capture graph replay."
+    },
+    "extension": {
+      "command": "bun run build:chrome:dev",
+      "cwd": "/private/tmp/knowledge-pr3213-mermaid-context-20261008/apps/extension",
+      "exit": 0,
+      "duration_seconds": 44,
+      "artifact": "/private/tmp/knowledge-pr3213-mermaid-context-20261008/apps/extension/build/chrome-mv3-dev",
+      "qualification": "Actual affected development Chrome build in same task-owned archived context; read-only dependency symlinks reused. Existing duplicate auto-import/Browserslist warnings. Preserved currently loaded extension; new extension preview behavior not exercised natively and not claimed."
+    },
+    "checks": {
+      "affected_tests": "51/51 across6; final lint-corrected cold test1/1 separately",
+      "webui_types_exit": 0,
+      "extension_types_exit": 0,
+      "shared_lint": "0errors/2 inherited existing-test any warnings; no new product/new-test findings",
+      "e2e_lint_exit": 0,
+      "format": "Product/new cold-test pass explicit adjacent no-semi/no-trailing-comma style. Both existing owning-test/E2E files fail whole-file style on BASE and final, preserved outside actual hunks. No massreformat.",
+      "bandit": "N/A: touched executable product/tests are TypeScript only; no touched Python, no skipped Python security gate or new dependency.",
+      "diff_check": "git diff --check exit0"
+    },
+    "owned_handles": {
+      "image_tag": "knowledge-pr3213-mermaid:20261008",
+      "image": "sha256:cb65a10a47dd822f7c0099c3d76b882bc39d1c29dad28349bd1991b5ebb3d9b1",
+      "container_name": "knowledge-pr3213-mermaid-qa-20261008",
+      "container": "ab664b3310139c03973d40ce46da031783bd8acb4aa3f9dc818fb1fda00ba3e4",
+      "binding": "127.0.0.1:19260 ->3000",
+      "target": "A7EFD3A86099690ECF24C07ABCEE8254",
+      "context": "/private/tmp/knowledge-pr3213-mermaid-context-20261008",
+      "runtime_static": "/private/tmp/knowledge-pr3213-mermaid-runtime-static",
+      "preserved": "Existing frontend88275/API52363/mock37531/Chrome79323 and tabs/profile/data/model9099/loaded extension preserved; no cleanup/prune/push/merge. Task13512 native/device and unresolved historical CSV13532 remain tracked."
+    },
+    "receipts": [
+      {
+        "receipt": "red-1.log",
+        "exit": 1,
+        "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "First test fixture blocked its static module import before the test ran; task-owned node5420 terminated. Not accepted RED evidence.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-red-1.log",
+        "bytes": 2172,
+        "sha256": "70318df69e4cf785dd0fc02ef65ab7e17e6c4686399fa7457c88b9853fbcf706"
+      },
+      {
+        "receipt": "red-2.log",
+        "exit": 1,
+        "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "Accepted RED: optional preview module loaded before action, expected requests0 received1.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-red-2.log",
+        "bytes": 1660,
+        "sha256": "6cb523f1a8e0712f0e971bf27be2347bc6c044e8690d88563f95b737ed7552f1"
+      },
+      {
+        "receipt": "green-focused-1.log",
+        "exit": 1,
+        "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx",
+        "qualification": "New test passed; existing global URL object fixture removed its constructor, causing real dynamic import failure. Fixed only existing fixture via class extends URL.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-green-focused-1.log",
+        "bytes": 8109,
+        "sha256": "8c78f29bf68cf0511e582ec08efca416e51f7f37ef776f829d415a351a2cfacb"
+      },
+      {
+        "receipt": "green-focused-2.log",
+        "exit": 0,
+        "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx",
+        "qualification": "13/13 passed; jsdom localStorage experimental warning.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-green-focused-2.log",
+        "bytes": 1024,
+        "sha256": "604f976b752a19ba8eaba2f7f8ccf6beaa183b977498554f6a018b8d8a1641c9"
+      },
+      {
+        "receipt": "green-affected.log",
+        "exit": 0,
+        "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx ../packages/ui/src/components/Common/__tests__/MermaidPreviewDialog.test.tsx ../packages/ui/src/components/Common/__tests__/Markdown.mermaid.test.tsx ../packages/ui/src/components/Common/__tests__/Mermaid.test.tsx ../packages/ui/src/components/Sidepanel/Chat/__tests__/ArtifactsPanel.mermaid.test.tsx",
+        "qualification": "51/51 across6; existing jsdom/i18next warnings. Final subsequent change only named/typed new test fixture to satisfy Hook lint; product unchanged.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-green-affected.log",
+        "bytes": 2935,
+        "sha256": "ef68c72bc7a1e3caa03f58f3a40626ba4485b617c4640bceb3800c50fca4882e"
+      },
+      {
+        "receipt": "lazy-green-final.log",
+        "exit": 0,
+        "command": "bun run test:run ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "Final lint-corrected cold/pending-source/open/close/reopen regression1/1 passed; jsdom warning.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-lazy-green-final.log",
+        "bytes": 667,
+        "sha256": "e50926352afc7aab84f3bdce807fe32d2c72ff430d5ade404f064c119a3d6acb"
+      },
+      {
+        "receipt": "web-types.log",
+        "exit": 0,
+        "command": "bun run typecheck",
+        "qualification": "Existing WebUI config, host installed dependency graph; product final; later test-only typing correction.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-web-types.log",
+        "bytes": 64,
+        "sha256": "c67398a876270961ec43a24a93502c20fd8778371cede4bd977ddd4f2d2680b5"
+      },
+      {
+        "receipt": "extension-types.log",
+        "exit": 0,
+        "command": "bun run compile",
+        "qualification": "Existing tsconfig.compile.json, host graph; product final.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-extension-types.log",
+        "bytes": 40,
+        "sha256": "dc0e99c0cf65efb41a84818514f58275cbaacd74d58aea772575b45d072cb5dd"
+      },
+      {
+        "receipt": "lint.log",
+        "exit": 0,
+        "command": "bun x eslint ../packages/ui/src/components/Common/MermaidDiagramBlock.tsx ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx ../packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx e2e/smoke/mermaid-chat-cards.spec.ts",
+        "qualification": "E2E checked; shared files outside base were ignored; not shared proof.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-lint.log",
+        "bytes": 693,
+        "sha256": "9a9c0f9f3b801d00f3904345fe07adb6bf7e83bae2b89109d1396aa42401526b"
+      },
+      {
+        "receipt": "shared-lint.log",
+        "exit": 2,
+        "command": "bun x eslint src/components/Common/MermaidDiagramBlock.tsx src/components/Common/__tests__/MermaidDiagramBlock.test.tsx src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "No shared config; bunx temporary cached ESLint10.12 could not find config; no primary dependency/package changes.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-shared-lint.log",
+        "bytes": 568,
+        "sha256": "59595e8d064455ac61bd493015532d518e0b1998f590be43ab6c9c9be435d6cc"
+      },
+      {
+        "receipt": "shared-lint-2.log",
+        "exit": 1,
+        "command": "apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/components/Common/MermaidDiagramBlock.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "New anonymous default fixture Hook naming violation; corrected named Mermaid component and removed new any warnings.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-shared-lint-2.log",
+        "bytes": 2103,
+        "sha256": "8566cb51502bc814c12f23663b7c01358e423e044047b2d6d4c3f8fea8553b90"
+      },
+      {
+        "receipt": "shared-lint-final.log",
+        "exit": 0,
+        "command": "apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/components/Common/MermaidDiagramBlock.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "0errors/2 unchanged existing-test any warnings; config root pages-directory advisory. No new product/new-test lint findings.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-shared-lint-final.log",
+        "bytes": 724,
+        "sha256": "ef135ccd710570e6d86176ddc7b344f8f6247f7748ff6b313184c6ca3c8f1e3d"
+      },
+      {
+        "receipt": "format-write.log",
+        "exit": 0,
+        "command": "bun x prettier --write apps/packages/ui/src/components/Common/MermaidDiagramBlock.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts",
+        "qualification": "Default style caused massreformat; restored baseline outside actual hunks before final build.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-format-write.log",
+        "bytes": 375,
+        "sha256": "2e6d545508670e227a3f08d452adf83bfd2243beaf62e8aaf8363fbd2bf5eeb2"
+      },
+      {
+        "receipt": "format-style.log",
+        "exit": 0,
+        "command": "bun x prettier --write --no-semi --trailing-comma none --single-quote false apps/packages/ui/src/components/Common/MermaidDiagramBlock.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts",
+        "qualification": "Followed by exact BASE restoration outside E2E/new owning hunks; no massreformat retained.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-format-style.log",
+        "bytes": 375,
+        "sha256": "dd4be008ba5e97a421f721150e48e5278fd17c63fee2c93c59bc60a8fd315db5"
+      },
+      {
+        "receipt": "lazy-format-final.log",
+        "exit": 0,
+        "command": "apps/tldw-frontend/node_modules/.bin/prettier --write --no-semi --trailing-comma none --single-quote false apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-lazy-format-final.log",
+        "bytes": 88,
+        "sha256": "fd171debce6f14e452323d75710ccf964164561cd2e9f3ff92c2d87ed777bdee"
+      },
+      {
+        "receipt": "format-scoped-final.log",
+        "exit": 0,
+        "command": "apps/tldw-frontend/node_modules/.bin/prettier --check --no-semi --trailing-comma none --single-quote false apps/packages/ui/src/components/Common/MermaidDiagramBlock.tsx apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "qualification": "Product/new file style pass.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-format-scoped-final.log",
+        "bytes": 66,
+        "sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+      },
+      {
+        "receipt": "format-base-existing.log",
+        "exit": 1,
+        "command": "apps/tldw-frontend/node_modules/.bin/prettier --check --no-semi --trailing-comma none --single-quote false /private/tmp/knowledge-pr3213-mermaid-base-owning.test.tsx /private/tmp/knowledge-pr3213-mermaid-base-e2e.spec.ts",
+        "qualification": "Both BASE existing files fail whole-file style; no broad formatting success claimed.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-format-base-existing.log",
+        "bytes": 262,
+        "sha256": "f0dc2deb6a42a71580804582c99c1135a776f2f0eae6967fa0f99931fdea5386"
+      },
+      {
+        "receipt": "format-existing-final.log",
+        "exit": 1,
+        "command": "apps/tldw-frontend/node_modules/.bin/prettier --check --no-semi --trailing-comma none --single-quote false apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts",
+        "qualification": "Same two existing files fail whole-file style; minimal adjacent new behavior only.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-format-existing-final.log",
+        "bytes": 248,
+        "sha256": "7e149579b258d7d0185712fb8e7773b9025b873a6fcae47dcc326e71ebd30783"
+      },
+      {
+        "receipt": "docker-build-1.log",
+        "exit": 130,
+        "command": "docker build --progress=plain -f /private/tmp/knowledge-pr3213-mermaid-context-20261008/Dockerfiles/Dockerfile.webui -t knowledge-pr3213-mermaid:20261008 /private/tmp/knowledge-pr3213-mermaid-context-20261008",
+        "qualification": "Stopped only owned docker PID5754 during install to align minimal baseline style; no budget result inferred.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-docker-build-1.log",
+        "bytes": 2120,
+        "sha256": "56b0be6ab19f3a0fc76a0dda166bae79ceb0c7e5bf779ffb5d98c3bb909def3e"
+      },
+      {
+        "receipt": "docker-build-2.log",
+        "exit": 0,
+        "command": "docker build --progress=plain -f /private/tmp/knowledge-pr3213-mermaid-context-20261008/Dockerfiles/Dockerfile.webui -t knowledge-pr3213-mermaid:20261008 /private/tmp/knowledge-pr3213-mermaid-context-20261008",
+        "qualification": "Actual production Turbopack/token/gzip passes; final product same; later new-test lint correction prompted bounded source reconciliation build already started before controller instructed no test-only rebuilds.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-docker-build-2.log",
+        "bytes": 10961,
+        "sha256": "e7c44549f24618b791e1240098ceb46a73256570cffefa7f0be3c1a06e8cde4e"
+      },
+      {
+        "receipt": "extension-build-1.log",
+        "exit": 1,
+        "command": "bun run build:chrome:dev",
+        "qualification": "Executed only owned archived context; missing existing frontend node_modules symlink prevented Tailwind forms resolution. No primary dependency mutation.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-extension-build-1.log",
+        "bytes": 12760,
+        "sha256": "82c87c48dafd02917b43a11bf012b59102e5862056632cb8e8bb372b509c7cf0"
+      },
+      {
+        "receipt": "extension-build-2.log",
+        "exit": 0,
+        "command": "bun run build:chrome:dev",
+        "qualification": "Owned context frontend dependency symlink supplied; actual development Chrome build44s succeeds. Existing duplicated auto-import/Browserslist warnings retained; new built extension not loaded into existing Chrome/profile, native extension preview unverified.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-extension-build-2.log",
+        "bytes": 209160,
+        "sha256": "a846032c476ee77fc926df155a7dd410e031c125938cf028c5474b28a6d75dc9"
+      },
+      {
+        "receipt": "docker-build-final.log",
+        "exit": 130,
+        "command": "docker build --progress=plain -f /private/tmp/knowledge-pr3213-mermaid-context-20261008/Dockerfiles/Dockerfile.webui -t knowledge-pr3213-mermaid:20261008 /private/tmp/knowledge-pr3213-mermaid-context-20261008",
+        "qualification": "Redundant test-only input reconciliation remained in frozen installation without further output; canceled only owned PID6408 as directed. No replacement; build2 has identical final product/config/lock inputs and is the actual QA artifact.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-docker-build-final.log",
+        "bytes": 2184,
+        "sha256": "f43aae1a7f0186d3f31462fdf21b518f12023600481bb0ec39a3192118533066"
+      },
+      {
+        "receipt": "native-qa.log",
+        "exit": 1,
+        "command": "docker run -d --name knowledge-pr3213-mermaid-qa-20261008 -p 127.0.0.1:19260:3000 sha256:d78a056c3b4fb7f7a80959ecdbdcd5f254748b8b52aaf57732dc2c920950ce15; docker cp knowledge-pr3213-mermaid-qa-20261008:/app/apps/tldw-frontend/.next/static /private/tmp/knowledge-pr3213-mermaid-runtime-static; node /private/tmp/knowledge-pr3213-mermaid-native-qa.mjs",
+        "qualification": "First runtime reference incorrectly used exported config digest instead of actual Docker manifest/image ID. No container created; dependent artifact directory missing before browser work. Corrected with actual image inspect, not another build.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa.log",
+        "bytes": 754,
+        "sha256": "5b9312e17988aa11d1e920e3a4dcb7e7a21e32e15df699f5f5455efc46333b9f"
+      },
+      {
+        "receipt": "native-qa-2.log",
+        "exit": 1,
+        "command": "node /private/tmp/knowledge-pr3213-mermaid-native-qa.mjs",
+        "qualification": "111 parsed byte matches and all primary native/cold-chunk checks passed; final offscreen artifact fixture remained IntersectionObserver-hidden. Partial JSON preserved verbatim in native-qa-2.json. Real scroll prerequisite added to QA and owning E2E, no product change.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa-2.log",
+        "bytes": 908,
+        "sha256": "d3636dd60f36e3814e6070451b76af79f070247bc1e63d892b61972010ab1331"
+      },
+      {
+        "receipt": "native-qa-3.log",
+        "exit": 0,
+        "command": "node /private/tmp/knowledge-pr3213-mermaid-native-qa.mjs",
+        "qualification": "Same verified owned target, new cache-disabled navigation on identical actual production image. All native/cold-network and existing fixture checks pass;111/111 emitted script bytes match;0pageerrors/consoleerrors/requestfailures.",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa-3.log",
+        "bytes": 367,
+        "sha256": "0ad77687aafb3bdce19cfa1f5d056c8b995e0d4616dd090b5ac73541df63cefa"
+      },
+      {
+        "receipt": "e2e-lint-final.log",
+        "exit": 0,
+        "command": "apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts",
+        "path": "/private/tmp/knowledge-pr3213-mermaid-e2e-lint-final.log",
+        "bytes": 331,
+        "sha256": "6f82b00606242dded2e0cc6b14b4e0a155a1fe2899355d7c6c0a56138cff9c1d"
+      }
+    ],
+    "artifact_receipts": [
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-input-archive.tar",
+        "bytes": 118077440,
+        "sha256": "5a543d186dcfd38e4df15bda54b74e1a984b8193ed8cdc43a8c80afc14c66fee"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-input-manifest.json",
+        "bytes": 1460553,
+        "sha256": "60fdaa3897c524ded1d7d7001ebb2c4372ae4eeefd53573a857cabc36f964acd"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa-2.json",
+        "bytes": 69304,
+        "sha256": "c8a183eb5743e1ddf34cb068484fe127f3cfc826c8578f495ff03bcafac598ae"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa-3.json",
+        "bytes": 72703,
+        "sha256": "ce2665406a5a87170a9f4d7c6f8184df753f6f982f205ee668d5aa075403e84e"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-final.png",
+        "bytes": 108982,
+        "sha256": "9123aafb7b222035aba5a9c28addb045835e4fd99df747047c93a11355f94925"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-image-build2.txt",
+        "bytes": 78,
+        "sha256": "bc41ecd2afabbd2008b839aa6de8dbcc6a3c08be60a76594cdc97adf3a3979b0"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-runtime-identity.txt",
+        "bytes": 194,
+        "sha256": "8d6b920304f39e55539da0b3cfaf5e8e0d6a3e14df8dee7067d7e57760e985ab"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-runtime-start.log",
+        "bytes": 130,
+        "sha256": "62c2c4f068c7ae7df375a79b754a571ff46eb62c60811275f3fa70a15fec1668"
+      },
+      {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-native-qa.mjs",
+        "bytes": 6820,
+        "sha256": "5eed3f52b5c612f10f232ba61df708c38a50b8afe97aea0300cd36693907f501"
+      }
+    ],
+    "manual_hooks": {
+      "exit": 0,
+      "command": "source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv-uat-fixall-py312-20261007/bin/activate && python -m pre_commit run --files [exact_scope]",
+      "exact_scope": [
+        "IMPLEMENTATION_PLAN_knowledge_capture_refresh_20261007.md",
+        "Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md",
+        "Docs/Reviews/artifacts/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.json",
+        "apps/packages/ui/src/components/Common/MermaidDiagramBlock.tsx",
+        "apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.test.tsx",
+        "apps/packages/ui/src/components/Common/__tests__/MermaidDiagramBlock.lazy.test.tsx",
+        "apps/tldw-frontend/e2e/smoke/mermaid-chat-cards.spec.ts",
+        "backlog/tasks/task-13533 - Restore-production-WebUI-bundle-budget-after-Knowledge-changes.md",
+        "backlog/tasks/task-13514 - Retain-Knowledge-provenance-and-full-non-media-Research-source-context.md"
+      ],
+      "receipt": {
+        "path": "/private/tmp/knowledge-pr3213-mermaid-hooks-pre-final.log",
+        "bytes": 1288,
+        "sha256": "3901a38bf379d0a01891fe4ccca12714bc91d1f047e338c098fa206a946464c3"
+      },
+      "qualification": "Exact9-file scoped manual hooks pass; normal commit hooks also required. Python/YAML/TOML format/security checks skip because no applicable files."
+    }
   }
 }
