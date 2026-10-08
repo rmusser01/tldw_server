@@ -149,11 +149,16 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => storeOptionState.value
+vi.mock("@/store/option", async original => {
+  const actual = await original<typeof import("@/store/option")>()
+  return {
+    ...actual,
+    useStoreMessageOption: {
+      getState: () => ({ ...actual.useStoreMessageOption.getState(), ...storeOptionState.value }),
+      setState: actual.useStoreMessageOption.setState
+    }
   }
-}))
+})
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))

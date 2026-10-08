@@ -1720,3 +1720,18 @@ it("native Save refresh refuses a newer canonical target before publication", as
     mounted.hook.unmount()
   }
 })
+
+
+it("explicit regeneration recovery opens the actual alternative reply without treating original input admission as a new send", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.open(editedRecoveryOwner) })
+  const origin = hook.result.current.view!, edited = savedEditedRecovery(origin)
+  const entry = { ...edited, turn: { ...edited.turn, action: "regenerate" as const, selection_digest: "REGENERATION SELECTION",
+    input_text: "Original question", admission: { ...edited.turn.admission, selection_digest: "ORIGINAL ADMISSION" } } }
+  mocks.recoveries.mockResolvedValue([entry]); mocks.capture.mockClear()
+  await act(async () => { expect(await hook.result.current.openRecoveryResult(entry, () => true)).toBe(true) })
+  expect(mocks.capture).toHaveBeenCalledOnce()
+  expect(hook.result.current.view?.cursor).toEqual({ kind: "after_message", message_id: "b" })
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(entry.scope, origin, entry.turn.operation_id, "completed")
+  hook.unmount()
+})

@@ -2,7 +2,7 @@
 /**
  * Red-first reproductions for #3106 (UX G05, CM-01): Regenerate and
  * Edit -> "Save & Send" must work on a loaded saved chat instead of failing
- * with raw error codes. Regenerate remains `it.fails` and is not a positive result. Edit & resend
+ * with raw error codes. Regeneration uses a genuinely admitted saved exchange. Edit & resend
  * asserts preserved canonical originals and the new selected branch.
  */
 import {
@@ -13,6 +13,8 @@ import {
   HARNESS_WAIT,
   openSavedServerChat,
   renderPlayground,
+  sendFromComposer,
+  waitForChatIdle,
   resetPlaygroundHarness,
   screen,
   SidebarServerChatButton,
@@ -172,10 +174,9 @@ describe(
       }
     })
 
-    // CM-01 #3106 — useChatActions.ts:4766-4781 hands the HistorySelection controller to regenerate whenever it is not
-    // idle (any loaded chat), and messageHandlers.ts:88-95 then always throws "unsupported_history_regeneration".
-    it.fails(
-      "CM-01 (#3106): Regenerate on a loaded server chat sends a completion for the last user turn",
+    // Raw legacy seed rows carry no immutable input admission and remain an honest negative control.
+    it(
+      "CM-01 (#3106): an unqualified legacy saved reply refuses regeneration without duplicating its question",
       async () => {
         const view = await renderWithSavedChat()
 
@@ -183,10 +184,11 @@ describe(
           await view.user.click(
             screen.getByRole("button", { name: "Regenerate" })
           )
-          await expectActionSent(view.server, {
-            role: "user",
-            content: "Saved question"
-          })
+          await waitFor(() => expect(visibleNotifications().length).toBeGreaterThan(0), HARNESS_WAIT)
+          expect(visibleNotifications().join(" ")).toContain("original exchange and draft are kept")
+          expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
+          expect(view.server.chats.get("saved-chat")!.messages.map(row => row.content)).toEqual(["Saved question", "Saved answer"])
+          expect(screen.getByText("Saved answer")).toBeInTheDocument()
         })
       }
     )
@@ -263,3 +265,61 @@ describe(
     })
   }
 )
+
+
+const renderWithAdmittedExchange = async () => {
+  const server = createFakeTldwServer(); server.setDefaultReply("Saved answer")
+  const initial = await renderPlayground({ server })
+  await sendFromComposer(initial, "Saved question")
+  expect(server.chats.size).toBe(1)
+  const chat = [...server.chats.values()][0]
+  initial.unmount()
+  const view = await renderPlayground({ server, keepBrowserState: true,
+    extras: <SidebarServerChatButton chatId={chat.id} title={chat.title} /> })
+  await openSavedServerChat(view, { title: chat.title, lastMessage: "Saved answer" })
+  return { view, chat }
+}
+
+describe("native admitted regeneration through the actual Playground", { timeout: 60_000 }, () => {
+  beforeEach(async () => { await resetPlaygroundHarness() })
+  it.each([false, true])("CM-01 preserves one canonical question, original reply and unsent composer through a held reply %s", async held => {
+    const { view, chat } = await renderWithAdmittedExchange()
+    const original = structuredClone(chat.messages)
+    const priorCompletions = view.server.completionRequests().length
+    const hold = deferred()
+    view.server.planCompletion({ reply: "Regenerated alternative", ...(held ? { gate: hold.promise } : {}) })
+    await view.user.type(view.composer, "UNSENT NEXT QUESTION")
+    try {
+      await withUnhandledRejectionsRecorded(async () => {
+        await view.user.click(screen.getByRole("button", { name: "Regenerate" }))
+        await waitFor(() => expect(view.server.completionRequests()).toHaveLength(priorCompletions + 1), HARNESS_WAIT)
+        if (held) {
+          expect(useStoreMessageOption.getState().streaming).toBe(true)
+          const saved = screen.getAllByTestId("chat-message").find(row => row.getAttribute("data-role") === "assistant")!
+          expect(saved).toHaveTextContent("Saved answer")
+          expect(saved).not.toHaveAttribute("aria-busy")
+          expect(within(saved).queryByTestId("chat-message-stop-streaming")).toBeNull()
+          expect(screen.getByRole("button", { name: /Stop streaming/i })).toBeEnabled()
+          expect(view.composer).toHaveValue("UNSENT NEXT QUESTION")
+        }
+        hold.resolve(); await waitForChatIdle()
+        expect(useStoreMessageOption.getState().messages.map(row => row.message), JSON.stringify({
+          notices: visibleNotifications(), canonical: chat.messages.map(row => ({ id: row.id, role: row.role, content: row.content }))
+        })).toContain("Regenerated alternative")
+        await waitFor(() => expect(screen.getAllByTestId("chat-message")
+          .some(row => row.getAttribute("data-role") === "assistant" && row.textContent?.includes("Regenerated alternative"))).toBe(true), HARNESS_WAIT)
+        expect(view.composer).toHaveValue("UNSENT NEXT QUESTION")
+        expect(chat.messages.filter(row => original.some(old => old.id === row.id))).toEqual(original)
+        expect(chat.messages.filter(row => row.role === "user")).toEqual([original[0]])
+        const alternative = chat.messages.filter(row => !original.some(old => old.id === row.id))
+        expect(alternative).toEqual([expect.objectContaining({ role: "assistant", content: "Regenerated alternative", parent_message_id: original[0].id })])
+        const request = view.server.completionRequests().at(-1)!.body!
+        expect(request).toMatchObject({ save_to_db: true, tldw_history_branch: true,
+          metadata: { tldw_regenerate_from_message_id: original[1].id },
+          tldw_history_selection_v1: { cursor: { kind: "after_message", message_id: original[1].id } } })
+        expect(view.server.find("POST", new RegExp(`/chats/${chat.id}/messages$`)).filter(row => row.body?.role === "user")).toHaveLength(1)
+        expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
+      })
+    } finally { hold.resolve(); await waitForChatIdle() }
+  })
+})

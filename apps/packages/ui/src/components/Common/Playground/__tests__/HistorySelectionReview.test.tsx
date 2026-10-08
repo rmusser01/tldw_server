@@ -613,3 +613,19 @@ it("replacement recovery opens without waiting for an old held read and late cle
   })
   expect(next).not.toBeDisabled()
 })
+
+
+it.each(["complete", "refused", "unknown"])("native regeneration %s has accurate review copy and requires an explicit result opening", async state => {
+  const selection = completedEditedSelection()
+  selection.recoveries[0].turn.action = "regenerate"
+  if (state !== "complete") Object.assign(selection.recoveries[0].turn, { outcome: undefined, settled_message_id: undefined, state })
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText(state === "complete" ? "New reply saved" : state === "refused" ? "New reply refused" : "New reply unconfirmed")).toBeTruthy()
+  expect(screen.queryByText("Edited reply saved")).toBeNull()
+  expect(screen.queryByText("Message not added")).toBeNull()
+  expect(selection.openRecoveryResult).not.toHaveBeenCalled()
+  if (state === "complete") {
+    fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
+    await waitFor(() => expect(selection.openRecoveryResult).toHaveBeenCalledOnce())
+  } else expect(screen.queryByRole("button", { name: "Open saved reply" })).toBeNull()
+})

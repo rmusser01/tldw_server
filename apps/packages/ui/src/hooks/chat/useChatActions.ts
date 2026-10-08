@@ -1,5 +1,5 @@
-import type { NativeHistoryEditResend } from "@/types/chat-modes"
-import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage } from "./native-character-preflight"
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
+import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import {
@@ -274,7 +274,7 @@ const throwIfServicePromptScopeInvalidated = (
 }
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
-  setHistoryId?: SaveMessageData["setHistoryId"]
+  setHistoryId?: (id: string, options?: { preserveServerChatId?: boolean }) => void
   conversationId?: string | number | null
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
@@ -428,6 +428,7 @@ type UseChatActionsOptions = {
   notification: NotificationInstance
   abortController: AbortController | null
   setAbortController: (controller: AbortController | null) => void
+  getAbortController?: () => AbortController | null
   messages: Message[]
   setMessages: (
     messagesOrUpdater: Message[] | ((prev: Message[]) => Message[])
@@ -529,6 +530,7 @@ export const useChatActions = ({
   notification,
   abortController,
   setAbortController,
+  getAbortController,
   messages,
   setMessages,
   history,
@@ -809,14 +811,15 @@ export const useChatActions = ({
     (turnSignal: AbortSignal): boolean => {
       if (
         activeAbortControllerRef.current &&
-        activeAbortControllerRef.current.signal === turnSignal
+        activeAbortControllerRef.current.signal === turnSignal &&
+        (!getAbortController || getAbortController()?.signal === turnSignal)
       ) {
         activeAbortControllerRef.current = null
         return true
       }
       return false
     },
-    []
+    [getAbortController]
   )
 
   React.useEffect(() => {
@@ -983,7 +986,11 @@ export const useChatActions = ({
 
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload,
-    sourceIsCurrent: () => boolean = () => true
+    sourceIsCurrent: () => boolean = () => {
+      const draft = useStoreMessageOption.getState()
+      return actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
+        draft.chatDraftAddress === renderedSettingsDraft
+    }
   ): Promise<string | null> => {
     if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
     const scopeSignal = payload?.scopeSignal
@@ -1003,17 +1010,16 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
-          setHistoryId:
-            payload.setHistoryId ??
-            ((id: string) => {
-              if (!sourceIsCurrent()) return
-              setHistoryId(
-                id,
-                payloadConversationId || serverChatId
-                  ? { preserveServerChatId: true }
-                  : undefined
-              )
-            })
+          setHistoryId: (...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>) => {
+            if (!sourceIsCurrent()) return
+            if (payload.setHistoryId) payload.setHistoryId(...args)
+            else setHistoryId(
+              args[0],
+              args[1] ?? (payloadConversationId || serverChatId
+                ? { preserveServerChatId: true }
+                : undefined)
+            )
+          }
         }
       : undefined
     const persistLocally = async (): Promise<string | null> => {
@@ -1054,7 +1060,7 @@ export const useChatActions = ({
     }
 
     let skipServerWrite = false
-    if (historyKey && payloadConversationId && !serverChatId) {
+    if (historyKey && payloadConversationId && !serverChatId && sourceIsCurrent()) {
       try {
         await syncChatSettingsForServerChat({
           historyId: historyKey,
@@ -1063,7 +1069,12 @@ export const useChatActions = ({
           sourceDraftAddress: renderedSettingsDraft,
           requestScope: payload?.requestScope,
           signal: scopeSignal,
-          validate_lease: () => !scopeSignal?.aborted && !scopeInvalidatedSignal?.aborted && sourceIsCurrent(),
+          validate_lease: () => {
+            const draft = useStoreMessageOption.getState()
+            return !scopeSignal?.aborted && !scopeInvalidatedSignal?.aborted && sourceIsCurrent() &&
+              actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
+              draft.chatDraftAddress === renderedSettingsDraft
+          },
           ...(scope ? { scope } : {})
         })
       } catch {
@@ -3304,6 +3315,7 @@ export const useChatActions = ({
     greetingIsCurrent,
     historyRetryAdmission,
     historyEditResend,
+    historyRegenerate,
     assertCurrent
   }: {
     message: string
@@ -3341,7 +3353,8 @@ export const useChatActions = ({
      */
     historyRetryAdmission?: HistoryAdmissionReferenceV1
     historyEditResend?: NativeHistoryEditResend
-  }, beginResponse: () => void): Promise<ChatSubmitResult> => {
+    historyRegenerate?: NativeHistoryRegenerate
+  }, beginResponse: () => boolean): Promise<ChatSubmitResult> => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     assertCurrent?.()
     controller?.signal.throwIfAborted()
@@ -3390,8 +3403,7 @@ export const useChatActions = ({
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
     )
-    beginResponse()
-    setStreaming(true)
+    if (!beginResponse()) return chatSubmitSkipped("stale_selection")
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
         ? imageBackendOverride.trim()
@@ -3407,6 +3419,7 @@ export const useChatActions = ({
       signal = controller.signal
       activeAbortControllerRef.current = controller
     }
+    setStreaming(true)
 
     const messageSteeringForTurn = messageSteeringOverride
       ? resolveMessageSteering({
@@ -3534,6 +3547,8 @@ export const useChatActions = ({
         : historySelection
 
     try {
+      if (historyRegenerate && (!isRegenerate || historyEditResend || historyRetryAdmission || !selectedHistoryTurn))
+        throw new Error("unsupported_history_regeneration")
       if (greetingSeed && (!historySelection || turnResolvedSendMode !== "tracked_character" ||
           !greetingIsCurrent || !greetingIsCurrent() || message || isRegenerate || isContinue ||
           compareModeActive || turnUsesImageMode || turnContextFiles.length || docs?.length ||
@@ -3550,8 +3565,8 @@ export const useChatActions = ({
       }
       if (
         selectedHistoryTurn &&
-        ((historyEditResend && compareModeActive) ||
-          isRegenerate ||
+        (((historyEditResend || historyRegenerate) && compareModeActive) ||
+          (isRegenerate && !historyRegenerate) ||
           isContinue ||
           turnUsesImageMode ||
           turnContextFiles.length ||
@@ -3886,6 +3901,27 @@ export const useChatActions = ({
             }
           : enhancedChatModeParams
 
+        if (historyRegenerate) {
+          await sendNativeHistoryCharacter({
+            surface: "playground", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
+            signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId, scope,
+            model: effectiveSelectedModel || "", currentModel: getEffectiveSelectedModel(),
+            toolChoice: servicePromptChatModeParams.toolChoice, settings: servicePromptChatModeParams.currentChatModelSettings,
+            message, image, historyRegenerate, setServerChatId, setMessages,
+            unsupportedContext: Boolean(servicePromptChatModeParams.webSearch || servicePromptChatModeParams.selectedSystemPrompt ||
+              uploadedFiles?.length || servicePromptChatModeParams.actorSettings?.isEnabled ||
+              servicePromptChatModeParams.systemPromptAppendix || shouldConsumeSteering || replyActive ||
+              servicePromptChatModeParams.researchContext || servicePromptChatModeParams.dynamicUIRequest ||
+              requestOverrides?.historyForModel || requestOverrides?.messageForModel ||
+              (resolvedSendMode === "overlay" && effectiveSelectedAssistant)),
+            releaseActivity: () => {
+              if (releaseAbortControllerIfOwned(signal)) {
+                setAbortController(null); setIsProcessing(false); setStreaming(false)
+              }
+            }
+          })
+          return { status: "submitted" }
+        }
         if (!compareModeActive) {
           if (resolvedSendMode === "tracked_persona" && trackedPersonaAssistantForSend) {
             const resolvedModel = effectiveSelectedModel?.trim()
@@ -4505,10 +4541,10 @@ export const useChatActions = ({
         signal.aborted &&
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
-      if ((!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
+      if ((!historyRegenerate || historyRegenerate.isOriginCurrent()) && (!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
-          description: nativeCharacterPreflightMessage(e, t) ?? errorMessage
+          description: historyRegenerate ? nativeRegenerationFeedback(e, t) : nativeCharacterPreflightMessage(e, t) ?? errorMessage
         })
       }
       // If this turn still owns the shared controller (e.g. a pre-stream failure
@@ -4933,6 +4969,9 @@ export const useChatActions = ({
     setMessages,
     onSubmit,
     historySelection: selectedHistoryForActions,
+    getMessages: () => useStoreMessageOption.getState().messages,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     beforeSubmit: async ({ lastAssistant, nextMessages }) => {
       if (!serverChatId || selectedHistoryForActions) return
       if (selectedCharacter?.id == null && serverChatCharacterId == null) return
@@ -4957,7 +4996,7 @@ export const useChatActions = ({
   // streamed), so the new reply settles against that admission: the chat keeps
   // one copy of the question. A local chat keeps the cut-off reply as an
   // alternative to the new one; a server chat never received it. Regenerate in
-  // general is not supported on selected history yet (CM-01, #3106).
+  // uses its own server-owned admission path for saved native replies.
   const retryInterruptedHistoryTurn =
     async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }): Promise<ChatSubmitResult | null> => {
       const selection = selectedHistoryForActions
@@ -5066,9 +5105,8 @@ export const useChatActions = ({
 
   const stopStreamingRequest = React.useCallback(
     (options?: unknown) => {
-      if (!abortController) {
-        return
-      }
+      const currentController = getAbortController ? getAbortController() : abortController
+      if (!currentController) return
 
       const discardTurn =
         typeof options === "object" &&
@@ -5077,14 +5115,13 @@ export const useChatActions = ({
         options.discardTurn === true
 
       if (discardTurn) {
-        discardCurrentTurnOnAbortSignalRef.current = abortController.signal
+        discardCurrentTurnOnAbortSignalRef.current = currentController.signal
       }
 
-      markChatTurnStoppedByUser(abortController.signal)
-      abortController.abort()
-      setAbortController(null)
+      markChatTurnStoppedByUser(currentController.signal)
+      currentController.abort()
     },
-    [abortController, setAbortController]
+    [abortController, getAbortController]
   )
 
   const ordinaryLocalMutation =
@@ -5093,7 +5130,7 @@ export const useChatActions = ({
     serverChatId,
     historySelection,
     notification,
-    captureSourceFence: () => captureChatDraftSource().isCurrent,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
     captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {

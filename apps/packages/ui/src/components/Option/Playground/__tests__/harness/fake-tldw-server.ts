@@ -5,7 +5,8 @@
  * bgStream code paths run unchanged and every request the UI makes is recorded
  * with its method, path, query and JSON body.
  */
-import { resolveHistorySelection } from "@/utils/history-selection"
+import type { HistoryAdmissionV1 } from "@/types/history-selection"
+import { resolveHistorySelection, selectionDigest } from "@/utils/history-selection"
 
 export const FAKE_SERVER_URL = "http://tldw.test"
 export const FAKE_API_KEY = "harness-api-key"
@@ -192,6 +193,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
   const requests: RecordedRequest[] = []
   const unhandled: RecordedRequest[] = []
   const chats = new Map<string, FakeChat>()
+  const inputAdmissions = new Map<string, HistoryAdmissionV1>()
   const completionPlans: CompletionPlan[] = []
   let defaultReply = "Harness reply"
   let chatSequence = 0
@@ -272,21 +274,50 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
    * `save_to_db: true` on /chat/completions persists the turn server side, into
    * `conversation_id` or a new conversation, like the real endpoint.
    */
-  const persistCompletionTurn = (body: JsonBody | undefined, reply: string) => {
+  const persistCompletionTurn = async (body: JsonBody | undefined, reply: string) => {
     if (body?.save_to_db !== true) return null
     const existing = body.conversation_id ? chats.get(String(body.conversation_id)) : undefined
-    const chat = existing ?? createChat("Chat", { source: "chat-completions" })
-    const lastUser = [...(body?.messages ?? [])].reverse().find((m: JsonBody) => m?.role === "user")
-    const user = appendMessage(chat, {
-      role: "user",
-      content:
-        typeof lastUser?.content === "string"
-          ? lastUser.content
-          : JSON.stringify(lastUser?.content ?? ""),
-      parent_message_id: chat.messages.at(-1)?.id ?? null
-    })
-    appendMessage(chat, { role: "assistant", content: reply, parent_message_id: user.id })
-    return chat.id
+    const selection = body.tldw_history_selection_v1
+    const regenerateId = body.metadata?.tldw_regenerate_from_message_id
+    let chat: FakeChat, user: FakeChatMessage, admission: HistoryAdmissionV1 | undefined
+    if (regenerateId !== undefined) {
+      const { canonicalHistoryJson, historyDigest } = await import("@/db/dexie/history-selection")
+      if (!existing || typeof regenerateId !== "string" || body.tldw_history_branch !== true ||
+          selection?.version !== 1 || selection.purpose !== "send" || selection.interpretation?.kind !== "parent_graph_v1" ||
+          selection.cursor?.kind !== "after_message" || selection.cursor.message_id !== regenerateId)
+        throw new Error("unsupported_history_regeneration")
+      chat = existing
+      const target = chat.messages.find(row => row.id === regenerateId)
+      const input = chat.messages.find(row => row.id === target?.parent_message_id)
+      const captured = captureSelection(chat, { purpose: "send", view: selection })
+      const { tldw_history_selection_v1: _selection, tldw_history_branch: _branch, ...context } = body
+      admission = input && inputAdmissions.get(input.id)
+      if (target?.role !== "assistant" || input?.role !== "user" || !admission ||
+          admission.owner_key !== selection.owner_key || admission.conversation_id !== chat.id ||
+          admission.input_message_revision !== String(input.version) || captured.status !== "captured" ||
+          captured.rows.at(-1)?.id !== target.id || captured.rows.at(-2)?.id !== input.id ||
+          canonicalHistoryJson(selection.messages) !== canonicalHistoryJson(captured.rows.map(row => ({ id: row.id, revision: row.revision }))) ||
+          selectionDigest(selection) !== selection.selection_digest || historyDigest(context) !== selection.request_context_digest ||
+          canonicalHistoryJson(body.messages.filter((row: JsonBody) => row.role === "user")) !==
+            canonicalHistoryJson([{ role: "user", content: input.content }]))
+        throw new Error("unsupported_history_regeneration")
+      user = input
+    } else {
+      chat = existing ?? createChat("Chat", { source: "chat-completions" })
+      const lastUser = [...(body.messages ?? [])].reverse().find((m: JsonBody) => m?.role === "user")
+      user = appendMessage(chat, {
+        role: "user", content: typeof lastUser?.content === "string" ? lastUser.content : JSON.stringify(lastUser?.content ?? ""),
+        parent_message_id: selection ? (selection.messages.at(-1)?.id ?? null) : (chat.messages.at(-1)?.id ?? null)
+      })
+      if (selection) {
+        admission = { version: 1, owner_key: selection.owner_key, conversation_id: chat.id, input_message_id: user.id,
+          input_message_revision: String(user.version), selection_digest: selection.selection_digest,
+          messages: structuredClone(selection.messages), originating_selection_revision: selection.selection_revision }
+        inputAdmissions.set(user.id, admission)
+      }
+    }
+    const assistant = appendMessage(chat, { role: "assistant", content: reply, parent_message_id: user.id })
+    return { conversationId: chat.id, assistantId: assistant.id, admission }
   }
 
   /** Emulates the native history-selection capture with the client's own resolver. */
@@ -347,10 +378,13 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     }
     const reply = plan.chunks ? plan.chunks.join("") : (plan.reply ?? defaultReply)
     const model = body?.model ?? FAKE_MODEL
-    const conversationId = persistCompletionTurn(body, reply)
+    let persisted: Awaited<ReturnType<typeof persistCompletionTurn>>
+    try { persisted = await persistCompletionTurn(body, reply) }
+    catch { return json({ detail: { code: "unsupported_history_regeneration" } }, 409) }
     if (!body?.stream) {
       return json({
-        ...(conversationId ? { tldw_conversation_id: conversationId } : {}),
+        ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId,
+          ...(persisted.admission ? { tldw_history_admission_v1: persisted.admission } : {}) } : {}),
         id: "chatcmpl-harness",
         object: "chat.completion",
         model,
@@ -366,6 +400,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       async start(controller) {
         try {
           if (plan.firstTokenDelayMs) await sleep(plan.firstTokenDelayMs, signal)
+          if (persisted?.admission) controller.enqueue(chunk({ tldw_history_admission_v1: persisted.admission }))
           const deltas = plan.chunks ?? [reply]
           const pause = async () => {
             // An unresolved `resume` models a page that never hears back.
@@ -395,6 +430,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
               id: "chatcmpl-harness",
               object: "chat.completion.chunk",
               model,
+              ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId } : {}),
               choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
             })
           )
@@ -469,6 +505,13 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       )
       return json({ models, total: models.length })
     }
+    const rawMessage = path.match(/^\/api\/v1\/messages\/([^/]+)$/)
+    if (rawMessage && method === "GET") {
+      const id = decodeURIComponent(rawMessage[1])
+      const chat = [...chats.values()].find(value => value.messages.some(row => row.id === id))
+      const row = chat?.messages.find(value => value.id === id)
+      return row && chat ? json({ ...messageRow(row), conversation_id: chat.id, has_image: false }) : json({ detail: "Message not found" }, 404)
+    }
     if (path === "/api/v1/chat/completions" && method === "POST") {
       return completionResponse(body, signal)
     }
@@ -511,24 +554,13 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
           parent_message_id: parent
         })
         if (selection) {
-          // Native history admission: the server accepts the user turn against
-          // the selection it was sent with and echoes the selected path back.
-          return json(
-            {
-              ...messageRow(message),
-              tldw_history_admission_v1: {
-                version: 1,
-                owner_key: selection.owner_key,
-                conversation_id: chat.id,
-                input_message_id: message.id,
-                input_message_revision: String(message.version),
-                selection_digest: selection.selection_digest,
-                messages: selection.messages,
-                originating_selection_revision: selection.selection_revision
-              }
-            },
-            201
-          )
+          const accepted: HistoryAdmissionV1 = {
+            version: 1, owner_key: selection.owner_key, conversation_id: chat.id, input_message_id: message.id,
+            input_message_revision: String(message.version), selection_digest: selection.selection_digest,
+            messages: structuredClone(selection.messages), originating_selection_revision: selection.selection_revision
+          }
+          inputAdmissions.set(message.id, accepted)
+          return json({ ...messageRow(message), tldw_history_admission_v1: accepted }, 201)
         }
         return json(messageRow(message), 201)
       }

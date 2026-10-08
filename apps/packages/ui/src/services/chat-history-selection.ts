@@ -1,6 +1,6 @@
 /** Owner selection is separate from workspace routing, view identity and inference connection. */
 import { z } from "zod"
-import type { NativeHistoryEditResend } from "@/types/chat-modes"
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
 import type { ChatScope } from "@/types/chat-scope"
 import type {
   HistoryAdmissionReferenceV1,
@@ -16,7 +16,7 @@ import type {
 } from "@/types/history-selection"
 import type { HistoryBookmarkScope, Message } from "@/db/dexie/types"
 import type { ServicePromptRequestScope } from "./tldw/domains/service-prompts"
-import { tldwClient } from "./tldw/TldwApiClient"
+import { tldwClient, type ChatMessage } from "./tldw/TldwApiClient"
 import {
   acknowledgeHistoryConfirmation,
   appendLocalSelectedUser,
@@ -621,6 +621,79 @@ export const nativeEditResendView = (
   }
 }
 
+const nativeRegenerationTarget = (capture: HistorySelectionCaptureV1) => {
+  const user = capture.rows.at(-2)
+  const reply = capture.rows.at(-1)
+  if (!user || !reply || user.role !== "user" || reply.role !== "assistant" ||
+      !user.settled || !reply.settled || reply.parent_id !== user.id ||
+      user.comparison || reply.comparison)
+    return fail("unsupported_history_regeneration")
+  for (const row of [user, reply]) {
+    const nodes = capture.snapshot.nodes.filter(node => node.id === row.id)
+    if (nodes.length !== 1 || canonicalHistoryJson(nodes[0]) !== canonicalHistoryJson(row))
+      fail("message_changed")
+  }
+  const content = capture.selected_content.filter(row => row.id === user.id)
+  if (content.length !== 1 || content[0].revision !== user.revision)
+    return fail("message_changed")
+  return { user, reply, content: content[0] }
+}
+
+/** Regenerate the selected saved reply without changing the mounted selection. */
+export const nativeRegenerateView = (
+  owner: HistoryOwnerV1,
+  origin: HistoryViewSelectionV1,
+  capture: HistorySelectionCaptureV1,
+  intent: NativeHistoryRegenerate
+): HistoryViewSelectionV1 => {
+  assertOwnerLease(owner)
+  if (owner.kind !== "native") return fail("native_history_requires_server_owner")
+  if (origin.owner_key !== intent.owner_key || origin.conversation_id !== intent.conversation_id ||
+      capture.snapshot.owner_key !== intent.owner_key || capture.snapshot.conversation_id !== intent.conversation_id ||
+      owner.conversation_id !== intent.conversation_id || (owner.owner_key && owner.owner_key !== intent.owner_key))
+    fail("owner_conversation_mismatch")
+  if (origin.interpretation.kind !== "parent_graph_v1" || capture.view.interpretation.kind !== "parent_graph_v1")
+    fail("unsupported_history_regeneration")
+  const { user, reply } = nativeRegenerationTarget(capture)
+  if (reply.id !== intent.message_id || reply.revision !== intent.message_revision ||
+      user.id !== intent.input_message_id || user.revision !== intent.input_message_revision)
+    fail("message_changed")
+  if (!intent.isOriginCurrent() || !intent.isCurrent()) fail("stale_selection")
+  const selection_revision = origin.selection_revision + 1
+  if (!Number.isSafeInteger(selection_revision)) fail("invalid_selection")
+  return { ...structuredClone(origin), selection_revision,
+    cursor: { kind: "after_message", message_id: intent.message_id } }
+}
+
+/** Saved completion input uses every raw attachment, rather than MessageCreate's one-image form. */
+export const nativeRegenerationMessage = (
+  capture: HistorySelectionCaptureV1,
+  intent: NativeHistoryRegenerate,
+  inputVersion: number
+): Extract<ChatMessage, { role: "user" }> => {
+  const { user, reply, content } = nativeRegenerationTarget(capture)
+  if (user.id !== intent.input_message_id || user.revision !== intent.input_message_revision ||
+      reply.id !== intent.message_id || reply.revision !== intent.message_revision)
+    fail("message_changed")
+  const extra = content.extra_metadata ?? {}
+  const details = extra.image_details ?? content.images.map(() => "auto")
+  if (!Number.isSafeInteger(inputVersion) || inputVersion <= 0 || inputVersion >= Number.MAX_SAFE_INTEGER ||
+      (extra.sender_role != null && extra.sender_role !== "user") || content.tool_calls != null ||
+      extra.function_call != null || extra.tool_call_id != null ||
+      !Array.isArray(details) || details.length !== content.images.length ||
+      details.some(detail => typeof detail !== "string" || !["auto", "high", "low"].includes(detail)) ||
+      content.images.some(image => !/^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/]*={0,2}$/.test(image)))
+    fail("unsupported_history_regeneration")
+  const text = inputVersion === 1 && extra.content_placeholder_reason === "image_attachment" &&
+    content.images.length && content.message === `<Image attachment x${content.images.length}>`
+    ? "" : content.message
+  return { role: "user", content: content.images.length ? [
+    ...(text ? [{ type: "text" as const, text }] : []),
+    ...content.images.map((url, index) => ({ type: "image_url" as const,
+      image_url: { url, detail: details[index] as "auto" | "high" | "low" } }))
+  ] : text }
+}
+
 /** Consumers dispatch this exact detached payload; never dispatch the original mutable input. */
 export const prepareHistoryContext = (
   payload: unknown,
@@ -843,6 +916,26 @@ export const parseNativeHistoryAdmission = (
     canonicalHistoryJson(admission.messages) !==
       canonicalHistoryJson(selection.messages)
   )
+    fail("invalid_history_admission")
+  return freeze(admission)
+}
+
+/** The original user admission retains its original selection provenance during regeneration. */
+export const parseNativeRegenerationAdmission = (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  inputVersion: number,
+  value: unknown
+): HistoryAdmissionV1 => {
+  assertOwnerLease(owner)
+  assertNativeBinding(owner, capture.snapshot, true)
+  const { user, reply } = nativeRegenerationTarget(capture)
+  const admission = parse(admissionSchema, value) as HistoryAdmissionV1
+  assertNativeBinding(owner, admission, true)
+  const ids = admission.messages.map(row => row.id)
+  if (!Number.isSafeInteger(inputVersion) || inputVersion <= 0 || inputVersion >= Number.MAX_SAFE_INTEGER ||
+      ids.includes(user.id) || ids.includes(reply.id) || new Set(ids).size !== ids.length ||
+      admission.input_message_id !== user.id || admission.input_message_revision !== String(inputVersion))
     fail("invalid_history_admission")
   return freeze(admission)
 }

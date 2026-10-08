@@ -1,4 +1,4 @@
-import type { NativeHistoryEditResend } from "@/types/chat-modes"
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import { createChatWithRecovery, acknowledgeChatCreation, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
@@ -34,7 +34,10 @@ import {
   finalizeHistorySelection,
   parseNativeHistoryAdmission,
   historyAdmissionReference,
-  nativeEditResendView
+  nativeEditResendView,
+  nativeRegenerateView,
+  nativeRegenerationMessage,
+  parseNativeRegenerationAdmission
 } from "@/services/chat-history-selection"
 import {
   tldwClient,
@@ -67,6 +70,7 @@ export type NativeHistoryCharacterSendParams = {
   greetingSeed?: GreetingSeed
   greetingIsCurrent?: () => boolean
   historyEditResend?: NativeHistoryEditResend
+  historyRegenerate?: NativeHistoryRegenerate
   t: TFunction
   unsupportedContext?: boolean
   setServerChatId: (id: string) => void
@@ -125,6 +129,11 @@ export const sendNativeHistoryCharacter = async (
 ): Promise<{ content: string; matchesPreview: boolean } | void> => {
   const { controller, signal } = params
   const editResend = params.historyEditResend
+  const regenerate = params.historyRegenerate
+  const explicitAction = editResend ?? regenerate
+  if (regenerate && (editResend || params.greetingSeed || params.privateDraft ||
+      controller.getCurrent().status !== "ready" || controller.getCurrent().owner?.kind !== "native"))
+    throw new Error("unsupported_history_regeneration")
   const greetingSeed = params.greetingSeed ? structuredClone(params.greetingSeed) : undefined
   const privateHandle = params.privateDraft ? structuredClone(params.privateDraft.handle) : undefined
   if (privateHandle && (!isChatDraftHandle(privateHandle) || privateHandle.address.kind !== "fresh" || privateHandle.address.temporary))
@@ -136,7 +145,7 @@ export const sendNativeHistoryCharacter = async (
   if (privateHandle && params.scope && chatDraftAddressKey({ ...privateHandle.address, scope: params.scope } as ChatDraftHandle["address"]) !== chatDraftAddressKey(privateHandle.address))
     throw new Error("chat_creation_source_invalid")
   const acceptDraftBind = !privateHandle && !params.historyId && !params.serverChatId && sourceDraft?.kind === "fresh" ? captureChatDraftLoad("bind") : null
-  if (!greetingSeed && !params.message.trim()) throw new Error("native_history_input_required")
+  if (!greetingSeed && !regenerate && !params.message.trim()) throw new Error("native_history_input_required")
   if (greetingSeed && (params.message || !greetingSeed.rawText?.trim() ||
       params.historyId || params.serverChatId || sourceDraft?.kind !== "fresh" ||
       controller.getCurrent().status !== "idle" || controller.getCurrent().owner))
@@ -153,6 +162,7 @@ export const sendNativeHistoryCharacter = async (
   })
   const { model, provider, settings } = validateNativeCharacterConfiguration({
     ...params,
+    image: regenerate ? "" : params.image,
     settings: capturedSettings,
     temporary: params.temporary || params.historyId === "temp",
     clientToolCount: toolsState.tools.length,
@@ -362,7 +372,9 @@ export const sendNativeHistoryCharacter = async (
           current.capture,
           editResend
         )
-      : structuredClone(originView)
+      : regenerate
+        ? nativeRegenerateView(current.owner, originView, current.capture, regenerate)
+        : structuredClone(originView)
     const scope = { ...current.bookmarkScope }
     const owner = {
       ...current.owner,
@@ -393,8 +405,8 @@ export const sendNativeHistoryCharacter = async (
       sameView() &&
       selectionCurrent() &&
       leaseValid() &&
-      (!editResend ||
-        (editResend.isCurrent() && editResend.isOriginCurrent())) &&
+      (!explicitAction ||
+        (explicitAction.isCurrent() && explicitAction.isOriginCurrent())) &&
       controller.getCurrent().owner === originOwner &&
       controller.getCurrent().view === originView &&
       originOwner.validate_lease()
@@ -419,6 +431,23 @@ export const sendNativeHistoryCharacter = async (
           : null
     const usesSavedSampler = (field: "temperature" | "top_p") =>
       overrides?.enabled !== false && typeof overrides?.[field] === "number" && Number.isFinite(overrides[field])
+    let inputVersion: number | undefined
+    if (regenerate) {
+      const input = originalCapture.rows.at(-2)!
+      const content = originalCapture.selected_content.at(-2)!
+      if (params.message !== content.message || params.image !== (content.images[0] ?? ""))
+        throw new Error("message_changed")
+      const row = await tldwClient.getMessage(input.id, {
+        scope: owner.scope, requestScope: owner.request_scope, signal: snapshot.scopeSignal
+      })
+      if (!preparingIsCurrent()) throw new Error("stale_selection")
+      if (!row || row.id !== input.id || row.conversation_id !== owner.conversation_id || row.sender !== "user" ||
+          row.parent_message_id !== input.parent_id || row.content !== content.message ||
+          row.has_image !== Boolean(content.images.length) || !Number.isSafeInteger(row.version) ||
+          row.version <= 0 || row.version >= Number.MAX_SAFE_INTEGER)
+        throw new Error("message_changed")
+      inputVersion = row.version
+    }
     const capture = await captureHistorySnapshot(
       owner,
       view,
@@ -428,18 +457,29 @@ export const sendNativeHistoryCharacter = async (
     if (capture.status !== "captured") throw new Error(capture.code)
     if (!preparingIsCurrent()) throw new Error("stale_selection")
     if (editResend) nativeEditResendView(owner, originView, capture, editResend, originalCapture)
+    if (regenerate) {
+      nativeRegenerateView(owner, originView, capture, regenerate)
+      for (const id of [regenerate.input_message_id, regenerate.message_id]) {
+        if (JSON.stringify(originalCapture.selected_content.find(row => row.id === id)) !==
+            JSON.stringify(capture.selected_content.find(row => row.id === id)))
+          throw new Error("message_changed")
+      }
+    }
+    const userMessage = regenerate ? nativeRegenerationMessage(capture, regenerate, inputVersion!)
+      : { role: "user" as const, content: params.message }
     const request = prepareChatCompletionRequest(
       [
         ...(settings.systemPrompt?.trim()
           ? [{ role: "system" as const, content: settings.systemPrompt }]
           : []),
-        { role: "user", content: params.message }
+        userMessage
       ],
       {
         model,
         apiProvider: provider,
         saveToDb: true,
         conversationId: owner.conversation_id,
+        regenerateFromMessageId: regenerate?.message_id,
         temperature: usesSavedSampler("temperature") ? undefined : settings.temperature,
         maxTokens: settings.numPredict,
         topP: usesSavedSampler("top_p") ? undefined : settings.topP,
@@ -464,7 +504,7 @@ export const sendNativeHistoryCharacter = async (
       owner,
       capture,
       prepared,
-      editResend ? view : controller.getCurrent().view!
+      explicitAction ? view : controller.getCurrent().view!
     )
     const operationId = crypto.randomUUID()
     const displayId = `native-draft-${operationId}`
@@ -481,7 +521,7 @@ export const sendNativeHistoryCharacter = async (
       state: HistoryTurnRecovery["state"]
     ): HistoryTurnRecovery => ({
       operation_id: operationId,
-      ...(editResend ? { action: "edit_resend" as const } : {}),
+      ...(editResend ? { action: "edit_resend" as const } : regenerate ? { action: "regenerate" as const } : {}),
       persistence: "server",
       origin_view: view,
       owner_key: view.owner_key,
@@ -490,7 +530,7 @@ export const sendNativeHistoryCharacter = async (
       request_context_digest: selection.request_context_digest,
       created_at: createdAt,
       input_text: params.message,
-      input_images: [],
+      input_images: regenerate ? [...capture.selected_content.at(-2)!.images] : [],
       result_text: content,
       state,
       ...(admission
@@ -502,7 +542,7 @@ export const sendNativeHistoryCharacter = async (
       ...(resultId ? { assistant_id: resultId } : {})
     })
     const finishSettled = async () => {
-      if (editResend) {
+      if (explicitAction) {
         // A saved result remains recoverable when newer editor input prevents following it.
         await saveHistoryTurnRecovery(scope, view, {
           ...record("generated_unsaved"),
@@ -512,8 +552,8 @@ export const sendNativeHistoryCharacter = async (
         if (
           sameView() &&
           selectionCurrent() &&
-          editResend.isOriginCurrent() &&
-          editResend.isCurrent() &&
+          explicitAction.isOriginCurrent() &&
+          explicitAction.isCurrent() &&
           !followAttempted
         ) {
           followAttempted = true
@@ -521,7 +561,7 @@ export const sendNativeHistoryCharacter = async (
             (await controller.followResult(
               originView,
               resultId!,
-              editResend.isCurrent
+              explicitAction.isCurrent
             )) !== false
         }
         if (resultFollowed)
@@ -531,7 +571,7 @@ export const sendNativeHistoryCharacter = async (
             operationId,
             "completed"
           )
-        else if (sameView() && editResend.isOriginCurrent())
+        else if (sameView() && explicitAction.isOriginCurrent())
           await controller.refreshRecovery()
       } else {
         await dismissHistoryTurnRecovery(scope, view, operationId, "completed")
@@ -550,7 +590,7 @@ export const sendNativeHistoryCharacter = async (
       const wire = {
         ...(structuredClone(prepared.payload) as ChatCompletionRequest),
         tldw_history_selection_v1: structuredClone(selection),
-        ...(editResend ? { tldw_history_branch: true } : {})
+        ...(explicitAction ? { tldw_history_branch: true } : {})
       }
       for await (const chunk of tldwClient.streamChatCompletion(wire, {
         signal: snapshot.scopeSignal,
@@ -566,11 +606,9 @@ export const sendNativeHistoryCharacter = async (
         if (chunk?.error)
           throw new Error("native_history_stream_interrupted", { cause: chunk.error })
         if (chunk?.tldw_history_admission_v1 !== undefined) {
-          const accepted = parseNativeHistoryAdmission(
-            owner,
-            selection,
-            chunk.tldw_history_admission_v1
-          )
+          const accepted = regenerate
+            ? parseNativeRegenerationAdmission(owner, capture, inputVersion!, chunk.tldw_history_admission_v1)
+            : parseNativeHistoryAdmission(owner, selection, chunk.tldw_history_admission_v1)
           if (
             admission &&
             JSON.stringify(admission) !== JSON.stringify(accepted)
@@ -586,6 +624,7 @@ export const sendNativeHistoryCharacter = async (
             !chunk.tldw_message_id.trim() ||
             chunk.tldw_conversation_id !== owner.conversation_id ||
             chunk.tldw_message_id === admission.input_message_id ||
+            (regenerate && originalCapture.snapshot.nodes.some(row => row.id === chunk.tldw_message_id)) ||
             (resultId && resultId !== chunk.tldw_message_id)
           )
             throw new Error("invalid_history_settlement")
@@ -593,7 +632,7 @@ export const sendNativeHistoryCharacter = async (
         }
         const delta = chunk?.choices?.[0]?.delta?.content
         if (typeof delta === "string") content += delta
-        if (!editResend && sameView() && admission && content)
+        if (!explicitAction && sameView() && admission && content)
           params.setMessages([
             ...base.messages,
             {
@@ -667,7 +706,7 @@ export const sendNativeHistoryCharacter = async (
         )
         if (sameView()) {
           // This error is display-only; the retained receipt owns any uncertain outcome.
-          if (!editResend)
+          if (!explicitAction)
             params.setMessages([
               ...base.messages,
               {

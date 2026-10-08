@@ -1375,7 +1375,13 @@
     "savedEditedReplyMessage": "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready.",
     "openSavedReply": "Open saved reply",
     "finishEditBeforeOpening": "Finish or cancel your current message edit before opening the saved reply.",
-    "openSavedReplyFailed": "Could not open the saved reply. Your current view and saved reply are retained."
+    "openSavedReplyFailed": "Could not open the saved reply. Your current view and saved reply are retained.",
+    "savedRegeneratedReplyTitle": "New reply saved",
+    "savedRegeneratedReplyMessage": "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready.",
+    "regenerationRefusedTitle": "New reply refused",
+    "regenerationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.",
+    "regenerationUnknownTitle": "New reply unconfirmed",
+    "regenerationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
   },
   "standaloneHtml": {
     "recoveryUnavailable": "Recovery unavailable. Keep this tab open or download your draft.",

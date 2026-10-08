@@ -84,8 +84,11 @@ export const useMessageOption = (
 ) => {
   const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
-  const { controller: abortController, setController: setAbortController } =
-    usePageAssist();
+  const {
+    controller: abortController,
+    setController: setAbortController,
+    getController: getAbortController,
+  } = usePageAssist();
 
   const {
     messages,
@@ -520,6 +523,7 @@ export const useMessageOption = (
     notification,
     abortController,
     setAbortController,
+    getAbortController,
     messages,
     setMessages,
     history,

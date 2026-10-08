@@ -20,6 +20,12 @@ export type NativeHistoryEditResend = {
   isOriginCurrent: () => boolean
 }
 
+/** A private saved-reply action also captures its canonical direct user. */
+export type NativeHistoryRegenerate = NativeHistoryEditResend & {
+  input_message_id: string
+  input_message_revision: string
+}
+
 /** One operation owns its adapter and immutable pending intent across display navigation. */
 export interface HistorySendTurn {
   owner: HistoryOwnerV1

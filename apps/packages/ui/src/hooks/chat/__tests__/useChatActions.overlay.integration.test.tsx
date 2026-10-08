@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
@@ -9,13 +9,15 @@ const {
   createChatMock,
   normalChatModeMock,
   streamCharacterChatCompletionMock,
-  syncChatSettingsForServerChatMock
+  syncChatSettingsForServerChatMock,
+  saveLocalSuccessMock
 } =
   vi.hoisted(() => ({
     createChatMock: vi.fn(),
     normalChatModeMock: vi.fn(),
     streamCharacterChatCompletionMock: vi.fn(),
-    syncChatSettingsForServerChatMock: vi.fn(async () => null)
+    syncChatSettingsForServerChatMock: vi.fn(async () => null),
+    saveLocalSuccessMock: vi.fn()
   }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -59,6 +61,11 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
       async (_payload?: unknown): Promise<string | null> =>
         "history-overlay"
   )
+}))
+
+vi.mock("@/hooks/chat-helper", async original => ({
+  ...await original<typeof import("@/hooks/chat-helper")>(),
+  saveMessageOnSuccess: saveLocalSuccessMock
 }))
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
@@ -120,11 +127,16 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => ({ selectedModel: "deepseek-chat" as string | null })
+vi.mock("@/store/option", async original => {
+  const actual = await original<typeof import("@/store/option")>()
+  return {
+    ...actual,
+    useStoreMessageOption: {
+      getState: () => ({ ...actual.useStoreMessageOption.getState(), selectedModel: "deepseek-chat" as string | null }),
+      setState: actual.useStoreMessageOption.setState
+    }
   }
-}))
+})
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
@@ -262,7 +274,7 @@ describe("useChatActions overlay integration", () => {
 
   it("routes overlay character selections through normal chat mode without creating tracked chats", async () => {
     const options = createHookOptions()
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -288,6 +300,166 @@ describe("useChatActions overlay integration", () => {
     )
   })
 
+  it.each(["current", "new", "same-id", "unmount"] as const)(
+    "keeps a held overlay save attached to its rendered source across %s",
+    async (boundary) => {
+      const store = (await import("@/store/option")).useStoreMessageOption
+      const { createSaveMessageOnSuccess } = await import(
+        "@/hooks/utils/messageHelpers"
+      )
+      const previous = store.getState()
+      previous.startNewChatDraft()
+      const options = createHookOptions()
+      let finishPersistence!: () => void
+      const held = new Promise<void>((resolve) => {
+        finishPersistence = resolve
+      })
+      const persist = vi.fn(
+        async (payload: { setHistoryId: (id: string) => void }) => {
+          await held
+          payload.setHistoryId("saved-overlay")
+          return "saved-overlay"
+        }
+      )
+      vi.mocked(createSaveMessageOnSuccess).mockReturnValueOnce(persist)
+      normalChatModeMock.mockImplementationOnce(
+        async (...args: Parameters<typeof normalChatModeMock>) => {
+          await args[6].saveMessageOnSuccess({
+            historyId: null,
+            setHistoryId: args[6].setHistoryId,
+            conversationId: "server-chat-42",
+            saveToDb: true,
+            message: "Overlay request",
+            fullText: "Overlay reply"
+          })
+        }
+      )
+      const hook = renderHook(() =>
+        useChatActions(options as Parameters<typeof useChatActions>[0])
+      )
+      const submission = hook.result.current.onSubmit({
+        message: "Overlay request",
+        image: ""
+      })
+      try {
+        await waitFor(() => expect(persist).toHaveBeenCalledOnce())
+        if (boundary === "new" || boundary === "same-id") {
+          store.getState().startNewChatDraft()
+          if (boundary === "same-id")
+            store.setState({
+              historyId: "saved-overlay",
+              serverChatId: "server-chat-42"
+            })
+        }
+        if (boundary === "unmount") hook.unmount()
+        options.setHistoryId.mockClear()
+        options.setServerChatId.mockClear()
+        syncChatSettingsForServerChatMock.mockClear()
+        await act(async () => {
+          finishPersistence()
+          await submission
+        })
+        if (boundary === "current") {
+          expect(options.setHistoryId).toHaveBeenCalledWith("saved-overlay")
+          expect(options.setServerChatId).toHaveBeenCalledWith("server-chat-42")
+          expect(syncChatSettingsForServerChatMock).toHaveBeenCalledOnce()
+        } else {
+          expect(options.setHistoryId).not.toHaveBeenCalled()
+          expect(options.setServerChatId).not.toHaveBeenCalled()
+          expect(syncChatSettingsForServerChatMock).not.toHaveBeenCalled()
+        }
+        expect(persist).toHaveBeenCalledOnce()
+      } finally {
+        finishPersistence()
+        await submission
+        hook.unmount()
+        store.setState(previous)
+      }
+    }
+  )
+
+  it.each([false, true])(
+    "preserves actual server metadata at first local-ID acknowledgement (retired=%s)",
+    async (retired) => {
+      const store = (await import("@/store/option")).useStoreMessageOption
+      const previous = store.getState()
+      previous.startNewChatDraft()
+      store.setState({
+        historyId: null,
+        serverChatId: "server-chat-42",
+        serverChatTitle: "Saved identity",
+        serverChatCharacterId: "saved-character",
+        serverChatVersion: 7,
+        serverChatMetaLoaded: true
+      })
+      const { createSaveMessageOnSuccess } = await import(
+        "@/hooks/utils/messageHelpers"
+      )
+      const actual = await vi.importActual<
+        typeof import("@/hooks/utils/messageHelpers")
+      >("@/hooks/utils/messageHelpers")
+      vi.mocked(createSaveMessageOnSuccess).mockImplementationOnce(
+        actual.createSaveMessageOnSuccess
+      )
+      let finishPersistence!: () => void
+      const held = new Promise<void>((resolve) => {
+        finishPersistence = resolve
+      })
+      saveLocalSuccessMock.mockImplementationOnce(async (payload) => {
+        await held
+        payload.setHistoryId("first-local-history")
+        return "first-local-history"
+      })
+      const options = createHookOptions()
+      Object.assign(options, {
+        serverChatId: "server-chat-42",
+        setHistoryId: store.getState().setHistoryId
+      })
+      normalChatModeMock.mockImplementationOnce(
+        async (...args: Parameters<typeof normalChatModeMock>) => {
+          await args[6].saveMessageOnSuccess({
+            historyId: null,
+            setHistoryId: args[6].setHistoryId,
+            conversationId: "server-chat-42",
+            message: "Current question",
+            fullText: "Current reply"
+          })
+        }
+      )
+      const hook = renderHook(() =>
+        useChatActions(options as Parameters<typeof useChatActions>[0])
+      )
+      const submission = hook.result.current.onSubmit({
+        message: "Current question",
+        image: ""
+      })
+      try {
+        await waitFor(() => expect(saveLocalSuccessMock).toHaveBeenCalledOnce())
+        if (retired) {
+          store.getState().startNewChatDraft()
+          store.setState({ historyId: "newer-local-history" })
+        }
+        await act(async () => {
+          finishPersistence()
+          await submission
+        })
+        expect(store.getState()).toMatchObject({
+          historyId: retired ? "newer-local-history" : "first-local-history",
+          serverChatId: "server-chat-42",
+          serverChatTitle: "Saved identity",
+          serverChatCharacterId: "saved-character",
+          serverChatVersion: 7,
+          serverChatMetaLoaded: true
+        })
+      } finally {
+        finishPersistence()
+        await submission
+        hook.unmount()
+        store.setState(previous)
+      }
+    }
+  )
+
   it("reconciles scratch overlay settings only when a send links a new server conversation", async () => {
     const options = createHookOptions()
     normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
@@ -306,7 +478,7 @@ describe("useChatActions overlay integration", () => {
       })
     })
 
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -315,11 +487,25 @@ describe("useChatActions overlay integration", () => {
       })
     })
 
+    const store = (await import("@/store/option")).useStoreMessageOption
+    const source = store.getState()
     expect(syncChatSettingsForServerChatMock).toHaveBeenCalledWith({
       historyId: "history-overlay",
       serverChatId: "server-chat-42",
-      allowScratchFallback: true
+      allowScratchFallback: true,
+      requestScope: undefined,
+      signal: undefined,
+      sourceDraftAddress: source.chatDraftAddress,
+      validate_lease: expect.any(Function)
     })
+    const lease = syncChatSettingsForServerChatMock.mock.calls[0][0].validate_lease
+    expect(lease()).toBe(true)
+    try {
+      source.startNewChatDraft()
+      expect(lease()).toBe(false)
+    } finally {
+      store.setState(source)
+    }
   })
 
 })

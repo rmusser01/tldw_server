@@ -1,4 +1,4 @@
-import type { NativeHistoryEditResend } from "@/types/chat-modes";
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import type { GreetingSeed } from "@/utils/character-greetings";
 import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
@@ -10,7 +10,7 @@ import {
   createSelectedForkAction,
   withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils";
-import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage } from "./chat/native-character-preflight";
+import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
@@ -149,11 +149,17 @@ export const useMessage = () => {
   const {
     controller: abortController,
     setController: setAbortController,
+    getController: getAbortController,
     embeddingController,
     setEmbeddingController,
   } = usePageAssist();
   const discardCurrentTurnOnAbortRef = React.useRef(false);
   const activeNormalControllerRef = React.useRef<AbortController | null>(null);
+  const actionsMountedRef = React.useRef(false);
+  React.useEffect(() => {
+    actionsMountedRef.current = true;
+    return () => { actionsMountedRef.current = false; };
+  }, []);
 
   // Messages now come from Zustand store (single source of truth)
   const messages = useStoreMessageOption((state) => state.messages);
@@ -399,25 +405,38 @@ export const useMessage = () => {
     return true;
   };
 
+  const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision;
+  const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress;
+  const settingsDraftIsCurrent = () => {
+    const draft = useStoreMessageOption.getState();
+    return actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
+      draft.chatDraftAddress === renderedSettingsDraft;
+  };
   const historySetterForQueuedTurn = (guard?: QueuedDispatchGuard) =>
     (id: string, options?: { preserveServerChatId?: boolean }) => {
+      if (!settingsDraftIsCurrent()) return;
       if (guard) guard.publishHistoryId(id, () => setHistoryId(id, options));
       else setHistoryId(id, options);
     };
-  const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress;
   const saveSuccessForQueuedTurn = (guard?: QueuedDispatchGuard) => createSaveMessageOnSuccess(
     temporaryChat,
     historySetterForQueuedTurn(guard),
     {
       onServerConversationLinked: (conversationId, payload, linkedHistoryId) => {
+        const sourceIsCurrent = () => settingsDraftIsCurrent() &&
+          !payload.scopeSignal?.aborted && !payload.scopeInvalidatedSignal?.aborted &&
+          (!guard || guard.isSourceCurrent?.() === true);
+        if (!sourceIsCurrent()) return;
         const publish = () => {
           setServerChatId(conversationId);
+          if (!sourceIsCurrent()) return;
           setServerChatMetaLoaded(false);
+          if (!sourceIsCurrent()) return;
           invalidateServerChatHistory();
         };
         if (guard) guard.publishServerChatId(conversationId, publish);
         else publish();
-        if (!serverChatId) {
+        if (!serverChatId && sourceIsCurrent()) {
           void syncChatSettingsForServerChat({
             historyId: linkedHistoryId,
             serverChatId: conversationId,
@@ -425,8 +444,8 @@ export const useMessage = () => {
             sourceDraftAddress: renderedSettingsDraft,
             requestScope: payload.requestScope,
             signal: payload.scopeSignal,
-            validate_lease: () => !payload.scopeSignal?.aborted && !payload.scopeInvalidatedSignal?.aborted &&
-              (guard ? guard.isSourceCurrent?.() === true : useStoreMessageOption.getState().serverChatId === conversationId),
+            validate_lease: () => sourceIsCurrent() &&
+              useStoreMessageOption.getState().serverChatId === conversationId,
           }).catch(() => {
             // Best-effort scratch-to-server settings reconciliation.
           });
@@ -2416,6 +2435,7 @@ export const useMessage = () => {
     greetingSeed: requestedGreetingSeed,
     greetingIsCurrent,
     historyEditResend,
+    historyRegenerate,
     assertCurrent,
   }: {
     message: string;
@@ -2445,8 +2465,9 @@ export const useMessage = () => {
     greetingSeed?: GreetingSeed;
     greetingIsCurrent?: () => boolean;
     historyEditResend?: NativeHistoryEditResend;
+    historyRegenerate?: NativeHistoryRegenerate;
     assertCurrent?: () => void;
-  }, beginResponse: () => void) => {
+  }, beginResponse: () => boolean) => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
     // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
     // onto the chat's latest message (or the send is held) before a new turn,
@@ -2515,9 +2536,11 @@ export const useMessage = () => {
         ? historySelection
         : null
     );
+    if (historyRegenerate && (!isRegenerate || historyEditResend || !selectedHistoryTurn))
+      throw new Error("unsupported_history_regeneration");
     if (
       selectedHistoryTurn &&
-      (isRegenerate ||
+      ((isRegenerate && !historyRegenerate) ||
         hasExplicitImageBackend ||
         imageBackendCandidates.length ||
         uploadedFiles?.length ||
@@ -2660,11 +2683,21 @@ export const useMessage = () => {
       }
     }
 
-    beginResponse();
+    const nativeServerTurn = Boolean(historySelection) && resolvedChatMode === "normal" &&
+      (Boolean(historyRegenerate) || resolveUseMessageSendMode({ effectiveMode: effectiveAssistantState.mode,
+        hasEffectiveAssistant: Boolean(effectiveSelectedAssistant), draftAssistantKind: selectedAssistant?.kind ?? null,
+        draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant) }) === "tracked_character");
+    if (nativeServerTurn) {
+      const activity = useStoreMessageOption.getState();
+      if (activity.streaming || activity.isProcessing) return chatSubmitSkipped("response_in_progress");
+    }
+    if (!beginResponse()) return chatSubmitSkipped("stale_selection");
     if (!usesLegacySidepanelRag) setAbortController(activeController);
     activeNormalControllerRef.current = activeController;
+    if (nativeServerTurn) { setIsProcessing(true); setStreaming(true); }
     const releaseNormalControllerIfOwned = () => {
-      if (activeNormalControllerRef.current !== activeController) return false;
+      if (activeNormalControllerRef.current !== activeController ||
+          (getAbortController && getAbortController() !== activeController)) return false;
       activeNormalControllerRef.current = null;
       return true;
     };
@@ -2687,6 +2720,32 @@ export const useMessage = () => {
         })()
       : {};
 
+      if (historyRegenerate) {
+        try {
+          await sendNativeHistoryCharacter({
+            surface: "sidepanel", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
+            signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId,
+            model, currentModel: selectedModel, toolChoice: resolvedToolChoice, settings: currentChatModelSettings,
+            message, image, historyRegenerate, setServerChatId, setMessages,
+            unsupportedContext: Boolean(resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
+              conversationContextOverrides.historyForModel || conversationContextOverrides.messageForModel ||
+              (effectiveAssistantState.mode === "overlay" && effectiveSelectedAssistant)),
+            releaseActivity: () => {
+              if (releaseNormalControllerIfOwned()) {
+                setAbortController(null); setIsProcessing(false); setStreaming(false);
+              }
+            }
+          });
+          return chatSubmitSubmitted();
+        } catch (error) {
+          if (historyRegenerate.isOriginCurrent()) notification.error({ message: t("error"),
+            description: nativeRegenerationFeedback(error, t) });
+          if (releaseNormalControllerIfOwned()) {
+            setAbortController(null); setIsProcessing(false); setStreaming(false);
+          }
+          return chatSubmitFailed(error instanceof Error ? error.message : "Native history completion failed");
+        }
+      }
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         return await normalChatMode(
           message,
@@ -3165,9 +3224,10 @@ export const useMessage = () => {
       options !== null &&
       "discardTurn" in options &&
       options.discardTurn === true;
+    const currentController = getAbortController ? getAbortController() : abortController;
     if (
       discardTurn &&
-      (isEmbedding || abortController || embeddingController)
+      (isEmbedding || currentController || embeddingController)
     ) {
       discardCurrentTurnOnAbortRef.current = true;
     }
@@ -3177,10 +3237,9 @@ export const useMessage = () => {
         setEmbeddingController(null);
       }
     }
-    if (abortController) {
-      markChatTurnStoppedByUser(abortController.signal);
-      abortController.abort();
-      setAbortController(null);
+    if (currentController) {
+      markChatTurnStoppedByUser(currentController.signal);
+      currentController.abort();
     }
   };
 
@@ -3197,7 +3256,7 @@ export const useMessage = () => {
     setHistory,
     onSubmit,
     validateBeforeSubmitFn: () => true,
-    captureSourceFence: () => captureChatDraftSource().isCurrent,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
     captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {
@@ -3347,6 +3406,9 @@ export const useMessage = () => {
     notification,
     allowOrdinaryRetry: true,
     historySelection,
+    getMessages: () => useStoreMessageOption.getState().messages,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     validateBeforeSubmitFn: () => true,
     history,
     messages,

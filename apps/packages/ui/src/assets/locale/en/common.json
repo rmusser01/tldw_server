@@ -815,5 +815,13 @@
       "large_rewrite": "The rewrite is extensive and needs review.",
       "unknown": "Prompt safety notice."
     }
+  },
+  "regenerateMessage": {
+    "settings": "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept.",
+    "context": "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    "changed": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again.",
+    "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    "unsupported": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.",
+    "failed": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
   }
 }

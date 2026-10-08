@@ -1,3 +1,4 @@
+import { nativeRegenerationFeedback } from "@/hooks/chat/native-character-preflight"
 import i18n from "i18next"
 import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
 
@@ -21,6 +22,7 @@ import {
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import {
   nativeHistoryMessagePayload,
+  nativeRegenerateView,
   saveNativeHistoryMessage,
   assertHistoryConversationTarget,
   commitNativeFork,
@@ -64,6 +66,9 @@ export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn,
   history,
   messages,
+  getMessages,
+  captureViewFence,
+  captureSourceFence,
   setHistory,
   setMessages,
   onSubmit,
@@ -75,6 +80,9 @@ export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn: () => boolean
   history: ChatHistory
   messages: Message[]
+  getMessages?: () => Message[]
+  captureViewFence?: () => () => boolean
+  captureSourceFence?: () => () => boolean
   setHistory: (history: ChatHistory) => void
   setMessages: (messages: Message[]) => void
   onSubmit: (params: any) => Promise<ChatSubmitResult | void>
@@ -98,15 +106,55 @@ export const createRegenerateLastMessage = ({
     | void
   >
 }) => {
+  const current = captureViewFence?.() ?? historySelection?.fence?.() ?? (() => true)
+  const sourceCurrent = captureSourceFence?.() ?? (() => true)
   return async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }) => {
     dispatch?.controller?.signal.throwIfAborted()
     dispatch?.assertCurrent?.()
+    if (!current() || !sourceCurrent()) return chatSubmitSkipped("stale_selection")
+    const busy = useStoreMessageOption.getState()
+    if (busy.streaming || busy.isProcessing) return chatSubmitSkipped("response_in_progress")
+    const origin = historySelection?.getCurrent()
+    if (origin?.status === "ready" && origin.owner?.kind === "native" &&
+        origin.view && origin.capture?.status === "captured") {
+      const reply = origin.capture.rows.at(-1)
+      const input = origin.capture.rows.at(-2)
+      const before = getMessages?.() ?? messages
+      const target = before.at(-1)
+      const question = before.at(-2)
+      const inputContent = origin.capture.selected_content.at(-2)
+      const replyContent = origin.capture.selected_content.at(-1)
+      if (!reply || !input || !target?.isBot || question?.isBot ||
+          (target.serverMessageId ?? target.id) !== reply.id || (question?.serverMessageId ?? question?.id) !== input.id ||
+          before.filter(row => (row.serverMessageId ?? row.id) === reply.id).length !== 1 ||
+          before.filter(row => (row.serverMessageId ?? row.id) === input.id).length !== 1 ||
+          target.message !== replyContent?.message || question?.message !== inputContent?.message ||
+          JSON.stringify(question.images ?? []) !== JSON.stringify(inputContent?.images ?? []))
+        return chatSubmitSkipped("message_changed")
+      const isCurrent = () => {
+        try {
+          dispatch?.assertCurrent?.()
+          return sourceCurrent() && !dispatch?.controller?.signal.aborted
+        } catch { return false }
+      }
+      const intent = {
+        owner_key: origin.view.owner_key, conversation_id: origin.view.conversation_id,
+        message_id: reply.id, message_revision: reply.revision,
+        input_message_id: input.id, input_message_revision: input.revision,
+        isCurrent, isOriginCurrent: () => current() && isCurrent()
+      }
+      nativeRegenerateView(origin.owner, origin.view, origin.capture, intent)
+      if (!validateBeforeSubmitFn()) return chatSubmitSkipped("validation_failed")
+      return await onSubmit({ message: inputContent!.message, image: inputContent!.images[0] ?? "", isRegenerate: true,
+        historyRegenerate: intent, controller: dispatch?.controller ?? new AbortController(),
+        assertCurrent: () => { if (!intent.isOriginCurrent()) throw new Error("stale_selection") } })
+    }
     if (!allowOrdinaryRetry || historySelection) {
       const target = [...messages].reverse().find((row) => row.isBot && row.id)
       const error = Object.assign(new Error("unsupported_history_regeneration"), {
         boundary: target ? { kind: "before_message", message_id: target.id } : null
       })
-      notification?.error({ message: "Message action unavailable", description: error.message })
+      notification?.error({ message: "Message action unavailable", description: nativeRegenerationFeedback(error, (key, fallback) => String(i18n.t(key, fallback))) })
       throw error
     }
     if (typeof setHistory !== "function") {

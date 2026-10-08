@@ -5,6 +5,8 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
+import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
+import { usePageAssist } from "@/context"
 
 const {
   addChatMessageMock,
@@ -1847,7 +1849,7 @@ it.each(["http502", "sse-beforeadmission", "sse-afteradmission", "sse-afterparti
   else expect(retained.admission.input_message_id).toBe("native-input")
   expect(h1.dismiss).not.toHaveBeenCalled()
   expect(h1.controller.followResult).not.toHaveBeenCalled()
-  await expect(result.current.regenerateLastMessage()).rejects.toThrow("unsupported_history_regeneration")
+  expect(await result.current.regenerateLastMessage()).toEqual({ status: "skipped", reason: "message_changed" })
   expect(h1.wire).toHaveBeenCalledOnce()
   expect(addChatMessageMock).not.toHaveBeenCalled()
   expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
@@ -5201,3 +5203,249 @@ it.each(["write", "refresh", "final-read"])(
     }
   }
 )
+
+
+it.each(["normal", "character"].flatMap(mode => ["current", "interrupted", "old result", "wrong admission"].map(boundary => ({ mode, boundary }))))(
+  "full native owned regeneration through $mode / $boundary keeps the canonical input and original reply",
+  async ({ mode, boundary }) => {
+    const options = mode === "character" ? createHookOptions() : ordinaryOptions()
+    options.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+      { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }] as never
+    messageStoreState.editRows = () => options.messages
+    const original = structuredClone(options.messages)
+    const hook = renderHook(() => useChatActions(options as never))
+    options.setMessages.mockClear(); options.setHistory.mockClear()
+    const store = (await import("@/store/option")).useStoreMessageOption
+    const origin = h1.controller.getCurrent().view
+    const admission = { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+      input_message_id: "u-old", input_message_revision: "1", selection_digest: "ORIGINAL INPUT ADMISSION",
+      originating_selection_revision: 0, messages: [] }
+    h1.read.mockResolvedValue({ id: "u-old", conversation_id: nativeChatId, sender: "user", parent_message_id: null,
+      content: "old question", has_image: false, version: 1 })
+    h1.wire.mockImplementation(async function* () {
+      expect(store.getState().detachedHistoryResponse).toBeTruthy()
+      yield { tldw_history_admission_v1: { ...admission, ...(boundary === "wrong admission" ? { input_message_id: "foreign" } : {}) } }
+      yield { choices: [{ delta: { content: "New alternative reply" } }] }
+      if (boundary === "interrupted") throw new Error("Response lost")
+      yield { tldw_message_id: boundary === "old result" ? "a2" : "new-alternative", tldw_conversation_id: nativeChatId }
+    })
+    let outcome: unknown
+    await act(async () => { outcome = await hook.result.current.regenerateLastMessage() })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.read).toHaveBeenCalledWith("u-old", expect.objectContaining({ requestScope: expect.any(Object) }))
+    const request = h1.wire.mock.calls[0][0]
+    expect(request).toMatchObject({ save_to_db: true, tldw_history_branch: true,
+      metadata: { tldw_regenerate_from_message_id: "a1" }, messages: [{ role: "user", content: "old question" }],
+      tldw_history_selection_v1: { cursor: { kind: "after_message", message_id: "a1" }, selection_revision: origin.selection_revision + 1,
+        messages: [{ id: "u-old", revision: "r1" }, { id: "a1", revision: "r2" }] } })
+    expect(options.messages).toEqual(original)
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(options.setHistory).not.toHaveBeenCalled()
+    expect(store.getState().detachedHistoryResponse).toBeNull()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    if (boundary === "current") {
+      expect(outcome).toEqual({ status: "submitted" })
+      expect(h1.controller.followResult).toHaveBeenCalledWith(origin, "new-alternative", expect.any(Function))
+      expect(h1.dismiss).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "completed")
+      expect(h1.recover).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ action: "regenerate",
+        admission: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId, input_message_id: "u-old",
+          input_message_revision: "1", selection_digest: "ORIGINAL INPUT ADMISSION" } }))
+    } else {
+      expect(outcome).toMatchObject({ status: "failed" })
+      expect(h1.controller.followResult).not.toHaveBeenCalled()
+      expect(h1.dismiss).not.toHaveBeenCalled()
+    }
+    hook.unmount()
+  }
+)
+
+
+it.each(["normal", "character"])("full $mode native regeneration preserves literal whitespace with every image through final request serialization", async mode => {
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+    const decorate = (captured: ReturnType<typeof captureFor>) => ({ ...captured,
+      selected_content: captured.selected_content.map(row => row.id === "u-old" ? { ...row, message: "  \n", images: [image, image],
+        extra_metadata: { sender_role: "user", image_details: ["high", "low"] } } : row) })
+    h1.controller.getCurrent().capture = decorate(h1.controller.getCurrent().capture)
+    h1.capture.mockImplementation(async (_id, request) => decorate(captureFor(request.view)))
+    const options = mode === "character" ? createHookOptions() : ordinaryOptions()
+    options.messages = [{ id: "u-old", name: "You", isBot: false, message: "  \n", images: [image, image], sources: [] },
+      { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }] as never
+    messageStoreState.editRows = () => options.messages
+    const hook = renderHook(() => useChatActions(options as never))
+    h1.read.mockResolvedValue({ id: "u-old", sender: "user", conversation_id: nativeChatId, parent_message_id: null,
+      content: "  \n", has_image: true, version: 1 })
+    const origin = h1.controller.getCurrent().view
+    h1.wire.mockImplementation(async function* (request) {
+      expect(request.messages).toEqual([{ role: "user", content: [{ type: "text", text: "  \n" },
+        { type: "image_url", image_url: { url: image, detail: "high" } }, { type: "image_url", image_url: { url: image, detail: "low" } }] }])
+      yield { tldw_history_admission_v1: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+        input_message_id: "u-old", input_message_revision: "1", selection_digest: "original", originating_selection_revision: 0, messages: [] } }
+      yield { tldw_message_id: "new-alternative", tldw_conversation_id: nativeChatId }
+    })
+    await act(async () => { expect(await hook.result.current.regenerateLastMessage()).toEqual({ status: "submitted" }) })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    hook.unmount()
+  })
+
+
+it("full native regeneration cannot follow an unmounted source even when its outer H1 owner survives", async () => {
+  const options = ordinaryOptions()
+  options.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+    { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }] as never
+  messageStoreState.editRows = () => options.messages
+  const hook = renderHook(() => useChatActions(options as never))
+  const origin = h1.controller.getCurrent().view
+  h1.read.mockResolvedValue({ id: "u-old", sender: "user", conversation_id: nativeChatId, parent_message_id: null,
+    content: "old question", has_image: false, version: 1 })
+  let release!: () => void, enter!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), entered = new Promise<void>(resolve => { enter = resolve })
+  h1.wire.mockImplementation(async function* () {
+    yield { tldw_history_admission_v1: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+      input_message_id: "u-old", input_message_revision: "1", selection_digest: "original", originating_selection_revision: 0, messages: [] } }
+    enter(); await gate
+    yield { tldw_message_id: "unmounted-alternative", tldw_conversation_id: nativeChatId }
+  })
+  let pending!: Promise<unknown>
+  act(() => { pending = hook.result.current.regenerateLastMessage() })
+  await entered; hook.unmount(); release()
+  expect(await pending).toEqual({ status: "submitted" })
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(h1.recover).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+    action: "regenerate", outcome: "complete", settled_message_id: "unmounted-alternative" }))
+})
+
+
+it.each(["regenerate", "send"])("full an older regeneration cannot clear a newer request through another mounted hook: %s", async kind => {
+    let sharedController: AbortController | null = null
+    const store = (await import("@/store/option")).useStoreMessageOption
+    const optionsFor = () => {
+      const options = kind === "send" ? createHookOptions() : ordinaryOptions()
+      options.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+        { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }] as never
+      options.setStreaming.mockImplementation(value => store.setState({ streaming: value }))
+      options.setIsProcessing.mockImplementation(value => store.setState({ isProcessing: value }))
+      options.setAbortController.mockImplementation(value => { sharedController = value })
+      return { ...options, getAbortController: () => sharedController }
+    }
+    const firstOptions = optionsFor(), secondOptions = optionsFor()
+    messageStoreState.editRows = () => firstOptions.messages
+    const firstHook = renderHook(() => useChatActions(firstOptions as never))
+    const secondHook = renderHook(() => useChatActions(secondOptions as never))
+    const origin = h1.controller.getCurrent().view
+    h1.read.mockResolvedValue({ id: "u-old", sender: "user", conversation_id: nativeChatId, parent_message_id: null,
+      content: "old question", has_image: false, version: 1 })
+    let releaseA!: () => void, releaseB!: () => void, enterA!: () => void, enterB!: () => void, dispatched = 0
+    const a = new Promise<void>(resolve => { releaseA = resolve }), b = new Promise<void>(resolve => { releaseB = resolve }),
+      enteredA = new Promise<void>(resolve => { enterA = resolve }), enteredB = new Promise<void>(resolve => { enterB = resolve })
+    h1.wire.mockImplementation(async function* (request) {
+      const first = dispatched++ === 0, selection = request.tldw_history_selection_v1
+      yield { tldw_history_admission_v1: request.metadata?.tldw_regenerate_from_message_id ? { version: 1,
+        owner_key: origin.owner_key, conversation_id: nativeChatId, input_message_id: "u-old", input_message_revision: "1",
+        selection_digest: "original", originating_selection_revision: 0, messages: [] } : { version: 1, owner_key: origin.owner_key,
+        conversation_id: nativeChatId, input_message_id: "new-input-B", input_message_revision: "1", selection_digest: selection.selection_digest,
+        originating_selection_revision: selection.selection_revision, messages: selection.messages } }
+      if (first) { enterA(); await a } else { enterB(); await b }
+      yield { tldw_message_id: first ? "reply-A" : "reply-B", tldw_conversation_id: nativeChatId }
+    })
+    let first!: Promise<unknown>, second!: Promise<unknown>
+    try {
+      act(() => { first = firstHook.result.current.regenerateLastMessage() })
+      await enteredA
+      store.setState({ streaming: false, isProcessing: false, chatDraftRevision: store.getState().chatDraftRevision + 1 })
+      secondHook.rerender()
+      act(() => { second = kind === "send" ? secondHook.result.current.onSubmit({ message: "Next B", image: "" }) : secondHook.result.current.regenerateLastMessage() })
+      await enteredB
+      const controllerB = sharedController, markerB = store.getState().detachedHistoryResponse
+      const processingB = store.getState().isProcessing
+      releaseA(); await act(async () => { await first })
+      expect(sharedController).toBe(controllerB)
+      expect(store.getState().streaming).toBe(true)
+      expect(store.getState().isProcessing).toBe(processingB)
+      expect(store.getState().detachedHistoryResponse).toBe(markerB)
+      releaseB(); await act(async () => { expect(await second).toEqual({ status: "submitted" }) })
+      expect(store.getState().streaming).toBe(false)
+    } finally {
+      releaseA(); releaseB(); await first; await second; firstHook.unmount(); secondHook.unmount()
+      store.setState({ streaming: false, isProcessing: false })
+    }
+  })
+
+
+it("full Stop releases native busy state through the actual shared provider after the aborted turn finishes", async () => {
+  const store = (await import("@/store/option")).useStoreMessageOption
+  const options = ordinaryOptions()
+  options.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+    { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }] as never
+  messageStoreState.editRows = () => options.messages
+  options.setStreaming.mockImplementation(value => store.setState({ streaming: value }))
+  options.setIsProcessing.mockImplementation(value => store.setState({ isProcessing: value }))
+  const hook = renderHook(() => {
+    const context = usePageAssist()
+    return { context, actions: useChatActions({ ...options, abortController: context.controller,
+      setAbortController: context.setController, getAbortController: context.getController } as never) }
+  }, { wrapper: PageAssistProvider })
+  const origin = h1.controller.getCurrent().view
+  h1.read.mockResolvedValue({ id: "u-old", sender: "user", conversation_id: nativeChatId, parent_message_id: null,
+    content: "old question", has_image: false, version: 1 })
+  let release!: () => void, enter!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), entered = new Promise<void>(resolve => { enter = resolve })
+  h1.wire.mockImplementation(async function* () {
+    yield { tldw_history_admission_v1: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+      input_message_id: "u-old", input_message_revision: "1", selection_digest: "original", originating_selection_revision: 0, messages: [] } }
+    enter(); await gate
+    throw new DOMException("Stopped", "AbortError")
+  })
+  let pending!: Promise<unknown>
+  try {
+    act(() => { pending = hook.result.current.actions.regenerateLastMessage() })
+    await act(async () => { await entered })
+    const owned = hook.result.current.context.getController!()!
+    act(() => { hook.result.current.actions.stopStreamingRequest() })
+    expect(owned.signal.aborted).toBe(true)
+    release(); await act(async () => { await pending })
+    expect(hook.result.current.context.getController!()).toBeNull()
+    expect(store.getState().streaming).toBe(false)
+    expect(store.getState().isProcessing).toBe(false)
+    expect(h1.controller.followResult).not.toHaveBeenCalled()
+  } finally { release(); await pending; store.setState({ streaming: false, isProcessing: false }); hook.unmount() }
+})
+
+
+it.each(["marker", "busy"])("full a synchronous replacement during %s publication keeps the newer provider owner", async publication => {
+  const store = (await import("@/store/option")).useStoreMessageOption
+  const options = ordinaryOptions()
+  options.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+    { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }] as never
+  messageStoreState.editRows = () => options.messages
+  options.setStreaming.mockImplementation(value => store.setState({ streaming: value }))
+  options.setIsProcessing.mockImplementation(value => store.setState({ isProcessing: value }))
+  const hook = renderHook(() => {
+    const context = usePageAssist()
+    return { context, actions: useChatActions({ ...options, abortController: context.controller,
+      setAbortController: context.setController, getAbortController: context.getController } as never) }
+  }, { wrapper: PageAssistProvider })
+  const newer = new AbortController(), marker = { originalReply: { id: "newer", isBot: true, message: "B" } }
+  let replaced = false
+  const actualStore = (await vi.importActual<typeof import("@/store/option")>("@/store/option")).useStoreMessageOption
+  const unsubscribe = actualStore.subscribe((state, previous) => {
+    if (!replaced && (publication === "marker"
+      ? state.detachedHistoryResponse && state.detachedHistoryResponse !== previous.detachedHistoryResponse
+      : state.streaming && !previous.streaming)) {
+      replaced = true
+      hook.result.current.context.setController(newer)
+      store.setState({ chatDraftRevision: state.chatDraftRevision + 1, streaming: true, isProcessing: true, detachedHistoryResponse: marker })
+    }
+  })
+  try {
+    await act(async () => { await hook.result.current.actions.regenerateLastMessage().catch(() => undefined) })
+    expect(replaced).toBe(true)
+    expect(hook.result.current.context.getController!()).toBe(newer)
+    expect(store.getState().streaming).toBe(true)
+    expect(store.getState().isProcessing).toBe(true)
+    expect(store.getState().detachedHistoryResponse).toBe(marker)
+    expect(h1.wire).not.toHaveBeenCalled()
+  } finally { unsubscribe(); store.setState({ streaming: false, isProcessing: false }); hook.unmount() }
+})

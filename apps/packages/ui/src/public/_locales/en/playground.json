@@ -4384,5 +4384,13 @@
   },
   "historySelection_openSavedReplyFailed": {
     "message": "Could not open the saved reply. Your current view and saved reply are retained."
+  },
+  "historySelection": {
+    "savedRegeneratedReplyTitle": "New reply saved",
+    "savedRegeneratedReplyMessage": "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready.",
+    "regenerationRefusedTitle": "New reply refused",
+    "regenerationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.",
+    "regenerationUnknownTitle": "New reply unconfirmed",
+    "regenerationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
   }
 }

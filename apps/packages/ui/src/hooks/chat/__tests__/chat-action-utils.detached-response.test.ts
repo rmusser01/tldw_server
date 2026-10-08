@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
-import type { NativeHistoryEditResend } from "@/types/chat-modes"
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
 import { withDetachedHistoryResponse } from "../chat-action-utils"
 
 // Only the private presentation lifetime is under test; mounted dispatch tests validate the intent.
-const edited = { historyEditResend: {} as NativeHistoryEditResend }
+const edited = { historyEditResend: { isOriginCurrent: () => true } as NativeHistoryEditResend }
 const held = () => {
   let release!: () => void
   const promise = new Promise<void>(resolve => { release = resolve })
@@ -128,4 +128,15 @@ it("an early refusal before beginning response presentation leaves the active ma
   const submit = withDetachedHistoryResponse(async () => "skipped")
   expect(await submit(edited)).toBe("skipped")
   expect(useStoreMessageOption.getState().detachedHistoryResponse).toBe(current)
+})
+
+
+it("native regeneration keeps the saved reply passive through a held dispatch", async () => {
+  const gate = held(), original = { id: "saved-answer", message: "Original reply", isBot: true, name: "Assistant" }
+  useStoreMessageOption.setState({ messages: [original] })
+  const submit = withDetachedHistoryResponse(async (_params, beginResponse) => { beginResponse(); await gate.promise })
+  const pending = submit({ historyRegenerate: { isOriginCurrent: () => true } as NativeHistoryRegenerate })
+  expect(useStoreMessageOption.getState().detachedHistoryResponse?.originalReply).toEqual(original)
+  gate.release(); await pending
+  expect(useStoreMessageOption.getState().detachedHistoryResponse).toBeNull()
 })

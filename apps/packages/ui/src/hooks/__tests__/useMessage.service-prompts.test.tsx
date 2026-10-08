@@ -712,6 +712,121 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     }
   })
 
+  it.each(["current", "new", "same-id", "unmount", "account"] as const)(
+    "keeps scratch-to-server save publication and its settings lease owned across %s",
+    async (boundary) => {
+      const { useStoreMessageOption: realStore } =
+        await vi.importActual<typeof import("@/store/option")>("@/store/option")
+      const { syncChatSettingsForServerChat } = await import(
+        "@/services/chat-settings"
+      )
+      const previous = realStore.getState()
+      const previousAssistant = mocks.selectedAssistant
+      const previousEffectiveAssistant = mocks.effectiveAssistantState
+      mocks.selectedAssistant = null
+      mocks.effectiveAssistantState = null
+      mocks.useRealQueueState = true
+      realStore.getState().startNewChatDraft()
+      realStore.setState({
+        historyId: null,
+        serverChatId: null,
+        serverChatMetaLoaded: false,
+        messages: [],
+        history: [],
+        temporaryChat: false,
+        chatMode: "normal",
+        streaming: false,
+        isProcessing: false,
+        selectedSystemPrompt: null
+      })
+      const source = realStore.getState()
+      const scope = new AbortController()
+      let finishPersistence!: () => void
+      const held = new Promise<void>((resolve) => {
+        finishPersistence = resolve
+      })
+      mocks.saveMessageOnSuccess.mockImplementation(async (payload) => {
+        await held
+        payload.setHistoryId("created-local-history")
+        return "created-local-history"
+      })
+      vi.mocked(normalChatMode).mockImplementationOnce(async (...args) => {
+        await args[6].saveMessageOnSuccess({
+          historyId: null,
+          setHistoryId: args[6].setHistoryId,
+          conversationId: "created-server",
+          saveToDb: true,
+          scopeSignal: scope.signal,
+          message: "Original request",
+          fullText: "Saved reply"
+        })
+        return { status: "submitted" }
+      })
+      const hook = renderHook(() => useMessage())
+      const submission = hook.result.current.onSubmit({
+        message: "Original request",
+        image: "",
+        controller: new AbortController(),
+        requestOverrides: { chatMode: "normal" }
+      })
+      try {
+        await waitFor(() =>
+          expect(mocks.saveMessageOnSuccess).toHaveBeenCalledOnce()
+        )
+        if (boundary === "new" || boundary === "same-id") {
+          act(() => {
+            realStore.getState().startNewChatDraft()
+            realStore.setState({
+              historyId: boundary === "same-id" ? "reopened-local-history" : null,
+              serverChatId: boundary === "same-id" ? "created-server" : null,
+              serverChatMetaLoaded: true
+            })
+          })
+        }
+        if (boundary === "unmount") hook.unmount()
+        if (boundary === "account") scope.abort()
+        const currentView = realStore.getState()
+        await act(async () => {
+          finishPersistence()
+          await submission
+        })
+        if (boundary === "current") {
+          expect(realStore.getState().historyId).toBe("created-local-history")
+          expect(realStore.getState().serverChatId).toBe("created-server")
+          expect(syncChatSettingsForServerChat).toHaveBeenCalledOnce()
+          const options = vi.mocked(syncChatSettingsForServerChat).mock
+            .calls[0][0]
+          expect(options.sourceDraftAddress).toBe(source.chatDraftAddress)
+          expect(options.validate_lease?.()).toBe(true)
+          act(() => {
+            realStore.getState().startNewChatDraft()
+            realStore.setState({
+              historyId: "created-local-history",
+              serverChatId: "created-server"
+            })
+          })
+          expect(options.validate_lease?.()).toBe(false)
+        } else {
+          expect(realStore.getState().serverChatId).toBe(currentView.serverChatId)
+          expect(syncChatSettingsForServerChat).not.toHaveBeenCalled()
+          if (boundary !== "account")
+            expect(realStore.getState().historyId).toBe(currentView.historyId)
+        }
+        expect(mocks.saveMessageOnSuccess).toHaveBeenCalledOnce()
+      } finally {
+        finishPersistence()
+        await submission
+        hook.unmount()
+        realStore.setState(previous, true)
+        mocks.useRealQueueState = false
+        mocks.selectedAssistant = previousAssistant
+        mocks.effectiveAssistantState = previousEffectiveAssistant
+        mocks.saveMessageOnSuccess.mockReset()
+        vi.mocked(normalChatMode).mockReset()
+      }
+    }
+  )
+
   it.each(["local", "server"])("deletes a qualified sidepanel row and clears the %s reply target", async replyKind => {
     const previous = { ...mocks.storeState }
     const localId = "history-A:server:answer"

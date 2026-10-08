@@ -130,11 +130,16 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => ({ selectedModel: "deepseek-chat" as string | null })
+vi.mock("@/store/option", async original => {
+  const actual = await original<typeof import("@/store/option")>()
+  return {
+    ...actual,
+    useStoreMessageOption: {
+      getState: () => ({ ...actual.useStoreMessageOption.getState(), selectedModel: "deepseek-chat" as string | null }),
+      setState: actual.useStoreMessageOption.setState
+    }
   }
-}))
+})
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))

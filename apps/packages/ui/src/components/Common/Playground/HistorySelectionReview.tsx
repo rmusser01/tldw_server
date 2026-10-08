@@ -298,19 +298,27 @@ export function HistorySelectionReview({
             key={entry.turn.operation_id}
             className="mb-3 rounded border p-3"
             role="status">
-            {entry.turn.action === "edit_resend" &&
+            {(entry.turn.action === "edit_resend" || entry.turn.action === "regenerate") &&
             entry.turn.outcome === "complete" &&
             entry.turn.settled_message_id ? (
               <>
                 <p className="font-medium">
-                  {text("savedEditedReplyTitle", "Edited reply saved")}
+                  {entry.turn.action === "regenerate" ? text("savedRegeneratedReplyTitle", "New reply saved") : text("savedEditedReplyTitle", "Edited reply saved")}
                 </p>
                 <p>
-                  {text(
+                  {entry.turn.action === "regenerate" ? text("savedRegeneratedReplyMessage",
+                    "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready.") : text(
                     "savedEditedReplyMessage",
                     "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready."
                   )}
                 </p>
+              </>
+            ) : entry.turn.action === "regenerate" ? (
+              <>
+                <p className="font-medium">{entry.turn.state === "refused" ? text("regenerationRefusedTitle", "New reply refused") : text("regenerationUnknownTitle", "New reply unconfirmed")}</p>
+                <p>{entry.turn.state === "refused" ? text("regenerationRefusedMessage",
+                  "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.") : text("regenerationUnknownMessage",
+                  "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically.")}</p>
               </>
             ) : entry.turn.outcome === "stopped" ||
             entry.turn.outcome === "interrupted" ? (
@@ -383,7 +391,7 @@ export function HistorySelectionReview({
               }>
               {text("copyRecovery", "Copy recovered text")}
             </Button>
-            {entry.turn.action === "edit_resend" &&
+            {(entry.turn.action === "edit_resend" || entry.turn.action === "regenerate") &&
               entry.turn.outcome === "complete" &&
               entry.turn.settled_message_id && (
                 <Button

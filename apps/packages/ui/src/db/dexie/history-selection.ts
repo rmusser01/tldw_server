@@ -1021,11 +1021,14 @@ const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopp
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
 ): Promise<void> => {
-  if (turn.action !== undefined && turn.action !== "edit_resend") fail("unsupported_history_action")
+  if (turn.action !== undefined && turn.action !== "edit_resend" && turn.action !== "regenerate") fail("unsupported_history_action")
+  if (turn.action === "regenerate" && (turn.persistence !== "server" ||
+      turn.origin_view?.interpretation.kind !== "parent_graph_v1" || turn.origin_view.cursor.kind !== "after_message"))
+    fail("unsupported_history_action")
   // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
   const detached: HistoryTurnRecovery = structuredClone({
     operation_id: turn.operation_id, origin_view: turn.origin_view,
-    ...(turn.action === "edit_resend" ? { action: turn.action } : {}),
+    ...(turn.action ? { action: turn.action } : {}),
     selection_digest: turn.selection_digest, request_context_digest: turn.request_context_digest,
     owner_key: turn.owner_key, conversation_id: turn.conversation_id,
     persistence: turn.persistence ?? "client",
@@ -1052,7 +1055,7 @@ export const saveHistoryTurnRecovery = async (
       fail("invalid_history_operation")
     if (detached.persistence === "server" && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
       fail("history_operation_conflict")
-    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || detached.admission.selection_digest !== detached.selection_digest))
+    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (detached.action !== "regenerate" && detached.admission.selection_digest !== detached.selection_digest)))
       fail("history_operation_conflict")
     if (
       detached.state === "refused" &&
@@ -1063,7 +1066,7 @@ export const saveHistoryTurnRecovery = async (
         detached.result_text ||
         detached.outcome ||
         detached.settled_message_id ||
-        detached.input_images?.length)
+        (detached.action !== "regenerate" && detached.input_images?.length))
     )
       fail("history_operation_conflict")
 
@@ -1113,9 +1116,9 @@ export const loadHistoryTurnRecoveries = async (
     return bookmarks.filter(record => record.profile_id === scope.profile_id && record.conversation_id === owner.conversation_id)
       .flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => {
         const { action, ...ordinary } = turn
-        if (action !== undefined && action !== "edit_resend") fail("unsupported_history_action")
+        if (action !== undefined && action !== "edit_resend" && action !== "regenerate") fail("unsupported_history_action")
         return { scope: { profile_id: record.profile_id, client_session_id: record.client_session_id },
-          turn: { ...ordinary, ...(action === "edit_resend" ? { action } : {}) } }
+          turn: { ...ordinary, ...(action ? { action } : {}) } }
       }))
   })
 

@@ -274,8 +274,8 @@ export type HistoryBookmarkScope = { profile_id: string; client_session_id: stri
 export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
 /** Recovery text is never a message, selected history, or persisted write capability. */
 export type HistoryTurnRecovery = {
-  /** Explicit edited branches remain in review until the user opens their result. */
-  action?: 'edit_resend';
+  /** Explicit alternatives remain in review until the user opens their result. */
+  action?: 'edit_resend' | 'regenerate';
   operation_id: string;
   origin_view: HistoryViewSelectionV1;
   selection_digest: string;

@@ -1415,7 +1415,9 @@ export function useHistorySelection(
           live.current.view !== origin ||
           live.current.owner !== owner ||
           !saved ||
-          saved.turn.action !== "edit_resend" ||
+          (saved.turn.action !== "edit_resend" && saved.turn.action !== "regenerate") ||
+          saved.turn.action !== entry.turn.action ||
+          saved.turn.persistence !== "server" ||
           saved.turn.outcome !== "complete" ||
           !saved.turn.settled_message_id?.trim() ||
           saved.turn.settled_message_id !== entry.turn.settled_message_id

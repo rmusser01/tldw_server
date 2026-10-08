@@ -1,5 +1,6 @@
 import { useStoreMessageOption } from "@/store/option";
-import type { NativeHistoryEditResend } from "@/types/chat-modes";
+import { captureChatDraftSource } from "./chat-draft-transition";
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup";
 import {
   isImageGenerationMessageType,
@@ -78,18 +79,23 @@ export type ChatSubmitResult =
 
 // A detached reply owns request locks, but does not make any saved row active.
 export const withDetachedHistoryResponse =
-  <T extends { historyEditResend?: NativeHistoryEditResend }, R>(
-    submit: (params: T, beginResponse: () => void) => Promise<R>
+  <T extends { historyEditResend?: NativeHistoryEditResend; historyRegenerate?: NativeHistoryRegenerate }, R>(
+    submit: (params: T, beginResponse: () => boolean) => Promise<R>
   ) =>
   async (params: T): Promise<R> => {
+    const source = captureChatDraftSource()
+    const intent = params.historyRegenerate ?? params.historyEditResend
+    const isCurrent = () => source.isCurrent() && (!intent || intent.isOriginCurrent())
     let token: {
       originalReply?: Pick<Message, "id" | "message" | "isBot">
     } | null = null
     const beginResponse = () => {
-      token = params.historyEditResend
+      if (!isCurrent()) return false
+      token = intent
         ? { originalReply: useStoreMessageOption.getState().messages.at(-1) }
         : null
       useStoreMessageOption.setState({ detachedHistoryResponse: token })
+      return isCurrent()
     }
     try {
       return await submit(params, beginResponse)

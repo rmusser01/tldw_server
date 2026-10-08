@@ -94,7 +94,9 @@ describe("message helper wrappers", () => {
       conversationId: "server-chat-42"
     })
 
-    expect(onServerConversationLinked).toHaveBeenCalledWith("server-chat-42")
+    expect(onServerConversationLinked).toHaveBeenCalledWith(
+      "server-chat-42", { conversationId: "server-chat-42" }, "history-success"
+    )
   })
 
   it("preserves local history without linking an explicitly nonpersisted conversation", async () => {

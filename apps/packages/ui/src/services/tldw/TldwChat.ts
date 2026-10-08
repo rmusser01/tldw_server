@@ -144,7 +144,8 @@ const resolveStreamTimeoutError = (
 }
 
 const sanitizeUserContent = (
-  content: string | ChatCompletionContentPart[]
+  content: string | ChatCompletionContentPart[],
+  preserveTextWhitespace = false
 ): string | ChatCompletionContentPart[] | null => {
   if (typeof content === "string") {
     const trimmed = content.trim()
@@ -157,7 +158,7 @@ const sanitizeUserContent = (
       if (!part || typeof part !== "object") return null
       if (part.type === "text") {
         const text = typeof part.text === "string" ? part.text : ""
-        return text.trim().length > 0 ? { type: "text", text } : null
+        return (preserveTextWhitespace ? text.length : text.trim().length) > 0 ? { type: "text", text } : null
       }
       if (part.type === "image_url") {
         const candidate = part.image_url
@@ -176,7 +177,7 @@ const sanitizeUserContent = (
   return cleaned.length > 0 ? cleaned : null
 }
 
-const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
+const sanitizeMessages = (messages: ChatMessage[], preserveTextWhitespace = false): ChatMessage[] => {
   return messages
     .map((message) => {
       if (message.role === "system") {
@@ -186,7 +187,7 @@ const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
       }
 
       if (message.role === "user") {
-        const content = sanitizeUserContent(message.content)
+        const content = sanitizeUserContent(message.content, preserveTextWhitespace)
         if (content == null) return null
         return { ...message, content } as ChatMessage
       }
@@ -226,7 +227,7 @@ const buildRequestMessages = (
   messages: ChatMessage[],
   options: TldwChatOptions
 ): ChatMessage[] => {
-  const sanitizedMessages = sanitizeMessages(messages)
+  const sanitizedMessages = sanitizeMessages(messages, Boolean(options.regenerateFromMessageId))
   const systemPrompt = normalizeSystemPrompt(options.systemPrompt)
   let withSystemPrompt: ChatMessage[]
   if (systemPrompt) {

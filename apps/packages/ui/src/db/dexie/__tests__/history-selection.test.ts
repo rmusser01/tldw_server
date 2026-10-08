@@ -1521,3 +1521,41 @@ it("recovery reads refuse an unknown action without downgrading it into automati
     (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.action
   ).toBeUndefined()
 })
+
+
+const regenerationRecovery = (origin: HistoryViewSelectionV1): import("../types").HistoryTurnRecovery => ({
+  action: "regenerate", operation_id: "regenerated", persistence: "server", origin_view: origin,
+  owner_key: origin.owner_key, conversation_id: origin.conversation_id, selection_digest: "NEW REGENERATION SELECTION",
+  request_context_digest: "request", created_at: 1, input_text: "  Original input  \n", input_images: ["saved-image"],
+  result_text: "", state: "dispatching"
+})
+it("regeneration recovery retains both the new operation digest and original input admission digest", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: "after_message", message_id: "original-assistant" }
+  const pending = regenerationRecovery(origin)
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const accepted = { ...pending, input_id: "original-input", state: "accepted_unsent" as const, admission: { version: 1 as const,
+    owner_key: owner.owner_key, conversation_id: "chat", input_message_id: "original-input", input_message_revision: "1", selection_digest: "ORIGINAL ADMISSION" } }
+  await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject(accepted)
+  for (const patch of [{ action: undefined }, { selection_digest: "different" }, { admission: { ...accepted.admission, selection_digest: "different" } },
+    { input_id: "foreign-input" }, { admission: { ...accepted.admission, owner_key: "foreign" } }]) {
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, { ...accepted, ...patch })).rejects.toThrow("history_operation_conflict")
+  }
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject(accepted)
+})
+it("confirmed saved-image regeneration refusal keeps the exact original attachments without inventing admission", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: "after_message", message_id: "original-assistant" }
+  const pending = regenerationRecovery(origin)
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, state: "refused" })
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject({ ...pending, state: "refused" })
+})
+it.each(["client", "before_message"])("regeneration recovery refuses unsupported %s persistence or boundary", async boundary => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: boundary === "client" ? "after_message" : "before_message", message_id: "original-assistant" }
+  const pending = regenerationRecovery(origin)
+  if (boundary === "client") Object.assign(pending, { persistence: "client", input_id: "u", assistant_id: "a" })
+  await expect(history.saveHistoryTurnRecovery(bookmark, origin, pending)).rejects.toThrow("unsupported_history_action")
+})
