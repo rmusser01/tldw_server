@@ -153,7 +153,7 @@ const assetOptions = (
   return options
 }
 
-export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
+const LlamacppProfilesPanelImpl: React.FC<LlamacppProfilesPanelProps> = ({
   profiles,
   assets,
   loading = false,
@@ -556,5 +556,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppProfilesPanel = React.memo(LlamacppProfilesPanelImpl)
 
 export default LlamacppProfilesPanel

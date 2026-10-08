@@ -136,7 +136,7 @@ const CandidateLabels: React.FC<{ asset: LlamacppAsset }> = ({ asset }) => (
   </Space>
 )
 
-export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
+const LlamacppAssetsPanelImpl: React.FC<LlamacppAssetsPanelProps> = ({
   assets,
   loading = false,
   registeringPath = false,
@@ -518,5 +518,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppAssetsPanel = React.memo(LlamacppAssetsPanelImpl)
 
 export default LlamacppAssetsPanel

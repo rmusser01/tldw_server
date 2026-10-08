@@ -42,7 +42,7 @@ const isActiveModel = (item: LlamacppInventoryItem, activeModel?: string | null)
   return [item.model_id, item.basename, item.display_name, item.path].includes(activeModel)
 }
 
-export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
+const LlamacppInventoryPanelImpl: React.FC<LlamacppInventoryPanelProps> = ({
   inventory,
   selectedModelId,
   activeModel,
@@ -187,5 +187,7 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppInventoryPanel = React.memo(LlamacppInventoryPanelImpl)
 
 export default LlamacppInventoryPanel
