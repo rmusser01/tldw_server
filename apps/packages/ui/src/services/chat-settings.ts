@@ -1009,8 +1009,29 @@ const requireSettingsSave = (record: LocalRegistryRecord<SettingsSave> | null, d
   return record
 }
 
+export type ChatSettingsRecovery = {
+  destination: string
+  operationId: string
+  status: "pending" | "acknowledged"
+  patch: Partial<ChatSettingsRecord>
+}
+
+/** Read the existing private receipt; never replay or infer a rollback. */
+export const getChatSettingsRecovery = async (target: ChatSettingsTarget): Promise<ChatSettingsRecovery | null> => {
+  const captured = { ...target, scope: target.scope ? { ...target.scope } : undefined }
+  assertSettingsCurrent(captured)
+  if (!captured.serverChatId) return null
+  const destination = resolveChatSettingsKey(captured)
+  const record = requireSettingsSave(await settingsSaves.get(destination, { failClosed: true }), destination)
+  assertSettingsCurrent(captured)
+  if (!record || (record.value.status !== "pending" && record.value.status !== "acknowledged")) return null
+  return { destination, operationId: record.value.operation_id, status: record.value.status,
+    patch: structuredClone(record.value.intent) as Partial<ChatSettingsRecord> }
+}
+
 const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   patch: Partial<ChatSettingsRecord>
+  recoveryOperationId?: string
 }): Promise<ChatSettingsRecord | null> => {
   assertSettingsCurrent(target)
   const chatKey = resolveChatSettingsKey(target)
@@ -1022,6 +1043,8 @@ const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   if (target.serverChatId) {
     previous = requireSettingsSave(await settingsSaves.get(chatKey, { failClosed: true }), chatKey)
     assertSettingsCurrent(target)
+    if (target.recoveryOperationId && (previous?.value.operation_id !== target.recoveryOperationId ||
+      !["pending", "acknowledged"].includes(previous.value.status))) throw new Error("chat_settings_recovery_changed")
     await tldwClient.initialize()
     assertSettingsCurrent(target)
     const raw = requireServerSettingsResponse(target.serverChatId, await tldwClient.getChatSettings(target.serverChatId, settingsRequestOptions(target)))
@@ -1073,6 +1096,7 @@ const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
     }
     pending = { value, updatedAt }
   }
+  try {
   assertSettingsCurrent(target)
   let synced = existing
   if (!alreadyApplied) {
@@ -1116,9 +1140,14 @@ const applyCapturedChatSettingsPatch = async (target: ChatSettingsTarget & {
   }
   assertSettingsCurrent(target)
   return synced
+  } catch (error) {
+    if (error instanceof Error && pending && ["chat_settings_server_unconfirmed", "chat_settings_device_save_failed", "chat_settings_ack_invalid"].includes(error.message))
+      Object.assign(error, { settingsOperationId: pending.value.operation_id })
+    throw error
+  }
 }
 
-export const applyChatSettingsPatch = async (target: ChatSettingsTarget & { patch: Partial<ChatSettingsRecord> }): Promise<ChatSettingsRecord | null> => {
+export const applyChatSettingsPatch = async (target: ChatSettingsTarget & { patch: Partial<ChatSettingsRecord>; recoveryOperationId?: string }): Promise<ChatSettingsRecord | null> => {
   const captured = { ...target, patch: structuredClone(target.patch), scope: target.scope ? { ...target.scope } : undefined }
   assertSettingsCurrent(captured)
   if (!captured.serverChatId) return await applyCapturedChatSettingsPatch(captured)

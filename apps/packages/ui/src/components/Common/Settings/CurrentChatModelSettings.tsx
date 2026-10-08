@@ -46,6 +46,7 @@ import {
 } from "./tabs"
 import { LlamaCppAdvancedControls } from "./LlamaCppAdvancedControls"
 import { resolveSelectedSystemPromptContent } from "../system-prompt-utils"
+import type { ConversationDraftStatus } from "./tabs/ConversationTab"
 import { normalizeCurrentChatModelSettingValue } from "./current-chat-model-settings-values"
 
 type Props = {
@@ -173,14 +174,14 @@ export const CurrentChatModelSettings = ({
     setSelectedModel,
     retrySelectedModelSave,
     serverChatId,
+    serverChatVersion,
     serverChatAssistantKind,
     serverChatPersonaMemoryMode,
     serverChatTopic,
     setServerChatTopic,
     serverChatState,
     setServerChatState,
-    setServerChatVersion,
-    setServerChatPersonaMemoryMode
+    setServerChatVersion
   } = useMessageOption()
 
   const [selectedCharacter, , selectedCharacterMeta] =
@@ -263,6 +264,20 @@ export const CurrentChatModelSettings = ({
     baselineRef.current = null
   }
   const renderedView = viewRef.current
+  const conversationDraftRef = React.useRef({ view: renderedView, dirty: false, pending: false, revision: 0 })
+  const [, refreshConversationDraft] = React.useReducer((value: number) => value + 1, 0)
+  if (conversationDraftRef.current.view !== renderedView)
+    conversationDraftRef.current = { view: renderedView, dirty: false, pending: false, revision: 0 }
+  const onConversationDraftChange = useCallback((status: ConversationDraftStatus) => {
+    if (viewRef.current !== renderedView) return
+    const previous = conversationDraftRef.current
+    if (previous.revision === status.revision && previous.dirty === status.dirty && previous.pending === status.pending) return
+    if (previous.revision !== status.revision) editRevisionRef.current++
+    conversationDraftRef.current = { view: renderedView, ...status }
+    refreshConversationDraft()
+  }, [renderedView])
+  const conversationDirty = conversationDraftRef.current.dirty
+  const conversationPending = conversationDraftRef.current.pending
   React.useEffect(() => {
     saveAttemptRef.current = null
     modelRetryRef.current = null
@@ -296,18 +311,18 @@ export const CurrentChatModelSettings = ({
   }, [isEditorCurrent])
   const isDirty = useCallback(() => {
     const baseline = baselineRef.current
-    return Boolean(baseline && (
+    return conversationDraftRef.current.dirty || Boolean(baseline && (
       Object.entries(baseline.values).some(([key, value]) => JSON.stringify(form.getFieldValue(key as keyof CurrentChatModelFormValues)) !== JSON.stringify(value)) ||
       JSON.stringify(actorSettings) !== JSON.stringify(baseline.actor) ||
       stagedOcrLanguage !== baseline.ocrLanguage
     ))
   }, [actorSettings, form, stagedOcrLanguage])
   const requestClose = useCallback(() => {
-    if (saveAttemptRef.current || saving || viewRef.current !== renderedView) return
+    if (saveAttemptRef.current || saving || conversationDraftRef.current.pending || viewRef.current !== renderedView) return
     const revision = editRevisionRef.current
     const source = loadedSourceRef.current
     const close = () => {
-      if (!saveAttemptRef.current && mountedRef.current && viewRef.current === renderedView &&
+      if (!saveAttemptRef.current && !conversationDraftRef.current.pending && mountedRef.current && viewRef.current === renderedView &&
         useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision &&
         editRevisionRef.current === revision && (!source || source()))
         setOpen(false)
@@ -514,7 +529,7 @@ export const CurrentChatModelSettings = ({
 
   const handleModelChange = useCallback((selection: string | null | undefined) => {
     const value = normalizeSelectedModel(selection)
-    if (saving || !isEditorCurrent()) return
+    if (saving || conversationDraftRef.current.pending || !isEditorCurrent()) return
     const revision = editRevisionRef.current
     const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
     const source = captureChatDraftSource(() => selectionIsCurrent() && (accountIsCurrent?.() ?? true))
@@ -522,7 +537,7 @@ export const CurrentChatModelSettings = ({
       editRevisionRef.current === revision && source.isCurrent() &&
       useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision
     const change = () => {
-      if (!isEditorCurrent() || !canSelect()) return
+      if (conversationDraftRef.current.pending || !isEditorCurrent() || !canSelect()) return
       const state = useStoreChatModelSettings.getState()
       const nextScope = resolveModelSelectorSelection(composerModels, value, state.apiProvider, {
         scope: state.activeSettingsScope,
@@ -839,6 +854,10 @@ export const CurrentChatModelSettings = ({
           label: t("modelSettings.tabs.conversation", "Conversation"),
           children: (
             <ConversationTab
+              key={renderedView.revision}
+              isCurrent={isEditorCurrent}
+              onDraftChange={onConversationDraftChange}
+              serverChatVersion={serverChatVersion}
               useDrawer={useDrawer}
               historyId={historyId}
               selectedSystemPrompt={selectedSystemPrompt}
@@ -854,7 +873,6 @@ export const CurrentChatModelSettings = ({
               serverChatTopic={serverChatTopic}
               onTopicChange={setServerChatTopic}
               onVersionChange={setServerChatVersion}
-              onPersonaMemoryModeChange={setServerChatPersonaMemoryMode}
             />
           )
         },
@@ -895,7 +913,6 @@ export const CurrentChatModelSettings = ({
     [
       t,
       form,
-      selectedModel,
       selectedSelection.key,
       handleModelChange,
       modelOptions,
@@ -908,7 +925,13 @@ export const CurrentChatModelSettings = ({
       resetSystemPrompt,
       uploadedFiles,
       removeUploadedFile,
+      historyId,
       serverChatId,
+      serverChatVersion,
+      serverChatAssistantKind,
+      serverChatPersonaMemoryMode,
+      renderedView.revision,
+      onConversationDraftChange,
       serverChatState,
       setServerChatState,
       serverChatTopic,
@@ -993,10 +1016,11 @@ export const CurrentChatModelSettings = ({
             // A remounted dialog may reuse cached config without rerunning its query.
             initialValues={buildBaseValues()}
             layout="vertical"
-            disabled={saving}
+            disabled={saving || conversationPending}
             onFinish={async (values) => {
               if (
                 saveAttemptRef.current ||
+                conversationDraftRef.current.dirty || conversationDraftRef.current.pending ||
                 !sceneReady ||
                 viewRef.current !== renderedView
               )
@@ -1044,7 +1068,7 @@ export const CurrentChatModelSettings = ({
             }}>
             <fieldset
               className="min-w-0 border-0 p-0"
-              disabled={saving || !sceneReady}>
+              disabled={saving || conversationPending || !sceneReady}>
               <Tabs
                 defaultActiveKey="model"
                 destroyOnHidden={false}
@@ -1063,14 +1087,17 @@ export const CurrentChatModelSettings = ({
                   onChange={handleLlamaControlChange}
                 />
               </div>
-              <div className="mt-4 border-t border-border pt-4">
-                <Button disabled={saving} onClick={() => setOpen(false)}>
+              <div className="sticky bottom-0 z-20 mt-4 border-t border-border bg-surface py-3">
+                {conversationDirty && <p className="mb-2 text-xs text-text-muted">{t("modelSettings.conversationPendingHelp", "Apply or cancel conversation changes before saving model settings.")}</p>}
+                <Button htmlType="button" disabled={saving || conversationPending} onClick={() => {
+                  if (!conversationDraftRef.current.pending && isEditorCurrent()) setOpen(false)
+                }}>
                   {t("cancel", "Cancel")}
                 </Button>
                 <button
                   type="submit"
                   aria-busy={saving}
-                  disabled={saving || !sceneReady}
+                  disabled={saving || conversationDirty || conversationPending || !sceneReady}
                   className="inline-flex w-full items-center justify-center rounded-md border border-transparent bg-primary px-3 py-2 min-h-[40px] text-sm font-medium text-surface shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] disabled:opacity-50">
                   {saving ? t("saving", "Saving...") : t("save", "Save")}
                 </button>
@@ -1103,6 +1130,12 @@ export const CurrentChatModelSettings = ({
       open={open}
       onOk={requestClose}
       onCancel={requestClose}
+      style={{ top: "1rem", paddingBottom: 0 }}
+      styles={{
+        container: { maxHeight: "calc(100dvh - 2rem)", display: "flex", flexDirection: "column" },
+        header: { flexShrink: 0 },
+        body: { minHeight: 0, overflowY: "auto" }
+      }}
       footer={null}>
       {renderBody()}
     </Modal>

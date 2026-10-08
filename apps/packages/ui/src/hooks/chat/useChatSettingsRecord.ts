@@ -2,6 +2,8 @@ import {
   applyChatSettingsPatch,
   chatSettingsStorageForKey,
   getChatSettingsForKey,
+  getChatSettingsRecovery,
+  type ChatSettingsRecovery,
   getChatSettingsStorageKey,
   normalizeChatSettingsRecord,
   resolveChatSettingsKey,
@@ -126,12 +128,36 @@ export const useChatSettingsRecord = ({
         stableHistoryId ? true : draftAccount?.isCurrent() === true))
     return { ...target, validate_lease: source.isCurrent }
   }, [renderedIsCurrent, mode, ownerPending, nativeOwner, controller, stableHistoryId, draftAccount, target])
-  const updateSettings = React.useCallback(async (patch: Partial<ChatSettingsRecord>) => {
+  const [recoveryPresentation, setRecoveryPresentation] = React.useState<{
+    source: typeof sourceToken; value: ChatSettingsRecovery | null; error: string | null
+  } | null>(null)
+  const recoveryReadAttempt = React.useRef(0)
+  const refreshRecovery = React.useCallback(async (capturedTarget?: ChatSettingsTarget) => {
+    if (!renderedIsCurrent() || guarded || !serverChatId || ownerPending) return
+    const attempt = ++recoveryReadAttempt.current
+    try {
+      const value = await getChatSettingsRecovery(capturedTarget ?? captureTarget())
+      if (renderedIsCurrent() && recoveryReadAttempt.current === attempt) setRecoveryPresentation({ source: sourceToken, value, error: null })
+    } catch (error) {
+      if (renderedIsCurrent() && recoveryReadAttempt.current === attempt) setRecoveryPresentation({ source: sourceToken, value: null,
+        error: error instanceof Error ? error.message : "The previous settings change could not be read." })
+    }
+  }, [renderedIsCurrent, guarded, serverChatId, ownerPending, captureTarget, sourceToken])
+  React.useEffect(() => { void refreshRecovery() }, [refreshRecovery])
+  const ownsRecovery = recoveryPresentation?.source === sourceToken
+  const recoveryReady = !serverChatId || guarded || (ownsRecovery && !recoveryPresentation.error)
+  const settingsRecovery = ownsRecovery ? recoveryPresentation.value : null
+  const settingsRecoveryError = ownsRecovery ? recoveryPresentation.error : null
+  const updateSettings = React.useCallback(async (patch: Partial<ChatSettingsRecord>, recoveryOperationId?: string) => {
     if (!renderedIsCurrent()) throw new Error("chat_settings_owner_unavailable")
     if (mode === "pending") throw new Error("fork_settings_owner_unavailable")
     if (mode === "fork") return controller!.updateForkSettings(patch)
-    return await applyChatSettingsPatch({ ...captureTarget(), patch })
-  }, [renderedIsCurrent, mode, controller, captureTarget])
+    const capturedTarget = captureTarget()
+    try { return await applyChatSettingsPatch({ ...capturedTarget, patch, recoveryOperationId }) }
+    finally { await refreshRecovery(capturedTarget) }
+  }, [renderedIsCurrent, mode, controller, captureTarget, refreshRecovery])
 
-  return { settings, updateSettings, chatKey, target, captureTarget }
+  const isReady = guarded ? mode === "fork" : !ownerPending && recoveryReady && rawSettings?.storageKey === storageKey
+  return { settings, updateSettings, chatKey, target, captureTarget, isReady, isCurrent: renderedIsCurrent, mode,
+    settingsRecovery, settingsRecoveryError, refreshRecovery }
 }

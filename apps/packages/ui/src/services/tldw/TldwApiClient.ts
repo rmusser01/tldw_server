@@ -5782,9 +5782,9 @@ export class TldwApiClientBase {
         : null,
       source: input?.source ?? null,
       state: state ? String(state) : null,
-      topic_label: input?.topic_label ?? input?.topicLabel ?? null,
-      cluster_id: input?.cluster_id ?? input?.clusterId ?? null,
-      external_ref: input?.external_ref ?? input?.externalRef ?? null,
+      topic_label: Object.prototype.hasOwnProperty.call(input ?? {}, "topic_label") ? input.topic_label ?? null : input?.topicLabel ?? null,
+      cluster_id: Object.prototype.hasOwnProperty.call(input ?? {}, "cluster_id") ? input.cluster_id ?? null : input?.clusterId ?? null,
+      external_ref: Object.prototype.hasOwnProperty.call(input ?? {}, "external_ref") ? input.external_ref ?? null : input?.externalRef ?? null,
       bm25_norm:
         typeof input?.bm25_norm === "number"
           ? input?.bm25_norm
@@ -5953,21 +5953,9 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[] } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    const res = await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
-      path: appendPathQuery(`/api/v1/chats/${cid}`, query),
-      method: "GET",
-      headers: scopeFields.headers,
-      abortSignal: options?.signal,
-      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
-    })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.getChat.call(this as unknown as TldwApiClientCore, chat_id, options)
   }
 
   async listChatResearchRuns(

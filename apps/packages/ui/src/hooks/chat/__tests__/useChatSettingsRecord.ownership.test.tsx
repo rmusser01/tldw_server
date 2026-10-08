@@ -84,3 +84,72 @@ it.each(["restore", "selection"])("rejects a retained callback after synchronous
   })
   expect(state.write).not.toHaveBeenCalled()
 })
+
+
+it("marks unread settings unresolved until the owned storage read completes", async () => {
+  const held = deferred(), entered = deferred(), read = Storage.prototype.get
+  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+    if (storageKey === key("A")) { entered.release(); await held.promise }
+    return read.call(this, storageKey)
+  })
+  const hook = renderHook(() => useChatSettingsRecord({ historyId: null, serverChatId: "A" }))
+  await entered.promise
+  expect(hook.result.current.isReady).toBe(false)
+  await act(async () => held.release())
+  await waitFor(() => expect(hook.result.current.isReady).toBe(true))
+})
+
+it("keeps an unverified saved-chat owner unresolved even with warm storage", () => {
+  state.owner = null
+  const hook = renderHook(() => useChatSettingsRecord({ historyId: null, serverChatId: "A" }))
+  expect(hook.result.current.isReady).toBe(false)
+})
+
+it("retains an explicit recovery read error instead of certifying no pending save", async () => {
+  const destination = resolveChatSettingsKey({ historyId: null, serverChatId: "A", requestScope })
+  await new Storage({ area: "local" }).set(`tldw:chatSettingsSaves:v1:${destination}`, { value: { version: 1, destination, operation_id: "pending", status: "pending", intent: [], patch: {} }, updatedAt: 1 })
+  const hook = renderHook(() => useChatSettingsRecord({ historyId: null, serverChatId: "A" }))
+  await waitFor(() => expect(hook.result.current.settingsRecoveryError).toBe("chat_settings_pending_invalid"))
+  expect(hook.result.current.isReady).toBe(false)
+})
+
+it("does not publish an old recovery receipt after a held read retires to another owner", async () => {
+  const destination = resolveChatSettingsKey({ historyId: null, serverChatId: "A", requestScope })
+  const receiptKey = `tldw:chatSettingsSaves:v1:${destination}`
+  await new Storage({ area: "local" }).set(receiptKey, { value: { version: 1, destination, operation_id: "pending-A", status: "pending", intent: { authorNote: "Old unresolved A" }, patch: { authorNote: "Old unresolved A" } }, updatedAt: 1 })
+  await new Storage({ area: "local" }).set(key("B"), { value: settings("Beta"), updatedAt: 2 })
+  const entered = deferred(), held = deferred(), read = Storage.prototype.get
+  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+    if (storageKey === receiptKey) { entered.release(); await held.promise }
+    return read.call(this, storageKey)
+  })
+  const hook = renderHook(({ id }) => useChatSettingsRecord({ historyId: null, serverChatId: id }), { initialProps: { id: "A" } })
+  await entered.promise
+  act(() => { state.owner = owner("B"); state.epoch++; useStoreMessageOption.setState({ serverChatId: "B" }); hook.rerender({ id: "B" }) })
+  await waitFor(() => expect(hook.result.current.isReady).toBe(true))
+  await act(async () => held.release())
+  expect(hook.result.current.settingsRecovery).toBeNull()
+  expect(hook.result.current.settingsRecoveryError).toBeNull()
+  expect(hook.result.current.settings?.authorNote).toBe("Beta")
+})
+
+it.each([false, true])("only publishes the latest recovery read on the same source, old failure=%s", async (oldFailure) => {
+  const destination = resolveChatSettingsKey({ historyId: null, serverChatId: "A", requestScope })
+  const receiptKey = `tldw:chatSettingsSaves:v1:${destination}`
+  const entered = deferred(), held = deferred(), read = Storage.prototype.get
+  let blocked = false
+  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+    const snapshot = await read.call(this, storageKey)
+    if (storageKey === receiptKey && !blocked) { blocked = true; entered.release(); await held.promise; if (oldFailure) throw new Error("Old read failed") }
+    return snapshot
+  })
+  const hook = renderHook(() => useChatSettingsRecord({ historyId: null, serverChatId: "A" }))
+  await entered.promise
+  await new Storage({ area: "local" }).set(receiptKey, { value: { version: 1, destination, operation_id: "pending-A", status: "pending", intent: { authorNote: "Current unresolved A" }, patch: { authorNote: "Current unresolved A" } }, updatedAt: 1 })
+  await act(async () => { await hook.result.current.refreshRecovery() })
+  expect(hook.result.current.settingsRecovery?.operationId).toBe("pending-A")
+  await act(async () => held.release())
+  expect(hook.result.current.settingsRecovery?.operationId).toBe("pending-A")
+  expect(hook.result.current.settingsRecoveryError).toBeNull()
+  expect(hook.result.current.isReady).toBe(true)
+})

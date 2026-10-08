@@ -288,3 +288,35 @@ describe("TldwApiClient chat mutations", () => {
     expect(payload).toEqual(completion)
   })
 })
+
+
+describe("qualified metadata reads for an unresolved proposal", () => {
+  beforeEach(() => mocks.bgRequest.mockReset())
+  it.each([
+    { id: "chat-1", version: 5 },
+    { id: "chat-1", version: 5, topicLabel: null },
+    { id: "other", version: 5, topic_label: null },
+    { id: "chat-1", expected_version: 5, topic_label: null },
+    { id: "chat-1", version: 5, topic_label: 123 },
+    { id: "chat-1", version: 0, topic_label: null }
+  ])("does not certify topic Clear from an unqualified raw read %j", async response => {
+    mocks.bgRequest.mockResolvedValue(response)
+    await expect(new TldwApiClient().getChat("chat-1", { requiredMetadata: ["topic_label"] })).rejects.toThrow("conversation metadata")
+  })
+  it("preserves canonical null despite contradictory metadata aliases", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "chat-1", version: 5, topic_label: null, topicLabel: "Old topic", cluster_id: null, clusterId: "Old cluster", external_ref: null, externalRef: "Old ref" })
+    const result = await new TldwApiClient().getChat("chat-1", { requiredMetadata: ["topic_label", "cluster_id", "external_ref"] })
+    expect(result).toMatchObject({ topic_label: null, cluster_id: null, external_ref: null })
+  })
+  it("rejects an unsupported canonical state in a qualified metadata read", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "chat-1", version: 5, state: "imaginary-state" })
+    await expect(new TldwApiClient().getChat("chat-1", { requiredMetadata: ["state"] })).rejects.toThrow("conversation metadata")
+  })
+  it.each([null, "Saved tag"])("accepts actual owned metadata values without exposing normalized absence: %j", async topic => {
+    mocks.bgRequest.mockResolvedValue({ id: "chat-1", version: 5, topic_label: topic })
+    const signal = new AbortController().signal
+    const result = await new TldwApiClient().getChat("chat-1", { requiredMetadata: ["topic_label"], scope: { type: "workspace", workspaceId: "W" }, signal })
+    expect(result).toMatchObject({ id: "chat-1", version: 5, topic_label: topic })
+    expect(mocks.bgRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "/api/v1/chats/chat-1?scope_type=workspace&workspace_id=W", abortSignal: signal }))
+  })
+})

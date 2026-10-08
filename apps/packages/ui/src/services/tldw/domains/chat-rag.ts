@@ -9,6 +9,7 @@ import type { TldwApiClientCore } from '../TldwApiClient'
 import type { ChatScope } from '@/types/chat-scope'
 import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
+import { CONVERSATION_STATE_VALUES } from "@/utils/conversation-state"
 import { parseRagStreamLine } from '@/services/rag/stream-contract'
 import { sanitizeRagProviderFailure } from '@/services/rag/provider-error-contract'
 import { DEFAULT_RAG_SETTINGS } from '@/services/rag/unified-rag'
@@ -354,9 +355,9 @@ export const chatRagMethods = {
         : null,
       source: input?.source ?? null,
       state: state ? String(state) : null,
-      topic_label: input?.topic_label ?? input?.topicLabel ?? null,
-      cluster_id: input?.cluster_id ?? input?.clusterId ?? null,
-      external_ref: input?.external_ref ?? input?.externalRef ?? null,
+      topic_label: Object.prototype.hasOwnProperty.call(input ?? {}, "topic_label") ? input.topic_label ?? null : input?.topicLabel ?? null,
+      cluster_id: Object.prototype.hasOwnProperty.call(input ?? {}, "cluster_id") ? input.cluster_id ?? null : input?.clusterId ?? null,
+      external_ref: Object.prototype.hasOwnProperty.call(input ?? {}, "external_ref") ? input.external_ref ?? null : input?.externalRef ?? null,
       bm25_norm:
         typeof input?.bm25_norm === "number"
           ? input?.bm25_norm
@@ -798,10 +799,12 @@ export const chatRagMethods = {
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[] } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
+    const requiredMetadata = [...(options?.requiredMetadata ?? [])]
+    options?.signal?.throwIfAborted()
     const query = buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
       ...scopeFields,
@@ -812,6 +815,15 @@ export const chatRagMethods = {
       abortSignal: options?.signal,
       ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
+    options?.signal?.throwIfAborted()
+    if (requiredMetadata.length && (!res || typeof res !== "object" || Array.isArray(res) ||
+      !["string", "number"].includes(typeof res.id) || String(res.id) !== cid ||
+      !Number.isSafeInteger(res.version) || res.version <= 0 || requiredMetadata.some(key =>
+        !["title", "rating", "state", "topic_label", "cluster_id", "source", "external_ref"].includes(key) ||
+        !Object.prototype.hasOwnProperty.call(res, key) ||
+        (key === "state" && !CONVERSATION_STATE_VALUES.includes(res[key])) ||
+        (res[key] !== null && (key === "rating" ? !Number.isInteger(res[key]) || res[key] < 1 || res[key] > 5 : typeof res[key] !== "string")))))
+      throw new Error("The conversation metadata could not be verified. Reload before saving.")
     return this.normalizeChatSummary(res)
   },
 

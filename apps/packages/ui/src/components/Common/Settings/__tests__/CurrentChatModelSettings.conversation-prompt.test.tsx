@@ -28,6 +28,7 @@ const inputs = vi.hoisted(() => ({
   realModelSelection: false,
   modelWrite: null as null | (() => Promise<void>),
   accountCurrent: vi.fn(() => true),
+  conversationWrite: vi.fn(async (_patch: unknown) => null),
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -65,8 +66,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
     settings: null,
-    updateSettings: vi.fn(),
-    chatKey: null,
+    updateSettings: inputs.conversationWrite,
+    chatKey: "local:test",
+    isReady: true, mode: "ordinary", isCurrent: () => inputs.accountCurrent(),
+    captureTarget: () => ({ historyId: "test", serverChatId: null, validate_lease: () => inputs.accountCurrent() }),
   }),
 }))
 vi.mock("@/services/tldw-server", () => ({
@@ -176,6 +179,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     inputs.otherProviderFirst = false
     inputs.realModelSelection = false
     inputs.modelWrite = null
+    inputs.conversationWrite.mockReset().mockResolvedValue(null)
     inputs.accountCurrent.mockReset().mockReturnValue(true)
     useStoreChatModelSettings.getState().reset()
     useStoreChatModelSettings
@@ -252,6 +256,50 @@ describe("Conversation prompt editor through real model settings Save", () => {
     await act(async () => { release("Old reset result"); await pending })
     expect(editor).not.toHaveValue("Old reset result")
     expect(useStoreChatModelSettings.getState().systemPrompt).not.toBe("Old reset result")
+  })
+
+  it("protects a typed conversation note from main Save and dirty close before blur", async () => {
+    const { close } = await mountSettings()
+    const note = screen.getByPlaceholderText("E.g., Keep responses grounded, avoid repetition, and progress the scene.")
+    fireEvent.change(note, { target: { value: "Staged conversation only" } })
+    expect(screen.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+    expect(close).not.toHaveBeenCalled()
+    expect(saveActorSettingsForChat).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+    await screen.findAllByText("Discard unsaved settings?")
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing", exact: true }))
+    expect(note).toHaveValue("Staged conversation only")
+    expect(inputs.conversationWrite).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+  })
+
+  it("cannot use an older discard admission to discard a newer conversation edit", async () => {
+    const { close } = await mountSettings()
+    const note = screen.getByPlaceholderText("E.g., Keep responses grounded, avoid repetition, and progress the scene.")
+    fireEvent.change(note, { target: { value: "First draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+    await screen.findAllByText("Discard unsaved settings?")
+    fireEvent.change(note, { target: { value: "Newer draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Discard", exact: true }))
+    await waitFor(() => expect(screen.queryAllByText("Discard unsaved settings?")).toHaveLength(0))
+    expect(close).not.toHaveBeenCalled()
+    expect(note).toHaveValue("Newer draft")
+  })
+
+  it("blocks panel dismissal while conversation Apply is held", async () => {
+    let release!: () => void
+    inputs.conversationWrite.mockImplementation(() => new Promise<null>(resolve => { release = () => resolve(null) }))
+    const { close } = await mountSettings()
+    fireEvent.change(screen.getByPlaceholderText("E.g., Keep responses grounded, avoid repetition, and progress the scene."), { target: { value: "Captured note" } })
+    fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
+    await waitFor(() => expect(inputs.conversationWrite).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+    expect(close).not.toHaveBeenCalled()
+    expect(screen.queryByText("Discard unsaved settings?")).not.toBeInTheDocument()
+    await act(async () => release())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save", exact: true })).toBeEnabled())
   })
 
   it("keeps edits when dirty-close admission is cancelled", async () => {

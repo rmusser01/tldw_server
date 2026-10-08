@@ -193,9 +193,10 @@ export const fetchAllServerChatMessages = async (
       signal: options?.signal
     })
     options?.signal?.throwIfAborted()
-    if (!Array.isArray(batch) || batch.length === 0) {
-      break
-    }
+    if (!Array.isArray(batch)) throw new Error("The saved message page could not be verified.")
+    if (batch.length === 0) break
+    if (page === maxPages - 1 && batch.length >= limit)
+      throw new Error("The saved conversation reached the pagination limit. Its complete history could not be verified.")
     imageCharacters += batch.reduce((total, message) => total + (message.images || []).reduce((size, image) => size + image.length, 0), 0)
     if (imageCharacters > SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS) {
       throw new Error("Saved chat attachments exceed the image history limit. Local work has been retained.")

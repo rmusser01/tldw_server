@@ -1,4 +1,7 @@
 import { FileIcon, X } from "lucide-react"
+import { getChatSettingsRecovery, type ChatSettingsTarget } from "@/services/chat-settings"
+import type { ChatSettingsRecord, ChatGenerationOverride } from "@/types/chat-session-settings"
+import { useStoreMessageOption } from "@/store/option"
 import React from "react"
 import { Button, Form, Input, InputNumber, Select } from "antd"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -8,8 +11,11 @@ import {
   CONVERSATION_STATE_OPTIONS,
   normalizeConversationState
 } from "@/utils/conversation-state"
-import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import { fetchAllServerChatMessages } from "@/hooks/chat/useServerChatLoader"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { toChatScopeParams } from "@/types/chat-scope"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { PromptAssemblyPreview } from "@/components/Common/Settings/PromptAssemblyPreview"
 import { LorebookDebugPanel } from "@/components/Common/Settings/LorebookDebugPanel"
 import {
@@ -26,6 +32,8 @@ interface UploadedFile {
   processed?: boolean
 }
 
+export type ConversationDraftStatus = { dirty: boolean; pending: boolean; revision: number }
+
 interface ConversationTabProps {
   useDrawer?: boolean
   historyId: string | null
@@ -35,6 +43,9 @@ interface ConversationTabProps {
   uploadedFiles: UploadedFile[]
   onRemoveFile: (id: string) => void
   serverChatId: string | null
+  serverChatVersion?: number | null
+  isCurrent?: () => boolean
+  onDraftChange?: (status: ConversationDraftStatus) => void
   serverChatAssistantKind?: "character" | "persona" | null
   serverChatPersonaMemoryMode?: "read_only" | "read_write" | null
   serverChatState: ConversationState | null
@@ -45,8 +56,18 @@ interface ConversationTabProps {
   onPersonaMemoryModeChange?: (mode: "read_only" | "read_write") => void
 }
 
-interface UpdateChatResponse {
-  version?: number | null
+type ConversationDetailsPatch = { state?: ConversationState; topic_label?: string | null }
+type ConversationDraft = { settings: Partial<ChatSettingsRecord>; details: ConversationDetailsPatch; revision: number; recoveryId?: string }
+type ConversationProposal = {
+  draft: ConversationDraft
+  target?: ChatSettingsTarget
+  expectedVersion?: number
+  settingsOperationId?: string
+  settingsAcknowledged: boolean
+  detailsAcknowledged: boolean
+  detailsAttempted: boolean
+  observedVersion: number | null
+  isCurrent: () => boolean
 }
 
 type CharacterLite = {
@@ -67,18 +88,6 @@ function isErrorWithMessage(error: unknown): error is { message: string } {
     "message" in error &&
     typeof (error as { message?: unknown }).message === "string"
   )
-}
-
-function isUpdateChatResponse(value: unknown): value is UpdateChatResponse {
-  if (!value || typeof value !== "object") return false
-  if (!("version" in value)) return true
-  const version = (value as { version?: unknown }).version
-  return version === null || version === undefined || typeof version === "number"
-}
-
-function getUpdateChatVersion(value: unknown): number | null {
-  if (!isUpdateChatResponse(value)) return null
-  return value.version ?? null
 }
 
 const sanitizeDepth = (value: unknown): number => {
@@ -347,6 +356,9 @@ export function ConversationTab({
   uploadedFiles,
   onRemoveFile,
   serverChatId,
+  serverChatVersion,
+  isCurrent = () => true,
+  onDraftChange,
   serverChatAssistantKind,
   serverChatPersonaMemoryMode,
   serverChatState,
@@ -357,60 +369,67 @@ export function ConversationTab({
 }: ConversationTabProps) {
   const numericFieldId = React.useId()
   const { t } = useTranslation(["common", "playground"])
-  const notification = useAntdNotification()
   const queryClient = useQueryClient()
-  const { settings: chatSettings, updateSettings } = useChatSettingsRecord({
+  const { settings: appliedSettings, updateSettings, isReady, isCurrent: settingsIsCurrent, mode, captureTarget, target: settingsTarget, settingsRecovery, settingsRecoveryError, refreshRecovery } = useChatSettingsRecord({
     historyId,
     serverChatId
   })
-  const handleAsyncError = React.useCallback(
-    (error: unknown) => {
-      notification.error({
-        message: t("common:error.label", { defaultValue: "Error" }),
-        description:
-          (isErrorWithMessage(error)
-            ? error.message
-            : t("common:somethingWentWrong", {
-                defaultValue: "Something went wrong"
-              }))
-      })
-    },
-    [notification, t]
-  )
-  const [authorNoteDraft, setAuthorNoteDraft] = React.useState("")
-  const [authorNoteMode, setAuthorNoteMode] = React.useState<
-    "before_system" | "depth"
-  >("before_system")
-  const [authorNoteDepth, setAuthorNoteDepth] = React.useState(1)
-  const [memoryCharacterId, setMemoryCharacterId] = React.useState<string | null>(
-    null
-  )
-  const [memoryNoteDraft, setMemoryNoteDraft] = React.useState("")
-  const [isResettingSystemPrompt, setIsResettingSystemPrompt] =
-    React.useState(false)
-  const summarySettings =
-    chatSettings?.summary && typeof chatSettings.summary === "object"
-      ? (chatSettings.summary as Record<string, unknown>)
-      : null
-  const persistedAutoSummaryEnabled = Boolean(
-    chatSettings?.autoSummaryEnabled ?? summarySettings?.enabled ?? false
-  )
-  const persistedAutoSummaryThreshold = sanitizeAutoSummaryThreshold(
-    chatSettings?.autoSummaryThresholdMessages ??
-      summarySettings?.thresholdMessages
-  )
-  const persistedAutoSummaryWindow = sanitizeAutoSummaryWindow(
-    chatSettings?.autoSummaryWindowMessages ?? summarySettings?.windowMessages,
-    persistedAutoSummaryThreshold
-  )
-  const [autoSummaryEnabledDraft, setAutoSummaryEnabledDraft] = React.useState(
-    persistedAutoSummaryEnabled
-  )
-  const [autoSummaryThresholdDraft, setAutoSummaryThresholdDraft] =
-    React.useState(persistedAutoSummaryThreshold)
-  const [autoSummaryWindowDraft, setAutoSummaryWindowDraft] = React.useState(
-    persistedAutoSummaryWindow
-  )
+  const [draft, setDraft] = React.useState<ConversationDraft>({ settings: {}, details: {}, revision: 0 })
+  const draftRef = React.useRef(draft)
+  const [pending, setPending] = React.useState(false)
+  const pendingRef = React.useRef<object | null>(null)
+  const proposalRef = React.useRef<ConversationProposal | null>(null)
+  const metadataVersionRef = React.useRef<number | null>(null)
+  const [saveError, setSaveError] = React.useState<string | null>(null)
+  const mounted = React.useRef(true)
+  const [memoryCharacterId, setMemoryCharacterId] = React.useState<string | null>(null)
+  const [generationStopsText, setGenerationStopsText] = React.useState<string | null>(null)
+  const [isResettingSystemPrompt, setIsResettingSystemPrompt] = React.useState(false)
+  const hasDraft = Object.keys(draft.settings).length > 0 || Object.keys(draft.details).length > 0
+  const canEdit = Boolean(isReady && settingsIsCurrent?.() && isCurrent())
+  const reportDraft = (next: ConversationDraft, busy: boolean) => onDraftChange?.({
+    dirty: Object.keys(next.settings).length > 0 || Object.keys(next.details).length > 0,
+    pending: busy, revision: next.revision
+  })
+  React.useLayoutEffect(() => {
+    mounted.current = true
+    onDraftChange?.({ dirty: false, pending: false, revision: 0 })
+    return () => { mounted.current = false }
+  }, [onDraftChange])
+  const stage = (settings: Partial<ChatSettingsRecord>, details: ConversationDetailsPatch = {}) => {
+    if (!canEdit || pendingRef.current || proposalRef.current || draftRef.current.recoveryId) return
+    const previous = draftRef.current
+    const next = {
+      settings: { ...previous.settings, ...settings }, details: { ...previous.details, ...details },
+      revision: previous.revision + 1
+    }
+    if (settings.chatGenerationOverride) next.settings.chatGenerationOverride = {
+      ...previous.settings.chatGenerationOverride, ...settings.chatGenerationOverride
+    }
+    draftRef.current = next
+    setDraft(next)
+    reportDraft(next, false)
+  }
+  const stageDetails = (details: ConversationDetailsPatch) => {
+    if (!canEdit || mode !== "ordinary" || !serverChatId ||
+      !Number.isSafeInteger(serverChatVersion) || (serverChatVersion ?? 0) <= 0) return
+    if (!Object.keys(draftRef.current.details).length) metadataVersionRef.current = serverChatVersion!
+    stage({}, details)
+  }
+  // Staged fields win over hydration; untouched generation siblings stay fresh.
+  const appliedGeneration = appliedSettings?.chatGenerationOverride && typeof appliedSettings.chatGenerationOverride === "object"
+    ? appliedSettings.chatGenerationOverride : appliedSettings?.generationOverrides
+  const chatSettings = {
+    ...appliedSettings, ...draft.settings,
+    ...(draft.settings.chatGenerationOverride ? { chatGenerationOverride: { ...appliedGeneration, ...draft.settings.chatGenerationOverride } } : {})
+  }
+  const authorNoteDraft = chatSettings.authorNote ?? ""
+  const { mode: authorNoteMode, depth: authorNoteDepth } = normalizeAuthorNotePosition(chatSettings.authorNotePosition)
+  const summarySettings = appliedSettings?.summary && typeof appliedSettings.summary === "object"
+    ? appliedSettings.summary as Record<string, unknown> : null
+  const autoSummaryEnabledDraft = Boolean(chatSettings.autoSummaryEnabled ?? summarySettings?.enabled ?? false)
+  const autoSummaryThresholdDraft = sanitizeAutoSummaryThreshold(chatSettings.autoSummaryThresholdMessages ?? summarySettings?.thresholdMessages)
+  const autoSummaryWindowDraft = sanitizeAutoSummaryWindow(chatSettings.autoSummaryWindowMessages ?? summarySettings?.windowMessages, autoSummaryThresholdDraft)
   const personaMemoryModeValue = serverChatPersonaMemoryMode ?? "read_only"
   const generationOverrideSource =
     chatSettings?.chatGenerationOverride &&
@@ -420,40 +439,11 @@ export function ConversationTab({
           typeof chatSettings.generationOverrides === "object"
         ? (chatSettings.generationOverrides as Record<string, unknown>)
         : null
-  const persistedGenerationOverrideEnabled = Boolean(
-    generationOverrideSource?.enabled ?? false
-  )
-  const persistedGenerationTemperature = sanitizeGenerationFloat(
-    generationOverrideSource?.temperature,
-    0,
-    2
-  )
-  const persistedGenerationTopP = sanitizeGenerationFloat(
-    generationOverrideSource?.top_p,
-    0,
-    1
-  )
-  const persistedGenerationRepetitionPenalty = sanitizeGenerationFloat(
-    generationOverrideSource?.repetition_penalty,
-    0,
-    3
-  )
-  const persistedGenerationStops = normalizeGenerationStopList(
-    generationOverrideSource?.stop
-  )
-  const persistedGenerationStopsKey = persistedGenerationStops.join("\n")
-  const [generationOverrideEnabledDraft, setGenerationOverrideEnabledDraft] =
-    React.useState(persistedGenerationOverrideEnabled)
-  const [generationTemperatureDraft, setGenerationTemperatureDraft] =
-    React.useState<number | null>(persistedGenerationTemperature)
-  const [generationTopPDraft, setGenerationTopPDraft] = React.useState<
-    number | null
-  >(persistedGenerationTopP)
-  const [generationRepetitionPenaltyDraft, setGenerationRepetitionPenaltyDraft] =
-    React.useState<number | null>(persistedGenerationRepetitionPenalty)
-  const [generationStopsDraft, setGenerationStopsDraft] = React.useState(
-    persistedGenerationStopsKey
-  )
+  const generationOverrideEnabledDraft = generationOverrideSource ? generationOverrideSource.enabled !== false : false
+  const generationTemperatureDraft = sanitizeGenerationFloat(generationOverrideSource?.temperature, 0, 2)
+  const generationTopPDraft = sanitizeGenerationFloat(generationOverrideSource?.top_p, 0, 1)
+  const generationRepetitionPenaltyDraft = sanitizeGenerationFloat(generationOverrideSource?.repetition_penalty, 0, 3)
+  const generationStopsDraft = generationStopsText ?? normalizeGenerationStopList(generationOverrideSource?.stop).join("\n")
   const greetingScopeValue = normalizeGreetingScope(chatSettings?.greetingScope)
   const presetScopeValue = normalizePresetScope(chatSettings?.presetScope)
   const chatPresetOverrideValue = normalizeChatPresetOverrideId(
@@ -465,82 +455,64 @@ export function ConversationTab({
     chatSettings?.directedCharacterId
   )
   const characterMemoryById = React.useMemo(
-    () => normalizeCharacterMemoryById(chatSettings?.characterMemoryById),
-    [chatSettings?.characterMemoryById]
+    () => ({ ...normalizeCharacterMemoryById(appliedSettings?.characterMemoryById), ...draft.settings.characterMemoryById }),
+    [appliedSettings?.characterMemoryById, draft.settings.characterMemoryById]
   )
   const participantCharacterIdsValue = normalizeParticipantCharacterIds(
     chatSettings?.participantCharacterIds
   )
-  const {
-    data: availableCharacters = [],
-    isError: isAvailableCharactersError
-  } = useQuery<CharacterLite[]>({
-    queryKey: CONVERSATION_TAB_QUERY_KEYS.listCharacters,
-    queryFn: async () => {
-      await tldwClient.initialize()
-      const list = await tldwClient.listCharacters({ limit: 200 })
-      return Array.isArray(list) ? (list as CharacterLite[]) : []
+  const readOwnerKey = mode === "ordinary" && settingsTarget?.requestScope
+    ? JSON.stringify([serverChatMirrorOwnerKey({ requestScope: settingsTarget.requestScope }), toChatScopeParams(settingsTarget.scope)]) : null
+  const canRead = canEdit && Boolean(readOwnerKey)
+  const captureRead = (querySignal: AbortSignal) => {
+    const target = captureTarget()
+    const signal = target.signal ? AbortSignal.any([target.signal, querySignal]) : querySignal
+    const assertCurrent = () => {
+      signal.throwIfAborted()
+      if (!target.requestScope || target.validate_lease?.() === false || !settingsIsCurrent?.() || !isCurrent() ||
+        JSON.stringify([serverChatMirrorOwnerKey({ requestScope: target.requestScope }), toChatScopeParams(target.scope)]) !== readOwnerKey)
+        throw createServicePromptScopeChangedError()
+    }
+    assertCurrent()
+    return { target, signal, assertCurrent }
+  }
+  const { data: characterRead, isError: isAvailableCharactersError } = useQuery<{ ownerKey: string; items: CharacterLite[] }>({
+    queryKey: [...CONVERSATION_TAB_QUERY_KEYS.listCharacters, readOwnerKey],
+    enabled: canRead,
+    queryFn: async ({ signal }) => {
+      const read = captureRead(signal)
+      const list = await tldwClient.listCharacters({ limit: 200 }, { requestScope: read.target.requestScope, signal: read.signal })
+      read.assertCurrent()
+      if (!Array.isArray(list)) throw new Error("The character list could not be verified.")
+      return { ownerKey: readOwnerKey!, items: list as CharacterLite[] }
     },
     staleTime: 60_000
   })
-  const {
-    data: pinnedMessages = [],
-    isError: isPinnedMessagesError
-  } = useQuery<
-    Array<{ id: string; role: string; content: string }>
-  >({
-    queryKey: CONVERSATION_TAB_QUERY_KEYS.pinnedMessages(serverChatId),
-    enabled: Boolean(serverChatId),
-    queryFn: async () => {
-      if (!serverChatId) return []
-      await tldwClient.initialize()
-      const list = await tldwClient.listChatMessages(serverChatId, {
-        include_deleted: "false",
-        include_metadata: "true"
-      })
-      return list
-        .filter((item) => Boolean(item.pinned))
-        .map((item) => ({
-          id: item.id,
-          role: item.role,
-          content: String(item.content ?? "")
-        }))
+  const availableCharacters = canRead && characterRead?.ownerKey === readOwnerKey ? characterRead.items : []
+  const { data: pinnedRead, isError: isPinnedMessagesError, isPending: isPinnedMessagesPending } = useQuery<{
+    ownerKey: string; items: Array<{ id: string; role: string; content: string }>
+  }>({
+    queryKey: [...CONVERSATION_TAB_QUERY_KEYS.pinnedMessages(serverChatId), readOwnerKey],
+    enabled: canRead && Boolean(serverChatId),
+    queryFn: async ({ signal }) => {
+      const read = captureRead(signal)
+      if (!read.target.serverChatId) throw createServicePromptScopeChangedError()
+      // ponytail: reuse the loader's 20k-message ceiling; add a server pin query if chats exceed it.
+      const list = await fetchAllServerChatMessages(async ({ limit, offset }) => {
+        read.assertCurrent()
+        const page = await tldwClient.listChatMessages(read.target.serverChatId!, {
+          include_deleted: "false", include_metadata: "true", limit, offset
+        }, { requestScope: read.target.requestScope, scope: read.target.scope, signal: read.signal })
+        read.assertCurrent()
+        return page
+      }, { signal: read.signal })
+      read.assertCurrent()
+      return { ownerKey: readOwnerKey!, items: list.filter(item => Boolean(item.pinned)).map(item => ({ id: item.id, role: item.role, content: String(item.content ?? "") })) }
     },
     staleTime: 10_000
   })
-
-  React.useEffect(() => {
-    setAuthorNoteDraft(
-      typeof chatSettings?.authorNote === "string" ? chatSettings.authorNote : ""
-    )
-    const normalized = normalizeAuthorNotePosition(chatSettings?.authorNotePosition)
-    setAuthorNoteMode(normalized.mode)
-    setAuthorNoteDepth(normalized.depth)
-  }, [chatSettings?.authorNote, chatSettings?.authorNotePosition])
-
-  React.useEffect(() => {
-    setAutoSummaryEnabledDraft(persistedAutoSummaryEnabled)
-    setAutoSummaryThresholdDraft(persistedAutoSummaryThreshold)
-    setAutoSummaryWindowDraft(persistedAutoSummaryWindow)
-  }, [
-    persistedAutoSummaryEnabled,
-    persistedAutoSummaryThreshold,
-    persistedAutoSummaryWindow
-  ])
-
-  React.useEffect(() => {
-    setGenerationOverrideEnabledDraft(persistedGenerationOverrideEnabled)
-    setGenerationTemperatureDraft(persistedGenerationTemperature)
-    setGenerationTopPDraft(persistedGenerationTopP)
-    setGenerationRepetitionPenaltyDraft(persistedGenerationRepetitionPenalty)
-    setGenerationStopsDraft(persistedGenerationStopsKey)
-  }, [
-    persistedGenerationOverrideEnabled,
-    persistedGenerationTemperature,
-    persistedGenerationTopP,
-    persistedGenerationRepetitionPenalty,
-    persistedGenerationStopsKey
-  ])
+  const ownsPinnedRead = canRead && pinnedRead?.ownerKey === readOwnerKey
+  const pinnedMessages = ownsPinnedRead ? pinnedRead.items : []
 
   const conversationStateOptions = CONVERSATION_STATE_OPTIONS.map((option) => ({
     value: option.value,
@@ -667,249 +639,172 @@ export function ConversationTab({
     participantCharacterOptions
   ])
 
-  React.useEffect(() => {
-    if (!memoryCharacterId) {
-      setMemoryNoteDraft("")
-      return
-    }
-    setMemoryNoteDraft(characterMemoryById[memoryCharacterId]?.note || "")
-  }, [characterMemoryById, memoryCharacterId])
-
-  const persistAuthorNote = async (value: string) => {
+  const memoryNoteDraft = memoryCharacterId ? characterMemoryById[memoryCharacterId]?.note ?? "" : ""
+  const stageCharacterMemory = (characterId: string, note: string) => {
+    stage({ characterMemoryById: { ...draftRef.current.settings.characterMemoryById, [characterId]: { note } } })
+  }
+  const stageGeneration = (override: ChatGenerationOverride) => stage({ chatGenerationOverride: override })
+  const stageSummaryThreshold = (value: unknown) => {
+    const threshold = sanitizeAutoSummaryThreshold(value)
+    stage({ autoSummaryThresholdMessages: threshold,
+      autoSummaryWindowMessages: sanitizeAutoSummaryWindow(autoSummaryWindowDraft, threshold) })
+  }
+  const reviewRecovery = async () => {
+    if (!canEdit || hasDraft || pendingRef.current || !settingsRecovery) return
+    const recovery = settingsRecovery
+    const revision = draftRef.current.revision
+    let target: ChatSettingsTarget | undefined
+    const attempt = {}
+    pendingRef.current = attempt
+    setPending(true)
+    reportDraft(draftRef.current, true)
     try {
-      await updateSettings({
-        authorNote: value.trim()
-      })
-    } catch (error: unknown) {
-      handleAsyncError(error)
+      target = captureTarget()
+      const fresh = await getChatSettingsRecovery(target)
+      if (!mounted.current || !isCurrent() || !settingsIsCurrent?.() || target.validate_lease?.() === false || draftRef.current.revision !== revision) return
+      if (!fresh || fresh.operationId !== recovery.operationId || fresh.destination !== recovery.destination || JSON.stringify(fresh.patch) !== JSON.stringify(recovery.patch))
+        throw new Error("The previous settings change changed elsewhere. Refresh recovery before reviewing it.")
+      const next = { settings: structuredClone(fresh.patch), details: {}, revision: revision + 1, recoveryId: fresh.operationId }
+      draftRef.current = next
+      setDraft(next)
+      setSaveError(null)
+      reportDraft(next, true)
+    } catch (error) {
+      if (mounted.current && isCurrent() && settingsIsCurrent?.()) setSaveError(isErrorWithMessage(error) ? error.message : "The previous settings change could not be read.")
+      await refreshRecovery?.(target)
+    } finally {
+      if (pendingRef.current === attempt) {
+        pendingRef.current = null
+        if (mounted.current) { setPending(false); reportDraft(draftRef.current, false) }
+      }
     }
   }
-
-  const persistAuthorNotePosition = async (
-    mode: "before_system" | "depth",
-    depth: number
-  ) => {
+  const cancelChanges = () => {
+    if (!canEdit || pendingRef.current) return
+    proposalRef.current = null
+    metadataVersionRef.current = null
+    setGenerationStopsText(null)
+    setSaveError(null)
+    const next = { settings: {}, details: {}, revision: draftRef.current.revision + 1 }
+    draftRef.current = next
+    setDraft(next)
+    reportDraft(next, false)
+  }
+  const applyChanges = async () => {
+    if (!canEdit || pendingRef.current || !hasDraft || (settingsRecovery && !draftRef.current.recoveryId && !proposalRef.current)) return
+    let proposal = proposalRef.current
     try {
-      if (mode === "depth") {
-        await updateSettings({
-          authorNotePosition: {
-            mode: "depth",
-            depth: sanitizeDepth(depth)
+      if (!proposal) {
+        const captured = structuredClone(draftRef.current)
+        const hasDetails = Object.keys(captured.details).length > 0
+        const target = mode === "ordinary" ? captureTarget() : undefined
+        const expectedVersion = metadataVersionRef.current ?? undefined
+        if (hasDetails && (!serverChatId || !target?.requestScope || !Number.isSafeInteger(expectedVersion) || (expectedVersion ?? 0) <= 0))
+          throw new Error("Reload this saved conversation before changing its details.")
+        if (captured.details.topic_label !== undefined) captured.details.topic_label = captured.details.topic_label?.trim() || null
+        if (!captured.recoveryId && captured.settings.authorNote !== undefined) captured.settings.authorNote = captured.settings.authorNote.trim()
+        if (!captured.recoveryId && captured.settings.characterMemoryById) {
+          // Native history cannot project per-character memory; an omitted key is not a server deletion.
+          if (serverChatId) throw new Error("This server cannot change per-character memory here. Use a local chat for these edits.")
+          captured.settings.characterMemoryById = Object.fromEntries(Object.entries({ ...normalizeCharacterMemoryById(appliedSettings?.characterMemoryById), ...captured.settings.characterMemoryById })
+            .filter(([, entry]) => entry.note.trim())
+            .map(([id, entry]) => [id, { note: entry.note.trim(), updatedAt: new Date().toISOString() }]))
+        }
+        proposal = { draft: captured, target, expectedVersion, settingsOperationId: captured.recoveryId, settingsAcknowledged: false, detailsAcknowledged: false, detailsAttempted: false, observedVersion: serverChatVersion ?? null,
+          isCurrent: () => mounted.current && isCurrent() && Boolean(settingsIsCurrent?.()) &&
+            target?.validate_lease?.() !== false }
+        proposalRef.current = proposal
+      }
+      if (!proposal.isCurrent()) return
+      const attempt = {}
+      pendingRef.current = attempt
+      setPending(true)
+      setSaveError(null)
+      reportDraft(draftRef.current, true)
+      try {
+        const details = proposal.draft.details
+        if (!proposal.detailsAcknowledged && Object.keys(details).length) {
+          const target = proposal.target!
+          const options = { scope: target.scope, requestScope: target.requestScope, signal: target.signal }
+          let reconciled: Awaited<ReturnType<typeof tldwClient.getChat>> | undefined
+          if (proposal.detailsAttempted) {
+            const fresh = await tldwClient.getChat(target.serverChatId!, { ...options, requiredMetadata: Object.keys(details) })
+            if (!proposal.isCurrent()) return
+            if (fresh.id !== target.serverChatId || !Number.isSafeInteger(fresh.version) || (fresh.version ?? 0) < proposal.expectedVersion!)
+              throw new Error("The conversation metadata could not be verified. Reload before saving.")
+            if (fresh.version! > proposal.expectedVersion! && Object.entries(details).every(([key, value]) => fresh[key as keyof typeof fresh] === value)) reconciled = fresh
+            else if (fresh.version !== proposal.expectedVersion)
+              throw new Error("This conversation changed elsewhere. Your edits remain staged; cancel and reload before applying them.")
           }
-        })
-        return
+          proposal.detailsAttempted = true
+          const updated = reconciled ?? await tldwClient.updateChat(target.serverChatId!, details, {
+            ...options, expectedVersion: proposal.expectedVersion
+          })
+          if (!proposal.isCurrent()) return
+          if (updated.id !== target.serverChatId || !Number.isSafeInteger(updated.version) || updated.version! <= proposal.expectedVersion! ||
+            Object.entries(details).some(([key, value]) => !Object.prototype.hasOwnProperty.call(updated, key) || updated[key as keyof typeof updated] !== value))
+            throw new Error("The server did not confirm these conversation changes. Reload before retrying.")
+          proposal.detailsAcknowledged = true
+          proposal.observedVersion = updated.version!
+          const canPublish = () => {
+            const live = useStoreMessageOption.getState()
+            return proposal!.isCurrent() && live.serverChatId === target.serverChatId && (live.serverChatVersion ?? 0) <= updated.version!
+          }
+          if (canPublish() && details.state !== undefined) onStateChange(details.state)
+          if (canPublish() && details.topic_label !== undefined) onTopicChange(details.topic_label)
+          if (canPublish()) onVersionChange(updated.version!)
+          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+        }
+        if (!proposal.isCurrent()) return
+        // Both writes advance conversations.version. Preserve the original metadata
+        // CAS by applying it first, then refresh only for the next user edit.
+        if (!proposal.settingsAcknowledged && Object.keys(proposal.draft.settings).length) {
+          await (proposal.settingsOperationId
+            ? updateSettings(proposal.draft.settings, proposal.settingsOperationId)
+            : updateSettings(proposal.draft.settings))
+          proposal.settingsAcknowledged = true
+        }
+        if (!proposal.isCurrent()) return
+        if (proposal.settingsAcknowledged && proposal.target?.serverChatId) {
+          const target = proposal.target
+          const fresh = await tldwClient.getChat(target.serverChatId!, {
+            scope: target.scope, requestScope: target.requestScope, signal: target.signal, requiredMetadata: ["state", "topic_label"]
+          })
+          if (!proposal.isCurrent()) return
+          if (fresh.id !== target.serverChatId || !Number.isSafeInteger(fresh.version) || (fresh.version ?? 0) <= 0 || fresh.version! < (proposal.observedVersion ?? 0))
+            throw new Error("Settings were applied, but the conversation version could not be verified. Retry to refresh it.")
+          const canPublish = () => {
+            const live = useStoreMessageOption.getState()
+            return proposal!.isCurrent() && live.serverChatId === target.serverChatId && (live.serverChatVersion ?? 0) <= fresh.version!
+          }
+          if (canPublish() && fresh.state && useStoreMessageOption.getState().serverChatState !== fresh.state) onStateChange(normalizeConversationState(fresh.state))
+          if (canPublish() && fresh.topic_label !== undefined && useStoreMessageOption.getState().serverChatTopic !== fresh.topic_label) onTopicChange(fresh.topic_label)
+          if (canPublish() && (useStoreMessageOption.getState().serverChatVersion ?? 0) < fresh.version!) onVersionChange(fresh.version!)
+        }
+        if (!proposal.isCurrent()) return
+        proposalRef.current = null
+        metadataVersionRef.current = null
+        setGenerationStopsText(null)
+        const next = { settings: {}, details: {}, revision: draftRef.current.revision + 1 }
+        draftRef.current = next
+        setDraft(next)
+        reportDraft(next, false)
+      } catch (error) {
+        if (error && typeof error === "object" && "settingsOperationId" in error && typeof error.settingsOperationId === "string") proposal.settingsOperationId = error.settingsOperationId
+        if (proposal.isCurrent()) setSaveError(isErrorWithMessage(error)
+          ? error.message === "chat_settings_recovery_changed" ? "That previous change was verified or replaced elsewhere. Cancel this proposal and refresh before editing." : error.message
+          : "Conversation changes could not be applied.")
+      } finally {
+        if (pendingRef.current === attempt) {
+          pendingRef.current = null
+          if (mounted.current) { setPending(false); reportDraft(draftRef.current, false) }
+        }
       }
-      await updateSettings({ authorNotePosition: "before_system" })
-    } catch (error: unknown) {
-      handleAsyncError(error)
+    } catch (error) {
+      if (canEdit) setSaveError(isErrorWithMessage(error) ? error.message : "Conversation changes could not be applied.")
     }
   }
-  const persistGreetingScope = async (value: "chat" | "character") => {
-    await updateSettings({ greetingScope: value })
-  }
-  const persistPresetScope = async (value: "chat" | "character") => {
-    await updateSettings({ presetScope: value })
-  }
-  const persistChatPresetOverrideId = async (
-    value: CharacterPromptPresetId | null
-  ) => {
-    await updateSettings({ chatPresetOverrideId: value })
-  }
-  const persistChatGenerationOverride = async (
-    override: {
-      enabled?: boolean
-      temperature?: number | null
-      top_p?: number | null
-      repetition_penalty?: number | null
-      stop?: string[]
-    } = {}
-  ) => {
-    const nextEnabled =
-      typeof override.enabled === "boolean"
-        ? override.enabled
-        : generationOverrideEnabledDraft
-    const nextTemperature =
-      override.temperature !== undefined
-        ? sanitizeGenerationFloat(override.temperature, 0, 2)
-        : generationTemperatureDraft
-    const nextTopP =
-      override.top_p !== undefined
-        ? sanitizeGenerationFloat(override.top_p, 0, 1)
-        : generationTopPDraft
-    const nextRepetitionPenalty =
-      override.repetition_penalty !== undefined
-        ? sanitizeGenerationFloat(override.repetition_penalty, 0, 3)
-        : generationRepetitionPenaltyDraft
-    const nextStops =
-      override.stop !== undefined
-        ? normalizeGenerationStopList(override.stop)
-        : parseGenerationStopListFromText(generationStopsDraft)
-
-    await updateSettings({
-      chatGenerationOverride: {
-        enabled: nextEnabled,
-        temperature: nextTemperature,
-        top_p: nextTopP,
-        repetition_penalty: nextRepetitionPenalty,
-        stop: nextStops,
-        updatedAt: new Date().toISOString()
-      }
-    })
-  }
-  const persistMemoryScope = async (
-    value: "shared" | "character" | "both"
-  ) => {
-    await updateSettings({ memoryScope: value })
-  }
-  const persistTurnTakingMode = async (value: "single" | "round_robin") => {
-    await updateSettings({ turnTakingMode: value })
-  }
-  const persistParticipantCharacterIds = async (values: string[]) => {
-    const normalized = normalizeParticipantCharacterIds(values)
-    await updateSettings({ participantCharacterIds: normalized })
-  }
-  const persistDirectedCharacterId = async (value: string | null) => {
-    const normalized = normalizeDirectedCharacterId(value)
-    await updateSettings({
-      directedCharacterId:
-        normalized !== null && /^\d+$/.test(normalized)
-          ? Number.parseInt(normalized, 10)
-          : null
-    })
-  }
-  const persistCharacterMemoryNote = async (
-    characterId: string,
-    noteDraft: string
-  ) => {
-    const normalizedId = normalizeDirectedCharacterId(characterId)
-    if (!normalizedId) return
-    const nextMap = { ...characterMemoryById }
-    const nextNote = noteDraft.trim()
-    if (nextNote.length === 0) {
-      delete nextMap[normalizedId]
-    } else {
-      nextMap[normalizedId] = {
-        note: nextNote,
-        updatedAt: new Date().toISOString()
-      }
-    }
-    await updateSettings({ characterMemoryById: nextMap })
-  }
-  const persistAutoSummaryEnabled = async (enabled: boolean) => {
-    await updateSettings({ autoSummaryEnabled: enabled })
-  }
-  const persistAutoSummaryThreshold = async (value: unknown) => {
-    const normalizedThreshold = sanitizeAutoSummaryThreshold(value)
-    const normalizedWindow = sanitizeAutoSummaryWindow(
-      autoSummaryWindowDraft,
-      normalizedThreshold
-    )
-    setAutoSummaryThresholdDraft(normalizedThreshold)
-    setAutoSummaryWindowDraft(normalizedWindow)
-    await updateSettings({
-      autoSummaryThresholdMessages: normalizedThreshold,
-      autoSummaryWindowMessages: normalizedWindow
-    })
-  }
-  const persistAutoSummaryWindow = async (value: unknown) => {
-    const normalizedThreshold = sanitizeAutoSummaryThreshold(
-      autoSummaryThresholdDraft
-    )
-    const normalizedWindow = sanitizeAutoSummaryWindow(
-      value,
-      normalizedThreshold
-    )
-    setAutoSummaryWindowDraft(normalizedWindow)
-    await updateSettings({
-      autoSummaryThresholdMessages: normalizedThreshold,
-      autoSummaryWindowMessages: normalizedWindow
-    })
-  }
-
-  const handleStateChange = async (val: string) => {
-    const next = normalizeConversationState(val)
-    onStateChange(next)
-    if (!serverChatId) return
-    try {
-      const updated = await tldwClient.updateChat(serverChatId, {
-        state: next
-      })
-      onVersionChange(getUpdateChatVersion(updated))
-      queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
-    } catch (error: unknown) {
-      handleAsyncError(error)
-    }
-  }
-
-  const handleTopicBlur = async (value: string) => {
-    const normalized = value.trim()
-    const topicValue = normalized.length > 0 ? normalized : null
-    onTopicChange(topicValue)
-    if (!serverChatId) return
-    try {
-      const updated = await tldwClient.updateChat(serverChatId, {
-        topic_label: topicValue || undefined
-      })
-      onVersionChange(getUpdateChatVersion(updated))
-      queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
-    } catch (error: unknown) {
-      handleAsyncError(error)
-    }
-  }
-
-  const previewSettingsFingerprint = React.useMemo(
-    () =>
-      JSON.stringify({
-        authorNote: chatSettings?.authorNote || "",
-        authorNotePosition: chatSettings?.authorNotePosition || null,
-        greetingScope: greetingScopeValue,
-        presetScope: presetScopeValue,
-        memoryScope: memoryScopeValue,
-        turnTakingMode: turnTakingModeValue,
-        participantCharacterIds: participantCharacterIdsValue.join(","),
-        directedCharacterId: directedCharacterIdValue,
-        characterMemoryById: JSON.stringify(characterMemoryById),
-        autoSummaryEnabled: autoSummaryEnabledDraft,
-        autoSummaryThresholdMessages: autoSummaryThresholdDraft,
-        autoSummaryWindowMessages: autoSummaryWindowDraft,
-        chatGenerationOverrideEnabled: generationOverrideEnabledDraft,
-        chatGenerationOverrideTemperature: generationTemperatureDraft,
-        chatGenerationOverrideTopP: generationTopPDraft,
-        chatGenerationOverrideRepetitionPenalty:
-          generationRepetitionPenaltyDraft,
-        chatGenerationOverrideStop: generationStopsDraft,
-        summaryUpdatedAt:
-          typeof summarySettings?.updatedAt === "string"
-            ? summarySettings.updatedAt
-            : null,
-        greetingEnabled: chatSettings?.greetingEnabled ?? true,
-        greetingSelectionId: chatSettings?.greetingSelectionId || null,
-        chatPresetOverrideId: chatSettings?.chatPresetOverrideId || null
-      }),
-    [
-      chatSettings?.authorNote,
-      chatSettings?.authorNotePosition,
-      greetingScopeValue,
-      presetScopeValue,
-      memoryScopeValue,
-      turnTakingModeValue,
-      participantCharacterIdsValue,
-      directedCharacterIdValue,
-      characterMemoryById,
-      autoSummaryEnabledDraft,
-      autoSummaryThresholdDraft,
-      autoSummaryWindowDraft,
-      generationOverrideEnabledDraft,
-      generationTemperatureDraft,
-      generationTopPDraft,
-      generationRepetitionPenaltyDraft,
-      generationStopsDraft,
-      summarySettings,
-      chatSettings?.greetingEnabled,
-      chatSettings?.greetingSelectionId,
-      chatSettings?.chatPresetOverrideId
-    ]
-  )
+  const previewSettingsFingerprint = JSON.stringify(appliedSettings)
 
   const handleResetSystemPrompt = React.useCallback(async () => {
     if (!onResetSystemPrompt) return
@@ -934,6 +829,7 @@ export function ConversationTab({
         <div className="space-y-1">
           <Form.Item name="systemPrompt" noStyle>
             <Input.TextArea
+              aria-label={t("common:modelSettings.conversation.modelDefaultPromptLabel", "Model default system prompt")}
               rows={useDrawer ? 4 : 6}
               placeholder={t(
                 "common:modelSettings.form.systemPrompt.placeholder",
@@ -1038,17 +934,42 @@ export function ConversationTab({
         </div>
       )}
 
+      <div className="sticky top-0 z-10 space-y-2 border-y border-border bg-surface py-3">
+        <p className="text-xs text-text-muted">{t("playground:composer.conversationStagingHelp", "Conversation changes stay in this panel until you apply them.")}</p>
+        {settingsRecoveryError && <p role="alert">{t("playground:composer.conversationRecoveryReadError", "The previous settings change could not be verified on this device. Retry the read before editing.")}
+          <Button htmlType="button" onClick={() => void refreshRecovery?.()}>{t("playground:composer.retryRecoveryRead", "Retry recovery read")}</Button>
+        </p>}
+        {settingsRecovery && <div className="space-y-2">
+          <p role="status">{t("playground:composer.conversationRecoveryHelp", "A previous settings change still needs verification. Review it, then Apply to reconcile it before applying new edits. Cancel does not undo a change already accepted by the server.")}</p>
+          <Button className="min-h-[40px]" htmlType="button" disabled={!canEdit || hasDraft || pending} onClick={() => void reviewRecovery()}>{t("playground:composer.reviewRecovery", "Review previous settings change")}</Button>
+        </div>}
+        {draft.recoveryId && <details><summary>{t("playground:composer.recoveredSettings", "Recovered settings to verify")}</summary><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(draft.settings, null, 2).slice(0, 4000)}</pre></details>}
+      {!canEdit && <p role="status">{t("playground:composer.conversationUnready", "Conversation settings are not ready. Check the selected chat and account before editing.")}</p>}
+      {saveError && <p role="alert">{saveError} {t("playground:composer.conversationRetryHelp", "Your proposal is retained. Retry applies only unconfirmed changes; Cancel discards unapplied edits.")}</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button className="min-h-[40px]" htmlType="button" type="primary" aria-label={saveError ? t("playground:composer.retryConversation", "Retry conversation changes") : t("playground:composer.applyConversation", "Apply conversation changes")} aria-busy={pending} loading={pending} disabled={!canEdit || !hasDraft || pending || Boolean(settingsRecovery && !draft.recoveryId && !proposalRef.current)} onClick={() => void applyChanges()}>
+          {saveError ? t("playground:composer.retryConversation", "Retry conversation changes") : t("playground:composer.applyConversation", "Apply conversation changes")}
+        </Button>
+        <Button className="min-h-[40px]" htmlType="button" disabled={!canEdit || !hasDraft || pending} onClick={cancelChanges}>
+          {t("playground:composer.cancelConversation", "Cancel conversation changes")}
+        </Button>
+      </div>
+      </div>
+
+      <fieldset className="min-w-0 space-y-4 border-0 p-0" disabled={!canEdit || pending || Boolean(proposalRef.current) || Boolean(draft.recoveryId)}>
       <Form.Item
-        label={t("playground:composer.conversationTags", "Conversation state")}
+        label={t("playground:composer.conversationStatus", "Conversation status")}
         help={t(
           "playground:composer.stateHelp",
           'Default state is "in-progress." Update it as the conversation progresses.'
         )}>
         <Select
+          aria-label={t("playground:composer.conversationStatus", "Conversation status")}
           data-testid="conversation-state-select"
-          value={serverChatState || "in-progress"}
+          value={draft.details.state ?? serverChatState ?? "in-progress"}
+          disabled={!serverChatId || mode !== "ordinary" || !Number.isSafeInteger(serverChatVersion) || (serverChatVersion ?? 0) <= 0}
           options={conversationStateOptions}
-          onChange={handleStateChange}
+          onChange={(value) => stageDetails({ state: normalizeConversationState(value) })}
         />
       </Form.Item>
 
@@ -1081,9 +1002,10 @@ export function ConversationTab({
           "Optional label for this chat; saved to the server when available."
         )}>
         <Input
-          value={serverChatTopic || ""}
-          onChange={(e) => onTopicChange(e.target.value || null)}
-          onBlur={(e) => handleTopicBlur(e.target.value)}
+          aria-label={t("playground:composer.topicPlaceholder", "Conversation tag")}
+          value={draft.details.topic_label !== undefined ? draft.details.topic_label ?? "" : serverChatTopic ?? ""}
+          disabled={!serverChatId || mode !== "ordinary" || !Number.isSafeInteger(serverChatVersion) || (serverChatVersion ?? 0) <= 0}
+          onChange={(e) => stageDetails({ topic_label: e.target.value || null })}
           placeholder={t(
             "playground:composer.topicPlaceholder",
             "Conversation tag (optional)"
@@ -1099,17 +1021,12 @@ export function ConversationTab({
         )}
       >
         <Input.TextArea
+          aria-label={t("playground:composer.authorNote.label", "Author note")}
           rows={3}
           showCount
           maxLength={1200}
           value={authorNoteDraft}
-          onChange={(e) => setAuthorNoteDraft(e.target.value)}
-          onBlur={() => {
-            const persisted =
-              typeof chatSettings?.authorNote === "string" ? chatSettings.authorNote : ""
-            if (persisted.trim() === authorNoteDraft.trim()) return
-            void persistAuthorNote(authorNoteDraft)
-          }}
+          onChange={(e) => stage({ authorNote: e.target.value })}
           placeholder={t(
             "playground:composer.authorNote.placeholder",
             "E.g., Keep responses grounded, avoid repetition, and progress the scene."
@@ -1129,12 +1046,12 @@ export function ConversationTab({
       >
         <div className="space-y-2">
           <Select
+            aria-label={t("playground:composer.authorNotePosition.label", "Author note insertion")}
             value={authorNoteMode}
             options={authorNotePositionOptions}
             onChange={(value) => {
               const nextMode = value === "depth" ? "depth" : "before_system"
-              setAuthorNoteMode(nextMode)
-              void persistAuthorNotePosition(nextMode, authorNoteDepth)
+              stage({ authorNotePosition: nextMode === "depth" ? { mode: "depth", depth: authorNoteDepth } : "before_system" })
             }}
           />
           {authorNoteMode === "depth" && (
@@ -1152,10 +1069,7 @@ export function ConversationTab({
                 step={1}
                 value={authorNoteDepth}
                 onChange={(value) => {
-                  setAuthorNoteDepth(sanitizeDepth(value))
-                }}
-                onBlur={() => {
-                  void persistAuthorNotePosition("depth", authorNoteDepth)
+                  stage({ authorNotePosition: { mode: "depth", depth: sanitizeDepth(value) } })
                 }}
               />
             </div>
@@ -1171,11 +1085,12 @@ export function ConversationTab({
         })}
       >
         <Select
+          aria-label={t("playground:composer.greetingScope.label", "Greeting scope")}
           value={greetingScopeValue}
           options={greetingScopeOptions}
           onChange={(value) => {
             const next = value === "character" ? "character" : "chat"
-            void persistGreetingScope(next)
+            stage({ greetingScope: next })
           }}
         />
       </Form.Item>
@@ -1188,11 +1103,12 @@ export function ConversationTab({
         })}
       >
         <Select
+          aria-label={t("playground:composer.presetScope.label", "Preset scope")}
           value={presetScopeValue}
           options={presetScopeOptions}
           onChange={(value) => {
             const next = value === "chat" ? "chat" : "character"
-            void persistPresetScope(next)
+            stage({ presetScope: next })
           }}
         />
       </Form.Item>
@@ -1209,13 +1125,12 @@ export function ConversationTab({
           })}
         >
           <Select
+            aria-label={t("playground:composer.chatPresetOverride.label", "Chat preset override")}
             value={chatPresetOverrideValue || DEFAULT_CHARACTER_PROMPT_PRESET}
             options={chatPresetOptions}
             onChange={(value) => {
               const next = normalizeChatPresetOverrideId(value)
-              void persistChatPresetOverrideId(
-                next || DEFAULT_CHARACTER_PROMPT_PRESET
-              )
+              stage({ chatPresetOverrideId: next || DEFAULT_CHARACTER_PROMPT_PRESET })
             }}
           />
         </Form.Item>
@@ -1233,6 +1148,7 @@ export function ConversationTab({
       >
         <div className="space-y-2" data-testid="chat-generation-override">
           <Select
+            aria-label={t("playground:composer.chatGenerationOverride.label", "Chat generation override")}
             value={generationOverrideEnabledDraft ? "on" : "off"}
             options={[
               {
@@ -1250,8 +1166,7 @@ export function ConversationTab({
             ]}
             onChange={(value) => {
               const enabled = value === "on"
-              setGenerationOverrideEnabledDraft(enabled)
-              void persistChatGenerationOverride({ enabled })
+              stageGeneration({ enabled })
             }}
           />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -1272,14 +1187,7 @@ export function ConversationTab({
                 disabled={!generationOverrideEnabledDraft}
                 value={generationTemperatureDraft}
                 onChange={(value) => {
-                  setGenerationTemperatureDraft(
-                    sanitizeGenerationFloat(value, 0, 2)
-                  )
-                }}
-                onBlur={() => {
-                  void persistChatGenerationOverride({
-                    temperature: generationTemperatureDraft
-                  })
+                  stageGeneration({ temperature: sanitizeGenerationFloat(value, 0, 2) })
                 }}
               />
             </div>
@@ -1300,10 +1208,7 @@ export function ConversationTab({
                 disabled={!generationOverrideEnabledDraft}
                 value={generationTopPDraft}
                 onChange={(value) => {
-                  setGenerationTopPDraft(sanitizeGenerationFloat(value, 0, 1))
-                }}
-                onBlur={() => {
-                  void persistChatGenerationOverride({ top_p: generationTopPDraft })
+                  stageGeneration({ top_p: sanitizeGenerationFloat(value, 0, 1) })
                 }}
               />
             </div>
@@ -1324,27 +1229,20 @@ export function ConversationTab({
                 disabled={!generationOverrideEnabledDraft}
                 value={generationRepetitionPenaltyDraft}
                 onChange={(value) => {
-                  setGenerationRepetitionPenaltyDraft(
-                    sanitizeGenerationFloat(value, 0, 3)
-                  )
-                }}
-                onBlur={() => {
-                  void persistChatGenerationOverride({
-                    repetition_penalty: generationRepetitionPenaltyDraft
-                  })
+                  stageGeneration({ repetition_penalty: sanitizeGenerationFloat(value, 0, 3) })
                 }}
               />
             </div>
           </div>
           <Input.TextArea
+            aria-label={t("playground:composer.chatGenerationOverride.stopLabel", "Stop sequences")}
             rows={2}
             disabled={!generationOverrideEnabledDraft}
             value={generationStopsDraft}
-            onChange={(event) => setGenerationStopsDraft(event.target.value)}
-            onBlur={() => {
-              void persistChatGenerationOverride({
-                stop: parseGenerationStopListFromText(generationStopsDraft)
-              })
+            onChange={(event) => {
+              if (!canEdit || pendingRef.current || proposalRef.current || draftRef.current.recoveryId) return
+              setGenerationStopsText(event.target.value)
+              stageGeneration({ stop: parseGenerationStopListFromText(event.target.value) })
             }}
             placeholder={t(
               "playground:composer.chatGenerationOverride.stopPlaceholder",
@@ -1362,11 +1260,12 @@ export function ConversationTab({
         })}
       >
         <Select
+          aria-label={t("playground:composer.memoryScope.label", "Memory scope")}
           value={memoryScopeValue}
           options={memoryScopeOptions}
           onChange={(value) => {
             const normalized = normalizeMemoryScope(value)
-            void persistMemoryScope(normalized)
+            stage({ memoryScope: normalized })
           }}
         />
       </Form.Item>
@@ -1379,11 +1278,12 @@ export function ConversationTab({
         })}
       >
         <Select
+          aria-label={t("playground:composer.turnTakingMode.label", "Turn-taking mode")}
           value={turnTakingModeValue}
           options={turnTakingModeOptions}
           onChange={(value) => {
             const normalized = normalizeTurnTakingMode(value)
-            void persistTurnTakingMode(normalized)
+            stage({ turnTakingMode: normalized })
           }}
         />
       </Form.Item>
@@ -1397,6 +1297,7 @@ export function ConversationTab({
       >
         <div className="space-y-1">
           <Select
+            aria-label={t("playground:composer.participants.label", "Participants")}
             mode="multiple"
             allowClear
             showSearch
@@ -1409,7 +1310,7 @@ export function ConversationTab({
               const nextValues = Array.isArray(values)
                 ? values.map((value) => String(value))
                 : []
-              void persistParticipantCharacterIds(nextValues)
+              stage({ participantCharacterIds: normalizeParticipantCharacterIds(nextValues) })
             }}
           />
           {isAvailableCharactersError && (
@@ -1434,6 +1335,7 @@ export function ConversationTab({
         })}
       >
         <Select
+          aria-label={t("playground:composer.directedReply.label", "Directed responder")}
           allowClear
           showSearch
           value={directedCharacterIdValue ?? undefined}
@@ -1443,7 +1345,7 @@ export function ConversationTab({
           })}
           onChange={(value) => {
             const normalized = value != null ? String(value) : null
-            void persistDirectedCharacterId(normalized)
+            stage({ directedCharacterId: normalized !== null && /^\d+$/.test(normalized) ? Number.parseInt(normalized, 10) : null })
           }}
         />
       </Form.Item>
@@ -1461,6 +1363,7 @@ export function ConversationTab({
         >
           <div className="space-y-2">
             <Select
+              aria-label={t("playground:composer.characterMemory.targetLabel", "Memory character")}
               showSearch
               value={memoryCharacterId ?? undefined}
               options={participantCharacterOptions}
@@ -1470,28 +1373,23 @@ export function ConversationTab({
               onChange={(value) => {
                 const normalized = value ? String(value) : null
                 setMemoryCharacterId(normalized)
-                setMemoryNoteDraft(
-                  normalized ? characterMemoryById[normalized]?.note || "" : ""
-                )
+
               }}
             />
             <Input.TextArea
+              aria-label={t("playground:composer.characterMemory.noteLabel", "Memory note")}
               rows={3}
               showCount
               maxLength={600}
               value={memoryNoteDraft}
-              onChange={(e) => setMemoryNoteDraft(e.target.value)}
-              onBlur={() => {
-                if (!memoryCharacterId) return
-                const persisted = characterMemoryById[memoryCharacterId]?.note || ""
-                if (persisted.trim() === memoryNoteDraft.trim()) return
-                void persistCharacterMemoryNote(memoryCharacterId, memoryNoteDraft)
-              }}
+              disabled={!memoryCharacterId || Boolean(serverChatId)}
+              onChange={(e) => { if (memoryCharacterId) stageCharacterMemory(memoryCharacterId, e.target.value) }}
               placeholder={t(
                 "playground:composer.characterMemory.placeholder",
                 "Character-specific memory note"
               )}
             />
+            {serverChatId && <p className="text-xs text-text-muted">{t("playground:composer.characterMemory.localOnly", "Per-character memory editing is available for local chats.")}</p>}
           </div>
         </Form.Item>
       )}
@@ -1505,6 +1403,7 @@ export function ConversationTab({
       >
         <div className="space-y-2">
           <Select
+            aria-label={t("playground:composer.autoSummary.label", "Auto summary")}
             value={autoSummaryEnabledDraft ? "on" : "off"}
             options={[
               {
@@ -1522,8 +1421,7 @@ export function ConversationTab({
             ]}
             onChange={(value) => {
               const enabled = value === "on"
-              setAutoSummaryEnabledDraft(enabled)
-              void persistAutoSummaryEnabled(enabled)
+              stage({ autoSummaryEnabled: enabled })
             }}
           />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1543,12 +1441,7 @@ export function ConversationTab({
                 value={autoSummaryThresholdDraft}
                 disabled={!autoSummaryEnabledDraft}
                 onChange={(value) => {
-                  setAutoSummaryThresholdDraft(
-                    sanitizeAutoSummaryThreshold(value)
-                  )
-                }}
-                onBlur={() => {
-                  void persistAutoSummaryThreshold(autoSummaryThresholdDraft)
+                  stageSummaryThreshold(value)
                 }}
               />
             </div>
@@ -1568,12 +1461,7 @@ export function ConversationTab({
                 value={autoSummaryWindowDraft}
                 disabled={!autoSummaryEnabledDraft}
                 onChange={(value) => {
-                  setAutoSummaryWindowDraft(
-                    sanitizeAutoSummaryWindow(value, autoSummaryThresholdDraft)
-                  )
-                }}
-                onBlur={() => {
-                  void persistAutoSummaryWindow(autoSummaryWindowDraft)
+                  stage({ autoSummaryWindowMessages: sanitizeAutoSummaryWindow(value, autoSummaryThresholdDraft) })
                 }}
               />
             </div>
@@ -1595,6 +1483,10 @@ export function ConversationTab({
                 defaultValue: "Failed to load pinned messages."
               })}
             </div>
+          ) : !ownsPinnedRead ? (
+            <div role="status" className="text-xs text-text-muted">{canRead && isPinnedMessagesPending
+              ? t("playground:composer.pinnedMessages.loading", "Loading pinned messages...")
+              : t("playground:composer.pinnedMessages.unverified", "Pinned messages have not been verified for this chat.")}</div>
           ) : pinnedMessages.length === 0 ? (
             <div className="text-xs text-text-muted">
               {t("playground:composer.pinnedMessages.empty", {
@@ -1630,6 +1522,7 @@ export function ConversationTab({
             )}
           >
             <Input.TextArea
+              aria-label={t("playground:composer.autoSummary.currentSummary", "Current summary")}
               readOnly
               rows={4}
               value={summarySettings.content}
@@ -1637,6 +1530,8 @@ export function ConversationTab({
           </Form.Item>
         )}
 
+      </fieldset>
+      <p className="text-xs text-text-muted">{t("playground:composer.appliedPreviewHelp", "Prompt and lore previews show applied conversation settings.")}</p>
       <PromptAssemblyPreview
         serverChatId={serverChatId}
         settingsFingerprint={previewSettingsFingerprint}

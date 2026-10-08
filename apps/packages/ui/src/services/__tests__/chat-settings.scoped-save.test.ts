@@ -13,7 +13,7 @@ vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({
   remove: async (key: string) => { state.records.delete(key) }
 }) }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: transport }))
-import { applyChatSettingsPatch, getChatSettingsStorageKey, normalizeChatSettingsRecord, resolveChatSettingsKey, syncChatSettingsForServerChat } from "../chat-settings"
+import { getChatSettingsRecovery, applyChatSettingsPatch, getChatSettingsStorageKey, normalizeChatSettingsRecord, resolveChatSettingsKey, syncChatSettingsForServerChat } from "../chat-settings"
 
 const config = { serverUrl: "https://one.example", authMode: "single-user" as const, apiKey: "disposable-test-key" }
 const requestScope: ServicePromptRequestScope = { config, userId: 1 }
@@ -173,6 +173,57 @@ describe("ordinary settings captured owner and explicit reconciliation", () => {
     await expect(applyChatSettingsPatch({ ...params, patch: { authorNote: "Newer" } })).rejects.toMatchObject({ message: "chat_settings_pending_changed", pendingPatch: { authorNote: "First" } })
     expect(transport.updateChatSettings).toHaveBeenCalledOnce()
     expect([...state.records.values()]).toContainEqual(expect.objectContaining({ value: expect.objectContaining({ status: "pending", intent: { authorNote: "First" } }) }))
+  })
+
+  it("reads an owned unresolved receipt without transport or sharing it with another account", async () => {
+    transport.updateChatSettings.mockRejectedValueOnce(new Error("Response lost"))
+    await expect(applyChatSettingsPatch({ ...params, patch: { authorNote: "Original A" } })).rejects.toThrow("chat_settings_server_unconfirmed")
+    vi.clearAllMocks()
+    const recovery = await getChatSettingsRecovery(params)
+    expect(recovery).toMatchObject({ status: "pending", patch: { authorNote: "Original A" }, operationId: expect.any(String) })
+    recovery!.patch.authorNote = "Mutated projection"
+    expect(await getChatSettingsRecovery(params)).toMatchObject({ patch: { authorNote: "Original A" } })
+    expect(await getChatSettingsRecovery({ ...params, requestScope: { ...requestScope, userId: 2 } })).toBeNull()
+    expect(transport.getChatSettings).not.toHaveBeenCalled()
+    expect(transport.updateChatSettings).not.toHaveBeenCalled()
+  })
+
+  it("does not manufacture absent recovery from a malformed owned receipt", async () => {
+    const destination = resolveChatSettingsKey(params)
+    state.records.set(`tldw:chatSettingsSaves:v1:${destination}`, { value: { version: 1, destination, operation_id: "operation", status: "pending", intent: [], patch: {} }, updatedAt: 1 })
+    await expect(getChatSettingsRecovery(params)).rejects.toThrow("chat_settings_pending_invalid")
+  })
+
+  it("returns no unresolved receipt after successful reconciliation", async () => {
+    transport.updateChatSettings.mockImplementationOnce(async (_id: string, patch: Record<string, unknown>) => { state.remote = { ...state.remote, ...patch }; throw new Error("Response lost") })
+    await expect(applyChatSettingsPatch({ ...params, patch: { authorNote: "Original A" } })).rejects.toThrow()
+    const original = await getChatSettingsRecovery(params)
+    await applyChatSettingsPatch({ ...params, patch: original!.patch })
+    expect(await getChatSettingsRecovery(params)).toBeNull()
+    expect(transport.updateChatSettings).toHaveBeenCalledOnce()
+  })
+
+  it("refuses to read recovery after the captured owner retires", async () => {
+    await expect(getChatSettingsRecovery({ ...params, validate_lease: () => false })).rejects.toMatchObject({ status: 412 })
+  })
+
+  it("does not turn a replaced recovery operation into a new settings write", async () => {
+    transport.updateChatSettings.mockImplementationOnce(async (_id: string, patch: Record<string, unknown>) => { state.remote = { ...state.remote, ...patch }; throw new Error("Response lost") })
+    await expect(applyChatSettingsPatch({ ...params, patch: { authorNote: "Original A" } })).rejects.toThrow()
+    const original = (await getChatSettingsRecovery(params))!
+    await applyChatSettingsPatch({ ...params, patch: original.patch, recoveryOperationId: original.operationId } as Parameters<typeof applyChatSettingsPatch>[0])
+    await applyChatSettingsPatch({ ...params, patch: { authorNote: "Newer B" } })
+    vi.clearAllMocks()
+    await expect(applyChatSettingsPatch({ ...params, patch: original.patch, recoveryOperationId: original.operationId } as Parameters<typeof applyChatSettingsPatch>[0])).rejects.toThrow("chat_settings_recovery_changed")
+    expect(transport.getChatSettings).not.toHaveBeenCalled()
+    expect(transport.updateChatSettings).not.toHaveBeenCalled()
+    expect(state.remote.authorNote).toBe("Newer B")
+  })
+
+  it("retains the owning operation identity on an uncertain write for explicit Retry", async () => {
+    transport.updateChatSettings.mockRejectedValueOnce(new Error("Response lost"))
+    const failure = await applyChatSettingsPatch({ ...params, patch: { authorNote: "Original A" } }).catch(error => error)
+    expect(failure.settingsOperationId).toBe((await getChatSettingsRecovery(params))!.operationId)
   })
 
   it("does not dispatch a second same-intent write while the first PUT is held", async () => {
