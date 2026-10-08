@@ -1018,7 +1018,7 @@ Independent seven-path actual-source review CLEAR with no actionable findings. E
 **Goal**: Keep the edited text available until actual persistence acknowledges Save; preserve the current editor on rejection.
 **Success Criteria**: Deferred save remains visible; error retains draft/retry; duplicate work is prevented; late prior completion cannot close or alter a replacement editor; all actual callers return the existing save Promise.
 **Tests**: Actual EditMessageForm with deferred/rejected/synchronous callbacks, cancellation/replacement and IME; affected virtual timeline/message and edit-handler controls in both configured clients, types/lint/security as applicable.
-**Status**: In Progress
+**Status**: Complete
 
 #### Editor Stage 1: Causal failures and callers
 **Goal**: Trace the shared editor through each real save handler and demonstrate early-close/data-loss failures.
@@ -1036,7 +1036,7 @@ Independent seven-path actual-source review CLEAR with no actionable findings. E
 **Goal**: Independently review and normally commit the exact qualified scoped fix.
 **Success Criteria**: Unrelated Sync/ADR bytes preserved; no local unit result counted as real43 UAT acceptance.
 **Tests**: Configured types/lint, actual+staged review, normal hooks and commit equality.
-**Status**: In Progress
+**Status**: Complete
 
 Sidepanel completion: actual+staged reviews CLEAR, normal scoped pre_commit0/1.512s and local commit b0a5ebc0eafe2f4487891ee648d8b370790d7a150/0.380s; exact reviewed staged/committed binary patch equal, index empty and unrelated11 patch unchanged. All43 real workflow acceptance remains open; no publication.
 
@@ -1051,3 +1051,55 @@ Editor candidate1 scoped causal green: configured UI 8 passed/29 excluded, natur
 
 #### Editor affected checks and qualification
 Editor candidate1 local qualification: UI causal8passed/29excluded (2.752s), affected original Message29+timeline6=35passed/2newexcluded (3.817s); Web configured full editor/Message/timeline43unitcases passed (4.101s), not43UAT workflows. Existing stable-ID Save/error and two unsupported native-action guards3passed/130excluded per client (UI2.223s/Web2.191s). Final configured UItypes0/60.653s and normal Web npmtypecheck0/6.246s; first Web attempt was sandbox EPERM writing normal tsbuildinfo, then identical command with proper workspace permission succeeded, no compiler/source workaround. All outputs completely recovered/released; exact guarded14source/test hashes unchanged. Final TS parse0/no new lint findings; inherited message-types error/warnings and wholefile style flags unchanged. TS/prose-only BanditN/A. Independent production12 and narrow correction review CLEAR. All43 real workflow acceptance still open. Source-only legacy messageHandlers.edit.test.ts fixture uses removed updateMessageByIndex and expects unsupported user Edit-and-Send success; this later ADR067 action-protocol unit must address its real contract, no assertion/guard weakening or false qualification here. Editor Stage2Complete, Stage3InProgress pending actual/staged review/normalhooks/localcommit. No publication.
+
+## Selected-history Edit-and-Send and Regenerate
+
+#### Native action Stage 1: Existing contract and causal cases
+**Goal**: Trace the actual shared action handlers through owner-bound selection, user admission, provider dispatch and assistant settlement; reproduce supported action failures.
+**Success Criteria**: Every actual caller and applicable local/native/context/asset limit identified; no availability guard removed on speculation.
+**Tests**: Real selected-history Save/Send/Regenerate boundaries, preserved original rows/context, duplicate prevention, refusal and stale owner/view, supported legacy fixture migration only when its old contract is truly superseded.
+**Status**: In Progress
+
+#### Native action Stage 2: Minimal existing admission repair
+**Goal**: Implement only the smallest supported shared action using existing authoritative owner and durable receipt contracts.
+**Success Criteria**: Edited question/regeneration uses the selected context and canonical identities once; rejection retains original state/draft; older completion cannot replace a newer selection; local/native storage and replay authority remain.
+**Tests**: Causal red/green and genuinely affected component/controller/handler/service/backend consumers in both configured clients and official isolated PostgreSQL where applicable.
+**Status**: Not Started
+
+#### Native action Stage 3: Review and local commit
+**Goal**: Qualify and independently review the scoped action fix before normal local commit.
+**Success Criteria**: Existing protocol/storage/security guarantees and unrelated WIP preserved; local controls are separate from actual43 acceptance.
+**Tests**: Supported types/lint/scoped baseline-current Bandit for Python, actual+staged reviews and normal hooks/commit equality.
+**Status**: Not Started
+
+Editor unit completed locally: independent actual+staged16-path reviews CLEAR; normal scoped pre_commit0/1.666s and normal local commit8f33c72720132f97956143ec80010a01643a9e07/0.344s. Reviewed index/committed43218-byte binary patch byte-identical, SHAb261e9b5ff8c8d7a6600cc5ba003098de5edce4d3482b5396e1eaf1e92a44323; index empty and unrelated11Sync/ADR patch unchanged. Editor Stage3/main subsection Complete. No publication or real43 acceptance. Next independent unit: investigate and repair actual selected-history Edit-and-Send/Regenerate by reusing existing owner/selection/admission/settlement contracts, without removing availability guards before a causal supported path exists. Native Stage1InProgress; trace all actual callers, legacy fixture contract, local/native persistence and rejection/late-completion boundaries before tests/repair. ADR assessment will link existing049/050 if sufficient or record a new durable decision only when the actual contract demands it. Specific previously rejected6fileSync hold remains pending; no unchanged test replay.
+
+## Local RAG diagnostics and shared history projection
+
+#### RAG projection Stage 1: Actual Save causal failures
+**Goal**: Reproduce local-only preflight diagnostics leaking into genuine history after Save.
+**Success Criteria**: Existing behavioral assertions preserved; real current handler/mock boundary, no algorithm substitute.
+**Tests**: Existing genuine-row and diagnostic-row Save cases, excluding independently unsupported EditSend; eligible server receipt/answered variants retained.
+**Status**: Complete
+
+#### RAG projection Stage 2: Reuse existing eligibility helper
+**Goal**: Apply existing excludeLocalRagDiagnostics at the shared visible-history projection.
+**Success Criteria**: All Edit/Delete projection callers retain only genuine context; source rows remain visible and server-acknowledged/answered variants retained.
+**Tests**: Causal green, genuinely affected projection and diagnostic helper controls in both clients.
+**Status**: Complete
+
+#### RAG projection Stage 3: Review and local commit
+**Goal**: Normally commit the independently reviewed minimal projection correction.
+**Success Criteria**: No new protocol/storage rule; TS-only BanditN/A, static/client types as affected, actual/staged reviews and normalhooks.
+**Tests**: Scoped checks and exact reviewed commit equality; real43 acceptance remains open.
+**Status**: In Progress
+
+ADR required: no; reuse existing localRAG eligibility semantics and ADR049 history boundary.
+
+New source-traced shared history projection defect: historyFromVisibleMessages used by createEditMessage and five delete consumers omits existing excludeLocalRagDiagnostics. Local RAG selected-source preflight diagnostic question/answer can therefore enter inferred prompt history after an ordinary message Save; sibling submission/storage paths already apply the existing eligibility helper. Official independent RAG projection unit established before edits. Correct only stale updateMessageByIndex/deleteChatForEdit mocks in existing messageHandlers.edit test to actual updateMessageById; preserve all three behavioral assertions, run only two valid Save cases first (unsupported EditSend remains separate native unit), add only missing eligible receipt/answered-variant projection controls if not already covered. Root will execute real causal red before one minimal shared-helper green; maximum3productioncandidates, no broader guard/protocol changes. Native action architecture investigation remains read-only, and all43 real acceptance open.
+
+#### RAG causal red and native action architecture ruling
+RAG projection corrected causalRED: proper updateMessageById fixture and genuine emptyimages[] metadata retain exact two-row role/content/cardinality expectations. Both valid Save tests still fail at real leaked diagnostic pair (4actualrowsvs2), natural1/2.161s/stderr0/exact source and fixture unchanged; fullJSON recovered/released. Earlier1.853s red also demonstrated diagnostic leak but had separate stale image-metadata expectation, now corrected without weaker matchers. UnsupportedEditSend excluded, not qualified. Stage1Complete/Stage2InProgress; minimalproductioncandidate1 now reusesexistingexcludeLocalRagDiagnostics beforeexistinggreeting/image filters. Native readonlyarchitecture assessmentcomplete: EditSend must detach before-target ownercapture from originating display fence, avoiding eagerchoose/optimistic projection before realadmission ACK and inspect failed/skipped resolvedsubmitoutcomes. Regenerate requires same-parent assistants, no duplicatequestion; currentnativeGET doesn't expose savedadmission, legacyquestions maylackit. Narrowversionedselected-existing-input settlement/recoveryproof is proposed on newassistant'sprotectedauthorityfield, preserving originalquestionrevision/legacyprojection; no retroactiveuserauthority/forkstore. Existingreceipts mayreusecurrentretryAdmission. New publiccontractwillneed ADR067 ifavailable and SQLite/officialPG/APIreplay/owner/canonicalqualification. No native guard removed or nativeimplementation yet; all43 realacceptanceopen.
+
+#### RAG projection local qualification
+RAG projection candidate1 qualified locally: configured UI16passed19excluded/natural0/2.110s and Web16passed19excluded/natural0/1.803s. Scope is two exact Save regressions, thirteen existing diagnostic eligibility controls including receipts/answered variants, and stable-ID Save/error control; independently unsupported EditSend and eighteen unrelated branch cases excluded. Full native outputs recovered/released, guarded source/test hashes unchanged; utility fixture before/after SHA5c0e6ff14c1c613837f12c4ebaf380f1d9d58023a6c2ca58b3d0a527e9379d60 matched. Production helper/signature unchanged; only shared existing eligibility call and import changed. Post-green import-only formatting preserves full TypeScript AST exactly (normalizedSHA1ab3b2b2ba0eb42d1643209cbe2d811693213e327c3e6b85a04f465169330cf1); final source4e70e0fec50ac648888220c4de3581d5a600fcb6fad765e392c60087b0576b74/test6d8f358b85dca5b2ca2166f1072622aa14e6461f9dbf38981ce4a34efd7f7fbb. Two touched TS parse0/ESLint0errors/no newwarnings, source2identical inheritedwarnings/test0, diffcheck0. TS/prose-only BanditN/A; no API/public type/storage contract change or unchanged broad compiler replay. Independent two-file source review CLEAR; final four-path actual/staged review/normalhooks/localcommit pending. Stage2Complete/Stage3InProgress. Controlled handler Save proof is not real DB/native/UAT acceptance; all43 real workflows open.
