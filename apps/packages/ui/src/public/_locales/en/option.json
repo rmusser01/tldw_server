@@ -1181,6 +1181,12 @@
   "notes": {
     "message": "Notes"
   },
+  "notesSearch_editingManual": {
+    "message": "Editing: Manual"
+  },
+  "notesSearch_latestAssistPrefix": {
+    "message": "Latest AI assist"
+  },
   "notesSearch_placeholder": {
     "message": "Search titles and contents"
   },

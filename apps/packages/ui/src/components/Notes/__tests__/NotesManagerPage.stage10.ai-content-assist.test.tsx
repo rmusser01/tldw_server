@@ -256,7 +256,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
     })
   })
 
-  it("applies summarize assist only after confirmation and tracks provenance", async () => {
+  it("applies summarize assist only after confirmation and reports latest assist", async () => {
     renderPage()
     const textarea = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
 
@@ -278,14 +278,14 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
       ).toContain("Summary:")
     })
     expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent(
-      "Origin: AI-generated (Summarize"
+      "Latest AI assist (Summarize"
     )
 
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
       target: { value: "manual update after summary" }
     })
     await waitFor(() => {
-      expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Origin: Typed manually")
+      expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Editing: Manual")
     })
   })
 
@@ -305,10 +305,10 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
       expect(mockConfirmDanger).toHaveBeenCalled()
     })
     expect(textarea.value).toBe("Keep this draft exactly as typed.")
-    expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Origin: Typed manually")
+    expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Editing: Manual")
   })
 
-  it("suggests keywords with explicit selection and marks generated provenance after apply", async () => {
+  it("suggests keywords with explicit selection and reports latest assist after apply", async () => {
     renderPage()
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
       target: {
@@ -331,7 +331,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
       expect(mockMessageSuccess).toHaveBeenCalledWith("Applied suggested tags.")
     })
     expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent(
-      "Origin: AI-generated (Suggest tags"
+      "Latest AI assist (Suggest tags"
     )
     const editorKeywordsControl = screen.getByTestId("notes-keywords-editor")
     expect(within(editorKeywordsControl).getByText("quantum")).toBeInTheDocument()
@@ -353,7 +353,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
     await waitFor(() => {
-      expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Origin: Typed manually")
+      expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Editing: Manual")
     })
     const editorKeywordsControl = screen.getByTestId("notes-keywords-editor")
     expect(within(editorKeywordsControl).queryByText("quantum")).not.toBeInTheDocument()

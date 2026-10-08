@@ -41,7 +41,8 @@ export const webClipperMethods = {
 
   async getWebClipStatus(
     this: TldwWebClipperApiClientCore,
-    clipId: string
+    clipId: string,
+    options?: ScopedRequestOptions
   ): Promise<WebClipperStatusResponse> {
     const template = await this.resolveApiPath("webClipper.status", [
       "/api/v1/web-clipper/{clip_id}",
@@ -50,7 +51,9 @@ export const webClipperMethods = {
     const path = this.fillPathParams(template, clipId)
     return await bgRequest<WebClipperStatusResponse>({
       path,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 

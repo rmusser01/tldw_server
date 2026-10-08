@@ -1337,7 +1337,7 @@
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 677,
+        "line": 678,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_characterization.py",
         "target_name": "enhanced_web_scraping"
@@ -1435,7 +1435,7 @@
       {
         "import_kind": "from",
         "imported_name": "resolve_handler",
-        "line": 23,
+        "line": 24,
         "module": "tldw_Server_API.app.core.Web_Scraping.handlers",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
         "target_name": "handlers"
@@ -1785,7 +1785,7 @@
       {
         "import_kind": "from",
         "imported_name": "DEFAULT_HANDLER",
-        "line": 47,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
         "target_name": "scraper_router"
@@ -1793,7 +1793,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScraperRouter",
-        "line": 47,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
         "target_name": "scraper_router"
@@ -1974,6 +1974,14 @@
         "line": 95,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
+        "target_name": "ua_profiles"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "build_browser_headers",
+        "line": 263,
+        "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
+        "path": "tldw_Server_API/app/core/Web_Scraping/filters.py",
         "target_name": "ua_profiles"
       },
       {

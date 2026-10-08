@@ -253,3 +253,25 @@ describe("workspace bundle zip compatibility", () => {
     await expect(parseWorkspaceImportFile(file)).rejects.toThrow("schema-mismatch")
   })
 })
+
+it("export and reopen preserve all capture pin fields alongside original retrieved evidence", async () => {
+  const bundle = createBundleFixture()
+  const pin = {
+    clipId: "clip",
+    requestedUrl: "https://example.org",
+    capturedAt: "2026-10-07T00:00:00Z",
+    contentSha256: "digest",
+    refreshOf: "prior",
+    mediaId: 101,
+    versionNumber: 9,
+    versionUuid: "version-nine"
+  }
+  bundle.workspace.snapshot.sources[0].webCapture = pin
+  const blob = await createWorkspaceExportZipBlob(bundle)
+  const result = await parseWorkspaceImportFile(
+    new File([blob], "capture.workspace.zip", {
+      type: WORKSPACE_EXPORT_BUNDLE_ZIP_MIME
+    })
+  )
+  expect(result.workspace.snapshot.sources[0].webCapture).toEqual(pin)
+})

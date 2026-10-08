@@ -1,16 +1,16 @@
 # ADR-066: Explicit web capture and refresh snapshots
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Date:** 2026-10-07
 
 **Backfilled from:** not backfilled
 
-**Decision owner:** Requester; design approval pending
+**Decision owner:** Requester; design approved 2026-10-07
 
 **Related task:** TASK-13530.1
 
-**Related spec/plan:** [Proposed Research capture design (repository source)](https://github.com/rmusser01/tldw_server/blob/746598afff328fd0585677003bd916b7471a106f/Docs/Design/2026-10-07-knowledge-web-capture-refresh.md)
+**Related spec/plan:** [Requester-approved Research capture design (historical proposal source)](https://github.com/rmusser01/tldw_server/blob/746598afff328fd0585677003bd916b7471a106f/Docs/Design/2026-10-07-knowledge-web-capture-refresh.md)
 
 ## Decision
 
@@ -52,4 +52,4 @@ Current RAG targets Media IDs/current chunks rather than historical document ver
 
 ## Follow-up
 
-Obtain requester approval before implementation or changing this record to Accepted. Under TASK-13530.1, implement and verify the additive extraction profile, WebClipper descriptor, exact-version preview/readback, owner and retry fences, honest status labels, and retained evidence behavior described in the linked design. This record and its index entry remain Proposed; requester approval is required before acceptance.
+Requester approval was recorded on 2026-10-07. TASK-13530.1 implemented and locally verified the additive profile, descriptor, exact-version readback, owner/retry fences and retained evidence behavior. The historical immutable spec link preserves the approved proposal; the current canonical design records implementation. Local verification and remaining remote-acquisition/current-head-RAG/native-device qualifications are recorded in Docs/Reviews/KNOWLEDGE_CAPTURE_REFRESH_2026_10_07.md. Independent branch review and publication gates remain; acceptance of this durable policy does not claim those gates passed.

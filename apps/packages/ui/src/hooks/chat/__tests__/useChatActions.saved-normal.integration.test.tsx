@@ -1175,28 +1175,102 @@ describe("saved normal Chat pipeline with autosave", () => {
 
   it("uses the selected provider once for source-grounded completion and retrieves evidence only", async () => {
     mocks.realProviderResolution = true
-    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    const actualModels =
+      await vi.importActual<typeof import("@/models")>("@/models")
     mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
-    mocks.getModels.mockResolvedValue([{ id: "shared-model", provider: "custom_openai_api", capabilities: [] }])
-    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
-      const id = options.conversationId || "source-chat"
-      if (!mocks.serverRows.has(id)) mocks.serverRows.set(id, [])
-      const rows = mocks.serverRows.get(id)!
-      rows.push({ id: "source-user", role: "user", content: "Use this source" },
-        { id: "source-answer", role: "assistant", content: "Source answer" })
-      onChunk({ tldw_conversation_id: id, tldw_user_message_id: "source-user", tldw_message_id: "source-answer" })
-      yield "Source answer"
+    mocks.getModels.mockResolvedValue([
+      { id: "shared-model", provider: "openai", capabilities: [] },
+      { id: "shared-model", provider: "custom_openai_api", capabilities: [] }
+    ])
+    mocks.ragSearch.mockResolvedValue({
+      documents: [
+        {
+          content: "Evidence",
+          metadata: {
+            media_id: 42,
+            source: "media_db",
+            title: "Distinctive media 42 evidence",
+            type: "text",
+            url: "https://sources.test/media-42-evidence"
+          }
+        }
+      ]
     })
-    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
-    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true, ragEnableGeneration: true })
-    act(() => useStoreMessageOption.getState().setSelectedModel("custom-openai-api:shared-model"))
-    await act(async () => { await view.result.current.actions.onSubmit({ message: "Use this source", image: "" }) })
-    expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({ enable_generation: false }))
-    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_model")
-    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_provider")
+    mocks.streamMessage.mockImplementation(
+      async function* (_messages, options, onChunk) {
+        const id = options.conversationId || "source-chat"
+        if (!mocks.serverRows.has(id)) mocks.serverRows.set(id, [])
+        const rows = mocks.serverRows.get(id)!
+        rows.push(
+          { id: "source-user", role: "user", content: "Use this source" },
+          { id: "source-answer", role: "assistant", content: "Grounded answer" }
+        )
+        onChunk({
+          tldw_conversation_id: id,
+          tldw_user_message_id: "source-user",
+          tldw_message_id: "source-answer"
+        })
+        yield "Grounded answer"
+      }
+    )
+    const view = renderWorkspace(false, false, {
+      ragMediaIds: [42],
+      fileRetrievalEnabled: true,
+      ragEnableGeneration: true
+    })
+    act(() =>
+      useStoreMessageOption
+        .getState()
+        .setSelectedModel("custom-openai-api:shared-model")
+    )
+    await act(async () => {
+      await view.result.current.actions.onSubmit({
+        message: "Use this source",
+        image: ""
+      })
+    })
+    // Retrieval supplies evidence; the selected provider generates the one streamed answer.
+    expect(mocks.ragSearch).toHaveBeenCalledWith(
+      "Use this source",
+      expect.objectContaining({
+        enable_generation: false,
+        include_media_ids: [42],
+        sources: ["media_db"]
+      })
+    )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty(
+      "generation_model"
+    )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty(
+      "generation_provider"
+    )
     expect(mocks.streamMessage).toHaveBeenCalledTimes(1)
-    expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({ model: "shared-model", apiProvider: "custom-openai-api" })
-    expect(view.result.current.state.messages.at(-1)?.message).toBe("Source answer")
+    expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({
+      apiProvider: "custom-openai-api",
+      model: "shared-model"
+    })
+    expect(mocks.streamMessage.mock.calls[0][0].at(-1).content).toContain(
+      "Evidence"
+    )
+    expect(view.result.current.state.messages.at(-1)?.message).toBe(
+      "Grounded answer"
+    )
+    expect(view.result.current.state.messages.at(-1)?.sources).toEqual([
+      {
+        name: "Distinctive media 42 evidence",
+        type: "text",
+        mode: "rag",
+        url: "https://sources.test/media-42-evidence",
+        pageContent: "Evidence",
+        metadata: {
+          media_id: 42,
+          source: "media_db",
+          title: "Distinctive media 42 evidence",
+          type: "text",
+          url: "https://sources.test/media-42-evidence"
+        }
+      }
+    ])
     view.unmount()
   })
 

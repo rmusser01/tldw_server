@@ -1,3 +1,4 @@
+import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { WorkspaceSource } from "@/types/workspace"
@@ -20,6 +21,14 @@ const {
   mockUpdateWorkspaceSourceReviewState: vi.fn()
 }))
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    requestScope: {},
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
+}))
 const mockToggleSourceSelection = vi.fn()
 const mockSelectAllSources = vi.fn()
 const mockDeselectAllSources = vi.fn()
@@ -218,23 +227,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     render(
       <SourcesPane
         sourceListViewState={{
-          sort: "manual",
-          dateField: "addedAt",
-          dateFrom: null,
-          dateTo: null,
-          statusFilters: [],
-          reviewStateFilters: [],
-          typeFilters: [],
-          requireUrl: false,
-          requireFileSize: false,
-          requireDuration: false,
-          requirePageCount: false,
-          fileSizeMin: null,
-          fileSizeMax: null,
-          durationMin: null,
-          durationMax: null,
-          pageCountMin: null,
-          pageCountMax: null,
+          ...DEFAULT_SOURCE_LIST_VIEW_STATE,
           expanded: true
         }}
       />
@@ -740,10 +733,15 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(
       screen.getByText("Showing first 47 of 2,400 characters.")
     ).toBeInTheDocument()
-    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith("workspace-1", "s1", {
-      max_chars: 3000,
-      chunk_limit: 3
-    })
+    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith(
+      "workspace-1",
+      "s1",
+      {
+        max_chars: 3000,
+        chunk_limit: 3
+      },
+      undefined
+    )
   })
 
   it("explains when captured content is pending instead of replacing inspection with annotations", async () => {
@@ -975,4 +973,45 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     expect(screen.getByTestId("sources-virtualized-list")).toBeInTheDocument()
   })
+})
+
+it("capture and refresh are explicit actions while pinned previews request the exact Media version", async () => {
+  vi.clearAllMocks()
+  const capture = vi.fn()
+  const pin = {
+    clipId: "clip",
+    requestedUrl: "https://example.org",
+    capturedAt: "2026-10-07T00:00:00Z",
+    contentSha256: "digest",
+    refreshOf: null,
+    mediaId: 1,
+    versionNumber: 9,
+    versionUuid: "version-nine"
+  }
+  workspaceStoreState.sources = [
+    { ...defaultSources[0], url: pin.requestedUrl, webCapture: pin }
+  ]
+  mockGetWorkspaceSourcePreview.mockResolvedValue({
+    document_version_number: 9,
+    text_preview: "exact article",
+    content_available: true,
+    snippets: []
+  })
+  render(<SourcesPane onCaptureArticle={capture} />)
+  expect(mockGetWorkspaceSourcePreview).not.toHaveBeenCalled()
+  expect(
+    screen.getByText(/Source snapshot: Media version 9/)
+  ).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Refresh capture" }))
+  expect(capture).toHaveBeenCalledWith(workspaceStoreState.sources[0])
+  fireEvent.click(screen.getByTestId("preview-source-s1"))
+  await waitFor(() =>
+    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith(
+      "workspace-1",
+      "s1",
+      expect.objectContaining({ version_number: 9 }),
+      expect.objectContaining({ requestScope: {} })
+    )
+  )
+  expect(await screen.findByText("exact article")).toBeInTheDocument()
 })

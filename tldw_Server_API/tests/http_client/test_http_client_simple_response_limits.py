@@ -283,3 +283,83 @@ def test_simple_httpx_fetch_streams_final_response_after_redirect(
     assert [call["url"] for call in client.stream_calls] == [URL, "https://example.com/final"]
     assert redirect.closed is True
     assert final.closed is True
+
+
+@pytest.mark.parametrize("redirect", [False, True])
+def test_public_bounded_transport_uses_approved_ips_and_original_identity(monkeypatch, redirect):
+    import httpx
+
+    from tldw_Server_API.app.core.Security import egress
+
+    calls = []
+    transport_peers = []
+    monkeypatch.setattr(
+        egress, "_resolve_host_ips", lambda host, **kwargs: ["93.184.216.34"] if host == "example.com" else ["8.8.8.8"]
+    )
+    monkeypatch.setenv("HTTP_ALLOW_CROSS_HOST_REDIRECTS", "true")
+
+    def send(request):
+        calls.append(request)
+        # A transport resolving the original hostname again would get a private peer.
+        peer = "127.0.0.1" if request.url.host in {"example.com", "redirect.example"} else request.url.host
+        transport_peers.append(peer)
+        if redirect and len(calls) == 1:
+            return httpx.Response(302, headers={"Location": "https://redirect.example/final"})
+        return httpx.Response(200, stream=httpx.ByteStream(b"article"))
+
+    clients = []
+
+    def client_factory(**kwargs):
+        clients.append(kwargs)
+        return httpx.Client(transport=httpx.MockTransport(send), **kwargs)
+
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=client_factory))
+    with egress.public_url_policy_scope():
+        result = hc.fetch(URL, backend="httpx", trust_env=True, max_response_bytes=50)
+    assert transport_peers == (["93.184.216.34", "8.8.8.8"] if redirect else ["93.184.216.34"])
+    assert calls[0].headers["Host"] == "example.com"
+    assert calls[0].extensions["sni_hostname"] == "example.com"
+    if redirect:
+        assert calls[1].headers["Host"] == "redirect.example"
+        assert calls[1].extensions["sni_hostname"] == "redirect.example"
+    assert clients == [{"trust_env": False}]
+    assert result["url"] == ("https://redirect.example/final" if redirect else URL)
+    assert result["text"] == "article"
+
+
+def test_public_bounded_transport_denies_rebinding_before_dispatch(monkeypatch, httpx_streaming_backend):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security import egress
+
+    addresses = iter([["93.184.216.34"], ["127.0.0.1"]])
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: next(addresses))
+    with egress.public_url_policy_scope(), pytest.raises(EgressPolicyError):
+        hc.fetch(URL, backend="httpx", max_response_bytes=50)
+    assert all(client.stream_calls == [] for client in httpx_streaming_backend.instances)
+
+
+@pytest.mark.parametrize("kwargs", [{"backend": "curl"}, {"proxies": "http://proxy.example"}])
+def test_public_bounded_transport_declines_unpinnable_backend(monkeypatch, httpx_streaming_backend, kwargs):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    with egress.public_url_policy_scope(), pytest.raises(EgressPolicyError):
+        hc.fetch(URL, max_response_bytes=50, **kwargs)
+    assert httpx_streaming_backend.instances == []
+
+
+def test_public_bounded_transport_keeps_environment_disabled_with_incompatible_client(monkeypatch):
+    from tldw_Server_API.app.core.Security import egress
+
+    calls = []
+
+    def client_factory():
+        calls.append(True)
+        return object()
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=client_factory))
+    with egress.public_url_policy_scope(), pytest.raises(TypeError, match="trust_env"):
+        hc.fetch(URL, backend="httpx", max_response_bytes=50)
+    assert calls == []

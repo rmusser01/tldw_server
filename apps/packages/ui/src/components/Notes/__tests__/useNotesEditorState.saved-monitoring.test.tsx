@@ -194,6 +194,32 @@ describe('Notes saved-state hydration and optional monitoring', () => {
   })
   afterEach(() => { vi.useRealTimers(); cleanup() })
 
+  it.each([{}, { keywords: ['captured'] }])('reports editing mode for reopened unknown-origin Notes (%j)', async metadata => {
+    mocks.request.mockResolvedValue(note('one', { metadata }))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    expect(view.result.current.provenanceSummaryText).toBe('Editing: Manual')
+  })
+
+  it('retains authoritative Knowledge source origin through manual edits', async () => {
+    mocks.request.mockResolvedValue(note('one', {
+      knowledge_provenance_state: 'active',
+      knowledge_provenance: { origin: 'knowledge_qa', question: 'Original question', trust_state: 'uncited_degraded_answer', evidence_origin: 'local_library' }
+    }))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => view.result.current.setContentDirty('Edited answer'))
+    expect(view.result.current.provenanceSummaryText).toBe('Origin: Knowledge QA · uncited_degraded_answer · local_library')
+  })
+
+  it('retains recorded Chat backlink origin through manual edits', async () => {
+    mocks.request.mockResolvedValue(note('one', { conversation_id: 'chat-one' }))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('one') })
+    act(() => view.result.current.setContentDirty('Edited chat note'))
+    expect(view.result.current.provenanceSummaryText).toBe('Origin: Saved from Chat')
+  })
+
   it('announces saved after a versioned server load, retaining its saved timestamp', async () => {
     const view = renderEditor()
     await act(async () => {

@@ -3300,7 +3300,8 @@ export const useChatActions = ({
     researchContext,
     greetingSeed: requestedGreetingSeed,
     greetingIsCurrent,
-    historyRetryAdmission
+    historyRetryAdmission,
+    assertCurrent
   }: {
     message: string
     image: string
@@ -3308,6 +3309,7 @@ export const useChatActions = ({
     isContinue?: boolean
     messages?: Message[]
     memory?: ChatHistory
+    assertCurrent?: () => void
     controller?: AbortController
     docs?: ChatDocuments
     regenerateFromMessage?: Message
@@ -3337,6 +3339,8 @@ export const useChatActions = ({
     historyRetryAdmission?: HistoryAdmissionReferenceV1
   }): Promise<ChatSubmitResult> => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
+    assertCurrent?.()
+    controller?.signal.throwIfAborted()
     // CS-01 (#3106) defence in depth: a turn that addresses no conversation
     // must not be built from a selection another conversation left behind.
     // Reset it before the origin fence is taken, so the turn starts clean.
@@ -3599,6 +3603,8 @@ export const useChatActions = ({
           getRequiredServicePrompt(loadedSnapshot, promptId)
         }
       }
+      signal.throwIfAborted()
+      assertCurrent?.()
       const chatModeParams = await buildChatModeParams(
         {
           ...(requestOverrides ?? {}),
@@ -3626,6 +3632,8 @@ export const useChatActions = ({
           if (id === "temp") temporaryContinuationBound = true
         } : undefined
       )
+      signal.throwIfAborted()
+      assertCurrent?.()
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
       const replyOverrides = replyActive
@@ -3835,6 +3843,8 @@ export const useChatActions = ({
                 })
             }
           : ragModeParamsWithSnapshot
+        signal.throwIfAborted()
+        assertCurrent?.()
         const ragResult = await ragMode(
           message,
           image,
@@ -4088,6 +4098,8 @@ export const useChatActions = ({
                   })
               }
             : normalModeParams
+          signal.throwIfAborted()
+          assertCurrent?.()
           const normalResult = await normalChatMode(
             message,
             image,
@@ -4934,7 +4946,7 @@ export const useChatActions = ({
   // alternative to the new one; a server chat never received it. Regenerate in
   // general is not supported on selected history yet (CM-01, #3106).
   const retryInterruptedHistoryTurn =
-    async (): Promise<ChatSubmitResult | null> => {
+    async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }): Promise<ChatSubmitResult | null> => {
       const selection = selectedHistoryForActions
       if (!selection) return null
       const replyIndex = messages.length - 1
@@ -4992,6 +5004,8 @@ export const useChatActions = ({
           question.id
         ).catch(() => null)
       if (!sourceFence() || !sameSource()) return retired()
+      dispatch?.controller?.signal.throwIfAborted()
+      dispatch?.assertCurrent?.()
       const choosing = selection.choose({
         kind: "before_message",
         message_id: question.id
@@ -4999,6 +5013,8 @@ export const useChatActions = ({
       // Retain this choice while its capture is still loading.
       const retryFence = selection.fence()
       const moved = await choosing
+      dispatch?.controller?.signal.throwIfAborted()
+      dispatch?.assertCurrent?.()
       if (!retryFence() || !sameSource()) return retired()
       if (!moved) {
         notification.error({
@@ -5012,11 +5028,16 @@ export const useChatActions = ({
       }
       for (const entry of retained) {
         if (!retryFence() || !sameSource()) return retired()
+        dispatch?.controller?.signal.throwIfAborted()
+        dispatch?.assertCurrent?.()
         await selection.dismissRecovery(entry)
       }
       if (!retryFence() || !sameSource()) return retired()
+      dispatch?.controller?.signal.throwIfAborted()
+      dispatch?.assertCurrent?.()
       return toChatSubmitResult(
         await onSubmit({
+          ...dispatch,
           message: question.message,
           image: question.images?.[0] ?? "",
           // Without an admission (none was recorded) the question is sent
@@ -5027,8 +5048,8 @@ export const useChatActions = ({
         })
       )
     }
-  const regenerateLastMessage = async () =>
-    (await retryInterruptedHistoryTurn()) ?? regenerateLastMessageBase()
+  const regenerateLastMessage = async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }) =>
+    (await retryInterruptedHistoryTurn(dispatch)) ?? regenerateLastMessageBase(dispatch)
 
   const stopStreamingRequest = React.useCallback(
     (options?: unknown) => {

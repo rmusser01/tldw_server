@@ -2093,5 +2093,8 @@
   },
   "multiSelect_deleteAndCloseConfirmBody": {
     "message": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
+  },
+  "notification_webClipAnalyzeNewChatRequired": {
+    "message": "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
   }
 }

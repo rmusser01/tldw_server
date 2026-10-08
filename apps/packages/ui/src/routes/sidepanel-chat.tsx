@@ -2214,7 +2214,7 @@ const SidepanelChatContent = ({
     if (streaming || !selectedModel) return
 
     const pendingAnalyze = readPendingWebClipAnalyzeRequest()
-    if (!pendingAnalyze) return
+    if (!pendingAnalyze || !owner.isCurrent() || pendingAnalyze.ownerKey !== owner.ownerKey) return
     if (pendingWebClipAnalyzeRef.current === pendingAnalyze.id) return
 
     const baselineMessageIds = collectWebClipAnalyzeMessageIds(messagesRef.current)
@@ -2228,6 +2228,7 @@ const SidepanelChatContent = ({
           image: pendingAnalyze.image || "",
           requestOverrides: pendingAnalyze.requestOverrides
         })
+        if (!owner.isCurrent() || readPendingWebClipAnalyzeRequest()?.ownerKey !== owner.ownerKey) return
 
         if (
           hasSubmittedWebClipAnalyzeMessage(
@@ -2240,6 +2241,7 @@ const SidepanelChatContent = ({
           pendingWebClipAnalyzeRef.current = null
         }
       } catch (error) {
+        if (!owner.isCurrent() || readPendingWebClipAnalyzeRequest()?.ownerKey !== owner.ownerKey) return
         pendingWebClipAnalyzeRef.current = null
         notification.error({
           message: t(
@@ -2247,7 +2249,13 @@ const SidepanelChatContent = ({
             "Clip handoff failed"
           ),
           description:
-            error instanceof Error && error.message.trim()
+            error instanceof Error &&
+            error.message === "unsupported_history_action_context"
+              ? t(
+                  "sidepanel:notification.webClipAnalyzeNewChatRequired",
+                  "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
+                )
+              : error instanceof Error && error.message.trim()
               ? error.message
               : t(
                   "sidepanel:notification.webClipAnalyzeFailedBody",
@@ -2256,7 +2264,7 @@ const SidepanelChatContent = ({
         })
       }
     })()
-  }, [notification, onSubmit, selectedModel, streaming, t])
+  }, [notification, onSubmit, owner, selectedModel, streaming, t])
 
   React.useEffect(() => {
     if (!bgMsg) return

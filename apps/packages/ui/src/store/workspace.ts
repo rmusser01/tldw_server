@@ -1,4 +1,7 @@
-import { knowledgeNoteHead } from "@/utils/knowledge-note-provenance"
+import {
+  knowledgeNoteHead,
+  validateKnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Zustand Store
  * Manages state for the NotebookLM-style three-pane research interface
@@ -2161,6 +2164,7 @@ export interface WorkspaceUndoSnapshot {
 type CaptureNoteMode = "append" | "replace"
 
 interface CaptureToNoteInput {
+  provenance?: WorkspaceNote["pendingKnowledgeProvenance"]
   title?: string
   content: string
   mode?: CaptureNoteMode
@@ -3191,6 +3195,9 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
         )
       : [],
     ...knowledgeNoteHead(candidate),
+    pendingKnowledgeProvenance:
+      validateKnowledgeNoteProvenance(candidate.pendingKnowledgeProvenance) ||
+      undefined,
     version: typeof candidate.version === "number" ? candidate.version : 1,
     isDirty: Boolean(candidate.isDirty)
   }

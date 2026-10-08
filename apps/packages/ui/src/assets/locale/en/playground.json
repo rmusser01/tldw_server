@@ -1597,5 +1597,26 @@
     "lengthSummary": "This reply reached the model's output limit. The saved content is kept.",
     "generationFailedLabel": "Generation failed",
     "generationFailedSummary": "The saved record reports a generation failure. Any saved content is kept."
+  },
+  "sources": {
+    "captureTitle": "Extracted title",
+    "captureUrl": "Requested URL",
+    "captureTime": "Captured at",
+    "captureCharacters": "Characters",
+    "captureArticle": "Capture article",
+    "saveCapture": "Save capture",
+    "refreshCapture": "Refresh capture",
+    "retryCapture": "Retry capture",
+    "cancelCapture": "Cancel",
+    "expandText": "Expand text",
+    "collapseText": "Collapse text",
+    "captureDisclosure": "Save creates an additional capture Note and a new source containing the complete extracted article snapshot. Original retrieved evidence stays intact.",
+    "capturePublicOnly": "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used.",
+    "captureCompleteText": "The complete text is saved; it is never silently shortened.",
+    "extractedSnapshot": "Extracted article snapshot",
+    "retrievedExcerpt": "Retrieved excerpt",
+    "snapshotVersion": "Source snapshot: Media version {{version}}",
+    "snapshotChanged": "Snapshot changed outside refresh",
+    "textUnchanged": "Text unchanged"
   }
 }

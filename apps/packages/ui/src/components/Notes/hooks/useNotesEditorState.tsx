@@ -3174,8 +3174,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (backlinkConversationId) {
         return t('option:notesSearch.provenanceChat', { defaultValue: 'Origin: Saved from Chat' })
       }
-      return t('option:notesSearch.provenanceManual', {
-        defaultValue: 'Origin: Typed manually'
+      return t('option:notesSearch.editingManual', {
+        defaultValue: 'Editing: Manual'
       })
     }
     const actionLabel =
@@ -3185,8 +3185,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           ? t('option:notesSearch.assistExpandOutlineAction', { defaultValue: 'Expand outline' })
           : t('option:notesSearch.assistSuggestKeywordsAction', { defaultValue: 'Suggest tags' })
     const generatedAt = new Date(editProvenance.at).toLocaleTimeString()
-    const generatedPrefix = t('option:notesSearch.provenanceGeneratedPrefix', {
-      defaultValue: 'Origin: AI-generated'
+    const generatedPrefix = t('option:notesSearch.latestAssistPrefix', {
+      defaultValue: 'Latest AI assist'
     })
     return `${generatedPrefix} (${actionLabel} at ${generatedAt})`
   }, [backlinkConversationId, editProvenance, originalMetadata, t])

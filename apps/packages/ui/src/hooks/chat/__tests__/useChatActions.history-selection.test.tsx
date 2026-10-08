@@ -3713,6 +3713,72 @@ it("interrupted retry retains its own choice during a held capture without adopt
 })
 
 
+it.each([
+  ["capture", "abort"],
+  ["capture", "source"],
+  ["dismissal", "abort"],
+  ["dismissal", "source"]
+])(
+  "interrupted retry preserves remaining recoveries when dispatch retires during %s (%s)",
+  async (held, boundary) => {
+    const mounted = await mountInterruptedRetry()
+    const second = {
+      ...mounted.entry,
+      turn: { ...mounted.entry.turn, operation_id: "second-interrupted-retry" }
+    }
+    h1.lookupRecoveries.mockResolvedValue([mounted.entry, second])
+    let finish!: () => void
+    let entered!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    if (held === "capture") {
+      const capture = h1.capture.getMockImplementation()!
+      h1.capture.mockImplementationOnce(async (...args) => {
+        entered()
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+        return capture(...args)
+      })
+    } else {
+      mounted.dismiss.mockImplementationOnce(async () => {
+        entered()
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+      })
+    }
+    const controller = new AbortController()
+    let sourceCurrent = true
+    const assertCurrent = () => {
+      if (!sourceCurrent) throw new Error("Research source retired")
+    }
+    let pending!: Promise<unknown>
+    await act(async () => {
+      pending = mounted.hook.result.current
+        .regenerateLastMessage({ controller, assertCurrent })
+        .catch((error) => error)
+      await ready
+    })
+    if (boundary === "abort") controller.abort()
+    else sourceCurrent = false
+    let outcome: unknown
+    await act(async () => {
+      finish()
+      outcome = await pending
+    })
+    expect(mounted.dismiss).toHaveBeenCalledTimes(held === "capture" ? 0 : 1)
+    expect(mounted.dismiss).not.toHaveBeenCalledWith(second)
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(outcome).toBeInstanceOf(Error)
+    expect(mounted.options.notification.error).not.toHaveBeenCalled()
+  }
+)
+
+
 it.each(["view", "new", "account"])("an old rendered interrupted retry cannot adopt a later %s at invocation", async boundary => {
   const mounted = await mountInterruptedRetry()
   const oldRetry = mounted.hook.result.current.regenerateLastMessage

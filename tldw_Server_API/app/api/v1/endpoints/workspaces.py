@@ -2243,6 +2243,7 @@ async def get_source_preview(
     source_id: str,
     max_chars: int = Query(default=3000, ge=1, le=12000),
     chunk_limit: int = Query(default=3, ge=0, le=10),
+    version_number: int | None = Query(default=None, ge=1),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
     jm: JobManager | None = Depends(try_get_workspace_job_manager),
@@ -2275,7 +2276,10 @@ async def get_source_preview(
         media_db=media_db,
         max_chars=max_chars,
         chunk_limit=chunk_limit,
+        version_number=version_number,
     )
+    if version_number is not None and not payload["content_available"]:
+        raise HTTPException(status_code=404, detail="Workspace source document version unavailable")
     return WorkspaceSourcePreviewResponse(**payload)
 
 

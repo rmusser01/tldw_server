@@ -4870,6 +4870,16 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "backpressure.guard_backpressure_and_quota",
           "module": "tldw_Server_API.app.api.v1.API_Deps.backpressure",
           "type": "dependency"
@@ -4887,7 +4897,9 @@
       ],
       "name": "ingest_web_content",
       "path": "/api/v1/media/ingest-web-content",
-      "rate_limit_resources": [],
+      "rate_limit_resources": [
+        "media.create"
+      ],
       "summary": null,
       "tags": [
         "media"
@@ -7636,6 +7648,16 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "backpressure.guard_backpressure_and_quota",
           "module": "tldw_Server_API.app.api.v1.API_Deps.backpressure",
           "type": "dependency"
@@ -7653,7 +7675,9 @@
       ],
       "name": "ingest_web_content",
       "path": "/api/v1/media/ingest-web-content",
-      "rate_limit_resources": [],
+      "rate_limit_resources": [
+        "media.create"
+      ],
       "summary": null,
       "tags": [
         "media"

@@ -1,3 +1,5 @@
+import type { ScopedRequestOptions } from "../TldwApiClient"
+import { requestScopeFields } from "./service-prompts"
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
@@ -465,6 +467,7 @@ export interface WorkspaceSourcePreviewSnippet {
 }
 
 export interface WorkspaceSourcePreviewResponse {
+  document_version_number?: number | null
   workspace_id: string
   source_id: string
   media_id: number | null
@@ -1679,33 +1682,41 @@ export const workspaceApiMethods = {
   },
 
   async getWorkspaceSources(
-    workspaceId: string
+    workspaceId: string,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceApiResponse[]> {
     return await bgRequest<WorkspaceSourceApiResponse[]>({
       path: workspacePath(workspaceId, "/sources"),
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 
   async listWorkspaceSourceViews(
-    workspaceId: string
+    workspaceId: string,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceSavedViewListResponse> {
     return await bgRequest<WorkspaceSourceSavedViewListResponse>({
       path: workspacePath(workspaceId, "/source-views"),
       method: "GET",
       // Reconciliation must not join an older in-flight list request.
-      abortSignal: new AbortController().signal
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal ?? new AbortController().signal
     })
   },
 
   async createWorkspaceSourceView(
     workspaceId: string,
-    data: WorkspaceSourceSavedViewCreateRequest
+    data: WorkspaceSourceSavedViewCreateRequest,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceSavedViewResponse> {
     return await bgRequest<WorkspaceSourceSavedViewResponse>({
       path: workspacePath(workspaceId, "/source-views"),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: data,
       expectedStatuses: [409]
     })
@@ -1714,13 +1725,16 @@ export const workspaceApiMethods = {
   async updateWorkspaceSourceView(
     workspaceId: string,
     viewId: string,
-    data: WorkspaceSourceSavedViewPatchRequest
+    data: WorkspaceSourceSavedViewPatchRequest,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourceSavedViewResponse> {
     const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
     return await bgRequest<WorkspaceSourceSavedViewResponse>({
       path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: data,
       expectedStatuses: [404, 409]
     })
@@ -1728,12 +1742,15 @@ export const workspaceApiMethods = {
 
   async deleteWorkspaceSourceView(
     workspaceId: string,
-    viewId: string
+    viewId: string,
+    options?: ScopedRequestOptions
   ): Promise<void> {
     const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
     await bgRequest<unknown>({
       path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       expectedStatuses: [404]
     })
   },
@@ -1794,7 +1811,9 @@ export const workspaceApiMethods = {
     params?: {
       max_chars?: number
       chunk_limit?: number
-    }
+      version_number?: number
+    },
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceSourcePreviewResponse> {
     const query = buildQuery(params)
     const encodedSourceId = encodeWorkspacePathSegment(sourceId, "sourceId")
@@ -1803,7 +1822,9 @@ export const workspaceApiMethods = {
         workspacePath(workspaceId, `/sources/${encodedSourceId}/preview`),
         query
       ),
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 

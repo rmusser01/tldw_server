@@ -1,9 +1,12 @@
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { KnowledgeNoteSource } from "./knowledge-note-provenance"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { WebClipperSaveRequest } from "@/services/web-clipper/types"
+import type { WebArticleCapturePin, WorkspaceSource } from "@/types/workspace"
 import type { WorkspaceSourceType } from "@/types/workspace"
 
 const PREFILL_KEY = "__tldw_research_workspace_prefill"
@@ -236,12 +239,23 @@ export const buildKnowledgeQaWorkspacePrefill = (
 }
 
 /** Public account/server identity only; credentials never enter storage keys. */
-export const getResearchWorkspaceOwner = async (): Promise<string> => {
-  const config = await tldwClient.getConfig()
-  if (!config?.serverUrl || deriveScopedUserId(config) === "user:anonymous") {
+export const getResearchWorkspaceOwner = async (
+  requestScope?: ServicePromptRequestScope,
+): Promise<string> => {
+  // Project a verified request into the existing public recovery namespace;
+  // its credential-bound authority and lease remain on the request snapshot.
+  const config = requestScope?.config ?? (await tldwClient.getConfig())
+  const userId = requestScope?.userId
+  if (
+    !config?.serverUrl ||
+    deriveScopedUserId({ ...config, userId }) === "user:anonymous"
+  ) {
     throw new Error("Sign in before continuing in Research Workspace.")
   }
-  return buildChatSurfaceScopeKeyFromConfig({ ...config, apiKey: undefined })
+  return buildChatSurfaceScopeKeyFromConfig(
+    { ...config, apiKey: undefined },
+    { userId },
+  )
 }
 
 const assertPersistentStorage = () => {
@@ -313,6 +327,110 @@ export const saveResearchWorkspacePrefill = async (
     await storage.set(prefillKey(owner), checkpoint)
   })
 }
+
+/** Capture checkpoints share the owner-bound recovery backend, never the replaceable handoff. */
+export type ResearchWebCapture = {
+  ownerScope: string
+  workspaceId: string
+  sourceId: string
+  body: WebClipperSaveRequest
+  pin?: WebArticleCapturePin
+  attached?: boolean
+}
+
+export const readResearchWebCaptures = async (
+  owner: string,
+  workspaceId: string
+): Promise<ResearchWebCapture[]> => {
+  await pendingPrefillWrite.catch(() => {})
+  const records = await storage.get<Record<string, ResearchWebCapture>>(
+    `${prefillKey(owner)}:web-captures`
+  )
+  return Object.values(records || {})
+    .filter(
+      (record) =>
+        record.ownerScope === owner && record.workspaceId === workspaceId
+    )
+    .map((record) => {
+      // These are the closed, credential-free acceptance objects produced by prepareWebCaptureAcceptance.
+      Object.freeze(record.body.content)
+      Object.freeze(record.body.workspace)
+      Object.freeze(record.body.enhancements)
+      Object.freeze(record.body.capture_metadata?.web_capture_v1)
+      Object.freeze(record.body.capture_metadata)
+      Object.freeze(record.body)
+      return record
+    })
+}
+
+export const saveResearchWebCapture = async (
+  record: ResearchWebCapture
+): Promise<void> => {
+  assertPersistentStorage()
+  if (
+    !record.ownerScope ||
+    record.body.workspace?.workspace_id !== record.workspaceId
+  )
+    throw new Error("Missing capture owner or destination")
+  const checkpoint = structuredClone(record)
+  await persistPrefill(async () => {
+    const key = `${prefillKey(checkpoint.ownerScope)}:web-captures`
+    const records =
+      (await storage.get<Record<string, ResearchWebCapture>>(key)) || {}
+    const previous = records[checkpoint.body.clip_id]
+    if (
+      previous &&
+      (previous.workspaceId !== checkpoint.workspaceId ||
+        JSON.stringify(previous.body) !== JSON.stringify(checkpoint.body))
+    )
+      throw new Error("Accepted capture cannot change; retry the original body")
+    await storage.set(key, {
+      ...records,
+      [checkpoint.body.clip_id]: checkpoint
+    })
+  })
+}
+
+/** Only decorate authoritative owned membership; a checkpoint never restores a removed source. */
+export const retainResearchWebCapturePins = (
+  sources: WorkspaceSource[],
+  records: ResearchWebCapture[],
+  previousSources: WorkspaceSource[] = []
+): WorkspaceSource[] =>
+  sources.map((source) => {
+    const record = records.find(
+      (item) =>
+        item.pin &&
+        source.id === `web-clipper:${item.pin.clipId}` &&
+        source.mediaId === item.pin.mediaId &&
+        source.url === item.pin.requestedUrl
+    )
+    if (!record?.pin) return source
+    const pin = record.pin
+    const previous = previousSources.find(
+      (item) =>
+        item.id === source.id &&
+        item.mediaId === source.mediaId &&
+        item.url === source.url &&
+        item.status === "error" &&
+        item.statusDetails?.statusReason === "capture_head_changed" &&
+        Object.entries(pin).every(
+          ([key, value]) =>
+            item.webCapture?.[key as keyof WebArticleCapturePin] === value
+        )
+    )
+    return {
+      ...source,
+      webCapture: pin,
+      ...(previous
+        ? {
+            status: previous.status,
+            statusMessage: previous.statusMessage,
+            statusDetails: previous.statusDetails
+          }
+        : {})
+    }
+  })
 
 const truncate = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 1)}...` : value

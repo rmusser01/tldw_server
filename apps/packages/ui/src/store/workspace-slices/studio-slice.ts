@@ -155,7 +155,7 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
   clearCurrentNote: () =>
     set({ currentNote: { ...DEFAULT_WORKSPACE_NOTE } }),
 
-  captureToCurrentNote: ({ title, content, mode = "append" }) =>
+  captureToCurrentNote: ({ title, content, mode = "append", provenance }) =>
     set((state) => {
       const trimmedContent = content.trim()
       if (!trimmedContent) return state
@@ -179,6 +179,7 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
           ...state.currentNote,
           title: nextTitle,
           content: nextContent,
+          ...(provenance ? { pendingKnowledgeProvenance: provenance } : {}),
           isDirty: true
         }
       }

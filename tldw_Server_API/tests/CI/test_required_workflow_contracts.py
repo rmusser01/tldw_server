@@ -1040,6 +1040,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py",
             "tldw_Server_API/tests/Media/test_cache_index.py",
+            "tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py",
             "tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_email_summary_service_prompt.py",
             "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",

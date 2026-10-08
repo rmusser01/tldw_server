@@ -4586,10 +4586,19 @@ def fetch(*args, **kwargs):
         if type(max_response_bytes) is not int or max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be a positive integer")
 
-    # Enforce egress via stubbed policy helper (tests monkeypatch this).
-    # This remains intentionally lightweight so tests can override without
-    # triggering full DNS lookups in the central policy during unit runs.
-    if not _is_url_allowed(url):
+    from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+
+    public_capture = public_url_policy_active()
+    dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    if public_capture:
+        # Only a fresh, bounded, direct HTTPX client can enforce this profile.
+        if backend.lower().strip() != "httpx" or max_response_bytes is None or proxies:
+            raise EgressPolicyError("Public capture requires bounded direct HTTPX transport")
+        trust_env = False
+        cookies = None
+        _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    elif not _is_url_allowed(url):
+        # Preserve the ordinary simple-fetch policy seam for existing callers.
         raise ValueError("Egress denied for URL")  # noqa: TRY003
 
     # Validate proxies against allowlist even in simple mode
@@ -4815,7 +4824,8 @@ def fetch(*args, **kwargs):
 
     if max_response_bytes is not None:
         client_cls = getattr(_hx, "Client", object) if _hx is not None else object
-        sc = _instantiate_client(client_cls, client_kwargs)
+        # Do not let compatibility fallback silently remove trust_env=False.
+        sc = client_cls(**client_kwargs) if public_capture else _instantiate_client(client_cls, client_kwargs)
         with sc as sc:
             cur_url = url
             hop_headers = req_headers
@@ -4823,22 +4833,36 @@ def fetch(*args, **kwargs):
             redirects = 0
 
             while True:
-                if not _is_url_allowed(cur_url):
+                transport_url = cur_url
+                stream_options = {
+                    "headers": hop_headers,
+                    "cookies": hop_cookies,
+                    "follow_redirects": False,
+                }
+                if public_capture:
+                    _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                    accepted_ips = _accepted_ips_for_url(dns_pin_cache, cur_url)
+                    if not accepted_ips:
+                        raise EgressPolicyError("Public capture requires approved transport addresses")
+                    transport_url, transport_headers, sni_hostname = _prepare_pinned_transport_target(
+                        cur_url, hop_headers, accepted_ips
+                    )
+                    stream_options["headers"] = transport_headers
+                    if sni_hostname:
+                        stream_options["extensions"] = {"sni_hostname": sni_hostname}
+                    _clear_session_cookie_state(sc)
+                elif not _is_url_allowed(cur_url):
                     raise ValueError("Egress denied for URL")  # noqa: TRY003
 
                 request_stream = getattr(sc, "stream", None)
                 if not callable(request_stream):
                     raise RuntimeError("Selected backend does not support bounded response streaming")
-                with request_stream(
-                    "GET",
-                    cur_url,
-                    headers=hop_headers,
-                    cookies=hop_cookies,
-                    follow_redirects=False,
-                ) as streamed:
+                with request_stream("GET", transport_url, **stream_options) as streamed:
+                    if public_capture:
+                        _restore_httpx_response_url(streamed, cur_url)
                     status = int(getattr(streamed, "status_code", 0))
                     response_headers = dict(getattr(streamed, "headers", {}) or {})
-                    response_url = str(getattr(streamed, "url", cur_url))
+                    response_url = cur_url if public_capture else str(getattr(streamed, "url", cur_url))
 
                     if not follow_redirects or status not in (301, 302, 303, 307, 308):
                         if _uses_compressed_content_encoding(response_headers):

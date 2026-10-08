@@ -1315,6 +1315,8 @@
   "libraryView": "Library View",
   "notes": "Notes",
   "notesSearch": {
+    "editingManual": "Editing: Manual",
+    "latestAssistPrefix": "Latest AI assist",
     "placeholder": "Search titles and contents",
     "clear": "Clear search & filters",
     "keywordsPlaceholder": "Filter by tag",

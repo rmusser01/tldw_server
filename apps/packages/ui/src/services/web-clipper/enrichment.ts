@@ -18,6 +18,7 @@ export const WEB_CLIPPER_PENDING_ANALYZE_STORAGE_KEY =
   "tldw:web-clipper:pendingAnalyze"
 
 export type PendingWebClipAnalyzeRequest = {
+  ownerKey: string
   id: string
   clipId: string
   noteId: string
@@ -436,6 +437,7 @@ export const normalizePendingWebClipAnalyzeRequest = (
 ): PendingWebClipAnalyzeRequest | null => {
   if (!isRecord(raw)) return null
 
+  const ownerKey = trimText(raw.ownerKey)
   const id = trimText(raw.id)
   const clipId = trimText(raw.clipId)
   const noteId = trimText(raw.noteId)
@@ -450,11 +452,12 @@ export const normalizePendingWebClipAnalyzeRequest = (
     trimText(requestOverrides?.chatMode) === "vision" ? "vision" : "normal"
   const useOCR = Boolean(requestOverrides?.useOCR)
 
-  if (!id || !clipId || !noteId || !pageUrl || !pageTitle || !message) {
+  if (!ownerKey || !id || !clipId || !noteId || !pageUrl || !pageTitle || !message) {
     return null
   }
 
   return {
+    ownerKey,
     id,
     clipId,
     noteId,
@@ -513,11 +516,13 @@ export const clearPendingWebClipAnalyzeRequest = (id?: string): void => {
 }
 
 export const buildPendingWebClipAnalyzeRequest = ({
+  ownerKey,
   draft,
   clipId,
   noteId,
   useOCR
 }: {
+  ownerKey: string
   draft: PendingClipDraft
   clipId: string
   noteId: string
@@ -535,6 +540,7 @@ export const buildPendingWebClipAnalyzeRequest = ({
   }
 
   return {
+    ownerKey,
     id: `web-clipper-analyze:${clipId}:${Date.now()}`,
     clipId,
     noteId,
