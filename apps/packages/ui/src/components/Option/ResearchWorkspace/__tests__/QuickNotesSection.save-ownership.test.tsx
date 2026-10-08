@@ -1,3 +1,5 @@
+import { Storage as PlasmoStorage } from "@plasmohq/storage"
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 import type { BgRequestInit } from "@/services/background-proxy"
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -50,12 +52,13 @@ vi.mock("antd", async () => ({
         success: mocks.success,
         error: mocks.error,
         open: mocks.open,
-        warning: vi.fn()
+        destroy: vi.fn(),
+        warning: vi.fn(),
       },
-      null
-    ]
-  }
-}))
+      null,
+    ],
+  },
+}));
 
 const noteId = "9f0a165c-6f62-4b76-8cfb-e5d1a719f13b"
 const otherId = "cb438f03-d609-4b4b-9f64-32bc769a55cb"
@@ -146,6 +149,7 @@ function changeContext(change: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  window.localStorage.clear();
   mocks.serverUrl = "https://research-a.example"
   mocks.userId = "alice"
   useWorkspaceStore.setState({
@@ -619,4 +623,136 @@ it("retains explicit capture history when the acknowledgment does not confirm it
     useWorkspaceStore.getState().currentNote.pendingKnowledgeProvenance
   ).toEqual(replacement)
   expect(mocks.success).not.toHaveBeenCalled()
+})
+
+function CollapsibleQuickNotes() {
+  const [expanded, setExpanded] = React.useState(true)
+  return expanded ? <QuickNotesSection onCollapse={() => setExpanded(false)} /> :
+    <button onClick={() => setExpanded(true)}>Reopen Quick Notes</button>
+}
+
+it("keeps the content base after a conflict until explicit reload and merge", async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), version: 40 } })
+  let remoteBody = "Remote edited body"
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "GET") return { ...draft(), content: remoteBody, version: 41 }
+    if (request.headers?.["expected-version"] !== "41")
+      throw Object.assign(new Error("version conflict"), { status: 409 })
+    remoteBody = String(request.body.content)
+    return { ...request.body, id: noteId, version: 42 }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1))
+  expect(useWorkspaceStore.getState().currentNote.version).toBe(40)
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(2))
+  expect(remoteBody).toBe("Remote edited body")
+  expect(writes()[1][0].headers["expected-version"]).toBe("40")
+  render(mocks.open.mock.calls[1][0].content)
+  fireEvent.click(screen.getByRole("button", { name: "Reload latest" }))
+  await waitFor(() => expect(useWorkspaceStore.getState().currentNote.version).toBe(41))
+  expect(useWorkspaceStore.getState().currentNote.content).toContain("Remote edited body")
+  expect(useWorkspaceStore.getState().currentNote.content).toContain("Original draft body")
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(useWorkspaceStore.getState().currentNote.version).toBe(42))
+})
+
+it.each(["unchanged", "newer", "versioned-new"])("reconciles a committed create after collapse with %s edits", async (change) => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined, version: change === "versioned-new" ? 1 : undefined } })
+  const notes = new Map<string, Record<string, unknown>>()
+  const receipts = new Map<string, Record<string, unknown>>()
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    const key = String(request.headers?.["Idempotency-Key"])
+    if (receipts.has(key)) return receipts.get(key)
+    const id = String(request.body.id || crypto.randomUUID())
+    const saved = { ...request.body, id, version: 1 }
+    notes.set(id, saved)
+    receipts.set(key, saved)
+    throw new Error("Committed, response dropped")
+  })
+  render(<CollapsibleQuickNotes />)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(mocks.error).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
+  if (change === "newer") act(() => { useWorkspaceStore.getState().updateNoteContent("Newer local body") })
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Save" }))
+  await waitFor(() => expect(writes()).toHaveLength(2))
+  expect(notes.size).toBe(1)
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()[1][0].body).toEqual(writes()[0][0].body)
+  expect(writes()[1][0].headers).toEqual(writes()[0][0].headers)
+  expect(writes()[0][0].body.id).toMatch(/^[a-f0-9-]{36}$/)
+  expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+    id: writes()[0][0].body.id,
+    content: change === "newer" ? "Newer local body" : "Original draft body",
+    isDirty: change === "newer"
+  })
+})
+
+it("does not dispatch when persistent operation retention fails", async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } })
+  mocks.request.mockResolvedValue([])
+  render(<QuickNotesSection />)
+  await screen.findByRole("button", { name: "Save" })
+  const prototype = Object.getPrototypeOf(window.localStorage) as Storage
+  const original = prototype.setItem
+  const write = vi.spyOn(prototype, "setItem").mockImplementation(function (key, value) {
+    if (key.startsWith("tldw:notesOfflineDraftQueue:v1")) throw new Error("Storage full")
+    return original.call(this, key, value)
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(mocks.error).toHaveBeenCalled())
+  expect(writes()).toHaveLength(0)
+  write.mockRestore()
+})
+
+it.each(["workspace", "account", "clear-then-type"])("does not recover an uncertain operation into another %s after collapse", async (change) => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } })
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (writes().length === 1) throw new Error("Response lost")
+    return { ...request.body, id: request.body.id, version: 1 }
+  })
+  render(<CollapsibleQuickNotes />)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(mocks.error).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
+  act(() => { changeContext(change) })
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Save" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()[1][0].headers["Idempotency-Key"]).not.toBe(writes()[0][0].headers["Idempotency-Key"])
+  expect(writes()[1][0].body.id).not.toBe(writes()[0][0].body.id)
+})
+
+it("publishes the canonical create identity before collapse interrupts asynchronous checkpoint retirement", async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } })
+  const notes = new Map<string, Record<string, unknown>>()
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    const id = String(request.body.id || crypto.randomUUID())
+    const saved = { ...request.body, id, version: 1 }
+    notes.set(id, saved)
+    return saved
+  })
+  const gate = deferred()
+  const remove = PlasmoStorage.prototype.remove
+  const retiring = vi.spyOn(PlasmoStorage.prototype, "remove").mockImplementation(async function(key) {
+    await gate.promise
+    return remove.call(this, key)
+  })
+  render(<CollapsibleQuickNotes />)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(retiring).toHaveBeenCalled())
+  expect(useWorkspaceStore.getState().currentNote.id).toBe(writes()[0][0].body.id)
+  fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
+  await act(async () => { gate.resolve(); await gate.promise })
+  retiring.mockRestore()
+  fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }))
+  expect(document.body.contains(await screen.findByRole("button", { name: "Update" }))).toBe(true)
+  expect(notes.size).toBe(1)
 })

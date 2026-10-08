@@ -1,3 +1,8 @@
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
+);
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -24,18 +29,23 @@ const {
       content: "",
       keywords: [] as string[],
       version: undefined as number | undefined,
-      isDirty: false
+      isDirty: false,
     },
     workspaceTag: "workspace:test",
     updateNoteTitle: vi.fn(),
     updateNoteContent: vi.fn(),
     updateNoteKeywords: vi.fn(),
-    setCurrentNote: vi.fn(),
+    setCurrentNote: vi.fn((note) => {
+      storeState.currentNote = note;
+    }),
     clearCurrentNote: vi.fn(),
     loadNote,
-    noteFocusTarget: null as { field: "title" | "content"; token: number } | null,
-    clearNoteFocusTarget: vi.fn()
-  }
+    noteFocusTarget: null as {
+      field: "title" | "content";
+      token: number;
+    } | null,
+    clearNoteFocusTarget: vi.fn(),
+  };
 
   return {
     mockBgRequest: bgRequest,
@@ -71,6 +81,10 @@ vi.mock("@/store/workspace", () => ({
     { getState: () => workspaceStoreState, subscribe: () => () => {} }
   )
 }))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) },
+}));
 
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({

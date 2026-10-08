@@ -92,22 +92,34 @@ vi.mock("@/services/service-prompts", () => ({
     userId: mocks.multiUser ? "user-a" : null,
   }),
 }))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: async () => ({
+      id: mocks.multiUser ? "user-a" : "single-owner",
+      is_active: true,
+    }),
+  },
+}));
 vi.mock("@/utils/safe-storage", () => ({
   safeStorageSerde: { deserializer: (value: unknown) => value },
   createSafeStorage: () => ({
     get hasPersistentBackend() {
-      return mocks.persistent
+      return mocks.persistent;
     },
     get: async (key: string) => {
-      await mocks.readGate
-      return structuredClone(mocks.values.get(key))
+      await mocks.readGate;
+      return structuredClone(mocks.values.get(key));
+    },
+    getAll: async () => Object.fromEntries(mocks.values),
+    remove: async (key: string) => {
+      mocks.values.delete(key);
     },
     set: async (key: string, value: unknown) => {
-      if (mocks.writeError) throw new Error("storage full")
-      mocks.values.set(key, structuredClone(value))
+      if (mocks.writeError) throw new Error("storage full");
+      mocks.values.set(key, structuredClone(value));
     },
   }),
-}))
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: string | { defaultValue?: string }) =>

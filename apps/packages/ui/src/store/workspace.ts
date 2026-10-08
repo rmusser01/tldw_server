@@ -3183,7 +3183,8 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
   }
 
   return {
-    id: typeof candidate.id === "number" ||
+    id:
+      typeof candidate.id === "number" ||
       (typeof candidate.id === "string" && candidate.id.trim())
         ? candidate.id
         : undefined,
@@ -3191,16 +3192,21 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
     content: typeof candidate.content === "string" ? candidate.content : "",
     keywords: Array.isArray(candidate.keywords)
       ? candidate.keywords.filter(
-          (keyword): keyword is string => typeof keyword === "string"
+          (keyword): keyword is string => typeof keyword === "string",
         )
       : [],
     ...knowledgeNoteHead(candidate),
     pendingKnowledgeProvenance:
       validateKnowledgeNoteProvenance(candidate.pendingKnowledgeProvenance) ||
       undefined,
+    pendingNoteWriteKey:
+      typeof candidate.pendingNoteWriteKey === "string" &&
+      candidate.pendingNoteWriteKey.startsWith("surface:quick-notes:")
+        ? candidate.pendingNoteWriteKey
+        : undefined,
     version: typeof candidate.version === "number" ? candidate.version : 1,
-    isDirty: Boolean(candidate.isDirty)
-  }
+    isDirty: Boolean(candidate.isDirty),
+  };
 }
 
 const coerceAudioSettingsForRehydrate = (

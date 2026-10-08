@@ -1,3 +1,8 @@
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
+);
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -84,6 +89,10 @@ vi.mock("@/store/workspace", () => ({
   )
 }))
 
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) },
+}));
+
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
     requestScope: {
@@ -135,6 +144,10 @@ vi.mock("antd", async () => {
 describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear();
+    mockSetCurrentNote.mockImplementation((note) => {
+      workspaceStoreState.currentNote = note;
+    });
     workspaceStoreState.currentNote = {
       id: undefined,
       title: "",
@@ -239,8 +252,10 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
     })
 
     expect(mockSetCurrentNote.mock.calls[0]?.[0]).toMatchObject({
-      content: "Local unsaved paragraph", version: 2, isDirty: true
-    })
+      content: "Local unsaved paragraph",
+      version: 1,
+      isDirty: true,
+    });
     const conflictConfig = mockMessageOpen.mock.calls[0]?.[0]
     const renderedConflict = render(<>{conflictConfig?.content}</>)
     expect(renderedConflict.getByText("Reload latest")).toBeInTheDocument()

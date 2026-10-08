@@ -80,6 +80,8 @@ import {
   NOTES_OFFLINE_NEW_DRAFT_KEY,
   isEditorSaveShortcutContext,
   normalizeOfflineDraftQueue,
+  isSurfaceOfflineDraft,
+  writeNotesEditorOfflineDraftQueue,
   NOTES_TITLE_STRATEGIES,
   normalizeNotesTitleStrategy,
   deriveAllowedTitleStrategies,
@@ -632,9 +634,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         [nextDraft.key]: nextDraft
       }
       try {
-        const serializedQueue = JSON.stringify(nextQueue)
-        window.localStorage.setItem(offlineDraftStorageKey, serializedQueue)
-        if (window.localStorage.getItem(offlineDraftStorageKey) !== serializedQueue) return false
+        writeNotesEditorOfflineDraftQueue(offlineDraftStorageKey, nextQueue)
       } catch {
         return false
       }
@@ -2055,9 +2055,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           pending = { key: crypto.randomUUID(), expectedVersion, previousTitle, body: JSON.parse(JSON.stringify(payload)) }
           const queue = { ...offlineDraftQueueRef.current, [draft.key]: { ...draft, pendingWrite: pending } }
           if (!offlineDraftStorageKey) return cancelledResult
-          const serialized = JSON.stringify(queue)
-          window.localStorage.setItem(offlineDraftStorageKey, serialized)
-          if (window.localStorage.getItem(offlineDraftStorageKey) !== serialized) throw new Error('Could not retain the queued request identity.')
+          writeNotesEditorOfflineDraftQueue(offlineDraftStorageKey, queue)
           offlineDraftQueueRef.current = queue
           setOfflineDraftQueue(queue)
         }
@@ -2739,7 +2737,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return
       }
       const parsed = JSON.parse(raw)
-      setOfflineDraftQueue(normalizeOfflineDraftQueue(parsed))
+      setOfflineDraftQueue(Object.fromEntries(Object.entries(normalizeOfflineDraftQueue(parsed)).filter(([key]) => !isSurfaceOfflineDraft(key))))
     } catch {
       setOfflineDraftQueue({})
     } finally {
@@ -2752,10 +2750,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!offlineDraftStorageKey) return
     if (typeof window === 'undefined') return
     try {
-      window.localStorage.setItem(
-        offlineDraftStorageKey,
-        JSON.stringify(offlineDraftQueue)
-      )
+      writeNotesEditorOfflineDraftQueue(offlineDraftStorageKey, offlineDraftQueue)
     } catch {
       // Ignore localStorage quota/transient persistence failures.
     }
