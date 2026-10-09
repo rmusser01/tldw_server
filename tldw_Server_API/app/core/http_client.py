@@ -4898,7 +4898,7 @@ def fetch(*args, **kwargs):
             redirects = 0
 
             while True:
-                stream_options = {
+                stream_options: dict[str, Any] = {
                     "headers": hop_headers,
                     "cookies": hop_cookies,
                     "follow_redirects": False,

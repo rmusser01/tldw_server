@@ -659,7 +659,7 @@ class FileValidator:
                     if media_type_key == "html" and detected_mime_type == "text/plain":
                         # HTML magic is offset-zero; legal leading whitespace can
                         # otherwise become generic text in the file deep scan.
-                        with contextlib.suppress(_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
                             with current_file_path.open("rb") as source:
                                 prefix = source.read(4096).lstrip(b" \t\r\n\f")
                             if prefix.startswith(b"\xef\xbb\xbf"):
@@ -1098,11 +1098,11 @@ class FileValidator:
                         try:
                             t.decompose()
                         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
-                            with contextlib.suppress(_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                            with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
                                 t.extract()
                 # Remove HTML comments which may contain scripts
                 for c in soup.find_all(string=lambda s: isinstance(s, Comment)):
-                    with contextlib.suppress(_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
                         c.extract()
                 preprocessed = str(soup)
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
