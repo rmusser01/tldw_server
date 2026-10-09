@@ -1610,6 +1610,8 @@
     "referenceImageSelectionUnavailable": "The selected reference image could not be verified. Retry loading reference images or clear the selection before generating."
   },
   "errorRecovery": {
+    "interruptedSummary": "Generation was interrupted. Any text received is kept.",
+    "missingFinalSummary": "No final answer was generated.",
     "interruptedLabel": "Interrupted",
     "savedInterruptedSummary": "This reply ended early. The saved content is kept.",
     "stoppedLabel": "Stopped",

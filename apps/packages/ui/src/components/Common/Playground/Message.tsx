@@ -174,10 +174,6 @@ const ErrorBubble: React.FC<{
       )}
       {recoveryActions.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="sr-only">
-            Recommended next actions:{" "}
-            {recoveryActions.map((action) => action.label).join(", ")}
-          </span>
           {recoveryActions.map((action) => (
             <button
               key={action.id}
@@ -212,10 +208,6 @@ const EmptyAssistantResponseNotice: React.FC<{
     <p className="mt-1 text-xs text-warn">{detail}</p>
     {recoveryActions.length > 0 && (
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className="sr-only">
-          Recommended next actions:{" "}
-          {recoveryActions.map((action) => action.label).join(", ")}
-        </span>
         {recoveryActions.map((action) => (
           <button
             key={action.id}
@@ -593,11 +585,21 @@ export const PlaygroundMessage = (props: Props) => {
   const interruptionReason = React.useMemo(() => {
     const raw = (props.generationInfo as Record<string, unknown> | undefined)
       ?.interruptionReason
-    if (typeof raw !== "string" || raw.trim().length === 0) {
-      return missingFinalAnswer ? MISSING_FINAL_ANSWER_MESSAGE : null
+    if (
+      typeof raw !== "string" ||
+      raw.trim().length === 0 ||
+      (missingFinalAnswer && raw.trim() === MISSING_FINAL_ANSWER_MESSAGE)
+    ) {
+      return missingFinalAnswer
+        ? t(
+            "playground:errorRecovery.missingFinalSummary",
+            "No final answer was generated."
+          )
+        : null
     }
     return raw.trim()
-  }, [props.generationInfo, missingFinalAnswer])
+  }, [props.generationInfo, missingFinalAnswer, t])
+
   const streamTransportInterrupted = Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)
       ?.streamTransportInterrupted
@@ -1744,29 +1746,25 @@ export const PlaygroundMessage = (props: Props) => {
     const actions: Array<{ id: string; label: string; onClick: () => void }> = [
       {
         id: "retry",
-        label: t(
-          "playground:errorRecovery.retrySameModel",
-          "Retry same model"
-        ),
+        label: t("playground:errorRecovery.retrySameModel", "Retry same model"),
         onClick: () => runResponseRecovery(props.onRegenerate)
       },
       {
         id: "switch",
-        label: t(
-          "playground:errorRecovery.switchModel",
-          "Switch model"
-        ),
+        label: t("playground:errorRecovery.switchModel", "Switch model"),
         onClick: () => runResponseRecovery(handleOpenModelSettings)
-      },
-      {
+      }
+    ]
+    if (!stoppedGeneration) {
+      actions.push({
         id: "fallback",
         label: t(
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
         onClick: handleEnableProviderFallback
-      }
-    ]
+      })
+    }
     if (props.onContinue && !props.hideContinue) {
       actions.push({
         id: "continue",
@@ -1785,11 +1783,13 @@ export const PlaygroundMessage = (props: Props) => {
     handleEnableProviderFallback,
     handleOpenModelSettings,
     interruptedGeneration,
+    stoppedGeneration,
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
     t
   ])
+
   const emptyResponseRecoveryActions = React.useMemo(
     () => responseRecoveryBusy ? [] : [
       {
@@ -2677,87 +2677,6 @@ export const PlaygroundMessage = (props: Props) => {
               )}
             </div>
           )}
-          {savedPartialCopy && !errorPayload && (
-            <EmptyAssistantResponseNotice
-              summary={
-                t(
-                  `playground:errorRecovery.${savedPartialCopy[0]}`,
-                  savedPartialCopy[1]
-                ) as string
-              }
-              detail={
-                t(
-                  `playground:errorRecovery.${savedPartialCopy[2]}`,
-                  savedPartialCopy[3]
-                ) as string
-              }
-              recoveryActions={[]}
-            />
-          )}
-          {showPartialSaveMarker && (
-            <div
-              role="status"
-              aria-live="polite"
-              title={streamTransportInterruptionReason || undefined}
-              className="inline-flex items-center rounded-md border border-border/60 bg-surface px-2 py-1 text-[11px] font-medium text-text-muted"
-            >
-              {t(
-                "playground:errorRecovery.partialSavedMarker",
-                "Connection dropped. Partial response saved."
-              )}
-            </div>
-          )}
-          {interruptedGeneration && !errorPayload && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="rounded-md border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
-              <p className="font-medium">
-                <span
-                  data-interruption-label
-                  className="mr-1.5 inline-flex items-center rounded border border-warn/40 px-1.5 py-0.5 text-[11px] font-semibold">
-                  {stoppedGeneration
-                    ? t("playground:errorRecovery.stoppedLabel", "Stopped")
-                    : t(
-                        "playground:errorRecovery.interruptedLabel",
-                        "Interrupted"
-                      )}
-                </span>
-                {stoppedGeneration
-                  ? t(
-                      "playground:errorRecovery.stoppedSummary",
-                      "You stopped this reply. What it wrote so far is kept."
-                    )
-                  : t(
-                      "playground:errorRecovery.interruptedSummary",
-                      "Generation was interrupted. You can retry, switch model, or continue from the partial response."
-                    )}
-              </p>
-              {interruptionReason && !stoppedGeneration && (
-                <p className="mt-1 opacity-90">{interruptionReason}</p>
-              )}
-              {interruptionRecoveryActions.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="sr-only">
-                    Recommended next actions:{" "}
-                    {interruptionRecoveryActions
-                      .map((action) => action.label)
-                      .join(", ")}
-                  </span>
-                  {interruptionRecoveryActions.map((action) => (
-                    <button
-                      key={action.id}
-                      type="button"
-                      onClick={action.onClick}
-                      className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <div className="flex flex-grow flex-col">
             {!editMode ? (
               props.isBot ? (
@@ -2974,6 +2893,76 @@ export const PlaygroundMessage = (props: Props) => {
               </div>
             )}
 
+          {savedPartialCopy && !errorPayload && (
+            <EmptyAssistantResponseNotice
+              summary={
+                t(
+                  `playground:errorRecovery.${savedPartialCopy[0]}`,
+                  savedPartialCopy[1]
+                ) as string
+              }
+              detail={
+                t(
+                  `playground:errorRecovery.${savedPartialCopy[2]}`,
+                  savedPartialCopy[3]
+                ) as string
+              }
+              recoveryActions={[]}
+            />
+          )}
+          {showPartialSaveMarker && (
+            <div
+              role="status"
+              aria-live="polite"
+              title={streamTransportInterruptionReason || undefined}
+              className="inline-flex items-center rounded-md border border-border/60 bg-surface px-2 py-1 text-[11px] font-medium text-text-muted">
+              {t(
+                "playground:errorRecovery.partialSavedMarker",
+                "Connection dropped. Partial response saved."
+              )}
+            </div>
+          )}
+          {interruptedGeneration && !errorPayload && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-md border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
+              <p className="font-medium">
+                <span
+                  data-interruption-label
+                  className="mr-1.5 inline-flex items-center rounded border border-warn/40 px-1.5 py-0.5 text-[11px] font-semibold">
+                  {stoppedGeneration
+                    ? t("playground:errorRecovery.stoppedLabel", "Stopped")
+                    : t("playground:errorRecovery.interruptedLabel", "Interrupted")}
+                </span>
+                {stoppedGeneration
+                  ? t(
+                      "playground:errorRecovery.stoppedSummary",
+                      "You stopped this reply. What it wrote so far is kept."
+                    )
+                  : t(
+                      "playground:errorRecovery.interruptedSummary",
+                      "Generation was interrupted. Any text received is kept."
+                    )}
+              </p>
+              {interruptionReason && !stoppedGeneration && (
+                <p className="mt-1 opacity-90">{interruptionReason}</p>
+              )}
+              {interruptionRecoveryActions.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {interruptionRecoveryActions.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={action.onClick}
+                      className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10">
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {(showUseInChat || showFollowUp || researchActions?.primaryLink) && (
             <div className="mt-3 flex">
               <div className="flex items-center gap-2">
@@ -3289,6 +3278,8 @@ export const PlaygroundMessage = (props: Props) => {
         />
       )}
       {streamingComplete &&
+        !interruptedGeneration &&
+        !showPartialSaveMarker &&
         !savedPartialCopy &&
         !errorPayload &&
         !responseStreaming &&

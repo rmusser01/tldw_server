@@ -4405,5 +4405,11 @@
   },
   "historySelection_regenerationUnknownMessage": {
     "message": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
+  },
+  "errorRecovery_interruptedSummary": {
+    "message": "Generation was interrupted. Any text received is kept."
+  },
+  "errorRecovery_missingFinalSummary": {
+    "message": "No final answer was generated."
   }
 }

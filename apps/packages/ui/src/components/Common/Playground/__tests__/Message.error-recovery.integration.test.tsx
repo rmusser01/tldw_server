@@ -1657,3 +1657,213 @@ it("Delete failure uses recovery copy and never announces success", async () => 
     expect.stringMatching(/replies.*first/i)
   )
 })
+
+
+describe("preserved reply before recovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+  afterEach(() => {
+    parentChat.messages = []
+    parentChat.historyId = "identity-chat"
+  })
+  const cases: Array<{
+    name: string
+    props: Partial<React.ComponentProps<typeof PlaygroundMessage>>
+  }> = [
+    {
+      name: "local deliberate stop",
+      props: { generationInfo: { interrupted: true, stopped: true } }
+    },
+    {
+      name: "local interruption",
+      props: {
+        generationInfo: {
+          interrupted: true,
+          interruptionReason: "Stream ended early"
+        }
+      }
+    },
+    {
+      name: "saved stopped reply",
+      props: { metadataExtra: { generation_status: "stopped" } }
+    },
+    {
+      name: "saved interrupted reply",
+      props: { metadataExtra: { generation_status: "interrupted" } }
+    },
+    {
+      name: "saved transport partial",
+      props: {
+        generationInfo: {
+          streamTransportInterrupted: true,
+          partialResponseSaved: true
+        }
+      }
+    }
+  ]
+  it.each(
+    cases.flatMap(({ name, props }) =>
+      (["isStreaming", "isProcessing"] as const).map((activeFlag) => ({
+        name,
+        props,
+        activeFlag
+      }))
+    )
+  )(
+    "$name announces its partial outcome after $activeFlag instead of completion",
+    ({ props, activeFlag }) => {
+      const view = render(
+        <PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />
+      )
+      view.rerender(<PlaygroundMessage {...baseProps} {...props} />)
+      expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
+      expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+    }
+  )
+  it("announces recorded completion over stale transient partial flags", () => {
+    const view = render(<PlaygroundMessage {...baseProps} isStreaming />)
+    view.rerender(
+      <PlaygroundMessage
+        {...baseProps}
+        metadataExtra={{ generation_status: "complete" }}
+        generationInfo={{
+          interrupted: true,
+          stopped: true,
+          streamTransportInterrupted: true,
+          partialResponseSaved: true
+        }}
+      />
+    )
+    expect(screen.getByText("Response complete")).toHaveAttribute(
+      "aria-live",
+      "polite"
+    )
+    expect(screen.queryByText("Stopped")).not.toBeInTheDocument()
+  })
+  it.each(cases)(
+    "$name keeps prose, reasoning and the received image before the notice",
+    async ({ props }) => {
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          message="<think>Kept reasoning</think>Kept partial answer"
+          images={["data:image/png;base64,AAAA"]}
+          {...props}
+        />
+      )
+      const answer = await screen.findByText("Kept partial answer"),
+        reason = screen.getByText("Kept reasoning"),
+        image = screen.getByRole("img", { name: "Uploaded Image" }),
+        notice = screen.getByRole("status")
+      for (const content of [answer, reason, image])
+        expect(
+          content.compareDocumentPosition(notice) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy()
+    }
+  )
+  it.each(["full", "compact"] as const)(
+    "the real %s parent keeps a stopped reply before recovery without provider fallback",
+    async (surface) => {
+      const reply = {
+        id: "kept-reply",
+        message: "Kept parent answer",
+        name: "Assistant",
+        isBot: true,
+        role: "assistant",
+        generationInfo: { interrupted: true, stopped: true }
+      }
+      parentChat.messages = [reply]
+      render(surface === "full" ? <PlaygroundChat /> : <SidePanelBody />)
+      const content = await screen.findByText(reply.message),
+        notice = screen.getByRole("status")
+      expect(
+        content.compareDocumentPosition(notice) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        screen.queryByRole("button", { name: "Try provider fallback" })
+      ).toBeNull()
+      expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+    }
+  )
+  it("a deliberate stop offers each real recovery action once and never mutates routing by itself", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        generationInfo={{ interrupted: true, stopped: true }}
+      />
+    )
+    expect(
+      screen.queryByRole("button", { name: "Try provider fallback" })
+    ).toBeNull()
+    const notice = screen.getByRole("status")
+    for (const label of [
+      "Retry same model",
+      "Switch model",
+      "Continue from partial"
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
+      expect(notice.textContent!.split(label)).toHaveLength(2)
+    }
+    expect(notice).not.toHaveTextContent("Recommended next actions")
+    expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+    expect(baseProps.onRegenerate).not.toHaveBeenCalled()
+  })
+  it.each(["interrupted", "empty", "provider error"] as const)(
+    "$0 offers provider fallback but lists actual %s actions once",
+    (state) => {
+      if (state === "provider error")
+        decodeChatErrorPayloadMock.mockReturnValue({
+          summary: "Provider failed"
+        })
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          message={state === "empty" ? "" : baseProps.message}
+          generationInfo={
+            state === "interrupted" ? { interrupted: true } : undefined
+          }
+        />
+      )
+      expect(
+        screen.getByRole("button", { name: "Try provider fallback" })
+      ).toBeInTheDocument()
+      const notice = screen.getByRole(
+        state === "provider error" ? "alert" : "status"
+      )
+      expect(notice).not.toHaveTextContent("Recommended next actions")
+      expect(notice.textContent!.split("Try provider fallback")).toHaveLength(2)
+      if (state === "interrupted")
+        expect(notice).not.toHaveTextContent(
+          "You can retry, switch model, or continue"
+        )
+      expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+    }
+  )
+  it("reasoning-only recovery states the missing answer without promising absent Continue or repeating Retry", async () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        message="<think>Kept reasoning</think>"
+        onContinue={undefined}
+        generationInfo={{
+          interruptionReason:
+            "No final answer was generated. Retry or continue to request an answer."
+        }}
+      />
+    )
+    await screen.findByText("Kept reasoning")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "No final answer was generated."
+    )
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      "Retry or continue to request an answer"
+    )
+    expect(
+      screen.queryByRole("button", { name: "Continue from partial" })
+    ).toBeNull()
+  })
+})
