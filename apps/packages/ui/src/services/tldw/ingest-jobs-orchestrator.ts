@@ -167,13 +167,35 @@ export const createIngestJobsTracker = <TMeta>() => {
   }
 }
 
-type PollTrackedIngestJobsOptions<TMeta, TResult> = {
-  tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
+type LegacyPerJobFetch = {
   /**
-   * Per-job status fetch (legacy N+1 path). Required unless `fetchJobs` is
-   * provided; ignored when `fetchJobs` is present.
+   * Per-job status fetch (legacy N+1 path). Exactly one of `fetchJob` /
+   * `fetchJobs` must be provided; `fetchJob` is ignored when `fetchJobs` is
+   * present. Omitting both is a caller bug that previously spun silently to
+   * the poll timeout (PR #3210 review follow-up).
    */
-  fetchJob?: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
+  fetchJob: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
+  fetchJobs?: never
+}
+
+type BatchedJobsFetch = {
+  fetchJob?: never
+  /**
+   * Batched status fetch: ONE request per tracked batch per poll cycle. The
+   * returned response is expected to carry the reconciled status of every
+   * requested job under `data.jobs` (an array of job status objects with an
+   * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
+   * A job missing from `data.jobs` is treated like the per-job 404 path
+   * (stays pending until the poll timeout).
+   */
+  fetchJobs: (
+    batchId: string,
+    jobIds: number[]
+  ) => Promise<IngestJobStatusResponse | undefined>
+}
+
+type PollTrackedIngestJobsBase<TMeta, TResult> = {
+  tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
   /**
    * Batched status fetch: ONE request per tracked batch per poll cycle. The
    * returned response is expected to carry the reconciled status of every
@@ -207,6 +229,14 @@ type PollTrackedIngestJobsOptions<TMeta, TResult> = {
     response: IngestJobStatusResponse | undefined
   ) => TResult | undefined
 }
+
+/**
+ * Exactly one fetch strategy is required — the union makes omitting both a
+ * compile error instead of a silent spin to the poll timeout (PR #3210
+ * review follow-up).
+ */
+type PollTrackedIngestJobsOptions<TMeta, TResult> = PollTrackedIngestJobsBase<TMeta, TResult> &
+  (LegacyPerJobFetch | BatchedJobsFetch)
 
 export const pollTrackedIngestJobs = async <TMeta, TResult>(
   options: PollTrackedIngestJobsOptions<TMeta, TResult>

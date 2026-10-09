@@ -192,4 +192,46 @@ describe("ModelDb storage efficiency", () => {
     ])
     expect(area.__calls.setCalls).toBe(0)
   })
+
+  it("a failed migration is never cached as an empty index and cannot clobber the real index (PR #3210 review follow-up)", async () => {
+    // Legacy unprefixed records exist, no index yet: the one-time migration
+    // path runs — but the storage `set` fails (quota-style transient error).
+    area.__store.set("legacy-model-1", model("legacy-model-1"))
+    const originalSet = area.set.bind(area)
+    let failSets = true
+    area.set = ((items: Record<string, unknown>, callback: () => void) => {
+      if (failSets) {
+        setTimeout(() => callback(), 0)
+        return
+      }
+      return originalSet(items, callback)
+    }) as typeof area.set
+    ;(globalThis as any).chrome.runtime = {
+      ...(globalThis as any).chrome.runtime,
+      get lastError() {
+        return failSets ? { message: "QUOTA_BYTES exceeded" } : undefined
+      }
+    }
+
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+
+    // getAll must reject (loud failure) rather than silently return [].
+    await expect(db.getAll()).rejects.toThrow(/QUOTA_BYTES/)
+
+    // A later write on the same instance must also fail rather than persist
+    // an index built from the cached empty migration result.
+    await expect(db.createMany([model("y-model-1")])).rejects.toThrow(/QUOTA_BYTES/)
+    expect(area.__store.has("__tldwModelDbIndexV1")).toBe(false)
+
+    // Once storage recovers, a fresh operation on a fresh instance migrates
+    // correctly and the legacy record is still visible — nothing was lost.
+    failSets = false
+    const db2 = new ModelDb()
+    const all = await db2.getAll()
+    expect(all.map((record) => record.id)).toContain("legacy-model-1")
+    expect(area.__store.has("legacy-model-1")).toBe(false)
+    expect(area.__store.has("model:legacy-model-1")).toBe(true)
+    void originalSet
+  })
 })
