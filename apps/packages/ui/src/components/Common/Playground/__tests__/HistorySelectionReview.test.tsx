@@ -752,3 +752,78 @@ it("retired recovery Copy does not write a departed account's input to the clipb
   fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
   expect(copy).not.toHaveBeenCalled()
 })
+
+
+it("a proactive update keeps composer focus and makes no unsaved-message claim", () => {
+  const selection = {
+    ...controller(),
+    status: "stale_selection",
+    error: "history_branch_changed",
+    sendConflict: true,
+    freshnessConflict: true,
+    loadLatest: vi.fn(),
+    branchHere: vi.fn(),
+    fence: () => () => true
+  }
+  const input = document.createElement("textarea")
+  input.value = "Exact draft.  \nSecond line."
+  document.body.append(input)
+  input.focus()
+  try {
+    render(
+      <HistorySelectionReview
+        selection={selection as unknown as HistorySelectionController}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Updated in another window or tab"
+    )
+    expect(screen.queryByText(/Your message was not added/)).toBeNull()
+    expect(document.activeElement).toBe(input)
+    expect(input.value).toBe("Exact draft.  \nSecond line.")
+  } finally {
+    input.remove()
+  }
+})
+
+it.each(["Load latest messages", "Branch here"])(
+  "clears finished-editor feedback when %s is admitted",
+  (action) => {
+    const selection = {
+      ...controller(),
+      status: "stale_selection",
+      error: "history_branch_changed",
+      sendConflict: true,
+      freshnessConflict: true,
+      loadLatest: vi.fn(),
+      branchHere: vi.fn(),
+      fence: () => () => true
+    }
+    render(
+      <HistorySelectionReview
+        selection={selection as unknown as HistorySelectionController}
+      />
+    )
+    const editor = document.createElement("form")
+    editor.dataset.chatMessageEditor = ""
+    document.body.append(editor)
+    try {
+      fireEvent.click(screen.getByRole("button", { name: action }))
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Finish or cancel your current message edit"
+      )
+      expect(selection.loadLatest).not.toHaveBeenCalled()
+      expect(selection.branchHere).not.toHaveBeenCalled()
+      editor.remove()
+      fireEvent.click(screen.getByRole("button", { name: action }))
+      expect(
+        action === "Branch here" ? selection.branchHere : selection.loadLatest
+      ).toHaveBeenCalledOnce()
+      expect(
+        screen.queryByText(/Finish or cancel your current message edit/)
+      ).toBeNull()
+    } finally {
+      editor.remove()
+    }
+  }
+)

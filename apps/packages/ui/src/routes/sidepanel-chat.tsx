@@ -1100,10 +1100,14 @@ const SidepanelChatContent = ({
             (receipt.owner.kind !== "native" || chatDraftOwnerKey(receipt.owner.request_scope) === chatDraftOwnerKey(owner.snapshot.requestScope))) accept(receipt)
         }).then(async loaded => {
           if (!loaded || !accept.isCurrent()) return
-          await restoreReadableLocalComparison(historySelection, display => {
+          await restoreReadableLocalComparison(historySelection, (display) => {
             if (!accept.isCurrent()) return
-            setHistory(display.history); setMessages(display.messages)
+            useStoreMessageOption.setState({
+              history: display.history,
+              messages: display.messages
+            })
           })
+
           if (accept.isCurrent()) await checkShownTab()
         }).catch(error => console.warn("Failed to restore readable comparison", error))
       }

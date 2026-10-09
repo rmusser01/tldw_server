@@ -793,8 +793,7 @@ function RootLayoutShell({
       storageKey="tldw-h1-playground-reference"
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture)
-        useStoreMessageOption.getState().setHistory(display.history)
-        useStoreMessageOption.getState().setMessages(display.messages)
+        useStoreMessageOption.setState({ history: display.history, messages: display.messages })
       }}
     >
       {content}

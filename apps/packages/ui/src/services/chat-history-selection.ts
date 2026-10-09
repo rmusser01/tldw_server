@@ -370,6 +370,29 @@ export const captureHistorySnapshot = async (
   return freeze(result)
 }
 
+/** Read the deployed history fence without loading message content or changing the view. */
+export const readNativeHistoryVersion = async (
+  owner: NativeHistoryOwnerV1,
+  options?: HistoryOperationOptions
+): Promise<number> => {
+  assertOwnerLease(owner, options)
+  const capability = nativeCapabilities.get(owner)
+  if (!capability?.captured) fail("unsupported_history_capability")
+  const detail = await tldwClient.getChat(owner.conversation_id, {
+    ...nativeOptions(owner, options?.signal),
+    requireHistoryVersion: true
+  })
+  assertOwnerLease(owner, options)
+  if (
+    detail.id !== owner.conversation_id ||
+    typeof detail.history_version !== "number" ||
+    !Number.isSafeInteger(detail.history_version) ||
+    detail.history_version < 0
+  )
+    fail("unsupported_history_version")
+  return detail.history_version
+}
+
 export type NativeMessageEditReceipt = Readonly<{
   message_id: string
   message: string

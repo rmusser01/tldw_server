@@ -69,6 +69,7 @@ export function HistorySelectionReview({
       mounted.current = false
     }
   }, [])
+  const editorOpen = () => !!document.querySelector("form[data-chat-message-editor]")
   const openSavedReply = async (
     entry: HistorySelectionController["recoveries"][number]
   ) => {
@@ -78,8 +79,6 @@ export function HistorySelectionReview({
       !renderedSelectionIsCurrent()
     )
       return
-    const editorOpen = () =>
-      !!document.querySelector("form[data-chat-message-editor]")
     if (editorOpen()) {
       setOpenRecoveryError(
         text(
@@ -177,8 +176,10 @@ export function HistorySelectionReview({
     setFocusedId(null)
   }, [reviewOwner])
   React.useEffect(() => {
-    if (stale && expanded) errorRegion.current?.focus()
-  }, [stale, expanded])
+    if (stale && expanded && !selection.freshnessConflict)
+      errorRegion.current?.focus()
+  }, [stale, expanded, selection.freshnessConflict])
+
   const focusRow = (index: number) => {
     const node = nodes[Math.max(0, Math.min(index, nodes.length - 1))]
     if (!node) return
@@ -486,12 +487,19 @@ export function HistorySelectionReview({
         <div ref={errorRegion} tabIndex={-1}>
           <RecoveryCallout
             state="blocked"
-            role="alert"
+            role={selection.freshnessConflict ? "status" : "alert"}
             title={text("sendConflictTitle", "Updated in another window or tab")}
-            message={text(
-              "sendConflictMessage",
-              "Your message was not added. Load the latest messages to continue, or branch from the point shown here. Your input is kept."
-            )}
+            message={
+              selection.freshnessConflict
+                ? text(
+                    "freshnessConflictMessage",
+                    "This conversation changed. Your draft and the messages shown here are kept. Load the latest messages to continue, or branch from this point."
+                  )
+                : text(
+                    "sendConflictMessage",
+                    "Your message was not added. Load the latest messages to continue, or branch from the point shown here. Your input is kept."
+                  )
+            }
             primaryAction={{
               label: text("loadLatest", "Load latest messages"),
               onClick: () => {
@@ -500,11 +508,22 @@ export function HistorySelectionReview({
                   selection.view &&
                   renderedSource.isCurrent() &&
                   renderedSelectionIsCurrent()
-                )
-                  void selection.loadLatest(
-                    selection.view,
-                    renderedSource.isCurrent
-                  )
+                ) {
+                  if (editorOpen())
+                    setOpenRecoveryError(
+                      text(
+                        "finishEditBeforeOpening",
+                        "Finish or cancel your current message edit before opening the saved reply."
+                      )
+                    )
+                  else {
+                    setOpenRecoveryError(null)
+                    void selection.loadLatest(
+                      selection.view,
+                      renderedSource.isCurrent
+                    )
+                  }
+                }
               }
             }}
             secondaryActions={[
@@ -516,8 +535,22 @@ export function HistorySelectionReview({
                     selection.view &&
                     renderedSource.isCurrent() &&
                     renderedSelectionIsCurrent()
-                  )
-                    selection.branchHere(selection.view, renderedSource.isCurrent)
+                  ) {
+                    if (editorOpen())
+                      setOpenRecoveryError(
+                        text(
+                          "finishEditBeforeOpening",
+                          "Finish or cancel your current message edit before opening the saved reply."
+                        )
+                      )
+                    else {
+                      setOpenRecoveryError(null)
+                      selection.branchHere(
+                        selection.view,
+                        renderedSource.isCurrent
+                      )
+                    }
+                  }
                 }
               }
             ]}

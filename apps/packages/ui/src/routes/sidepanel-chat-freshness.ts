@@ -13,6 +13,8 @@
  * that exist only in this tab.
  */
 import React from "react"
+import { useChatHistoryFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/hooks/chat/useChatHistoryFreshness"
+export { FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/hooks/chat/useChatHistoryFreshness"
 
 import type { FreshnessNotice } from "@/components/Sidepanel/Chat/ServerChatFreshnessNotice"
 import type { SidepanelSendGateResult } from "@/hooks/chat/sidepanel-send-gate"
@@ -27,10 +29,6 @@ import type {
 } from "@/types/history-selection"
 import { latestHistoryTipId } from "@/utils/history-selection"
 
-/** Focus and visibility events arrive in bursts; check once they settle. */
-export const FOCUS_CHECK_DEBOUNCE_MS = 400
-/** At most one focus-triggered check per tab in this window. */
-export const FOCUS_CHECK_MIN_INTERVAL_MS = 5_000
 
 export type ServerTurnsComparison =
   | { status: "current"; latestId: string | null }
@@ -140,6 +138,7 @@ export const useSidepanelChatFreshness = ({
   selectionRef.current = historySelection
   const checkableRef = React.useRef(checkableTabId)
   checkableRef.current = checkableTabId
+  useChatHistoryFreshness(historySelection, () => !!checkableRef.current())
   const queueRef = React.useRef<Promise<unknown>>(Promise.resolve())
   const lastCheckAtRef = React.useRef(new Map<string, number>())
   const focusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -162,7 +161,7 @@ export const useSidepanelChatFreshness = ({
       const tabId = checkableRef.current()
       if (!tabId) return PROCEED
       const selection = selectionRef.current
-      if (selection.branchPending) return PROCEED
+      if (selection.branchPending || (selection.checkFreshness && (mode === "show" || mode === "focus"))) return PROCEED
       const current = selection.getCurrent()
       const { owner, view, capture } = current
       if (
@@ -312,7 +311,7 @@ export const useSidepanelChatFreshness = ({
   )
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined" || selectionRef.current.checkFreshness) return
     const schedule = () => {
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current)
       focusTimerRef.current = setTimeout(() => {

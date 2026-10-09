@@ -559,13 +559,37 @@ it("real qualified ordinary legacy controller lets the loader hydrate settings b
   const mounted = renderHook(() => {
     const controller = useHistorySelection()
     mocks.selection = controller
-    useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification: {error: vi.fn()}, t: ((key: string) => key) as any})
+    useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn(),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as any
+    })
     return controller
   })
-  await act(async () => {await mounted.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)})
-  await act(async () => {await vi.advanceTimersByTimeAsync(300)})
+  await act(async () => {
+    await mounted.result.current.open({
+      kind: "native",
+      owner_key: "owner",
+      conversation_id: "legacy",
+      validate_lease: () => true
+    } as any)
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(300)
+  })
   expect(mounted.result.current.status).toBe("legacy_review_required")
-  expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", scope: undefined, allowScratchFallback: false})
+  expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({
+    historyId: null,
+    serverChatId: "legacy",
+    scope: undefined,
+    allowScratchFallback: false,
+    requestScope: {
+      config: { serverUrl: "http://server", authMode: "multi-user" },
+      userId: "A"
+    },
+    signal: expect.any(AbortSignal),
+    validate_lease: expect.any(Function)
+  })
   expect(mocks.listChatMessages).toHaveBeenCalledOnce()
   mounted.unmount()
   vi.useRealTimers()

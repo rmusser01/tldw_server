@@ -773,7 +773,17 @@ export function usePlaygroundSessionPersistence() {
             if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
             if (selected.getCurrent().capture?.status !== "captured") {
               if (selected.getCurrent().error === "unsupported_comparison_history") {
-                await restoreReadableLocalComparison(selected, display => { setHistory(display.history); setMessages(display.messages) }, chatData)
+                await restoreReadableLocalComparison(
+                  selected,
+                  (display) => {
+                    useStoreMessageOption.setState({
+                      history: display.history,
+                      messages: display.messages
+                    })
+                  },
+                  chatData
+                )
+
                 if (!isCurrentRestore()) return "cancelled"
               } else {
                 setHistory(formatToChatHistory(chatData.messages))

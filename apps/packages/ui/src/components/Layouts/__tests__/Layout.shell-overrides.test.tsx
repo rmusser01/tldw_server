@@ -132,13 +132,21 @@ vi.mock("@/utils/human-message", () => ({
   humanMessageFormatter: () => ""
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: unknown) => unknown) =>
-    selector({
-      historyId: null,
-      serverChatId: null
-    })
-}))
+vi.mock("@/store/option", async (original) => {
+  const actual = await original<typeof import("@/store/option")>()
+  return {
+    ...actual,
+    useStoreMessageOption: Object.assign(
+      (selector: (state: unknown) => unknown) =>
+        selector({ historyId: null, serverChatId: null }),
+      {
+        getState: actual.useStoreMessageOption.getState,
+        setState: actual.useStoreMessageOption.setState,
+        subscribe: actual.useStoreMessageOption.subscribe
+      }
+    )
+  }
+})
 
 vi.mock("@/utils/settings-return", () => ({
   setSettingsReturnTo: () => undefined
@@ -426,4 +434,113 @@ it("reuses the shell controller and gives chat route reentry a fresh lifetime", 
   fireEvent.click(view.getByText("Return"))
   expect(seen.at(-1)).toBeTypeOf("function")
   expect(seen.at(-1)).not.toBe(first)
+})
+
+
+const capturePublication = vi.hoisted(() => ({
+  callback: null as
+    | null
+    | ((
+        capture: import("@/types/history-selection").HistorySelectionCaptureV1
+      ) => void)
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async (original) => {
+  const actual =
+    await original<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {
+    ...actual,
+    HistorySelectionProvider: (
+      props: Parameters<typeof actual.HistorySelectionProvider>[0]
+    ) => {
+      if (props.onCapture) capturePublication.callback = props.onCapture
+      return React.createElement(actual.HistorySelectionProvider, props)
+    }
+  }
+})
+
+it("the actual outer shell capture cannot republish old messages after synchronous New", async () => {
+  const { useStoreMessageOption } =
+    await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  useStoreMessageOption.setState({
+    history: [],
+    messages: [],
+    serverChatId: "source-chat"
+  })
+  capturePublication.callback = null
+  render(
+    <MemoryRouter initialEntries={["/chat"]}>
+      <OptionLayout>
+        <div>Active chat</div>
+      </OptionLayout>
+    </MemoryRouter>
+  )
+  expect(capturePublication.callback).not.toBeNull()
+  const row = {
+    id: "source-answer",
+    revision: "v1",
+    parent_id: null,
+    role: "assistant",
+    settled: true
+  }
+  const capture: import("@/types/history-selection").HistorySelectionCaptureV1 =
+    {
+      status: "captured",
+      purpose: "send",
+      storage_context_digest: "context",
+      snapshot: {
+        version: 1,
+        owner_key: "native-owner",
+        conversation_id: "source-chat",
+        fences: { conversation: "1", history: "1", settings: "0" },
+        nodes: [row],
+        source_digest: "source",
+        interpretation_status: { kind: "parent_graph_v1" },
+        storage_context_digest: "context"
+      },
+      view: {
+        view_session_id: "source-view",
+        owner_key: "native-owner",
+        conversation_id: "source-chat",
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "after_message", message_id: row.id },
+        selection_revision: 1
+      },
+      rows: [row],
+      selected_content: [
+        {
+          id: row.id,
+          revision: row.revision,
+          message: "Captured earlier reply",
+          images: []
+        }
+      ]
+    }
+  let replaced = false
+  const unsubscribe = useStoreMessageOption.subscribe((state) => {
+    if (
+      !replaced &&
+      state.history.some(
+        (message) => message.content === "Captured earlier reply"
+      )
+    ) {
+      replaced = true
+      state.startNewChatDraft()
+      useStoreMessageOption.setState({
+        history: [],
+        messages: [],
+        serverChatId: null
+      })
+    }
+  })
+  try {
+    act(() => capturePublication.callback!(capture))
+    expect(replaced).toBe(true)
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe(
+      "fresh"
+    )
+    expect(useStoreMessageOption.getState().history).toEqual([])
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+  } finally {
+    unsubscribe()
+  }
 })

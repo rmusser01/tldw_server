@@ -910,3 +910,91 @@ it("requires an explicit reopen of an invalidated stamped-local account lease af
   expect(controller.capture).not.toBeNull()
   expect(controller.error).toBeNull()
 })
+
+
+it.each([false, true])(
+  "cold comparison restore uses one actual store publication across New (%s)",
+  async (replace) => {
+    const helpers = await import("@/db/dexie/helpers")
+    const actual =
+      await vi.importActual<typeof import("@/db/dexie/helpers")>(
+        "@/db/dexie/helpers"
+      )
+    const historyFormatter = vi
+      .spyOn(helpers, "formatToChatHistory")
+      .mockImplementation(actual.formatToChatHistory)
+    const messageFormatter = vi
+      .spyOn(helpers, "formatToMessage")
+      .mockImplementation(actual.formatToMessage)
+    seedBookmark()
+    const capture = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementation(async (...args) => {
+      const result = await capture(...args)
+      return {
+        status: "unsupported_history_capability",
+        code: "unsupported_comparison_history",
+        snapshot: result.snapshot,
+        view: result.view
+      }
+    })
+    mocks.chatData.mockResolvedValue({
+      historyInfo: { id: "local-A", local_owner_key: "local-owner" },
+      messages: [
+        {
+          id: "comparison-answer",
+          role: "assistant",
+          content: "Cold readable comparison",
+          images: []
+        }
+      ]
+    })
+    let replaced = false
+    const unsubscribe = useStoreMessageOption.subscribe((state) => {
+      if (
+        replace &&
+        !replaced &&
+        state.history.some(
+          (message) => message.content === "Cold readable comparison"
+        )
+      ) {
+        replaced = true
+        state.startNewChatDraft()
+        useStoreMessageOption.setState({
+          history: [],
+          messages: [],
+          historyId: null,
+          serverChatId: null
+        })
+      }
+    })
+    try {
+      mount()
+      await waitFor(() =>
+        expect(outcome).toBe(replace ? "cancelled" : "restored")
+      )
+      expect(historyFormatter).toHaveBeenCalled()
+      expect(messageFormatter).toHaveBeenCalled()
+      expect(replaced).toBe(replace)
+      if (replace) {
+        expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe(
+          "fresh"
+        )
+        expect(useStoreMessageOption.getState().history).toEqual([])
+        expect(useStoreMessageOption.getState().messages).toEqual([])
+      } else {
+        expect(
+          useStoreMessageOption
+            .getState()
+            .messages.map((message) => message.message)
+        ).toEqual(["Cold readable comparison"])
+        expect(controller.getCurrent().capture?.status).toBe(
+          "unsupported_history_capability"
+        )
+      }
+    } finally {
+      unsubscribe()
+      historyFormatter.mockRestore()
+      messageFormatter.mockRestore()
+    }
+  }
+)

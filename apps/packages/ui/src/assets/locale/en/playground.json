@@ -1327,6 +1327,7 @@
     "sendRefusedMessage": "Your original input is kept here; copy it and review the conversation before trying again. It will not be sent again automatically.",
     "sendConflictTitle": "Updated in another window or tab",
     "sendConflictMessage": "Your message was not added. Load the latest messages to continue, or branch from the point shown here. Your input is kept.",
+    "freshnessConflictMessage": "This conversation changed. Your draft and the messages shown here are kept. Load the latest messages to continue, or branch from this point.",
     "loadLatest": "Load latest messages",
     "branchHere": "Branch here",
     "cancelBranch": "Cancel branch",

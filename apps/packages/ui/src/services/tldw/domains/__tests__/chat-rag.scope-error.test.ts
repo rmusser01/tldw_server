@@ -11,6 +11,7 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 import { chatRagMethods } from "../chat-rag"
+import type { TldwApiClientCore } from "../../TldwApiClient"
 
 describe("chat RAG scoped errors", () => {
   beforeEach(() => {
@@ -59,3 +60,79 @@ it.each(["getChat", "getChatSettings", "updateChatSettings"] as const)("forwards
     servicePromptConfig: expect.objectContaining({serverUrl: "https://original.test", expectedUserId: "alice"})
   }))
 })
+
+
+describe("authoritative detail history versions", () => {
+  const client = {
+    normalizeChatSummary: chatRagMethods.normalizeChatSummary
+  } as unknown as TldwApiClientCore
+  it.each([0, 1, Number.MAX_SAFE_INTEGER])(
+    "preserves safe history version %s",
+    async (version) => {
+      mocks.bgRequest.mockResolvedValueOnce({
+        id: "child",
+        history_version: version
+      })
+      const result = await chatRagMethods.getChat.call(client, "child", {
+        requireHistoryVersion: true
+      })
+      expect(result.history_version).toBe(version)
+    }
+  )
+  it.each([undefined, null, "4", -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1])(
+    "does not certify malformed history version %s",
+    async (history_version) => {
+      mocks.bgRequest.mockResolvedValueOnce({ id: "child", history_version })
+      await expect(
+        chatRagMethods.getChat.call(client, "child", {
+          requireHistoryVersion: true
+        })
+      ).rejects.toThrow("unsupported_history_version")
+    }
+  )
+  it.each([
+    {},
+    { id: "foreign", history_version: 3 },
+    { chat_id: "child", history_version: 3 },
+    { id: 1, history_version: 3 }
+  ])("rejects unbound detail %j before normalization", async (body) => {
+    mocks.bgRequest.mockResolvedValueOnce(body)
+    await expect(
+      chatRagMethods.getChat.call(client, "child", {
+        requireHistoryVersion: true
+      })
+    ).rejects.toThrow("unsupported_history_version")
+  })
+  it("keeps an older detail readable without certifying a history version", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({ id: "child" })
+    const result = await chatRagMethods.getChat.call(client, "child")
+    expect(result.history_version).toBeNull()
+  })
+})
+
+it.each([
+  { scope_type: "global", workspace_id: null },
+  { scope_type: "workspace", workspace_id: "foreign" },
+  { workspace_id: "original" }
+])(
+  "cannot use a history version from foreign or absent workspace metadata %j",
+  async (scope) => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      id: "child",
+      history_version: 3,
+      ...scope
+    })
+    await expect(
+      chatRagMethods.getChat.call(
+        {
+          normalizeChatSummary: chatRagMethods.normalizeChatSummary
+        } as unknown as TldwApiClientCore,
+        "child",
+        {
+          requireHistoryVersion: true,
+          scope: { type: "workspace", workspaceId: "original" }
+        }
+      )
+    ).rejects.toThrow("unsupported_history_version")
+  }
+)

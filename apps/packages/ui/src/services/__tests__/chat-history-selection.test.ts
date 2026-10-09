@@ -3,6 +3,7 @@ const calls = vi.hoisted(() => ({
   capture: vi.fn(),
   create: vi.fn(),
   getSettings: vi.fn(),
+  detail: vi.fn(),
   updateSettings: vi.fn(),
   confirm: vi.fn(),
   append: vi.fn(),
@@ -14,6 +15,7 @@ const calls = vi.hoisted(() => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     createChat: calls.create,
+    getChat: calls.detail,
     getChatSettings: calls.getSettings,
     updateChatSettings: calls.updateSettings,
     captureHistorySelection: calls.capture,
@@ -1094,4 +1096,52 @@ it("detached native edit rechecks structural metadata against the original canon
         invalid as HistorySelectionCaptureV1
       )
     ).toThrow("unsupported_message_payload")
+})
+
+
+describe("qualified native history version reads", () => {
+  it("binds the deployed detail version to the captured original scoped owner", async () => {
+    const native = {
+      ...owner(),
+      scope: { type: "workspace" as const, workspaceId: "original" }
+    }
+    calls.detail
+      .mockReset()
+      .mockResolvedValue({ id: "chat", history_version: 3 })
+    await service.captureHistorySnapshot(native, view, "send")
+    expect(await service.readNativeHistoryVersion(native)).toBe(3)
+    expect(calls.detail).toHaveBeenCalledWith(
+      "chat",
+      expect.objectContaining({
+        requireHistoryVersion: true,
+        scope: native.scope,
+        requestScope: native.request_scope
+      })
+    )
+  })
+  it("never uses route presence in place of a captured native owner", async () => {
+    const native = owner()
+    calls.detail.mockReset()
+    await expect(service.readNativeHistoryVersion(native)).rejects.toThrow(
+      "unsupported_history_capability"
+    )
+    expect(calls.detail).not.toHaveBeenCalled()
+  })
+  it("a held detail cannot survive an account lease change", async () => {
+    let current = true,
+      release!: () => void
+    const native = { ...owner(), validate_lease: () => current },
+      held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    await service.captureHistorySnapshot(native, view, "send")
+    calls.detail.mockReset().mockImplementation(async () => {
+      await held
+      return { id: "chat", history_version: 3 }
+    })
+    const pending = service.readNativeHistoryVersion(native)
+    current = false
+    release()
+    await expect(pending).rejects.toThrow("request_config_scope_changed")
+  })
 })

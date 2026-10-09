@@ -1,3 +1,4 @@
+import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
@@ -378,6 +379,7 @@ export const Playground = () => {
 
 const PlaygroundContent = () => {
   const historySelection = useHistorySelectionContext()!;
+  useChatHistoryFreshness(historySelection);
   const researchDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
   const renderedResearchFence = React.useMemo(() => historySelection.fence(), [historySelection]);
   const followUpMountedRef = React.useRef(false);
@@ -1769,7 +1771,10 @@ const PlaygroundContent = () => {
         setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
         setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
         const handoffCurrent = historySelection.fence();
-        await restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages); });
+        await restoreReadableLocalComparison(historySelection, (display) => {
+          useStoreMessageOption.setState({ history: display.history, messages: display.messages });
+        });
+
         if (signal.aborted || !handoffCurrent()) return;
         // The frozen address initializes this writer once. Reload then uses its
         // own saved address, including the original pending-confirmation pointer.

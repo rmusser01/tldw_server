@@ -1125,6 +1125,7 @@ export interface ServerChatSummary {
   root_id?: string | null
   forked_from_message_id?: string | null
   version?: number | null
+  history_version?: number | null
   scope_type?: "global" | "workspace" | null
   workspace_id?: string | null
   /** Where the search query matched. Set only by a search that includes message content. */
@@ -5822,6 +5823,10 @@ export class TldwApiClientBase {
           : typeof input?.expected_version === "number"
             ? input.expected_version
             : null,
+      history_version:
+        Number.isSafeInteger(input?.history_version) && input.history_version >= 0
+          ? input.history_version
+          : null,
       scope_type,
       workspace_id,
       matched_in: Array.isArray(input?.matched_in)
@@ -5917,7 +5922,7 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[] } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     return chatRagMethods.getChat.call(this as unknown as TldwApiClientCore, chat_id, options)
   }

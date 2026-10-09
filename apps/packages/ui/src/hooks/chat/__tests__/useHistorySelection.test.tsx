@@ -1,5 +1,6 @@
 import { useSidepanelChatFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/routes/sidepanel-chat-freshness"
 import React from "react"
+import { useChatHistoryFreshness } from "../useChatHistoryFreshness"
 import {
   act,
   fireEvent,
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   forkSettings: vi.fn(async (..._args: any[]) => null as any),
   updateForkSettings: vi.fn(async (..._args: any[]) => null as any),
   capture: vi.fn(),
+  historyVersion: vi.fn(),
   beforeBookmark: vi.fn(async () => {}),
   verifyEdit: vi.fn(async (..._args: any[]) => {}),
   confirm: vi.fn(),
@@ -80,6 +82,7 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
   getLocalHistoryOwner: (id: string) => mocks.localOwner(id)
 }))
 vi.mock("@/services/chat-history-selection", async (original) => ({
+  readNativeHistoryVersion: (...args: unknown[]) => mocks.historyVersion(...args),
   qualifyNativeMessageEditCapture: (await original<any>()).qualifyNativeMessageEditCapture,
   verifyNativeMessageEditReceipt: (...args: any[]) => mocks.verifyEdit(...args),
   captureHistorySnapshot: (...args: any[]) => mocks.capture(...args),
@@ -1990,4 +1993,399 @@ it("an actual H1 branch survives a held compact focus capture and subsequent foc
     hook.unmount()
     vi.useRealTimers()
   }
+})
+
+
+describe("shared proactive native freshness", () => {
+  const nativeOwner = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://chat.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    },
+    validate_lease: () => true
+  }
+  const mount = async () => {
+    const { useStoreMessageOption } = await import("@/store/option")
+    useStoreMessageOption.setState({
+      isLoading: false,
+      isProcessing: false,
+      streaming: false,
+      messages: [],
+      chatDraftAddress: {
+        kind: "native",
+        id: "chat",
+        ownerKey: "owner",
+        scope: { type: "global" }
+      }
+    })
+    mocks.historyVersion.mockReset().mockResolvedValue(1)
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(nativeOwner)
+      await hook.result.current.choose({
+        kind: "after_message",
+        message_id: "a"
+      })
+    })
+    return hook
+  }
+  const changed = () => {
+    const original = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementation(async (...args) => {
+      const result = await original(...args)
+      return {
+        ...result,
+        snapshot: {
+          ...result.snapshot,
+          fences: { ...result.snapshot.fences, history: "2" }
+        }
+      }
+    })
+    mocks.historyVersion.mockResolvedValue(2)
+  }
+  it("an unchanged detail requires no graph capture or display installation", async () => {
+    const hook = await mount(),
+      original = hook.result.current.getCurrent(),
+      reads = mocks.capture.mock.calls.length
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(false)
+    })
+    expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    expect(mocks.historyVersion).toHaveBeenCalledOnce()
+    expect(hook.result.current.getCurrent()).toBe(original)
+    hook.unmount()
+  })
+  it("same-ID history changes hold a passive choice without moving or saving the view", async () => {
+    const hook = await mount(),
+      origin = hook.result.current.getCurrent().view!,
+      bookmarks = [...mocks.bookmarks.values()],
+      reads = mocks.capture.mock.calls.length
+    changed()
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(true)
+    })
+    expect(hook.result.current.getCurrent().view).toBe(origin)
+    expect(hook.result.current.freshnessConflict).toBe(true)
+    expect(mocks.capture).toHaveBeenCalledTimes(reads + 1)
+    expect([...mocks.bookmarks.values()]).toEqual(bookmarks)
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+  it.each(["GET", "manifest"])(
+    "held %s cannot publish after original eligibility retires",
+    async (boundary) => {
+      const hook = await mount(),
+        origin = hook.result.current.getCurrent(),
+        reads = mocks.capture.mock.calls.length
+      changed()
+      let release!: () => void,
+        current = true
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      if (boundary === "GET")
+        mocks.historyVersion.mockImplementationOnce(async () => {
+          await held
+          return 2
+        })
+      else {
+        const original = mocks.capture.getMockImplementation()!
+        mocks.capture.mockImplementationOnce(async (...args) => {
+          await held
+          return original(...args)
+        })
+      }
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = hook.result.current.checkFreshness(() => current)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      current = false
+      await act(async () => {
+        release()
+        expect(await pending).toBe(false)
+      })
+      expect(hook.result.current.getCurrent()).toBe(origin)
+      if (boundary === "GET") expect(mocks.capture).toHaveBeenCalledTimes(reads)
+      hook.unmount()
+    }
+  )
+  it("compact focus cannot automatically choose a new parent", async () => {
+    vi.useFakeTimers()
+    const hook = renderHook(() => {
+      const selection = useHistorySelection()
+      const freshness = useSidepanelChatFreshness({
+        historySelection: selection,
+        checkableTabId: () => "active"
+      })
+      return { selection, freshness }
+    })
+    try {
+      const { useStoreMessageOption } = await import("@/store/option")
+      useStoreMessageOption.setState({
+        isLoading: false,
+        isProcessing: false,
+        streaming: false,
+        messages: [],
+        chatDraftAddress: {
+          kind: "native",
+          id: "chat",
+          ownerKey: "owner",
+          scope: { type: "global" }
+        }
+      })
+      mocks.historyVersion.mockReset().mockResolvedValue(2)
+      await act(async () => {
+        await hook.result.current.selection.open(nativeOwner)
+        await hook.result.current.selection.choose({
+          kind: "after_message",
+          message_id: "a"
+        })
+      })
+      const origin = hook.result.current.selection.getCurrent().view!
+      const next = {
+        ...snapshot,
+        fences: { ...snapshot.fences, history: "2" },
+        nodes: [
+          ...snapshot.nodes,
+          { ...snapshot.nodes[1], id: "latest", parent_id: "a" }
+        ]
+      }
+      mocks.capture.mockImplementation(async (_owner, view) => {
+        const resolved = resolveHistorySelection(next, view, "send", "")
+        if (resolved.status !== "ready") throw Error(resolved.code)
+        return {
+          status: "captured",
+          snapshot: next,
+          view,
+          rows: resolved.rows,
+          selected_content: resolved.rows.map((row) => ({
+            id: row.id,
+            revision: row.revision,
+            message: row.preview,
+            images: []
+          })),
+          purpose: "send",
+          storage_context_digest: "storage"
+        }
+      })
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(hook.result.current.selection.getCurrent().view).toBe(origin)
+      expect(hook.result.current.selection.freshnessConflict).toBe(true)
+    } finally {
+      hook.unmount()
+      vi.useRealTimers()
+    }
+  })
+  it("Load latest refuses before capture while a message edit is open", async () => {
+    const hook = await mount(),
+      origin = hook.result.current.getCurrent().view!,
+      reads = mocks.capture.mock.calls.length
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+    })
+    const editor = document.createElement("form")
+    editor.dataset.chatMessageEditor = ""
+    document.body.append(editor)
+    try {
+      await act(async () => {
+        expect(await hook.result.current.loadLatest(origin, () => true)).toBe(
+          false
+        )
+      })
+      expect(mocks.capture).toHaveBeenCalledTimes(reads)
+      expect(hook.result.current.getCurrent().view).toBe(origin)
+    } finally {
+      editor.remove()
+      hook.unmount()
+    }
+  })
+  it("a message editor opened during Load latest keeps the original captured view", async () => {
+    const hook = await mount(),
+      original = hook.result.current.getCurrent(),
+      origin = original.view!
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+    })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+        release = resolve
+      }),
+      capture = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return capture(...args)
+    })
+    let loading!: Promise<boolean>
+    act(() => {
+      loading = hook.result.current.loadLatest(origin, () => true)
+    })
+    const editor = document.createElement("form")
+    editor.dataset.chatMessageEditor = ""
+    document.body.append(editor)
+    try {
+      await act(async () => {
+        release()
+        expect(await loading).toBe(false)
+      })
+      expect(hook.result.current.getCurrent().view).toBe(origin)
+      expect(hook.result.current.getCurrent().capture).toBe(original.capture)
+      expect(hook.result.current.status).toBe("stale_selection")
+    } finally {
+      editor.remove()
+      hook.unmount()
+    }
+  })
+  it.each(["New", "H1", "draft", "owner", "busy", "editor", "unmount"])(
+    "a held detail cannot publish across %s",
+    async (boundary) => {
+      const hook = await mount(),
+        reads = mocks.capture.mock.calls.length
+      let release!: () => void,
+        valid = true
+      const held = new Promise<void>((resolve) => {
+          release = resolve
+        }),
+        validate = nativeOwner.validate_lease
+      nativeOwner.validate_lease = () => valid
+      mocks.historyVersion.mockImplementationOnce(async () => {
+        await held
+        return 2
+      })
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = hook.result.current.checkFreshness(() => true)
+      })
+      const { useStoreMessageOption } = await import("@/store/option")
+      const editor = document.createElement("form")
+      editor.dataset.chatMessageEditor = ""
+      act(() => {
+        if (boundary === "New") hook.result.current.reset()
+        if (boundary === "H1") hook.result.current.beginLoad()
+        if (boundary === "draft")
+          useStoreMessageOption.getState().startNewChatDraft()
+        if (boundary === "owner") valid = false
+        if (boundary === "busy")
+          useStoreMessageOption.setState({ isProcessing: true })
+        if (boundary === "editor") document.body.append(editor)
+        if (boundary === "unmount") hook.unmount()
+      })
+      try {
+        await act(async () => {
+          release()
+          expect(await pending).toBe(false)
+        })
+        expect(mocks.capture).toHaveBeenCalledTimes(reads)
+        expect(hook.result.current.freshnessConflict).toBe(false)
+      } finally {
+        nativeOwner.validate_lease = validate
+        editor.remove()
+        hook.unmount()
+        useStoreMessageOption.setState({ isProcessing: false })
+      }
+    }
+  )
+  it("an armed explicit branch does not read or change its intent on focus checks", async () => {
+    const hook = await mount(),
+      origin = hook.result.current.getCurrent().view!
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+      hook.result.current.branchHere(origin, () => true)
+    })
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(false)
+    })
+    expect(mocks.historyVersion).not.toHaveBeenCalled()
+    expect(hook.result.current.branchPending).toBe(true)
+    expect(hook.result.current.getCurrent().view).toBe(origin)
+    hook.unmount()
+  })
+  it("unavailable detail leaves saved state and recovery untouched", async () => {
+    const hook = await mount(),
+      original = hook.result.current.getCurrent(),
+      reads = mocks.capture.mock.calls.length
+    mocks.historyVersion.mockRejectedValueOnce(
+      Error("unsupported_history_version")
+    )
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(false)
+    })
+    expect(hook.result.current.getCurrent()).toBe(original)
+    expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+
+  it("the active full-view hook coalesces focus/visibility and skips unchanged graph reads", async () => {
+    vi.useFakeTimers()
+    const hook = renderHook(() => {
+      const selection = useHistorySelection()
+      useChatHistoryFreshness(selection)
+      return selection
+    })
+    try {
+      const { useStoreMessageOption } = await import("@/store/option")
+      useStoreMessageOption.setState({
+        isLoading: false,
+        isProcessing: false,
+        streaming: false,
+        chatDraftAddress: {
+          kind: "native",
+          id: "chat",
+          ownerKey: "owner",
+          scope: { type: "global" }
+        }
+      })
+      mocks.historyVersion.mockReset().mockResolvedValue(1)
+      await act(async () => {
+        await hook.result.current.open(nativeOwner)
+        await hook.result.current.choose({
+          kind: "after_message",
+          message_id: "a"
+        })
+      })
+      const reads = mocks.capture.mock.calls.length
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"))
+        document.dispatchEvent(new Event("visibilitychange"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(mocks.historyVersion).toHaveBeenCalledOnce()
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(mocks.historyVersion).toHaveBeenCalledOnce()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_MIN_INTERVAL_MS)
+        document.dispatchEvent(new Event("visibilitychange"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(mocks.historyVersion).toHaveBeenCalledTimes(2)
+      expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    } finally {
+      hook.unmount()
+      vi.useRealTimers()
+    }
+  })
+  it("an opening-only controller remains passive on focus", async () => {
+    const hook = await mount()
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    expect(mocks.historyVersion).not.toHaveBeenCalled()
+    hook.unmount()
+  })
 })

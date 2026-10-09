@@ -1,4 +1,5 @@
 import { captureChatDraftSource } from "./chat-draft-transition"
+import { useStoreMessageOption } from "@/store/option"
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
@@ -37,6 +38,7 @@ import {
   readNativeForkSettings,
   updateNativeForkSettings,
   captureHistorySnapshot,
+  readNativeHistoryVersion,
   qualifyNativeMessageEditCapture,
   verifyNativeMessageEditReceipt,
   type NativeMessageEditReceipt,
@@ -146,6 +148,17 @@ export type HistoryLoadReceipt = {
   view: HistoryViewSelectionV1
 }
 
+const historyRecoveryAvailable = () => {
+  const state = useStoreMessageOption.getState()
+  return (
+    !state.isLoading &&
+    !state.streaming &&
+    !state.isProcessing &&
+    (typeof document === "undefined" ||
+      !document.querySelector("form[data-chat-message-editor]"))
+  )
+}
+
 /** One controller per mounted view. Reopen references initialize a fresh writer. */
 export function useHistorySelection(
   options: {
@@ -184,12 +197,14 @@ export function useHistorySelection(
   const epoch = useRef(0)
   const sendChoice = useRef<{
     kind: "conflict" | "branch"
+    reason?: "send" | "freshness"
     owner: HistoryOwnerV1
     view: HistoryViewSelectionV1
     epoch: number
     isCurrent: () => boolean
   } | null>(null)
   const request = useRef<AbortController | null>(null)
+  const freshnessRequest = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   const saves = useRef(Promise.resolve())
   const storageKey = useRef(options.storageKey)
@@ -200,6 +215,8 @@ export function useHistorySelection(
   const invalidate = useCallback(() => {
     epoch.current += 1
     sendChoice.current = null
+    freshnessRequest.current?.abort()
+    freshnessRequest.current = null
     if (mounted.current) {
       // Keep already-empty lists: a fresh [] would re-render every consumer on
       // each load start, and callers that start a load from an effect would
@@ -1561,7 +1578,11 @@ export function useHistorySelection(
     )
   }, [])
   const holdStaleSend = useCallback(
-    (origin: HistoryViewSelectionV1, isCurrent: () => boolean) => {
+    (
+      origin: HistoryViewSelectionV1,
+      isCurrent: () => boolean,
+      reason: "send" | "freshness" = "send"
+    ) => {
       const current = live.current
       if (
         !mounted.current ||
@@ -1576,6 +1597,7 @@ export function useHistorySelection(
       const draft = captureChatDraftSource()
       sendChoice.current = {
         kind: "conflict",
+        reason,
         owner: current.owner,
         view: origin,
         epoch: epoch.current,
@@ -1596,6 +1618,7 @@ export function useHistorySelection(
         sendChoice.current?.kind !== "conflict" ||
         !sendChoiceIsCurrent() ||
         live.current.view !== origin ||
+        !historyRecoveryAvailable() ||
         !isCurrent()
       )
         return false
@@ -1633,20 +1656,23 @@ export function useHistorySelection(
         sendChoice.current?.kind !== "conflict" ||
         !sendChoiceIsCurrent() ||
         live.current.view !== origin ||
+        !historyRecoveryAvailable() ||
         !isCurrent()
       )
         return false
       const current = live.current
+      const reason = sendChoice.current?.reason
       if (current.owner?.kind !== "native" || !current.bookmarkScope) return false
       const draft = captureChatDraftSource()
       const operation = invalidate()
-      const owned = () =>
+      const sourceOwned = () =>
         mounted.current &&
         operation.epoch === epoch.current &&
         live.current.owner === current.owner &&
         ownerLeaseValid(current.owner) &&
         draft.isCurrent() &&
         isCurrent()
+      const owned = () => sourceOwned() && historyRecoveryAvailable()
       publish({ ...current, status: "loading", error: null })
       try {
         const manifest = await captureHistorySnapshot(
@@ -1685,6 +1711,7 @@ export function useHistorySelection(
         if (owned()) {
           sendChoice.current = {
             kind: "conflict",
+            reason,
             owner: current.owner,
             view: origin,
             epoch: operation.epoch,
@@ -1698,11 +1725,98 @@ export function useHistorySelection(
         }
         return false
       } finally {
-        if (!owned() && live.current.status === "loading")
-          retireCancelledLoad(operation.epoch, current.owner, origin)
+        if (!owned() && live.current.status === "loading") {
+          if (sourceOwned()) {
+            sendChoice.current = {
+              kind: "conflict",
+              reason,
+              owner: current.owner,
+              view: origin,
+              epoch: operation.epoch,
+              isCurrent: () => draft.isCurrent() && isCurrent()
+            }
+            publish({
+              ...current,
+              status: "stale_selection",
+              error: current.error
+            })
+          } else retireCancelledLoad(operation.epoch, current.owner, origin)
+        }
       }
     },
     [install, invalidate, publish, retireCancelledLoad, sendChoiceIsCurrent]
+  )
+
+  const checkFreshness = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      const current = live.current
+      const address = useStoreMessageOption.getState().chatDraftAddress
+      if (
+        freshnessRequest.current ||
+        !mounted.current ||
+        current.status !== "ready" ||
+        current.owner?.kind !== "native" ||
+        !current.view ||
+        current.capture?.status !== "captured" ||
+        sendChoice.current?.kind === "branch" ||
+        !ownerLeaseValid(current.owner) ||
+        !isCurrent() ||
+        !historyRecoveryAvailable() ||
+        (address &&
+          (address.kind !== "native" ||
+            address.id !== current.owner.conversation_id ||
+            address.ownerKey !== current.view.owner_key))
+      )
+        return false
+      const { owner, view, capture } = current
+      const token = epoch.current
+      const draft = captureChatDraftSource()
+      const probe = new AbortController()
+      freshnessRequest.current = probe
+      const sourceCurrent = () =>
+        mounted.current &&
+        token === epoch.current &&
+        live.current.owner === owner &&
+        live.current.view === view &&
+        ownerLeaseValid(owner) &&
+        draft.isCurrent() &&
+        isCurrent()
+      const probing = () =>
+        freshnessRequest.current === probe &&
+        !probe.signal.aborted &&
+        sourceCurrent() &&
+        live.current.status === "ready" &&
+        historyRecoveryAvailable() &&
+        sendChoice.current?.kind !== "branch"
+      try {
+        const version = await readNativeHistoryVersion(owner, {
+          signal: probe.signal,
+          validate_lease: probing
+        })
+        if (!probing() || String(version) === capture.snapshot.fences.history)
+          return false
+        const manifest = await captureHistorySnapshot(
+          owner,
+          { ...view, cursor: { kind: "empty" } },
+          "send",
+          probe.signal
+        )
+        if (
+          !probing() ||
+          manifest.status !== "captured" ||
+          manifest.snapshot.fences.history === capture.snapshot.fences.history
+        )
+          return false
+        return holdStaleSend(view, sourceCurrent, "freshness")
+      } catch {
+        // A failed background read supplies no freshness or non-admission evidence.
+        if (probing()) console.warn("Could not check conversation updates.")
+        return false
+      } finally {
+        if (freshnessRequest.current === probe) freshnessRequest.current = null
+      }
+    },
+    [holdStaleSend]
   )
 
   const getCurrent = useCallback(() => live.current, [])
@@ -1749,10 +1863,12 @@ export function useHistorySelection(
     getSignal: () => request.current?.signal,
     getCurrent,
     holdStaleSend,
+    checkFreshness,
     branchHere,
     takeBranchIntent,
     loadLatest,
     sendConflict: sendChoice.current?.kind === "conflict" && sendChoiceIsCurrent(),
+    freshnessConflict: sendChoice.current?.kind === "conflict" && sendChoice.current.reason === "freshness" && sendChoiceIsCurrent(),
     branchPending: sendChoice.current?.kind === "branch" && sendChoiceIsCurrent()
   }
 }

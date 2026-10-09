@@ -392,6 +392,10 @@ export const chatRagMethods = {
         Number.isSafeInteger(input?.version) && input.version > 0
           ? input.version
           : null,
+      history_version:
+        Number.isSafeInteger(input?.history_version) && input.history_version >= 0
+          ? input.history_version
+          : null,
       scope_type,
       workspace_id,
       matched_in: Array.isArray(input?.matched_in)
@@ -803,7 +807,7 @@ export const chatRagMethods = {
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[] } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
@@ -820,6 +824,23 @@ export const chatRagMethods = {
       ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
     options?.signal?.throwIfAborted()
+    if (
+      options?.requireHistoryVersion &&
+      (!res ||
+        typeof res !== "object" ||
+        Array.isArray(res) ||
+        typeof res.id !== "string" ||
+        res.id !== cid ||
+        !Number.isSafeInteger(res.history_version) ||
+        res.history_version < 0 ||
+        (options.scope &&
+          (res.scope_type !== options.scope.type ||
+            (options.scope.type === "workspace"
+              ? res.workspace_id !== options.scope.workspaceId
+              : res.workspace_id != null))))
+    )
+      throw new Error("unsupported_history_version")
+
     if (requiredMetadata.length && (!res || typeof res !== "object" || Array.isArray(res) ||
       !["string", "number"].includes(typeof res.id) || String(res.id) !== cid ||
       !Number.isSafeInteger(res.version) || res.version <= 0 || requiredMetadata.some(key =>
