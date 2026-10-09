@@ -124,6 +124,8 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
+  // Preserve catalog refresh cooldown across worker restarts.
+  private readonly FORCE_COOLDOWN_KEY = "tldwModelsForceCooldown"
   private readonly CACHE_SCHEMA_VERSION = 5
   private readonly INVALIDATION_TOKEN_HISTORY_LIMIT = 64
   private storage = createSafeStorage({ area: "local" })
@@ -177,6 +179,22 @@ export class TldwModelsService {
             this.lastFetchTime = Number(cached.timestamp || 0)
             this.cacheScopeKey =
               typeof cached.scope === "string" ? cached.scope : null
+          }
+          // Hydrate the force-cooldown so a restarted worker instance still
+          // honors the cooldown window from before the suspension.
+          const persistedCooldown = await this.storage.get<
+            number | { at?: number } | null
+          >(this.FORCE_COOLDOWN_KEY)
+          const persistedAt =
+            typeof persistedCooldown === "number"
+              ? persistedCooldown
+              : Number((persistedCooldown as { at?: number } | null)?.at || 0)
+          if (
+            loadGeneration === this.invalidationGeneration &&
+            Number.isFinite(persistedAt) &&
+            persistedAt > this.lastForcedFetchTime
+          ) {
+            this.lastForcedFetchTime = persistedAt
           }
         } catch {
           // ignore storage read failures
@@ -238,6 +256,25 @@ export class TldwModelsService {
     await write
   }
 
+  private async persistForceCooldown(
+    at: number | null,
+    expectedGeneration = this.invalidationGeneration
+  ): Promise<void> {
+    const write = this.storageWritePromise.then(async () => {
+      // FIFO clearing must survive a successor's fresh-read generation.
+      if (at !== null && expectedGeneration !== this.invalidationGeneration)
+        return
+      try {
+        if (at === null) await this.storage.remove?.(this.FORCE_COOLDOWN_KEY)
+        else await this.storage.set(this.FORCE_COOLDOWN_KEY, at)
+      } catch {
+        // Optional performance metadata must not block model discovery.
+      }
+    })
+    this.storageWritePromise = write
+    await write
+  }
+
   private invalidateCacheState() {
     this.invalidationGeneration += 1
     this.cacheScopeGeneration += 1
@@ -248,6 +285,7 @@ export class TldwModelsService {
     this.inFlightFreshFetch = null
     this.cacheScopeKey = null
     this.cookiePrincipalId = null
+    void this.persistForceCooldown(null, this.invalidationGeneration)
   }
 
   private applyInvalidationRecord(value: unknown): boolean {
@@ -484,6 +522,7 @@ export class TldwModelsService {
         this.lastFetchTime = Date.now()
         if (forceRefresh) {
           this.lastForcedFetchTime = this.lastFetchTime
+          void this.persistForceCooldown(this.lastForcedFetchTime, fetchGeneration)
         }
         // Cookie catalogs require live auth and never hydrate offline.
         if (!cookieSession) await this.persistCache(fetchGeneration)
@@ -756,6 +795,16 @@ export class TldwModelsService {
     options?: { refreshOpenRouter?: boolean }
   ): Promise<ModelInfo[]> {
     return await this.getModels(force, options)
+  }
+
+  /**
+   * Whether the persisted catalog is present and inside its TTL, without
+   * issuing any network traffic. Used to no-op periodic warm-up work.
+   */
+  async isCatalogFresh(): Promise<boolean> {
+    await this.ensureStorageLoaded()
+    if (!this.cachedModels) return false
+    return Date.now() - this.lastFetchTime < this.CACHE_DURATION
   }
 }
 

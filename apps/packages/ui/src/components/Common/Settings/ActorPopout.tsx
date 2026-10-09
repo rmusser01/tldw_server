@@ -1,7 +1,6 @@
 import React from "react"
 import { Button, Drawer, Form, Modal, Segmented, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
-import { useMessageOption } from "@/hooks/useMessageOption"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
@@ -30,7 +29,14 @@ const loadActorSettings = () => import("@/services/actor-settings")
 export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const { t } = useTranslation(["playground", "common"])
   const { historyId, serverChatId, serverChatAssistantKind } =
-    useMessageOption()
+    useStoreMessageOption(
+      (state) => ({
+        historyId: state.historyId,
+        serverChatId: state.serverChatId,
+        serverChatAssistantKind: state.serverChatAssistantKind
+      }),
+      shallow
+    )
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
   const [selectedAssistant, , assistantMeta] = useSelectedAssistant(null)
   const accountIsCurrent = assistantMeta?.isCurrent

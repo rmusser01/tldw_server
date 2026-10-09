@@ -160,7 +160,10 @@ vi.mock("@/components/Common/PageAssistLoader", () => ({
 
 vi.mock("@web/components/networking/ServerReadinessGate", async (original) => {
   const actual = await original<typeof import("@web/components/networking/ServerReadinessGate")>()
-  return { ServerReadinessGate: (props: React.ComponentProps<typeof actual.ServerReadinessGate>) =>
+  return {
+    warmServerReadinessHealth: vi.fn((...args: Parameters<typeof actual.warmServerReadinessHealth>) =>
+      firstRun.realReadiness ? actual.warmServerReadinessHealth(...args) : undefined),
+    ServerReadinessGate: (props: React.ComponentProps<typeof actual.ServerReadinessGate>) =>
     firstRun.realReadiness ? <actual.ServerReadinessGate {...props} /> : (
       <div data-testid="server-readiness-gate" data-allow-degraded={String(Boolean(props.allowDegraded))}>
         {props.children}

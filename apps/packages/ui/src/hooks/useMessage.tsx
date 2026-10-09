@@ -63,6 +63,32 @@ import {
   createRegenerateLastMessage,
 } from "./handlers/messageHandlers";
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
+import {
+  createStreamingUpdateScheduler,
+  type StreamingUpdateScheduler,
+} from "@/utils/streaming-update-scheduler";
+
+type StreamingTextUpdate = { text: string; reasoningTime: number };
+
+const createStreamingTextScheduler = (
+  generateMessageId: string,
+  setMessages: (updater: (prev: Message[]) => Message[]) => void,
+  shouldFlush: () => boolean
+): StreamingUpdateScheduler<StreamingTextUpdate> =>
+  createStreamingUpdateScheduler<StreamingTextUpdate>({
+    shouldFlush,
+    apply: ({ text, reasoningTime }) =>
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === generateMessageId
+            ? updateActiveVariant(message, {
+                message: text,
+                reasoning_time_taken: reasoningTime
+              })
+            : message
+        )
+      )
+  })
 import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ToolCall } from "@/types/tool-calls";
 import {
@@ -105,6 +131,7 @@ import {
   isGreetingMessageType,
 } from "@/utils/character-greetings";
 import { useSidepanelChatMetadata, type QueuedDispatchGuard } from "@/hooks/chat/useSidepanelChatMetadata";
+import { useShallow } from "zustand/react/shallow";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
@@ -188,7 +215,26 @@ export const useMessage = () => {
     setActionInfo,
     replyTarget,
     clearReplyTarget,
-  } = useStoreMessageOption();
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      setIsSearchingInternet: state.setIsSearchingInternet,
+      webSearch: state.webSearch,
+      setWebSearch: state.setWebSearch,
+      toolChoice: state.toolChoice,
+      setToolChoice: state.setToolChoice,
+      isSearchingInternet: state.isSearchingInternet,
+      temporaryChat: state.temporaryChat,
+      setTemporaryChat: state.setTemporaryChat,
+      queuedMessages: state.queuedMessages,
+      addQueuedMessage: state.addQueuedMessage,
+      setQueuedMessages: state.setQueuedMessages,
+      clearQueuedMessages: state.clearQueuedMessages,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
+      setActionInfo: state.setActionInfo,
+      replyTarget: state.replyTarget,
+      clearReplyTarget: state.clearReplyTarget,
+    })),
+  );
   const [defaultInternetSearchOn] = useStorage(
     "defaultInternetSearchOn",
     false,
@@ -255,7 +301,35 @@ export const useMessage = () => {
     setServerChatSource,
     serverChatExternalRef,
     setServerChatExternalRef,
-  } = useStoreMessageOption();
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      serverChatId: state.serverChatId,
+      setServerChatId: state.setServerChatId,
+      serverChatTitle: state.serverChatTitle,
+      setServerChatTitle: state.setServerChatTitle,
+      serverChatCharacterId: state.serverChatCharacterId,
+      setServerChatCharacterId: state.setServerChatCharacterId,
+      serverChatAssistantKind: state.serverChatAssistantKind,
+      setServerChatAssistantKind: state.setServerChatAssistantKind,
+      serverChatAssistantId: state.serverChatAssistantId,
+      setServerChatAssistantId: state.setServerChatAssistantId,
+      serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
+      setServerChatPersonaMemoryMode: state.setServerChatPersonaMemoryMode,
+      serverChatMetaLoaded: state.serverChatMetaLoaded,
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
+      serverChatState: state.serverChatState,
+      setServerChatState: state.setServerChatState,
+      setServerChatVersion: state.setServerChatVersion,
+      serverChatTopic: state.serverChatTopic,
+      setServerChatTopic: state.setServerChatTopic,
+      serverChatClusterId: state.serverChatClusterId,
+      setServerChatClusterId: state.setServerChatClusterId,
+      serverChatSource: state.serverChatSource,
+      setServerChatSource: state.setServerChatSource,
+      serverChatExternalRef: state.serverChatExternalRef,
+      setServerChatExternalRef: state.setServerChatExternalRef,
+    })),
+  );
   const notification = useAntdNotification();
   const { settings: chatSettings } = useChatSettingsRecord({
     historyId,
@@ -404,8 +478,12 @@ export const useMessage = () => {
     return true;
   };
 
-  const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision;
-  const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress;
+  const renderedDraftRevision = useStoreMessageOption(
+    (state) => state.chatDraftRevision
+  )
+  const renderedSettingsDraft = useStoreMessageOption(
+    (state) => state.chatDraftAddress
+  )
   const settingsDraftIsCurrent = () => {
     const draft = useStoreMessageOption.getState();
     return actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
@@ -461,6 +539,7 @@ export const useMessage = () => {
     signal: AbortSignal,
     embeddingSignal: AbortSignal,
     servicePromptSnapshot: ServicePromptSnapshot,
+    streamingSourceIsCurrent: () => boolean,
     regenerateFromMessage?: Message,
     queuedGuard?: QueuedDispatchGuard,
   ) => {
@@ -599,6 +678,16 @@ export const useMessage = () => {
       }
     }
     setMessages(newMessage);
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+      () =>
+        streamingSourceIsCurrent() &&
+        !executionSignal.aborted &&
+        !scopeInvalidatedSignal.aborted
+    )
     try {
       let query = message;
       if (newMessage.length > 2) {
@@ -732,16 +821,9 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        setMessages((prev) => {
-          return prev.map((message) => {
-            if (message.id === generateMessageId) {
-              return updateActiveVariant(message, {
-                message: fullText + "▋",
-                reasoning_time_taken: timetaken,
-              });
-            }
-            return message;
-          });
+        streamingScheduler.schedule({
+          text: fullText + "▋",
+          reasoningTime: timetaken,
         });
         count++;
       }
@@ -752,6 +834,9 @@ export const useMessage = () => {
         throw abortError;
       }
 
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the checks below throw.
+      streamingScheduler.flushNow();
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -812,6 +897,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       const scopeAborted = shouldAbortForScopeChange();
       if (scopeAborted || isRequestConfigScopeChangedError(e)) {
         setMessages(messages);
@@ -915,6 +1003,7 @@ export const useMessage = () => {
     messages: Message[],
     history: ChatHistory,
     signal: AbortSignal,
+    streamingSourceIsCurrent: () => boolean,
     regenerateFromMessage?: Message,
     queuedGuard?: QueuedDispatchGuard,
   ) => {
@@ -1010,6 +1099,13 @@ export const useMessage = () => {
     }
     let fullText = "";
     let contentToSave = "";
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+      streamingSourceIsCurrent
+    )
 
     try {
       const prompt = await systemPromptForNonRag();
@@ -1117,19 +1213,15 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        setMessages((prev) => {
-          return prev.map((message) => {
-            if (message.id === generateMessageId) {
-              return updateActiveVariant(message, {
-                message: fullText + "▋",
-                reasoning_time_taken: timetaken,
-              });
-            }
-            return message;
-          });
+        streamingScheduler.schedule({
+          text: fullText + "▋",
+          reasoningTime: timetaken,
         });
         count++;
       }
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the checks below throw.
+      streamingScheduler.flushNow();
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -1178,6 +1270,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -1243,6 +1338,7 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     model: string,
+    streamingSourceIsCurrent: () => boolean,
     characterOverride?: Character | null,
     regenerateFromMessage?: Message,
     serverChatIdOverride?: string | null,
@@ -1335,6 +1431,13 @@ export const useMessage = () => {
     if (!activeCharacter?.id) {
       throw new Error("No character selected");
     }
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+      streamingSourceIsCurrent
+    )
     const emoteStream = createCharacterEmoteStream();
     const getExplicitEmoteMoodLabel = () =>
       emoteStream.events.length > 0
@@ -1715,16 +1818,10 @@ export const useMessage = () => {
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
         if (chunkState.token && fullText !== previousFullText) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === generateMessageId
-                ? updateActiveVariant(m, {
-                    message: fullText + "▋",
-                    reasoning_time_taken: timetaken,
-                  })
-                : m,
-            ),
-          );
+          streamingScheduler.schedule({
+            text: fullText + "▋",
+            reasoningTime: timetaken,
+          });
         }
         if (count === 0) setIsProcessing(true);
 
@@ -1746,6 +1843,9 @@ export const useMessage = () => {
         count++;
         if (signal?.aborted) break;
       }
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the inactivity/abort checks below throw.
+      streamingScheduler.flushNow();
       if (inactivityTimer) clearTimeout(inactivityTimer);
       flushCharacterEmoteStream();
 
@@ -2005,6 +2105,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -2101,6 +2204,7 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     messageType: string,
+    streamingSourceIsCurrent: () => boolean,
     regenerateFromMessage?: Message,
     options?: {
       selectedModel?: string | null;
@@ -2219,6 +2323,13 @@ export const useMessage = () => {
     }
     let fullText = "";
     let contentToSave = "";
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+      streamingSourceIsCurrent
+    )
 
     try {
       const prompt = await getPrompt(messageType);
@@ -2295,20 +2406,16 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        setMessages((prev) => {
-          return prev.map((message) => {
-            if (message.id === generateMessageId) {
-              return updateActiveVariant(message, {
-                message: fullText + "▋",
-                reasoning_time_taken: timetaken,
-              });
-            }
-            return message;
-          });
+        streamingScheduler.schedule({
+          text: fullText + "▋",
+          reasoningTime: timetaken,
         });
         count++;
       }
 
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the checks below throw.
+      streamingScheduler.flushNow();
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -2360,6 +2467,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -2690,6 +2800,14 @@ export const useMessage = () => {
     if (!beginResponse()) return chatSubmitSkipped("stale_selection");
     if (!usesLegacySidepanelRag) setAbortController(activeController);
     activeNormalControllerRef.current = activeController;
+    const streamingSourceIsCurrent = () =>
+      settingsDraftIsCurrent() &&
+      (!historyOriginIsCurrent || historyOriginIsCurrent()) &&
+      activeNormalControllerRef.current === activeController &&
+      (!getAbortController || getAbortController() === activeController) &&
+      !signal.aborted &&
+      (!assertQueuedDispatchCurrent ||
+        assertQueuedDispatchCurrent.isSourceCurrent?.() === true)
     if (nativeServerTurn) { setIsProcessing(true); setStreaming(true); }
     const releaseNormalControllerIfOwned = () => {
       if (activeNormalControllerRef.current !== activeController ||
@@ -2850,6 +2968,7 @@ export const useMessage = () => {
           memory || history,
           signal,
           messageType,
+          streamingSourceIsCurrent,
           regenerateFromMessage,
           {
             selectedModel: resolvedSelectedModel,
@@ -2973,6 +3092,7 @@ export const useMessage = () => {
               memory || history,
               signal,
               model,
+              streamingSourceIsCurrent,
               hydratedTrackedCharacter,
               regenerateFromMessage,
               serverChatIdOverride,
@@ -3184,6 +3304,7 @@ export const useMessage = () => {
             chatHistory || messages,
             memory || history,
             signal,
+            streamingSourceIsCurrent,
             regenerateFromMessage,
             assertQueuedDispatchCurrent,
           );
@@ -3200,6 +3321,7 @@ export const useMessage = () => {
             signal,
             embeddingSignal,
             servicePromptSnapshot!,
+            streamingSourceIsCurrent,
             regenerateFromMessage,
             assertQueuedDispatchCurrent,
           );

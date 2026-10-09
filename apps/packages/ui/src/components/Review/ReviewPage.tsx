@@ -63,6 +63,10 @@ import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
 import { getDesignSystemState } from "@/design-system"
 const Markdown = React.lazy(() => import("@/components/Common/Markdown"))
 
+// Debounce for keyword-suggestion searches triggered by Select onSearch
+// (per-keystroke network calls, TASK-13511).
+const KEYWORD_SUGGESTION_DEBOUNCE_MS = 300
+
 type MediaItem = any
 type NoteItem = any
 
@@ -775,29 +779,56 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
     modeToastPrev.current = analysisMode
   }, [analysisMode, scopedKey, allowGeneration])
 
+  // Keyword suggestions are debounced (TASK-13511): the Select's onSearch
+  // fires per keystroke and each call hits /notes/keywords/search; out-of-
+  // order responses previously raced and overwrote each other. The sequence
+  // token drops stale responses.
+  const keywordSuggestionSeqRef = React.useRef(0)
+  const keywordSuggestionTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
+  React.useEffect(() => {
+    return () => {
+      if (keywordSuggestionTimerRef.current) {
+        clearTimeout(keywordSuggestionTimerRef.current)
+      }
+    }
+  }, [])
   const loadKeywordSuggestions = React.useCallback(
-    async (text: string) => {
+    (text: string) => {
       const q = String(text || "").trim()
+      if (keywordSuggestionTimerRef.current) {
+        clearTimeout(keywordSuggestionTimerRef.current)
+        keywordSuggestionTimerRef.current = null
+      }
       if (!q) {
+        keywordSuggestionSeqRef.current += 1
         setKeywordOptions(preloadedKeywords)
         return
       }
-
-      try {
-        const serverOpts = await searchNoteKeywords(q, 10)
-        const preloadMatches = preloadedKeywords.filter((k) =>
-          k.toLowerCase().includes(q.toLowerCase())
-        )
-        const merged = Array.from(
-          new Set<string>([...serverOpts, ...preloadMatches])
-        ) as string[]
-        setKeywordOptions(merged)
-      } catch {
-        const preloadMatches = preloadedKeywords.filter((k) =>
-          k.toLowerCase().includes(q.toLowerCase())
-        )
-        setKeywordOptions(preloadMatches)
-      }
+      const seq = ++keywordSuggestionSeqRef.current
+      keywordSuggestionTimerRef.current = setTimeout(() => {
+        keywordSuggestionTimerRef.current = null
+        void (async () => {
+          try {
+            const serverOpts = await searchNoteKeywords(q, 10)
+            if (seq !== keywordSuggestionSeqRef.current) return
+            const preloadMatches = preloadedKeywords.filter((k) =>
+              k.toLowerCase().includes(q.toLowerCase())
+            )
+            const merged = Array.from(
+              new Set<string>([...serverOpts, ...preloadMatches])
+            ) as string[]
+            setKeywordOptions(merged)
+          } catch {
+            if (seq !== keywordSuggestionSeqRef.current) return
+            const preloadMatches = preloadedKeywords.filter((k) =>
+              k.toLowerCase().includes(q.toLowerCase())
+            )
+            setKeywordOptions(preloadMatches)
+          }
+        })()
+      }, KEYWORD_SUGGESTION_DEBOUNCE_MS)
     },
     [preloadedKeywords]
   )

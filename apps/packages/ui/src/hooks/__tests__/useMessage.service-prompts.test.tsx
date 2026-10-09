@@ -268,19 +268,42 @@ vi.mock("~/store/option", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/store/option")>()
   return {
     useStoreMessageOption: Object.assign(
-      (selector?: (state: Record<string, unknown>) => unknown) =>
+      (
+        selector?: (state: Record<string, unknown>) => unknown,
+        equalityFn?: (a: unknown, b: unknown) => boolean
+      ) =>
         mocks.useRealQueueState
-          ? actual.useStoreMessageOption(selector ?? (state => state))
-          : selector ? selector(mocks.storeState) : mocks.storeState,
+          ? actual.useStoreMessageOption(
+              selector ?? ((state) => state),
+              equalityFn
+            )
+          : selector
+            ? selector(mocks.storeState)
+            : mocks.storeState,
       {
-        setState: (update: Record<string, unknown> | ((state: typeof mocks.storeState) => Record<string, unknown>)) => {
-          if (mocks.useRealQueueState) actual.useStoreMessageOption.setState(update)
-          else Object.assign(mocks.storeState, typeof update === "function" ? update(mocks.storeState) : update)
+        setState: (
+          update:
+            | Record<string, unknown>
+            | ((state: typeof mocks.storeState) => Record<string, unknown>)
+        ) => {
+          if (mocks.useRealQueueState)
+            actual.useStoreMessageOption.setState(update)
+          else
+            Object.assign(
+              mocks.storeState,
+              typeof update === "function" ? update(mocks.storeState) : update
+            )
         },
-        getState: () => mocks.useRealQueueState
-          ? actual.useStoreMessageOption.getState() : mocks.storeState,
-        subscribe: (listener: Parameters<typeof actual.useStoreMessageOption.subscribe>[0]) =>
-          mocks.useRealQueueState ? actual.useStoreMessageOption.subscribe(listener) : () => {}
+        getState: () =>
+          mocks.useRealQueueState
+            ? actual.useStoreMessageOption.getState()
+            : mocks.storeState,
+        subscribe: (
+          listener: Parameters<typeof actual.useStoreMessageOption.subscribe>[0]
+        ) =>
+          mocks.useRealQueueState
+            ? actual.useStoreMessageOption.subscribe(listener)
+            : () => {}
       }
     )
   }
@@ -709,6 +732,186 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       realStore.setState(previous, true)
       mocks.useRealQueueState = false
       mocks.saveMessageOnSuccess.mockReset()
+      vi.mocked(normalChatMode).mockReset()
+    }
+  })
+
+  it.each([
+    ...(["rag", "vision", "preset", "character"] as const).flatMap((mode) =>
+      (["current", "source", "stop", "newer-controller", "unmount"] as const).map(
+        (boundary) => ({ mode, boundary })
+      )
+    ),
+    { mode: "rag" as const, boundary: "account" as const }
+  ])(
+    "deferred legacy $mode text respects its $boundary boundary",
+    async ({ mode, boundary }) => {
+      const { useStoreMessageOption: realStore } =
+        await vi.importActual<typeof import("@/store/option")>("@/store/option")
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      const previous = realStore.getState()
+      const oldCharacter = mocks.selectedCharacter
+      const oldAssistant = mocks.selectedAssistant
+      const oldEffective = mocks.effectiveAssistantState
+      const controller = new AbortController()
+      const account = new AbortController()
+      let resume!: () => void
+      let entered!: () => void
+      const held = new Promise<void>((resolve) => {
+        resume = resolve
+      })
+      const started = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const stream = async function* () {
+        yield "Deferred answer"
+        entered()
+        await held
+      }
+      mocks.useRealQueueState = true
+      realStore.getState().startNewChatDraft()
+      realStore.setState({
+        historyId: null,
+        serverChatId: mode === "character" ? "character-chat" : null,
+        messages: [],
+        history: [],
+        chatMode: mode === "character" || mode === "preset" ? "normal" : mode,
+        temporaryChat: false,
+        selectedSystemPrompt: null,
+        streaming: false,
+        isProcessing: false,
+        serverChatMetaLoaded: true
+      })
+      if (mode === "character") {
+        mocks.selectedCharacter = { id: 42, name: "Mira", greeting: "" }
+        mocks.effectiveAssistantState = {
+          mode: "tracked_character",
+          kind: "character",
+          id: "42",
+          displayName: "Mira",
+          avatarUrl: null,
+          systemPromptSnapshot: null,
+          source: "tracked"
+        }
+        vi.mocked(
+          tldwClient.streamCharacterChatCompletion
+        ).mockImplementationOnce(stream)
+      } else {
+        mocks.finalModel.stream.mockResolvedValueOnce(stream())
+      }
+      mocks.loadServicePromptSnapshot.mockResolvedValue(
+        mocks.makeSnapshot("supported", undefined, undefined, {
+          scopeInvalidatedSignal: account.signal
+        })
+      )
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+      const hook = renderHook(() => useMessage())
+      let submission!: ReturnType<typeof hook.result.current.onSubmit>
+      try {
+        await act(async () => {
+          submission = hook.result.current.onSubmit({
+            message: "Current request",
+            image: "",
+            controller,
+            ...(mode === "preset" ? { messageType: "summary" } : {})
+          })
+          await started
+        })
+        const before = realStore.getState().messages
+        expect(before.at(-1)?.message).toBe("▋")
+        if (boundary === "source")
+          act(() => realStore.getState().startNewChatDraft())
+        if (boundary === "stop") controller.abort()
+        if (boundary === "unmount") hook.unmount()
+        if (boundary === "account") account.abort()
+        if (boundary === "newer-controller") {
+          mocks.selectedCharacter = null
+          mocks.selectedAssistant = {
+            kind: "character",
+            id: "overlay-current",
+            name: "Overlay",
+            metadata: { selectionMode: "overlay" }
+          }
+          mocks.effectiveAssistantState = null
+          hook.rerender()
+          vi.mocked(normalChatMode).mockImplementationOnce(async () => ({
+            status: "submitted"
+          }))
+          await act(async () => {
+            await hook.result.current.onSubmit({
+              message: "Newer request",
+              image: "",
+              controller: new AbortController(),
+              requestOverrides: { chatMode: "normal" }
+            })
+          })
+        }
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(80)
+        })
+        if (boundary === "current")
+          expect(realStore.getState().messages.at(-1)?.message).toBe(
+            "Deferred answer▋"
+          )
+        else expect(realStore.getState().messages).toBe(before)
+        await act(async () => {
+          resume()
+          await submission
+        })
+        if (boundary === "current")
+          expect(realStore.getState().messages.at(-1)?.message).toBe(
+            "Deferred answer"
+          )
+      } finally {
+        resume()
+        if (submission) await submission
+        hook.unmount()
+        vi.useRealTimers()
+        realStore.setState(previous, true)
+        mocks.useRealQueueState = false
+        mocks.selectedCharacter = oldCharacter
+        mocks.selectedAssistant = oldAssistant
+        mocks.effectiveAssistantState = oldEffective
+        vi.mocked(normalChatMode).mockReset()
+      }
+    }
+  )
+
+  it("keeps a fresh compact settings publisher usable after an address-only draft change", async () => {
+    const { useStoreMessageOption: realStore } =
+      await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    const previous = realStore.getState()
+    mocks.useRealQueueState = true
+    realStore.getState().startNewChatDraft()
+    realStore.setState({
+      historyId: null,
+      serverChatId: null,
+      messages: [],
+      history: [],
+      chatMode: "normal",
+      temporaryChat: false,
+      selectedSystemPrompt: null,
+      streaming: false,
+      isProcessing: false
+    })
+    const hook = renderHook(() => useMessage())
+    try {
+      act(() => realStore.getState().startNewChatDraft())
+      vi.mocked(normalChatMode).mockImplementationOnce(async (...args) => {
+        args[6].setHistoryId("fresh-current-history")
+        return { status: "submitted" }
+      })
+      await act(async () => {
+        await hook.result.current.onSubmit({
+          message: "First current request",
+          image: ""
+        })
+      })
+      expect(realStore.getState().historyId).toBe("fresh-current-history")
+    } finally {
+      hook.unmount()
+      realStore.setState(previous, true)
+      mocks.useRealQueueState = false
       vi.mocked(normalChatMode).mockReset()
     }
   })

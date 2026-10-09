@@ -28,6 +28,8 @@ type Props = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
 }
 
+const EMPTY_IMAGES: string[] = []
+
 export const SidePanelBody = ({
   scrollParentRef,
   searchQuery,
@@ -140,15 +142,18 @@ export const SidePanelBody = ({
     [handleVariantSwipe]
   )
 
-  const getPreviousUserMessage = (index: number) => {
-    for (let i = index - 1; i >= 0; i--) {
+  const previousUserMessageByIndex = React.useMemo(() => {
+    const map = new Map<number, (typeof messages)[number] | null>()
+    let previous: (typeof messages)[number] | null = null
+    for (let i = 0; i < messages.length; i++) {
+      map.set(i, previous)
       const candidate = messages[i]
-      if (!candidate?.isBot) {
-        return candidate
+      if (candidate && !candidate.isBot) {
+        previous = candidate
       }
     }
-    return null
-  }
+    return map
+  }, [messages])
 
   const parentEl = scrollParentRef?.current || null
   const rowVirtualizer = useVirtualizer({
@@ -275,7 +280,7 @@ export const SidePanelBody = ({
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
             const message = messages[index]
-            const previousUserMessage = getPreviousUserMessage(index)
+            const previousUserMessage = previousUserMessageByIndex.get(index) ?? null
             return (
               <div key={vr.key} ref={rowVirtualizer.measureElement} data-index={index} style={{ position: 'absolute', top: 0, left: 0, transform: `translateY(${vr.start}px)`, width: '100%' }}>
                 <PlaygroundMessage
@@ -283,7 +288,7 @@ export const SidePanelBody = ({
                   message={message.message}
                   name={message.name}
                   role={message.role}
-                  images={message.images || []}
+                  images={message.images || EMPTY_IMAGES}
                   currentMessageIndex={index}
                   totalMessages={messages.length}
                   onRegenerate={regenerateLastMessage}

@@ -20,9 +20,10 @@ import {
 import { ensureLocalProfileId } from "@/db/dexie/history-selection";
 import type { HistoryInfo } from "@/db/dexie/types";
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner";
-import { useMessageOption } from "@/hooks/useMessageOption";
 import { useStoreChatModelSettings } from "@/store/model";
 import { useStoreMessageOption } from "@/store/option";
+import { useShallow } from "zustand/react/shallow";
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import {
   historySelectionExpansionPath,
@@ -136,7 +137,18 @@ export function LocalChatList({
   }
   const routeEpoch = routeLifetime.current.epoch;
   const selection = useHistorySelectionContext();
-  const options = useMessageOption();
+  const historyId = useStoreMessageOption((state) => state.historyId);
+  const { setSelectedModel } = useSelectedModel();
+  const loadDependencies = useStoreMessageOption(
+    useShallow((state) => ({
+      setServerChatId: state.setServerChatId,
+      setHistoryId: state.setHistoryId,
+      setHistory: state.setHistory,
+      setMessages: state.setMessages,
+      setSelectedSystemPrompt: state.setSelectedSystemPrompt,
+      setContextFiles: state.setContextFiles
+    }))
+  )
   const { setSystemPrompt } = useStoreChatModelSettings();
   const temporary = useStoreMessageOption((state) => state.temporaryChat);
   const draftAddress = useStoreMessageOption((state) => state.chatDraftAddress);
@@ -335,7 +347,7 @@ export function LocalChatList({
     refetchOnWindowFocus: false,
   });
   const load = useLoadLocalConversation(
-    { ...options, setSystemPrompt },
+    { ...loadDependencies, setSelectedModel, setSystemPrompt },
     {
       t,
       errorLogPrefix: "Failed to load on-device chat",
@@ -780,7 +792,7 @@ export function LocalChatList({
                   aria-current={
                     !previewOnly &&
                     !row.server_chat_id &&
-                    (selectedChatId ?? options.historyId) === row.id
+                    (selectedChatId ?? historyId) === row.id
                       ? "true"
                       : undefined
                   }

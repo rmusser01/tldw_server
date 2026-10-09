@@ -235,7 +235,12 @@ vi.mock("@/services/tldw/server-capabilities", () => ({
   }
 }))
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
-  useChatSettingsRecord: () => ({ settings: {}, updateSettings: vi.fn() })
+  useChatSettingsRecord: () => {
+    // Keep the real hook's draft subscriptions while isolating settings storage.
+    useStoreMessageOption((state) => state.chatDraftAddress)
+    useStoreMessageOption((state) => state.chatDraftRevision)
+    return { settings: {}, updateSettings: vi.fn() }
+  }
 }))
 vi.mock("@/hooks/playground", () => ({
   usePersistenceMode: () => ({
@@ -958,6 +963,40 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
+  })
+
+  it("publishes a current Temporary full-chat reply after an address-only draft change", async () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    useStoreMessageOption.getState().startNewChatDraft()
+    const source = useStoreMessageOption.getState()
+    const fixedOptions = { ...createHookOptions(), ...source }
+    const hook = renderHook(() => {
+      const [abortController, setAbortController] =
+        React.useState<AbortController | null>(null)
+      return useChatActions({
+        ...fixedOptions,
+        abortController,
+        setAbortController
+      } as Parameters<typeof useChatActions>[0])
+    })
+    try {
+      act(() => useStoreMessageOption.getState().startNewChatDraft())
+      expect(useStoreMessageOption.getState().messages).toBe(source.messages)
+      expect(useStoreMessageOption.getState().historyId).toBe(source.historyId)
+      await act(async () => {
+        await hook.result.current.onSubmit({
+          message: "Fresh Temporary request",
+          image: ""
+        })
+      })
+      expect(useStoreMessageOption.getState().historyId).toBe("temp")
+      expect(useStoreMessageOption.getState().messages.at(-1)?.message).toBe(
+        "Answer: Fresh Temporary request"
+      )
+      expect(mocks.createChat).not.toHaveBeenCalled()
+    } finally {
+      hook.unmount()
+    }
   })
 
   it("UAT103 deleting a local diagnostic does not remove equal genuine prompt text", async () => {

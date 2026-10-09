@@ -148,6 +148,8 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
   return blocks
 }
 
+const EMPTY_IMAGES: string[] = []
+
 export const PlaygroundChat = ({
   scrollParentRef,
   navigationRef,
@@ -489,6 +491,44 @@ export const PlaygroundChat = ({
       }
     },
     [getMessageResearchHandoffState, handleAttachResearchRun, onPrepareResearchFollowUp]
+  )
+  const researchActionsCacheRef = React.useRef(
+    new Map<
+      string,
+      {
+        metadataExtra: Record<string, unknown> | undefined
+        builder: typeof buildMessageResearchActions
+        actions: MessageResearchActions | undefined
+      }
+    >()
+  )
+  React.useEffect(() => {
+    researchActionsCacheRef.current.clear()
+  }, [conversationInstanceId])
+  const getRowResearchActions = React.useCallback(
+    (
+      messageId: string | undefined,
+      metadataExtra: Record<string, unknown> | undefined
+    ) => {
+      const cache = researchActionsCacheRef.current
+      const key = messageId ?? ""
+      const cached = cache.get(key)
+      if (
+        cached &&
+        cached.metadataExtra === metadataExtra &&
+        cached.builder === buildMessageResearchActions
+      ) {
+        return cached.actions
+      }
+      const actions = buildMessageResearchActions(metadataExtra)
+      cache.set(key, {
+        metadataExtra,
+        builder: buildMessageResearchActions,
+        actions
+      })
+      return actions
+    },
+    [buildMessageResearchActions]
   )
   const showSelectedServerChatLoadFailure =
     messages.length === 0 &&
@@ -1068,6 +1108,22 @@ export const PlaygroundChat = ({
     },
     [messages]
   )
+  const previousUserMessageByIndex = React.useMemo(() => {
+    const map = new Map<number, (typeof messages)[number] | null>()
+    let previous: (typeof messages)[number] | null = null
+    for (let i = 0; i < messages.length; i++) {
+      map.set(i, previous)
+      const candidate = messages[i]
+      if (
+        candidate &&
+        !candidate.isBot &&
+        !isImageGenerationMessageType(resolveTimelineMessageType(candidate))
+      ) {
+        previous = candidate
+      }
+    }
+    return map
+  }, [messages])
   const modelMetaById = React.useMemo(() => {
     const map = new Map<string, { label: string; provider: string }>()
     const models = (chatModels as any[]) || []
@@ -1335,7 +1391,7 @@ export const PlaygroundChat = ({
         <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
-            const previousUserMessage = getPreviousUserMessage(block.index)
+            const previousUserMessage = previousUserMessageByIndex.get(block.index) ?? null
             const resolvedMessageType = resolveMessageType(message, block.index)
             const isImageGenerationAssistantEvent =
               resolvedMessageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE
@@ -1345,7 +1401,7 @@ export const PlaygroundChat = ({
                 message={message.message}
                 name={message.name}
                 role={message.role}
-                images={message.images || []}
+                images={message.images || EMPTY_IMAGES}
                 currentMessageIndex={block.index}
                 totalMessages={messages.length}
                 onRegenerate={regenerateLastMessage}
@@ -1402,7 +1458,7 @@ export const PlaygroundChat = ({
                 metadataExtra={message.metadataExtra}
                 dynamicUISurface="web-chat"
                 onDynamicUIAction={resolvedDynamicUIAction}
-                researchActions={buildMessageResearchActions(message.metadataExtra)}
+                researchActions={getRowResearchActions(message.id, message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
                 conversationInstanceId={conversationInstanceId}

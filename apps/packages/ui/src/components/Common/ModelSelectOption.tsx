@@ -4,7 +4,7 @@ import { LucideBrain } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { useMessageOption } from "~/hooks/useMessageOption"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
@@ -15,7 +15,7 @@ type Props = {
 
 export const ModelSelectOption: React.FC<Props> = ({ iconClassName = "size-5" }) => {
   const { t } = useTranslation("common")
-  const { setSelectedModel, selectedModel } = useMessageOption()
+  const { selectedModel, setSelectedModel } = useSelectedModel()
   const [menuDensity] = useStorage("menuDensity", "comfortable")
   const { data, isError, refetch } = useChatModelCatalog()
 

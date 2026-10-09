@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidePanelBody } from "../body"
+import { useStoreMessageOption } from "@/store/option"
 
 const deleteCallbacks = vi.hoisted(() => new Map<string, () => unknown>())
 
@@ -87,11 +88,6 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [null]
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ serverChatCharacterId: null })
-}))
-
 vi.mock("@/components/Common/ChatGreetingPicker", () => ({
   ChatGreetingPicker: () => null
 }))
@@ -99,6 +95,11 @@ vi.mock("@/components/Common/ChatGreetingPicker", () => ({
 vi.mock("../empty", () => ({
   EmptySidePanel: () => <div data-testid="empty-sidepanel" />
 }))
+
+beforeEach(() => {
+  useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+  useStoreMessageOption.getState().startNewChatDraft()
+})
 
 describe("SidePanelBody Dynamic UI fallback", () => {
   beforeEach(() => {
