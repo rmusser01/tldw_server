@@ -32,7 +32,7 @@ export const resolveActorChatKey = (params: {
 }
 
 const isValidActorAspect = (value: any): value is ActorAspect => {
-  if (!value || typeof value !== "object") return false
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
 
   const {
     id,
@@ -40,7 +40,9 @@ const isValidActorAspect = (value: any): value is ActorAspect => {
     target,
     name,
     source,
-    value: aspectValue
+    value: aspectValue,
+    lorebookId,
+    entryId
   } = value as {
     id: unknown
     key: unknown
@@ -48,6 +50,8 @@ const isValidActorAspect = (value: any): value is ActorAspect => {
     name: unknown
     source: unknown
     value: unknown
+    lorebookId?: unknown
+    entryId?: unknown
   }
 
   const isString = (v: unknown): v is string => typeof v === "string"
@@ -63,6 +67,9 @@ const isValidActorAspect = (value: any): value is ActorAspect => {
     return false
   }
 
+  if (lorebookId !== undefined && !isString(lorebookId)) return false
+  if (entryId !== undefined && !isString(entryId)) return false
+
   // Basic enum checks; if these ever expand, this guard can be relaxed.
   const validTargets = ["user", "char", "world"]
   const validSources = ["free", "lore"]
@@ -75,7 +82,7 @@ const isValidActorAspect = (value: any): value is ActorAspect => {
 }
 
 const isValidActorSettings = (raw: any): raw is ActorSettings => {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return false
   }
 
@@ -99,7 +106,10 @@ const isValidActorSettings = (raw: any): raw is ActorSettings => {
 
   if (!isNumber(version)) return false
   if (!isBoolean(isEnabled)) return false
-  if (!Array.isArray(aspects) || !aspects.every(isValidActorAspect)) {
+  if (
+    !Array.isArray(aspects) ||
+    !Array.from(aspects).every(isValidActorAspect)
+  ) {
     return false
   }
   if (!isString(notes)) return false
@@ -195,8 +205,15 @@ const getActorSettingsForChatOrNull = async (params: {
     const chatKey = resolveActorChatKey(params)
     const key = getActorStorageKey(chatKey)
     const stored = await storage.get<ActorSettings | undefined>(key)
-    if (!stored) {
+    requirePersistentStorage(storage)
+    if (stored === undefined) {
       return null
+    }
+    if (
+      !isValidActorSettings(stored) ||
+      stored.version !== ACTOR_SETTINGS_VERSION
+    ) {
+      throw new Error("actor_settings_invalid")
     }
     return migrateSettings(stored)
   } catch (error) {
@@ -223,6 +240,11 @@ export const saveActorSettingsForChat = async (params: {
 }): Promise<boolean> => {
   try {
     requirePersistentStorage(storage)
+    if (
+      !isValidActorSettings(params.settings) ||
+      params.settings.version !== ACTOR_SETTINGS_VERSION
+    )
+      return false
     const chatKey = resolveActorChatKey(params)
     const key = getActorStorageKey(chatKey)
     const payload: ActorSettings = {
@@ -230,6 +252,7 @@ export const saveActorSettingsForChat = async (params: {
       version: ACTOR_SETTINGS_VERSION
     }
     await storage.set(key, payload)
+    requirePersistentStorage(storage)
     return true
   } catch (error) {
     console.error("Failed to save Actor settings", error)
@@ -276,12 +299,16 @@ export const saveActorProfileForCharacter = async (params: {
   try {
     requirePersistentStorage(storage)
     if (params.validate_lease?.() === false) return false
+    if (
+      !isValidActorSettings(params.settings) ||
+      params.settings.version !== ACTOR_SETTINGS_VERSION
+    )
+      return false
     const key = getActorProfileStorageKey(params.characterId)
     const payload: ActorSettings = {
       ...params.settings,
       version: ACTOR_SETTINGS_VERSION
     }
-    if (!isValidActorSettings(payload)) return false
     await storage.set(key, payload)
     requirePersistentStorage(storage)
     return params.validate_lease?.() !== false

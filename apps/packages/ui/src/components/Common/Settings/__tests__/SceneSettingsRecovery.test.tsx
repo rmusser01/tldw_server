@@ -222,6 +222,33 @@ beforeEach(() => {
 describe.each(["actor", "model"] as const)(
   "%s scene editor recovery",
   (kind) => {
+    it.each([false, { ...scene("Unsupported stored scene."), version: 0 }])(
+      "preserves a malformed stored scene, blocks profile fallback and retries after repair (%j)",
+      async (invalid) => {
+        const key = "actorSettings:server:scene-one"
+        io.values.set(key, invalid)
+        io.values.set(
+          "actorProfile:character-one",
+          scene("Unrelated inherited fallback.")
+        )
+        const view = mountEditor(kind)
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+          "Scene settings could not be loaded"
+        )
+        const save = screen.queryByRole("button", { name: /^save$/i })
+        if (save) expect(save).toBeDisabled()
+        expect(io.values.get(key)).toEqual(invalid)
+        expect(io.set).not.toHaveBeenCalled()
+        expect(io.get).not.toHaveBeenCalledWith("actorProfile:character-one")
+        io.values.set(key, scene("Explicitly repaired scene."))
+        fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+        expect(await screen.findByLabelText("Scene notes")).toHaveValue(
+          "Explicitly repaired scene."
+        )
+        expect(view.close).not.toHaveBeenCalled()
+      }
+    )
+
     it("keeps the unread scene unchanged and retries the actual reader", async () => {
       io.values.set("actorSettings:server:scene-one", scene("Keep this scene."))
       io.get.mockRejectedValueOnce(new Error("read unavailable"))

@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createDefaultActorSettings } from "@/types/actor"
+import {
+  ACTOR_SETTINGS_VERSION,
+  createDefaultActorSettings
+} from "@/types/actor"
 
 const io = vi.hoisted(() => ({
   persistent: true,
@@ -31,6 +34,46 @@ const inherited = {
   notes: "Keep the inherited scene."
 }
 
+const invalidSceneRecords: Array<{ label: string; raw: unknown }> = [
+  { label: "false", raw: false },
+  { label: "zero", raw: 0 },
+  { label: "empty string", raw: "" },
+  { label: "null", raw: null },
+  { label: "empty object", raw: {} },
+  { label: "unsupported role", raw: { ...inherited, chatRole: "unsupported" } },
+  {
+    label: "null aspect value",
+    raw: { ...inherited, aspects: [{ ...inherited.aspects[0], value: null }] }
+  },
+  { label: "legacy version", raw: { ...inherited, version: 0 } },
+  {
+    label: "future version",
+    raw: { ...inherited, version: ACTOR_SETTINGS_VERSION + 1 }
+  },
+  {
+    label: "array masquerading as a record",
+    raw: Object.assign([], inherited)
+  },
+  {
+    label: "sparse aspects",
+    raw: {
+      ...inherited,
+      aspects: new Array<(typeof inherited.aspects)[number]>(1)
+    }
+  },
+  {
+    label: "invalid lorebook reference",
+    raw: {
+      ...inherited,
+      aspects: [{ ...inherited.aspects[0], lorebookId: 42 }]
+    }
+  },
+  {
+    label: "invalid entry reference",
+    raw: { ...inherited, aspects: [{ ...inherited.aspects[0], entryId: null }] }
+  }
+]
+
 describe("scene read availability", () => {
   beforeEach(() => {
     io.persistent = true
@@ -42,6 +85,125 @@ describe("scene read availability", () => {
       return io.values.get(key)
     })
     vi.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+
+  it.each(
+    invalidSceneRecords.flatMap((record) =>
+      [false, true].map((fallback) => ({ ...record, fallback }))
+    )
+  )(
+    "retains $label and refuses scene profile fallback=$fallback",
+    async ({ raw, fallback }) => {
+      const key = "actorSettings:server:server-one"
+      io.values.set(key, raw)
+      io.values.set("actorProfile:character-one", inherited)
+      await expect(
+        fallback
+          ? getActorSettingsForChatWithCharacterFallback({
+              ...source,
+              characterId: "character-one"
+            })
+          : getActorSettingsForChat(source)
+      ).rejects.toThrow("actor_settings_unavailable")
+      expect(io.values.has(key)).toBe(true)
+      expect(io.values.get(key)).toEqual(raw)
+      expect(io.set).not.toHaveBeenCalled()
+      expect(io.get).not.toHaveBeenCalledWith("actorProfile:character-one")
+    }
+  )
+
+  it.each(
+    [false, true].flatMap((fallback) =>
+      [undefined, inherited].map((raw) => ({ fallback, raw }))
+    )
+  )(
+    "does not certify a scene read after durable backend loss, fallback=$fallback, raw=$raw",
+    async ({ fallback, raw }) => {
+      io.get.mockImplementationOnce(async () => {
+        io.persistent = false
+        return raw
+      })
+      await expect(
+        fallback
+          ? getActorSettingsForChatWithCharacterFallback({
+              ...source,
+              characterId: "character-one"
+            })
+          : getActorSettingsForChat(source)
+      ).rejects.toThrow("actor_settings_unavailable")
+      expect(io.get).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each(
+    invalidSceneRecords.flatMap((record) =>
+      ["scene", "profile"].map((kind) => ({ ...record, kind }))
+    )
+  )("rejects $label before $kind Save storage IO", async ({ raw, kind }) => {
+    const payload = raw as typeof inherited
+    expect(
+      await (kind === "scene"
+        ? saveActorSettingsForChat({ ...source, settings: payload })
+        : saveActorProfileForCharacter({
+            characterId: "character-one",
+            settings: payload
+          }))
+    ).toBe(false)
+    expect(io.set).not.toHaveBeenCalled()
+  })
+
+  it.each(["scene", "profile"])(
+    "does not acknowledge a held %s write after durable backend loss",
+    async (kind) => {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      io.set.mockReturnValueOnce(held)
+      const pending =
+        kind === "scene"
+          ? saveActorSettingsForChat({ ...source, settings: inherited })
+          : saveActorProfileForCharacter({
+              characterId: "character-one",
+              settings: inherited
+            })
+      await vi.waitFor(() => expect(io.set).toHaveBeenCalledOnce())
+      io.persistent = false
+      release()
+      expect(await pending).toBe(false)
+    }
+  )
+
+  it("keeps a supported minimal scene and normalizes only missing optional appendable", async () => {
+    const minimal = {
+      version: ACTOR_SETTINGS_VERSION,
+      isEnabled: false,
+      aspects: [],
+      notes: "Supported minimal scene.",
+      chatPosition: "before",
+      chatDepth: 0,
+      chatRole: "system"
+    }
+    io.values.set("actorSettings:server:server-one", minimal)
+    expect(await getActorSettingsForChat(source)).toEqual({
+      ...minimal,
+      appendable: false
+    })
+    expect(io.values.get("actorSettings:server:server-one")).toEqual(minimal)
+    expect(io.set).not.toHaveBeenCalled()
+  })
+
+  it("keeps supported aspect-key normalization without rewriting the stored scene", async () => {
+    const stored = {
+      ...inherited,
+      aspects: [{ ...inherited.aspects[0], key: "  Role now  " }]
+    }
+    io.values.set("actorSettings:server:server-one", stored)
+    expect((await getActorSettingsForChat(source)).aspects[0].key).toBe(
+      "user_role_now"
+    )
+    expect(io.values.get("actorSettings:server:server-one")).toEqual(stored)
+    expect(io.set).not.toHaveBeenCalled()
   })
 
   it("rejects an unread chat scene instead of certifying a neutral scene", async () => {
