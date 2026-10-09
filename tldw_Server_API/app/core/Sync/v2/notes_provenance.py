@@ -16,10 +16,18 @@ from typing import TYPE_CHECKING
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from .errors import SyncStoreError
+from .errors import SyncMaterializationContractError, SyncStoreError
 from .materializers.base import MaterializationResult
+from .materializers.guarded_product_mutation import GuardedProductMutation
 from .materializers.notes import NotesMaterializer
-from .models import SyncDataset, SyncEnvelope, SyncEnvelopeCreate, SyncObjectState, validate_notes_note_upsert_payload
+from .models import (
+    SyncDataset,
+    SyncDomain,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
+    SyncObjectState,
+    validate_notes_note_upsert_payload,
+)
 from .mutation_group_validation import (
     materialization_group_view,
     mutation_group_plan_hash,
@@ -48,9 +56,13 @@ class NotesProvenanceMaterializer:
     """Apply independent evidence using the shared core conflict/checkpoint rules."""
 
     note_db: CharactersRAGDB
-    domain: str = "notes.provenance"
+    domain: SyncDomain = "notes.provenance"
 
-    def apply(self, envelope: SyncEnvelope, *, store: SyncV2Store) -> MaterializationResult:
+    def apply(
+        self, envelope: SyncEnvelope, *, store: SyncV2Store, guarded_mutation: GuardedProductMutation | None = None
+    ) -> MaterializationResult:
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         return project_notes_provenance(envelope, store=store, note_db=self.note_db)
 
 
@@ -88,7 +100,7 @@ def notes_provenance_bootstrap_matches_source(
 ) -> bool:
     """Verify retained product versions instead of replaying old bootstrap bytes."""
     owner = str(note_db.owner_user_id)
-    if not is_notes_provenance_bootstrap(envelope, owner):
+    if not is_notes_provenance_bootstrap(envelope, owner) or envelope.object_id is None:
         return False
     note = note_db.get_note_by_id(envelope.object_id, include_deleted=True)
     if (
@@ -129,8 +141,12 @@ def project_notes_provenance(
         or dataset.encryption_policy != "server_trusted_v1"
     ):
         raise SyncStoreError("notes_provenance_owner_or_encryption_invalid")
-    pending = []
+    pending: list[tuple[SyncEnvelope, SyncObjectState]] = []
+    cursors: list[int] = []
     for member in pair:
+        if member.object_id is None or member.server_cursor is None or not member.payload_hash:
+            return MaterializationResult(status="failed", error_code="notes_provenance_projection_failed")
+        cursors.append(member.server_cursor)
         state = store.get_object_state(member.dataset_id, member.domain, member.object_id)
         if core._is_already_materialized(member, state):
             continue
@@ -143,58 +159,61 @@ def project_notes_provenance(
                 apply_error_message=conflict.message,
             )
             return conflict
-        pending.append((member, core._next_object_revision(member, state)))
+        pending.append(
+            (
+                member,
+                SyncObjectState(
+                    dataset_id=member.dataset_id,
+                    domain=member.domain,
+                    object_id=member.object_id,
+                    object_revision=core._next_object_revision(member, state),
+                    object_hash=member.payload_hash,
+                    latest_server_cursor=member.server_cursor,
+                    deleted=member.operation == "tombstone",
+                ),
+            )
+        )
     try:
         with note_db.transaction() as conn:
-            for member, revision in pending:
+            for member, projected_state in pending:
                 if is_notes_provenance_bootstrap(member, str(note_db.owner_user_id)):
                     if not notes_provenance_bootstrap_matches_source(note_db, member):
                         raise SyncStoreError("notes_provenance_bootstrap_source_changed")
                     continue
                 if member.domain == "notes.note":
-                    core.project_product(member, object_revision=revision, conn=conn)
+                    core.project_product(member, object_revision=projected_state.object_revision, conn=conn)
                 else:
                     # Applied parent state is authoritative at this projection position;
                     # a later accepted delete may already be the durable current head.
                     parent = next((item for item in pair if item.domain == "notes.note"), None)
-                    parent_state = store.get_object_state(member.dataset_id, "notes.note", member.object_id)
+                    parent_state = store.get_object_state(member.dataset_id, "notes.note", projected_state.object_id)
                     if parent is None and (
                         parent_state is None or (parent_state.deleted and member.operation != "tombstone")
                     ):
                         raise SyncStoreError("notes_provenance_parent_missing")
                     note_db.note_provenance_store.apply_sync(
-                        member.object_id,
+                        projected_state.object_id,
                         member.payload,
-                        revision,
-                        member.payload_hash,
+                        projected_state.object_revision,
+                        projected_state.object_hash,
                         deleted=member.operation == "tombstone",
                         conn=conn,
                         restore=member.routing_metadata.get("restore_intent") is True,
                     )
     except Exception:  # noqa: BLE001 - product rollback is replayable, never expose source bytes.
-        for member, _ in pending:
+        for _, projected_state in pending:
             store.mark_envelope_apply_status(
-                member.server_cursor,
+                projected_state.latest_server_cursor,
                 apply_status="failed",
                 apply_error_code="notes_provenance_projection_failed",
                 apply_error_message="Notes provenance product projection failed",
             )
         return MaterializationResult(status="failed", error_code="notes_provenance_projection_failed")
     try:
-        for member, revision in pending:
-            store.upsert_object_state(
-                SyncObjectState(
-                    dataset_id=member.dataset_id,
-                    domain=member.domain,
-                    object_id=member.object_id,
-                    object_revision=revision,
-                    object_hash=member.payload_hash,
-                    latest_server_cursor=member.server_cursor,
-                    deleted=member.operation == "tombstone",
-                )
-            )
-        for member in pair:
-            store.mark_envelope_apply_status(member.server_cursor, apply_status="applied")
+        for _, projected_state in pending:
+            store.upsert_object_state(projected_state)
+        for cursor in cursors:
+            store.mark_envelope_apply_status(cursor, apply_status="applied")
     except Exception as exc:  # noqa: BLE001 - rollback every checkpoint, retain committed product pair.
         raise NotesProvenanceCheckpointError("notes_provenance_checkpoint_failed") from exc
     return MaterializationResult(status="applied")
@@ -283,9 +302,13 @@ def expand_provenance_tombstone(envelope: SyncEnvelopeCreate, *, store: SyncV2St
         or envelope.mutation_group_id is not None
     ):
         return None
+    if envelope.object_id is None:
+        raise SyncStoreError("notes_provenance_parent_missing")
     child = store.get_current_head(envelope.dataset_id, "notes.provenance", envelope.object_id)
     if child is None or child.operation == "tombstone":
         return None
+    if child.object_revision is None:
+        raise SyncStoreError("notes_provenance_projection_failed")
     group_id = singleton_delete_group_id(envelope)
     parent = replace(
         envelope, mutation_group_id=group_id, mutation_step=0, mutation_step_count=2, mutation_plan_hash="0" * 64
@@ -403,7 +426,7 @@ def ensure_notes_provenance_ready(
                     yield note, record
             after_note_id = page[-1]["id"]
 
-    def summary(*, prepare_markers: bool = False, verify_heads: bool = False):
+    def summary(*, prepare_markers: bool = False, verify_heads: bool = False) -> tuple[int, str]:
         digest = hashlib.sha256()
         count = 0
         for note, record in sources(prepare_markers=prepare_markers):
@@ -438,9 +461,9 @@ def ensure_notes_provenance_ready(
             parent = service.store.get_current_head(dataset.dataset_id, "notes.note", note_id)
             canonical = service.store.get_current_head(dataset.dataset_id, "notes.provenance", note_id)
             routing = {"bootstrap_id": bootstrap_id, "notes_provenance_parent_version": note["version"]}
-            steps = []
+            planned_steps: list[ServerOriginMutationStep] = []
             if parent is None:
-                steps.append(
+                planned_steps.append(
                     ServerOriginMutationStep(
                         domain="notes.note",
                         operation="tombstone" if note["deleted"] else "upsert",
@@ -460,7 +483,7 @@ def ensure_notes_provenance_ready(
             ):
                 raise SyncStoreError("notes_provenance_bootstrap_parent_changed")
             if canonical is None and record is not None:
-                steps.append(
+                planned_steps.append(
                     ServerOriginMutationStep(
                         domain="notes.provenance",
                         operation="tombstone" if record["deleted"] else "upsert",
@@ -477,6 +500,7 @@ def ensure_notes_provenance_ready(
                 or canonical.payload_hash != record["object_hash"]
             ):
                 raise SyncStoreError("notes_provenance_bootstrap_source_changed")
+            steps = tuple(planned_steps)
         if steps:
             capture_server_origin_mutation_batch(
                 service=service,
