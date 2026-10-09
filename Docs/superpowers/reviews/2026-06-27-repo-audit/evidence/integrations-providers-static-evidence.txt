@@ -1,0 +1,84 @@
+Integrations and Providers Domain Evidence
+Date: 2026-06-27
+Workspace: /Users/appledev/Documents/GitHub/tldw_server/.worktrees/comprehensive-repo-audit-2026-06-27
+
+Scope inspected:
+- Provider adapters and external integrations:
+  - tldw_Server_API/app/core/External_Sources/
+  - tldw_Server_API/app/core/Integrations/
+  - tldw_Server_API/app/core/WebSearch/
+  - tldw_Server_API/app/core/Web_Scraping/
+  - tldw_Server_API/app/core/TTS/
+  - tldw_Server_API/app/core/LLM_Calls/
+  - tldw_Server_API/app/core/Workflows/adapters/research/
+  - Slack and Discord provider endpoints/support modules
+- Tests under WebSearch, TTS, STT, External_Sources, LLM_Calls, Workflows research adapters, Slack, Discord, and integration/provider areas by inventory and targeted file reads.
+
+Key positive controls:
+- Central HTTP client documents safe provider defaults and enforces egress/proxy controls:
+  - tldw_Server_API/app/core/http_client.py:6-13 centralized helpers for trust_env=False, egress, redirects/proxies, retries, and logging.
+  - tldw_Server_API/app/core/http_client.py:147-149 default trust_env=False and proxy allowlist defaults.
+  - tldw_Server_API/app/core/http_client.py:982-1045 egress validation with DNS pin/cache path.
+  - tldw_Server_API/app/core/http_client.py:1071-1087 proxy denial unless explicitly allowed.
+- Web search and scraping primary paths use central helpers and explicit outbound policy:
+  - tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py:30 imports fetch.
+  - tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py:41-44 imports decide_web_outbound_policy_sync.
+  - tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py:100-127 evaluates and enforces outbound policy for provider URLs.
+  - tldw_Server_API/app/core/WebSearch/Web_Search.py:1357,1601,1842,1977,2092,2175,2213 call fetch for provider requests.
+- External source connectors sampled use afetch for OAuth/API calls:
+  - Gmail: tldw_Server_API/app/core/External_Sources/gmail.py:7,66,95,128-133.
+  - Google Drive: tldw_Server_API/app/core/External_Sources/google_drive.py:10,60,91,127-133,169-175,229-238.
+  - Notion: tldw_Server_API/app/core/External_Sources/notion.py:11,118,154,186,233-239.
+- Slack and Discord OAuth exchanges use the central async HTTP helper:
+  - Slack: tldw_Server_API/app/api/v1/endpoints/slack_support.py:26-28 and 203-214.
+  - Discord: tldw_Server_API/app/api/v1/endpoints/discord_support.py:26-28 and 203-214.
+- TTS sampled external adapters use central helpers:
+  - OpenAI TTS: tldw_Server_API/app/core/TTS/adapters/openai_adapter.py:18 and 160-164.
+  - ElevenLabs: tldw_Server_API/app/core/TTS/adapters/elevenlabs_adapter.py:22 and 227-235.
+  - Remote Qwen3: tldw_Server_API/app/core/TTS/adapters/qwen3_runtime_remote.py:10 and 189-194.
+  - Omnivoice sidecar intentionally uses local httpx client with trust_env=False:
+    tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_supervisor.py:29-34.
+
+Candidate evidence:
+
+CANDIDATE-integrations-providers-001 - Workflow research adapters bypass central outbound HTTP controls
+- tldw_Server_API/app/core/Workflows/adapters/research/search.py:
+  - 194-200: arxiv_download accepts pdf_url and downloads through raw httpx.AsyncClient().
+  - 236 and 274-298: pubmed_search imports httpx and uses raw AsyncClient for NCBI E-utilities.
+  - 340 and 377-388: semantic_scholar_search imports httpx and uses raw AsyncClient.
+  - 507 and 547-552: patent_search imports httpx and uses raw AsyncClient.
+- tldw_Server_API/app/core/Workflows/adapters/research/bibliography.py:
+  - 46 and 94-102: doi_resolve imports httpx and uses raw AsyncClient.
+- These clients do not call tldw_Server_API.app.core.http_client.afetch/create_async_client and do not call evaluate_url_policy.
+- Workflow research tests cover test-mode behavior and sanitized errors, but not egress or trust_env:
+  - tldw_Server_API/tests/Workflows/adapters/test_research_adapters.py:1211-1225, 1401-1430, 1521-1550, 1753-1781, 1893-1943.
+
+CANDIDATE-integrations-providers-002 - Tokenizer resolver bypasses central outbound HTTP controls
+- tldw_Server_API/app/core/LLM_Calls/tokenizer_resolver.py:
+  - 190-214: ProviderNativeTokenizerHTTPAdapter constructs provider tokenizer endpoints and calls _http_post().
+  - 318-325: _HTTPJSONAdapterBase sends commercial/token counting requests via _http_post().
+  - 428-459: Google countTokens path uses _http_post(), including optional query-key fallback.
+  - 567-589: Bedrock count-only adapter uses _http_post().
+  - 651-656: _http_post imports requests and calls requests.post() directly.
+  - 1119-1190 and 1212-1393: provider endpoints and commercial base URLs are normalized/selected without central egress policy enforcement.
+- Tokenizer resolver tests cover adapter behavior and some host guards, but not central http_client usage, egress denial, or proxy avoidance:
+  - tldw_Server_API/tests/Writing/test_tokenizer_resolver_unit.py
+  - tldw_Server_API/tests/Writing/test_llm_providers_tokenizer_metadata.py
+
+CANDIDATE-integrations-providers-003 - Weather provider uses raw httpx for API-key-bearing request
+- tldw_Server_API/app/core/Integrations/weather_providers.py:
+  - 14 and 29-30: imports httpx and sets http_client_factory = httpx.Client.
+  - 90-107: OpenWeather params include appid API key.
+  - 219-221: sends request with raw http_client_factory(timeout=...) and client.get().
+- Tests verify sanitization/behavior but not central egress or trust_env:
+  - tldw_Server_API/tests/Chat_NEW/unit/test_weather_providers.py.
+
+Verification:
+- Ran:
+  source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_tokenizer_resolver_unit.py tldw_Server_API/tests/Chat_NEW/unit/test_weather_providers.py tldw_Server_API/tests/Workflows/adapters/test_research_adapters.py -q
+- Result: 120 passed, 248 warnings in 12.18s.
+
+Blockers and limits:
+- No network access, live OAuth, live provider calls, Docker, service startup, or dependency installation performed.
+- Full repository tests and fresh repository-wide Bandit were not run for this domain report. Existing audit evidence included bandit-app-summary.txt.
+- Third-party libraries that perform their own outbound calls, such as arxiv and scholarly, were reviewed at call sites but not dynamically exercised.
