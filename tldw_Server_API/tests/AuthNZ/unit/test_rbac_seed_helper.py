@@ -20,6 +20,7 @@ def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
     expected_callers = {
         # 03dec014b2 (#2920) added the SQLite schema-ensure seed call.
         "core/AuthNZ/initialize.py": 3,
+        "core/AuthNZ/pg_migrations_extra.py": 1,
         "core/MCP_unified/adapters/tldw_runtime.py": 1,
     }
     actual_callers: dict[str, int] = {}
@@ -132,6 +133,10 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             "notes.graph.suggest",
             "notes.link_keyword",
             "keywords.create",
+            "calendar.read",
+            "calendar.write",
+            "calendar.sync",
+            "calendar.admin",
         }
         cur = await conn.execute("SELECT name FROM permissions")
         perms = {row[0] for row in await cur.fetchall()}
@@ -150,7 +155,8 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
                 'media.read','media.create','media.delete','system.configure',
                 'users.manage_roles','sql.read','sql.target:media_db','modules.read',
                 'prompts.read','tools.execute:*','notifications.read','notifications.control'
-                ,'notes.graph.suggest','notes.link_keyword','keywords.create'
+                ,'notes.graph.suggest','notes.link_keyword','keywords.create',
+                'calendar.read','calendar.write','calendar.sync','calendar.admin'
             )
             """
         )
@@ -172,6 +178,8 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         assert perm_id["notes.graph.suggest"] in user_perm_ids
         assert perm_id["notes.link_keyword"] in user_perm_ids
         assert perm_id["keywords.create"] in user_perm_ids
+        assert {perm_id[name] for name in ("calendar.read", "calendar.write", "calendar.sync")} <= user_perm_ids
+        assert perm_id["calendar.admin"] not in user_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
