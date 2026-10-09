@@ -120,6 +120,9 @@ export const createLocalRegistryBucket = <T>({
         raw = JSON.parse(pinned)
       } else {
         raw = await storage.get(storageKey)
+        if (failClosed && !hasDurableBackend())
+          throw new Error("registry_durable_read_unavailable")
+
         // A same-tab write may have completed while the durable read was pending.
         const current = readTab(storageKey)
         if (current != null) raw = JSON.parse(current)

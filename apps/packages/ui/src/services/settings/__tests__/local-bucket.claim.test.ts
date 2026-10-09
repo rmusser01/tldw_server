@@ -38,6 +38,56 @@ describe("existing registry durable creation reservation boundary", () => {
     expect(sessionStorage.length).toBe(0)
   })
 
+  it.each(
+    [false, true].flatMap((backendRemains) =>
+      [false, true].map((present) => ({ backendRemains, present }))
+    )
+  )(
+    "certifies held strict read presence=$present only while the backend remains=$backendRemains",
+    async ({ backendRemains, present }) => {
+      const storage = new PlasmoStorage({ area: "local" })
+      const record = { value: "ORIGINAL UNCONFIRMED", updatedAt: 1 }
+      if (present) await storage.set(prefix + "intent", record)
+      const before = localStorage.getItem(prefix + "intent")
+      const get = PlasmoStorage.prototype.get
+      let persistent = true
+      vi.spyOn(
+        PlasmoStorage.prototype,
+        "hasPersistentBackend",
+        "get"
+      ).mockImplementation(() => persistent)
+      let release!: () => void
+      let entered!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const started = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      vi.spyOn(PlasmoStorage.prototype, "get").mockImplementationOnce(
+        async function (this: PlasmoStorage, key: string) {
+          const result = await get.call(this, key)
+          entered()
+          await held
+          return result
+        }
+      )
+      const write = vi.spyOn(PlasmoStorage.prototype, "set")
+      const remove = vi.spyOn(PlasmoStorage.prototype, "remove")
+      const pending = bucket().get("intent", { failClosed: true })
+      await started
+      persistent = backendRemains
+      release()
+      if (backendRemains) expect(await pending).toEqual(present ? record : null)
+      else
+        await expect(pending).rejects.toThrow("registry_durable_read_unavailable")
+      expect(write).not.toHaveBeenCalled()
+      expect(remove).not.toHaveBeenCalled()
+      expect(localStorage.getItem(prefix + "intent")).toBe(before)
+      expect(sessionStorage.length).toBe(0)
+    }
+  )
+
   it("does not interpret failed durable reads as absence while legacy reads retain null behavior", async () => {
     vi.spyOn(PlasmoStorage.prototype, "get").mockRejectedValue(new Error("storage blocked"))
     await expect(bucket().get("intent", { failClosed: true })).rejects.toThrow("storage blocked")
