@@ -9,9 +9,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_payload
+from ..errors import SyncMaterializationContractError
+from ..models import SyncDomain, SyncEnvelope, SyncObjectState, validate_notes_note_upsert_payload
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
 
 _INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
@@ -49,16 +51,19 @@ class NotesMaterializer:
     """Apply `notes.note` upserts and tombstones to the ChaChaNotes note store."""
 
     note_db: CharactersRAGDB
-    domain: str = "notes.note"
+    domain: SyncDomain = "notes.note"
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted note envelope and record apply status."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:

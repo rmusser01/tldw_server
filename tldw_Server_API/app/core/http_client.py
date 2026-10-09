@@ -25,7 +25,15 @@ import socket  # noqa: E402
 import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping  # noqa: E402
+from collections.abc import (  # noqa: E402
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+)
 from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from functools import wraps  # noqa: E402
@@ -3182,7 +3190,7 @@ def _stream_timeout_values(timeout: Any | None) -> tuple[float, float]:
 async def _iter_bytes_with_timeouts(
     byte_iter: AsyncIterator[bytes],
     timeout: Any | None,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     first_timeout, idle_timeout = _stream_timeout_values(timeout)
     first_timeout = max(0.001, float(first_timeout))
     idle_timeout = max(0.001, float(idle_timeout))
@@ -4747,7 +4755,7 @@ def fetch(*args, **kwargs):
                 if public_capture:
                     clear()
                 else:
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         clear()
                 continue
             if public_capture:
@@ -4888,7 +4896,7 @@ def fetch(*args, **kwargs):
                 cur_url = next_url
 
     if max_response_bytes is not None:
-        client_cls = getattr(_hx, "Client", object) if _hx is not None else object
+        client_cls = _hx.Client
         # Do not let compatibility fallback silently remove trust_env=False.
         sc = client_cls(**client_kwargs) if public_capture else _instantiate_client(client_cls, client_kwargs)
         with sc as sc:
@@ -5676,7 +5684,7 @@ async def _astream_bytes_aiohttp(
                 if resp.status >= 400:
                     should, rsn = _should_retry(method, resp.status, None, retry)
                     if should and attempt < attempts:
-                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                             get_metrics_registry().increment(
                                 "http_client_retries_total",
                                 1,
@@ -5772,7 +5780,7 @@ async def _astream_bytes_aiohttp(
                     exception_class=e.__class__.__name__,
                 )
                 raise
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 get_metrics_registry().increment(
                     "http_client_retries_total",
                     1,
@@ -5822,7 +5830,7 @@ async def _astream_bytes_aiohttp(
                 if sensitive_observability:
                     raise network_exc from None
                 raise network_exc from e
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 get_metrics_registry().increment(
                     "http_client_retries_total",
                     1,

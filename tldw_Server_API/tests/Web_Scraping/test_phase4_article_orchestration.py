@@ -1405,10 +1405,9 @@ def test_credential_free_http_runtime_delegates_environment_and_pinning_to_centr
 
 @pytest.mark.asyncio
 async def test_credential_free_native_http_probe_disables_environment_state(monkeypatch):
-    from types import SimpleNamespace
-
     from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
     from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import http as adapter
+    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeHttpRequest
 
     calls = []
     client = object()
@@ -1425,7 +1424,7 @@ async def test_credential_free_native_http_probe_disables_environment_state(monk
     monkeypatch.setattr(adapter.http_client, "afetch", fetch)
     with public_url_policy_scope():
         await adapter.HttpxProbeTransport().send(
-            SimpleNamespace(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1)
+            ProbeHttpRequest(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1)
         )
     assert calls == [{"proxies": None, "trust_env": False}]
 
@@ -1436,7 +1435,7 @@ async def test_credential_free_native_curl_probe_declines_missing_security_capab
 
     from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
     from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import http as adapter
-    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeUnavailable
+    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeHttpRequest, ProbeUnavailable
 
     factory = Mock(side_effect=AssertionError("curl environment state must not be acquired"))
     monkeypatch.setattr(adapter, "_CurlOpt", SimpleNamespace(RESOLVE=1))
@@ -1446,6 +1445,6 @@ async def test_credential_free_native_curl_probe_declines_missing_security_capab
     )
     with public_url_policy_scope(), pytest.raises(ProbeUnavailable):
         await transport.send(
-            SimpleNamespace(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1, impersonate="chrome")
+            ProbeHttpRequest(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1, impersonate="chrome")
         )
     factory.assert_not_called()

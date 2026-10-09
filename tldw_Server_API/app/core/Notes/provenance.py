@@ -1,9 +1,14 @@
 """Notes response and local transaction boundaries for independent evidence."""
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, overload
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
 from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
     read_notes_provenance,
     retain_notes_provenance,
@@ -19,7 +24,7 @@ def provenance_response(
     state = (
         "unsupported" if not supported else "absent" if record is None else "deleted" if record["deleted"] else "active"
     )
-    payload = record["payload"] if state == "active" else None
+    payload = record["payload"] if state == "active" and record is not None else None
     note.update(
         knowledge_provenance_state=state,
         knowledge_provenance_version=record["version"] if record else 0 if supported else None,
@@ -35,6 +40,38 @@ def provenance_response(
         elif state == "deleted":
             note["content"] = strip_notes_provenance(note["content"])
     return note
+
+
+@overload
+def save_local_note(
+    db: CharactersRAGDB,
+    *,
+    note_id: str | None,
+    fields: dict[str, Any],
+    expected_note_version: int = 0,
+    provenance: dict[str, Any] | None = None,
+    expected_provenance_version: int | None = None,
+    receipt_key: str | None = None,
+    request_fingerprint: str | None = None,
+    load_result: Callable[[str], dict[str, Any]],
+    restore: bool = False,
+) -> dict[str, Any]: ...
+
+
+@overload
+def save_local_note(
+    db: CharactersRAGDB,
+    *,
+    note_id: str | None,
+    fields: dict[str, Any],
+    expected_note_version: int = 0,
+    provenance: dict[str, Any] | None = None,
+    expected_provenance_version: int | None = None,
+    receipt_key: str | None = None,
+    request_fingerprint: str | None = None,
+    load_result: None = None,
+    restore: bool = False,
+) -> str: ...
 
 
 def save_local_note(
@@ -53,8 +90,13 @@ def save_local_note(
     """Commit the core note and an explicit child replacement in one transaction."""
     if provenance is None and load_result is None:
         if expected_note_version == 0:
-            return db.add_note(note_id=note_id, **fields)
-        if not db.update_note(note_id=note_id, update_data=fields, expected_version=expected_note_version):
+            created_id = db.add_note(note_id=note_id, **fields)
+            if not created_id:
+                raise CharactersRAGDBError("Note creation failed to return an ID.")
+            return created_id
+        if note_id is None or not db.update_note(
+            note_id=note_id, update_data=fields, expected_version=expected_note_version
+        ):
             raise ConflictError("Note version mismatch")
         return note_id
     with db.transaction() as conn:
@@ -63,16 +105,24 @@ def save_local_note(
                 raise ValueError("A local receipt requires a fingerprint and acknowledgment loader")
             replay = db.note_provenance_store.claim_receipt(receipt_key, request_fingerprint, conn)
             if replay is not None:
+                if not isinstance(replay, dict):
+                    raise InputError("Invalid Knowledge provenance acknowledgment")
                 return replay
         if expected_note_version == 0:
             note_id = db.add_note(note_id=note_id, **fields, conn=conn)
-        elif not db.update_note(note_id, fields, expected_note_version, conn=conn):
+        elif note_id is None or not db.update_note(note_id, fields, expected_note_version, conn=conn):
             raise ConflictError("Note version mismatch")
+        if not note_id:
+            raise CharactersRAGDBError("Note creation failed to return an ID.")
         if provenance is not None:
+            if expected_provenance_version is None:
+                raise InputError("Invalid Knowledge provenance version")
             db.note_provenance_store.put(note_id, provenance, expected_provenance_version, conn=conn, restore=restore)
         if load_result is not None:
             response = load_result(note_id)
-            if receipt_key is not None:
+            if not isinstance(response, dict):
+                raise InputError("Invalid Knowledge provenance acknowledgment")
+            if receipt_key is not None and request_fingerprint is not None:
                 db.note_provenance_store.complete_receipt(receipt_key, request_fingerprint, response, conn)
             return response
     return note_id

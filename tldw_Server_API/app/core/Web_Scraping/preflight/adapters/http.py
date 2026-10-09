@@ -481,8 +481,10 @@ class HttpxProbeTransport:
 
     async def send(self, request: ProbeHttpRequest) -> Any:
         proxies = _mutable_proxies(request.proxies)
-        client = http_client.create_async_client(
-            proxies=proxies, **({"trust_env": False} if public_url_policy_active() else {})
+        client = (
+            http_client.create_async_client(proxies=proxies, trust_env=False)
+            if public_url_policy_active()
+            else http_client.create_async_client(proxies=proxies)
         )
         try:
             response = await http_client.afetch(

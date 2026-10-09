@@ -794,6 +794,33 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
+    if TYPE_CHECKING:
+        # Runtime methods below delegate to NoteStore and remain replaceable by callers.
+        def add_note(
+            self,
+            title: str,
+            content: str,
+            note_id: str | None = None,
+            conversation_id: str | None = None,
+            message_id: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> str | None: ...
+
+        def get_note_by_id(
+            self,
+            note_id: str,
+            include_deleted: bool = False,
+            include_studio_summary: bool = False,
+        ) -> dict[str, Any] | None: ...
+
+        def update_note(
+            self,
+            note_id: str,
+            update_data: dict[str, Any],
+            expected_version: int,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> bool | None: ...
+
     _CURRENT_SCHEMA_VERSION = 78  # Knowledge provenance and durable receipts after upstream Chat migrations
     _POSTGRES_SCHEMA_VERSION = 82
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
@@ -7994,7 +8021,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def backend_type(self) -> BackendType:
         return self.backend.backend_type
 
-
     def _prepare_backend_statement(
         self,
         query: str,
@@ -8036,7 +8062,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self.backend_type != BackendType.POSTGRESQL:
             return query
         return transform_sqlite_query_for_postgres(query)
-
 
     def _open_new_connection(self, backend: DatabaseBackend | None = None) -> RawBackendConnection:
         active_backend = backend or self.backend
@@ -33724,7 +33749,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         else:
             params_tuple_insert = tuple([main_col_value] + other_values + [now, now, client_id_to_use])
 
-
         try:
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
@@ -33773,11 +33797,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 logger.info(f"Added {table_name} '{main_col_value}' with ID: {item_id_insert}.")
                 return item_id_insert
         except sqlite3.IntegrityError as e:
-             if f"unique constraint failed: {table_name}.{unique_col_name}" in str(e).lower(): # Use lower for robustness
+            if f"unique constraint failed: {table_name}.{unique_col_name}" in str(e).lower(): # Use lower for robustness
                 logger.warning(f"{table_name} with {unique_col_name} '{main_col_value}' already exists and is active.")
                 raise ConflictError(f"{table_name} '{main_col_value}' already exists and is active.", entity=table_name,  # noqa: TRY003
                                     entity_id=main_col_value) from e
-             raise CharactersRAGDBError(f"Database integrity error adding {table_name}: {e}") from e  # noqa: TRY003
+            raise CharactersRAGDBError(f"Database integrity error adding {table_name}: {e}") from e  # noqa: TRY003
         except ConflictError: # From undelete path
             raise
         except CharactersRAGDBError as e:
@@ -33943,7 +33967,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.info(f"No recognized updatable fields provided in update_data for {table_name} ID {item_id}. Will only update metadata if version matches.")
             # If we must update metadata anyway if version matches:
             # Fall through to add metadata updates. The query will work fine.
-
 
         next_version_val = expected_version + 1
         current_fields_to_update_sql = list(fields_to_update_sql) # clone
@@ -34195,7 +34218,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # Notes (Now with UUID and specific methods)
     # Note CRUD/search methods are delegated to NoteStore at module bottom.
-
 
     def count_notes_matching(self, search_term: str) -> int:
         """Returns the total number of active notes matching the FTS query."""
@@ -35446,7 +35468,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             row["cover_image_url"] = None
         return paged
 
-
     # --- Linking Table Methods (with manual sync_log entries) ---
     def _manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
                      operation: str, *, owner_client_id: str | None = None) -> bool:
@@ -35552,7 +35573,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:  # Catch custom errors like InputError
             logger.error(f"Application error during {operation} for {link_table}: {e}", exc_info=True)
             raise
-
 
     # Conversation <-> Keyword
     # Keyword/note link helper methods are delegated to extracted stores at module bottom.

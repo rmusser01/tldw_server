@@ -283,7 +283,9 @@ def test_retained_pointers_grant_no_access_to_foreign_or_deleted_notes(api, chac
     assert saved["knowledge_provenance"]["sources"][0]["excerpt"] == "Saved evidence"
     assert client.get(BASE + "/foreign-note").status_code == 404
     assert client.get(BASE + "/deleted-source").status_code == 404
-    assert foreign.get_note_by_id("foreign-note")["content"] == "Never expose this"
+    retained_foreign = foreign.get_note_by_id("foreign-note")
+    assert retained_foreign is not None
+    assert retained_foreign["content"] == "Never expose this"
     foreign.close_all_connections()
 
 
@@ -817,7 +819,9 @@ def test_reads_wait_for_replacement_pair_projection(
     assert replay.status_code == 200, replay.text
     recovered = getattr(client, method)(route, **kwargs)
     assert recovered.status_code == 200, recovered.text
-    row = next(csv.DictReader(io.StringIO(recovered.text))) if suffix.endswith("csv") else recovered.json()
+    row: dict[str, Any] = (
+        next(csv.DictReader(io.StringIO(recovered.text))) if suffix.endswith("csv") else recovered.json()
+    )
     if "notes" in row:
         row = row["notes"][0]
     if "/export" in suffix:
@@ -1070,3 +1074,51 @@ def test_inactive_keyed_plain_batch_replays_exact_ack(client, chacha_db, monkeyp
     conflict = client.post(path, json=changed_body, headers=headers)
     assert conflict.json()["failed_count"] == 1, conflict.text
     assert chacha_db.count_notes() == 1
+
+
+def test_local_provenance_save_refuses_missing_created_id_without_committing(chacha_db, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+    from tldw_Server_API.app.core.Notes.provenance import save_local_note
+
+    original = chacha_db.add_note
+
+    def create_without_ack(**kwargs):
+        original(**kwargs)
+        return None
+
+    monkeypatch.setattr(chacha_db, "add_note", create_without_ack)
+    with pytest.raises(CharactersRAGDBError):
+        save_local_note(
+            chacha_db,
+            note_id="missing-ack",
+            fields={"title": "Title", "content": "Body"},
+            provenance=PAYLOAD,
+            expected_provenance_version=0,
+        )
+    assert chacha_db.get_note_by_id("missing-ack") is None
+
+
+@pytest.mark.parametrize("replay", [False, True])
+def test_local_provenance_save_refuses_non_object_ack_without_committing(chacha_db, replay):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+    from tldw_Server_API.app.core.Notes.provenance import save_local_note
+
+    def invalid_ack(_note_id):
+        return "invalid acknowledgment"
+
+    if replay:
+        with chacha_db.transaction() as conn:
+            chacha_db.note_provenance_store.claim_receipt("bad-ack", "same-request", conn)
+            chacha_db.note_provenance_store.complete_receipt("bad-ack", "same-request", invalid_ack("unused"), conn)
+    with pytest.raises(InputError):
+        save_local_note(
+            chacha_db,
+            note_id="invalid-ack",
+            fields={"title": "Title", "content": "Body"},
+            provenance=PAYLOAD,
+            expected_provenance_version=0,
+            receipt_key="bad-ack",
+            request_fingerprint="same-request",
+            load_result=invalid_ack,
+        )
+    assert chacha_db.get_note_by_id("invalid-ack") is None
