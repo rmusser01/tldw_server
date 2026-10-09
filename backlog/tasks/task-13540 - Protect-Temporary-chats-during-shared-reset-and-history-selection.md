@@ -1,7 +1,7 @@
 ---
 id: TASK-13540
 title: Protect Temporary chats during shared reset and history selection
-status: In Progress
+status: Done
 labels:
 - chat-ux
 - webui
@@ -22,7 +22,7 @@ Shared New/Clear and full-page history loading silently replace a completed Temp
 - [x] #1 Retained compact New/tab switches and empty or ordinary saved chat transitions do not gain redundant Temporary prompts; existing confirmed actions receive at most one relevant discard question.
 - [x] #2 Caller continuations stop when reset or selection is declined; source/account/navigation fences and native character preflight remain intact.
 - [x] #3 Failure-first behavior checks, appropriate neighbor suites, both client types, scoped static checks and two independent authorized reviews pass.
-- [ ] #4 Native Temporary Cancel/Discard outcomes are recorded against latest dev, with server fixtures and broader program limits explicit.
+- [x] #4 Native Temporary Cancel/Discard outcomes are recorded against latest dev, with server fixtures and broader program limits explicit.
 - [x] #5 New/Clear and saved or on-device history selection offer an explicit keep-or-discard choice before losing Temporary content; cancellation preserves the owned view and draft.
 <!-- AC:END -->
 
@@ -37,20 +37,21 @@ Review repairs: shared captureChatDraftSource now includes session restore/sourc
 Native IAB: declined New kept exact two-message Temporary transcript and draft including two trailing spaces, also after reload. Native JS confirm acceptance was not exposed by documented getJsDialog; later saved-selection click timed out. No extra Chrome windows created. Positive acceptance/packaged browser claim remains open. Read-only backend receipt confirms 4-row ordinary and 5-row character fixture hashes unchanged; Temporary content absent from server history. Evidence: /private/tmp/chat-native-temporary-declined-reload-13540-20261007.{png,json}; /private/tmp/chat-native-temporary-server-history-13540-20261007.json.
 Final regression evidence: broad34-suite matrix956passed/5fixture-errors; repaired neighbor fixture removes obsolete store/simple-form doubles and reuses actual primitives; final targeted8checks pass (five Research + three selector). Unique declared matrix961behavior checks pass across those completed runs, with no skipped tests in the broad or final focused matrices. Final WebUI and extension types pass. All30authored TS/TSX effective lint187baseline/185current/zeroadded;3owned format checks and3English confirmation mirrors pass, no unrelated locale bytes. Both independent source reviews clear after accepted-mode and H1 repairs. Fresh origin/dev2c5f19d0328360d45bce99b8bae75ce252cc312f included. Bandit N/A, no Python repository code authored. Native positive acceptance/packaged-browser gate remains explicitly open; status and owned plan remain In Progress.
 Native continuation after committed TASK13542b5e948ae89: fresh AX state confirms2 Temporary articles and exact trailing-space draft before action. After reading documented browser troubleshooting, native AX New saved chat reaches the explicit discard choice; getJsDialog exposes no handle and following AX read times out/reset. This different documented input path does not verify positive acceptance or post-action Temporary state. Existing tab2/19769 marked for handoff; no new Chrome window or tab. User asked to dismiss inaccessible dialog; response pending. Current isolated saved ordinary4/Mira5 message GETs preserve exact original hashes: /private/tmp/chat-native-confirmation-boundary-13540-server-preserved.json. Control facts -control.json. Initial wrong-endpoint404 excluded. Native AC4 and retained plan remain open; no guard relaxation or tool bypass.
+Remaining native AC4 now verified on actual current buildD7F825-h96xHLo8ujYwqc against latest dev97ea9cd5fa via the existing headless browser documented confirm controls. Cancel preserves identical2-row transcript and exact multiline/trailing-space draft before/after reload; explicit Discard clears both immediately and after cold/Healthy readiness. Actual request8835 save_to_db=false/no conversation_id/history selection; ordinary full23-row canonical response deep-equal and Temporary title absent from server catalog. Initial absent save_conversation assumption corrected against actual payload/schema without any resend. /private/tmp/chat-native-temporary-positive-13540-proof.json plus screenshots/DOM/network/canonical logs. No source change/new ADR/Python; prior reviewed961 controls and current both client gates remain implementation evidence. Only owned completed plan retires, preserved /private/tmp/chat-native-temporary-positive-13540-completed-plan.md. Packaged/physical/AT/all-ten and inaccessible original IAB handle remain distinct.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation checkpoint: shared Temporary keep-or-discard admission and caller refusal propagation are implemented and reviewed, including held-confirmation session/H1/input ownership, linked Notes admission/mode ordering, and live legacy sidebar cleanup. Regression matrix and both client types are verified; native declined New retains exact transcript/draft across reload and server fixtures remain unchanged. Native positive confirmation acceptance is still unverified in IAB, so this task is not closed. Compact closure/bulk outcomes are TASK-13541.
+Implemented and verified shared Temporary keep-or-discard admission with original source/account/session/H1/input ownership. All existing regression/client/static/review gates recorded; actual current native Cancel retains exact transcript/draft across reload and explicit Discard clears them across reload, without saving Temporary content or altering existing server messages. Documented headless dialog support completes the previously open positive criterion; no production guard was relaxed. Compact closure/bulk task13541 and complete packaged/physical/AT/all-ten gates remain separate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
