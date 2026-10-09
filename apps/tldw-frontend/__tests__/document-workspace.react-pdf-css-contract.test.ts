@@ -20,24 +20,23 @@ describe("Document workspace react-pdf CSS contract", () => {
     expect(pdfDocumentSource).not.toContain("react-pdf/dist/esm/Page/TextLayer.css")
   })
 
-  it("co-locates the shared react-pdf stylesheet with the web document-workspace async chunk", () => {
-    // The web app must not load PDF layer CSS app-wide from _app (perf
-    // remediation W4): it rides the document-workspace lazy chunk instead.
+  it("loads the shared react-pdf stylesheet app-wide from _app (Next.js pages-router constraint)", () => {
+    // The pages router forbids importing first-party global CSS outside
+    // _app.tsx (a co-location attempt broke the production build; see
+    // TASK-13511). Keep the single app-wide import until the app moves to
+    // the app router or the styles become CSS-module compatible.
     const webAppSource = readSource(path.join(frontendRoot, "pages/_app.tsx"))
-    expect(webAppSource).not.toContain('import "@/assets/react-pdf.css"')
-
-    const webLazyEntrySource = readSource(
-      path.join(frontendRoot, "routes/document-workspace.ts")
-    )
-    expect(webLazyEntrySource).toContain('import "@/assets/react-pdf.css"')
-    expect(webLazyEntrySource).toContain("routes/option-document-workspace")
+    expect(webAppSource).toContain('import "@/assets/react-pdf.css"')
 
     const documentWorkspacePageSource = readSource(
       path.join(frontendRoot, "pages/document-workspace.tsx")
     )
     expect(documentWorkspacePageSource).toContain(
-      'import("@web/routes/document-workspace")'
+      'import("@/routes/option-document-workspace")'
     )
+    expect(
+      existsSync(path.join(frontendRoot, "routes/document-workspace.ts"))
+    ).toBe(false)
   })
 
   it("keeps loading the shared react-pdf stylesheet from the extension app shells", () => {

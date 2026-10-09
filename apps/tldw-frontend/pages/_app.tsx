@@ -1,4 +1,8 @@
 import "../styles/globals.css"
+// react-pdf layer CSS must stay app-wide: the Next.js pages router forbids
+// importing first-party global CSS outside _app, so the earlier attempt to
+// co-locate it with the document-workspace chunk broke the prod build.
+import "@/assets/react-pdf.css"
 import { runtimeBootstrapReady } from "@web/extension/shims/runtime-bootstrap"
 // Use web-specific i18n that works with SSR/static generation
 import "@web/lib/i18n-web"
