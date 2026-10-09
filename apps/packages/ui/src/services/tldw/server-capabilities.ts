@@ -291,31 +291,137 @@ const normalizePaths = (raw: any): Record<string, any> => {
   return out
 }
 
-const resolveSchemaRef = (schema: any, spec: any): any => {
+const schemaAnnotationKeys = [
+  "title",
+  "description",
+  "default",
+  "example",
+  "examples",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+  "$comment"
+]
+
+const resolveSchemaRef = (
+  schema: any,
+  spec: any,
+  seen: Set<string> = new Set(),
+  rejectRefConstraints = false
+): any => {
   if (!schema || typeof schema !== "object") return schema
   const ref = schema.$ref
   if (typeof ref !== "string") return schema
+  if (
+    rejectRefConstraints &&
+    Object.keys(schema).some(
+      (key) => !["$ref", ...schemaAnnotationKeys].includes(key)
+    )
+  )
+    return null
   const prefix = "#/components/schemas/"
-  if (!ref.startsWith(prefix)) return schema
-  const name = ref.slice(prefix.length)
-  const resolved = spec?.components?.schemas?.[name]
-  return resolved || schema
+  if (!ref.startsWith(prefix) || seen.has(ref) || seen.size >= 64) return null
+  seen.add(ref)
+  return resolveSchemaRef(
+    spec?.components?.schemas?.[ref.slice(prefix.length)],
+    spec,
+    seen,
+    rejectRefConstraints
+  )
 }
 
 const schemaHasProperty = (
   schema: any,
   property: string,
   spec: any,
-  seen: Set<string> = new Set()
+  seen: Set<string> = new Set(),
+  propertyType?: string,
+  depth = 0
 ): boolean => {
-  if (!schema || typeof schema !== "object") return false
+  if (!schema || typeof schema !== "object" || depth >= 64) return false
   const ref = typeof schema.$ref === "string" ? schema.$ref : null
   if (ref) {
     if (seen.has(ref)) return false
     seen.add(ref)
-    return schemaHasProperty(resolveSchemaRef(schema, spec), property, spec, seen)
+    return schemaHasProperty(
+      resolveSchemaRef(schema, spec, new Set(), Boolean(propertyType)),
+      property,
+      spec,
+      seen,
+      propertyType,
+      depth + 1
+    )
   }
-  if (schema.properties && schema.properties[property]) return true
+  // Unsupported request constraints cannot grant strict admission authority.
+  if (
+    propertyType &&
+    ((schema.type !== undefined && schema.type !== "object") ||
+      Object.keys(schema).some(
+        (key) =>
+          ![
+            "type",
+            "properties",
+            "required",
+            "additionalProperties",
+            ...schemaAnnotationKeys
+          ].includes(key)
+      ))
+  )
+    return false
+  const field = resolveSchemaRef(
+    schema.properties?.[property],
+    spec,
+    new Set(),
+    Boolean(propertyType)
+  )
+  if (field && !propertyType) return true
+  if (field && propertyType) {
+    const fieldKeys = [
+      "type",
+      "const",
+      "enum",
+      "anyOf",
+      "oneOf",
+      ...schemaAnnotationKeys
+    ]
+    if (Object.keys(field).some((key) => !fieldKeys.includes(key))) return false
+    const variants = field.anyOf ?? field.oneOf ?? [field]
+    const isSimple = (entry: Record<string, unknown> | null | undefined) =>
+      Boolean(entry) &&
+      Object.keys(entry ?? {}).every((key) => fieldKeys.includes(key)) &&
+      entry?.anyOf === undefined &&
+      entry?.oneOf === undefined
+    const allowsFalse = (entry: Record<string, unknown> | null | undefined) =>
+      isSimple(entry) &&
+      entry?.type === propertyType &&
+      (entry.const === undefined || entry.const === false) &&
+      (entry.enum === undefined ||
+        (Array.isArray(entry.enum) && entry.enum.includes(false)))
+    if (
+      Array.isArray(variants) &&
+      variants.length > 0 &&
+      variants.length <= 64 &&
+      !(field.anyOf !== undefined && field.oneOf !== undefined) &&
+      (field.type === undefined || field.type === propertyType) &&
+      (field.const === undefined || field.const === false) &&
+      (field.enum === undefined ||
+        (Array.isArray(field.enum) && field.enum.includes(false)))
+    ) {
+      const resolved = variants.map((entry) =>
+        resolveSchemaRef(entry, spec, new Set(), true)
+      )
+      if (
+        (field.oneOf !== undefined
+          ? resolved.filter(allowsFalse).length === 1
+          : resolved.some(allowsFalse)) &&
+        resolved.every(
+          (entry) =>
+            allowsFalse(entry) || (isSimple(entry) && entry?.type === "null")
+        )
+      )
+        return true
+    }
+  }
 
   const combos = [
     ...(Array.isArray(schema.allOf) ? schema.allOf : []),
@@ -323,9 +429,34 @@ const schemaHasProperty = (
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : [])
   ]
   for (const entry of combos) {
-    if (schemaHasProperty(entry, property, spec, seen)) return true
+    if (schemaHasProperty(entry, property, spec, seen, propertyType, depth + 1))
+      return true
   }
   return false
+}
+
+/** Only the deployed operation's JSON request contract grants strict admission support. */
+export const detectNativeHistoryBranchAdmission = (
+  spec: unknown,
+  operation: "messages" | "completion"
+): boolean => {
+  const path =
+    operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"
+  const paths = resolveSchemaRef(spec, spec)?.paths
+  const post = paths?.[path]?.post ?? paths?.[`${path}/`]?.post
+  const content = post?.requestBody?.content
+  const schema =
+    content?.["application/json"]?.schema ??
+    content?.["application/json;charset=utf-8"]?.schema
+  return schemaHasProperty(
+    schema,
+    "tldw_history_branch",
+    spec,
+    new Set(),
+    "boolean"
+  )
 }
 
 const detectChatSaveToDb = (spec: any): boolean => {
@@ -754,6 +885,7 @@ const shouldProbeIngestionSourceCapabilities = (
 }
 
 type CapabilitiesFetchContext = {
+  configSnapshot: TldwConfig | null
   cacheKey: string
   shouldProbeIngestionSourceCapabilities: boolean
 }
@@ -772,6 +904,7 @@ const getCapabilitiesFetchContext = async (): Promise<CapabilitiesFetchContext> 
     : config
 
   return {
+    configSnapshot: cacheConfig ? { ...cacheConfig } : null,
     cacheKey: buildChatSurfaceScopeKeyFromConfig(cacheConfig),
     shouldProbeIngestionSourceCapabilities:
       shouldProbeIngestionSourceCapabilities(config)
@@ -815,7 +948,7 @@ const persistCapabilities = async (
 }
 
 const fetchCapabilitiesFromServer = async (
-  shouldProbeSourceCapabilities: boolean
+  { configSnapshot, shouldProbeIngestionSourceCapabilities: shouldProbeSourceCapabilities }: CapabilitiesFetchContext
 ): Promise<ServerCapabilities> => {
   const startedAt = Date.now()
   capabilitiesDiagnostics.networkFetches += 1
@@ -823,11 +956,12 @@ const fetchCapabilitiesFromServer = async (
   let docsInfo: DocsInfoResponse | null = null
   try {
     const [openApiSpec, docsInfoResponse] = await Promise.all([
-      tldwClient.getOpenAPISpec(),
+      tldwClient.getOpenAPISpec({ configSnapshot }),
       bgRequest<DocsInfoResponse, any>({
         path: "/api/v1/config/docs-info" as any,
         method: "GET" as any,
-        noAuth: true
+        noAuth: true,
+        configSnapshot
       }).catch(() => null)
     ])
     spec = openApiSpec
@@ -864,7 +998,8 @@ const fetchCapabilitiesFromServer = async (
       const sourceCapabilities =
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({
           path: "/api/v1/ingestion-sources/capabilities" as any,
-          method: "GET" as any
+          method: "GET" as any,
+          configSnapshot
         })
       capabilities = applyIngestionSourceCapabilityGates(
         capabilities,
@@ -881,8 +1016,8 @@ const fetchCapabilitiesFromServer = async (
 export const getServerCapabilities = async (
   options?: { forceRefresh?: boolean }
 ): Promise<ServerCapabilities> => {
-  const { cacheKey, shouldProbeIngestionSourceCapabilities } =
-    await getCapabilitiesFetchContext()
+  const context = await getCapabilitiesFetchContext()
+  const { cacheKey } = context
   const now = Date.now()
   const forceRefresh = options?.forceRefresh === true
   capabilitiesDiagnostics.calls += 1
@@ -924,9 +1059,7 @@ export const getServerCapabilities = async (
   }
 
   const request = (async () => {
-    const capabilities = await fetchCapabilitiesFromServer(
-      shouldProbeIngestionSourceCapabilities
-    )
+    const capabilities = await fetchCapabilitiesFromServer(context)
     const payload: CapabilitiesCachePayload = {
       key: cacheKey,
       fetchedAt: Date.now(),

@@ -530,8 +530,8 @@ describe("side-panel tabs that fall behind their server chat (XP-08)", () => {
       "chat-1 follow-up from the full page",
       "chat-1 reply from the full page"
     ])
-    // The panel says why its transcript changed.
-    expect(screen.getByText(STALE_NOTICE)).toBeInTheDocument()
+    // Choosing publishes the transcript before its awaited notice.
+    expect(await screen.findByText(STALE_NOTICE)).toBeInTheDocument()
     // The next send continues from the server's latest message.
     expect(io.bookmarks.get("chat-1")).toBe("chat-1-a2")
   })

@@ -400,6 +400,7 @@ vi.mock("@/libs/get-html", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getOpenAPISpec: (...args: unknown[]) => h1.spec(...args),
     getCharacter: h1.live,
     createChat: (...args: any[]) => h1.create(...args),
     getChat: vi.fn(async (id: string) => ({ id, title: "Owned opening", character_id: "12" })),
@@ -479,6 +480,7 @@ import {
 } from "@/hooks/chat/sidepanel-send-gate"
 
 const h1 = vi.hoisted(() => ({
+  spec: vi.fn(),
   native: false,
   persona: false,
   create: vi.fn(),
@@ -636,6 +638,32 @@ beforeEach(async () => {
   mocks.storeState.detachedHistoryResponse = null
   mocks.storeState.replyTarget = null
   h1.auth = new AbortController()
+  const strictAdmission = {
+    post: {
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: {
+                tldw_history_branch: {
+                  anyOf: [{ type: "boolean" }, { type: "null" }]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  h1.spec
+    .mockReset()
+    .mockResolvedValue({
+      paths: {
+        "/api/v1/chat/completions": strictAdmission,
+        "/api/v1/chats/{chat_id}/messages": strictAdmission
+      }
+    })
+
   h1.native = false
   h1.persona = false
   h1.beforeModel.mockReset()
@@ -4120,5 +4148,107 @@ it.each(["H1", "account", "draft", "journal failure"])(
     if (boundary !== "journal failure")
       expect(mocks.notification.error).not.toHaveBeenCalled()
     expect(h1.dismiss).not.toHaveBeenCalled()
+  }
+)
+
+it("mounted Character Send holds an older-server continuation locally, before any dispatch record or generation", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.spec.mockResolvedValue(null)
+  h1.controller.holdStaleSend = vi.fn(() => true)
+  h1.capture.mockImplementation(async (_id, request) => {
+    const result = captureFor(request.view)
+    return {
+      ...result,
+      snapshot: {
+        ...result.snapshot,
+        nodes: [
+          ...result.snapshot.nodes,
+          {
+            id: "other-input",
+            revision: "1",
+            parent_id: "a1",
+            role: "user",
+            settled: true
+          }
+        ]
+      }
+    }
+  })
+  const mounted = renderHook(() => useMessage())
+  let outcome: unknown
+  await act(async () => {
+    outcome = await mounted.result.current.onSubmit({
+      message: "  Character input\nkept exactly.  ",
+      image: ""
+    })
+  })
+  expect(outcome).toMatchObject({
+    status: "failed",
+    errorMessage: "native_history_branch_choice_required"
+  })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.recover.mock.calls.map((call) => call[2].state)).toEqual([
+    "refused"
+  ])
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+    input_text: "  Character input\nkept exactly.  ",
+    input_images: [],
+    result_text: ""
+  })
+  expect(h1.controller.holdStaleSend).toHaveBeenCalledOnce()
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  mounted.unmount()
+})
+
+it.each(["H1", "account", "New", "unmount"])(
+  "held Character contract discovery cannot restore authority after %s",
+  async (boundary) => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    h1.controller.holdStaleSend = vi.fn(() => true)
+    const actualStore =
+      await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    mocks.draftFields = () => {
+      const state = actualStore.useStoreMessageOption.getState()
+      return {
+        chatDraftAddress: state.chatDraftAddress,
+        chatDraftRevision: state.chatDraftRevision
+      }
+    }
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    h1.spec.mockImplementation(async () => {
+      await held
+      return null
+    })
+    const mounted = renderHook(() => useMessage())
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = mounted.result.current.onSubmit({
+        message: "Original unsent input",
+        image: ""
+      })
+    })
+    await waitFor(() => expect(h1.spec).toHaveBeenCalledOnce())
+    if (boundary === "H1") h1.controller.navigate()
+    if (boundary === "account") h1.auth.abort()
+    if (boundary === "New")
+      actualStore.useStoreMessageOption.getState().startNewChatDraft(false)
+    if (boundary === "unmount") mounted.unmount()
+    await act(async () => {
+      release()
+      await pending
+    })
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(h1.recover).not.toHaveBeenCalled()
+    expect(h1.controller.holdStaleSend).not.toHaveBeenCalled()
+    if (boundary !== "unmount") mounted.unmount()
   }
 )

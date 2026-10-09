@@ -30,6 +30,7 @@ import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
+  nativeHistoryNeedsBranchChoice,
   prepareHistoryContext,
   finalizeHistorySelection,
   parseNativeHistoryAdmission,
@@ -46,7 +47,7 @@ import {
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
-import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 
 export type NativeHistoryCharacterSendParams = {
@@ -55,6 +56,7 @@ export type NativeHistoryCharacterSendParams = {
   privateDraft?: { handle: ChatDraftHandle; isCurrent: () => boolean }
   surface: "playground" | "sidepanel"
   originIsCurrent: () => boolean
+  sourceIsCurrent?: () => boolean
   signal: AbortSignal
   temporary: boolean
   historyId?: string | null
@@ -146,7 +148,8 @@ export const sendNativeHistoryCharacter = async (
   if (privateHandle && params.scope && chatDraftAddressKey({ ...privateHandle.address, scope: params.scope } as ChatDraftHandle["address"]) !== chatDraftAddressKey(privateHandle.address))
     throw new Error("chat_creation_source_invalid")
   const acceptDraftBind = !privateHandle && !params.historyId && !params.serverChatId && sourceDraft?.kind === "fresh" ? captureChatDraftLoad("bind") : null
-  const draftIsCurrent = privateHandle ? privateCurrent : acceptDraftBind?.isCurrent ?? captureChatDraftSource().isCurrent
+  const capturedDraftIsCurrent = privateHandle ? privateCurrent : acceptDraftBind?.isCurrent ?? captureChatDraftSource().isCurrent
+  const draftIsCurrent = () => params.sourceIsCurrent?.() !== false && capturedDraftIsCurrent()
   if (!greetingSeed && !regenerate && !params.message.trim()) throw new Error("native_history_input_required")
   if (greetingSeed && (params.message || !greetingSeed.rawText?.trim() ||
       params.historyId || params.serverChatId || sourceDraft?.kind !== "fresh" ||
@@ -396,7 +399,7 @@ export const sendNativeHistoryCharacter = async (
     const sameView = () => {
       const now = controller.getCurrent().view
       return (
-        authValid() &&
+        authValid() && params.sourceIsCurrent?.() !== false &&
         !!now &&
         now.owner_key === originView.owner_key &&
         now.conversation_id === originView.conversation_id &&
@@ -585,8 +588,25 @@ export const sendNativeHistoryCharacter = async (
       }
       if (creationHandle) await markChatCreationSettled(creationHandle, owner.conversation_id)
     }
-    await saveHistoryTurnRecovery(scope, view, record("dispatching"))
     try {
+      if (!preparingIsCurrent()) throw new Error("stale_selection")
+      if (
+        !historyBranch &&
+        (await nativeHistoryNeedsBranchChoice(owner, capture, "completion", {
+          signal: snapshot.scopeSignal,
+          validate_lease: preparingIsCurrent
+        }))
+      )
+        throw new NativeHistoryBranchChoice(
+          () =>
+            sameView() &&
+            selectionCurrent() &&
+            privateCurrent() &&
+            draftIsCurrent() &&
+            originOwner.validate_lease()
+        )
+
+      await saveHistoryTurnRecovery(scope, view, record("dispatching"))
       if (!preparingIsCurrent()) throw new Error("stale_selection")
       dispatched = true
       // The transport sets stream=true. Never give it the frozen provenance object.
@@ -666,35 +686,41 @@ export const sendNativeHistoryCharacter = async (
         return
       }
       if (
-        dispatched &&
+        (error instanceof NativeHistoryBranchChoice || dispatched) &&
         !streamStarted &&
         !admission &&
         !resultId &&
         content === "" &&
-        (isSavedContextRefusal(error) ||
+        (error instanceof NativeHistoryBranchChoice ||
+          isSavedContextRefusal(error) ||
           (!historyBranch && isDefinitiveNativeBranchRejection(error, selection)))
       ) {
         const acceptedOwner = current.owner
         const branchRefusal =
-          !historyBranch && isDefinitiveNativeBranchRejection(error, selection)
+          !historyBranch &&
+          (error instanceof NativeHistoryBranchChoice ||
+            isDefinitiveNativeBranchRejection(error, selection))
         const Refusal = branchRefusal
           ? NativeHistoryBranchRefusal
           : NativeHistoryContextRefusal
-        const refusal = new Refusal(
-          error,
-          () =>
-            selectionCurrent() &&
-            privateCurrent() &&
-            draftIsCurrent() &&
-            sameView() &&
-            acceptedOwner.validate_lease()
-        )
+        const refusal =
+          error instanceof NativeHistoryBranchChoice
+            ? error
+            : new Refusal(
+                error,
+                () =>
+                  selectionCurrent() &&
+                  privateCurrent() &&
+                  draftIsCurrent() &&
+                  sameView() &&
+                  acceptedOwner.validate_lease()
+              )
         try {
           // Composer retention is not an acknowledged write; keep the only durable input.
           await saveHistoryTurnRecovery(scope, view, record("refused"))
         } catch {
           // The earlier dispatch record remains recoverable if storage or its account retired.
-          console.warn("Could not record or display a confirmed native refusal.")
+          console.warn("Could not retain a native input that was not admitted.")
         }
         if (refusal.isCurrent()) {
           if (branchRefusal) controller.holdStaleSend?.(originView, draftIsCurrent)

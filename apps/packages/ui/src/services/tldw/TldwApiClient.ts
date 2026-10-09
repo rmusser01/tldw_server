@@ -2912,16 +2912,31 @@ export class TldwApiClientBase {
     return query ? `?${query}` : ''
   }
 
-  async getOpenAPISpec(): Promise<any | null> {
+  async getOpenAPISpec(
+    options?: ScopedRequestOptions & { configSnapshot?: TldwConfig | null }
+  ): Promise<any | null> {
     try {
-      if (!this.baseUrl) await this.initialize()
-      if (!this.baseUrl) return null
-      const baseUrl = this.baseUrl.replace(/\/$/, '')
-      if (isQuickstartWebUiSameOriginServerUrl(baseUrl)) return null
-      return await this.requestWithCurrentConfig<any>({
-        path: `${baseUrl}/openapi.json` as any,
-        method: 'GET' as any
-      }, false)
+      if (options?.signal?.aborted) return null
+      if (options?.requestScope || options?.configSnapshot !== undefined) {
+        if (!options.requestScope && !options.configSnapshot?.serverUrl)
+          return null
+        return await bgRequest<unknown>({
+          path: "/openapi.json",
+          method: "GET",
+          ...(options.requestScope
+            ? requestScopeFields(options.requestScope)
+            : { configSnapshot: options.configSnapshot }),
+          abortSignal: options.signal
+        })
+      }
+      return await this.requestWithCurrentConfig<any>(
+        (config) => ({
+          path: `${config.serverUrl.replace(/\/$/, "")}/openapi.json`,
+          method: "GET",
+          abortSignal: options?.signal
+        }),
+        false
+      )
     } catch {
       return null
     }

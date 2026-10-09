@@ -63,6 +63,43 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgStream.mockReset()
   })
 
+  it("reads deployed OpenAPI from the captured native owner without consulting a replacement connection", async () => {
+    const client = new TldwApiClient()
+    const getConfig = vi
+      .spyOn(client, "getConfig")
+      .mockResolvedValue({
+        serverUrl: "https://replacement.test",
+        authMode: "single-user"
+      })
+    const initialize = vi.spyOn(client, "initialize").mockResolvedValue(undefined)
+    const signal = new AbortController().signal
+    const spec = { paths: { "/api/v1/chats/{chat_id}/messages": { post: {} } } }
+    mocks.bgRequest.mockResolvedValue(spec)
+    const read = client.getOpenAPISpec
+    expect(await read.call(client, { requestScope, signal })).toBe(spec)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/openapi.json",
+        method: "GET",
+        abortSignal: signal,
+        headers: { "X-TLDW-Expected-User-ID": "42" },
+        servicePromptConfig: expectedScopeFields.servicePromptConfig
+      })
+    )
+    expect(getConfig).not.toHaveBeenCalled()
+    expect(initialize).not.toHaveBeenCalled()
+  })
+
+  it("does not begin retired scoped OpenAPI discovery", async () => {
+    const client = new TldwApiClient()
+    const signal = AbortSignal.abort()
+    const initialize = vi.spyOn(client, "initialize").mockResolvedValue(undefined)
+    const read = client.getOpenAPISpec
+    expect(await read.call(client, { requestScope, signal })).toBeNull()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(initialize).not.toHaveBeenCalled()
+  })
+
   it.each([null, {}, { chats: {} }])("does not manufacture empty chats from an unknown list response %j", async response => {
     mocks.bgRequest.mockResolvedValue(response)
     await expect(new TldwApiClient().listChatsWithMeta({}, { requestScope })).rejects.toThrow(/chat.*list|list.*chat/i)

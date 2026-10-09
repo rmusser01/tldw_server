@@ -92,13 +92,21 @@ export class NativeHistoryContextRefusal extends Error {
   }
 }
 
-/** The server rejected this input before admission; feedback still belongs to its source. */
+/** A confirmed no-admission outcome; feedback still belongs to its source. */
 export class NativeHistoryBranchRefusal extends Error {
   constructor(
     cause: unknown,
     readonly isCurrent: () => boolean
   ) {
     super("native_history_branch_changed", { cause })
+  }
+}
+
+/** A client hold is not a server refusal or evidence of a dispatched request. */
+export class NativeHistoryBranchChoice extends NativeHistoryBranchRefusal {
+  constructor(isCurrent: () => boolean) {
+    super(new Error("strict_native_admission_unavailable"), isCurrent)
+    this.message = "native_history_branch_choice_required"
   }
 }
 
@@ -123,6 +131,12 @@ export const nativeCharacterPreflightMessage = (
       'playground:composer.native_history_settings_unverified',
       'Conversation settings could not be verified. Your message has not been sent. Reload this saved chat or try again.'
     );
+  if (error instanceof NativeHistoryBranchChoice)
+    return t(
+      "playground:composer.native_history_branch_choice_required",
+      "The selected messages already have a continuation. Your message was not sent. Load the latest messages or choose Branch here."
+    )
+
   if (error instanceof NativeHistoryBranchRefusal)
     return t(
       "playground:composer.native_history_branch_changed",

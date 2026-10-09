@@ -2468,7 +2468,7 @@ export const useMessage = () => {
     assertCurrent?: () => void;
   }, beginResponse: () => boolean) => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
-    // Native admission checks the selected tip atomically; legacy tabs retain their gate.
+    // Native senders qualify strict admission or hold an older-server choice using their fresh capture.
     if (sendGate?.current && historySelection?.getCurrent().owner?.kind !== "native" && !historyEditResend && !isRegenerate && !chatHistory && !memory) {
       const gate = await sendGate.current({ message });
       if (!gate.proceed) return { status: "skipped" as const, reason: "server_history_refresh_required" };
@@ -2720,6 +2720,7 @@ export const useMessage = () => {
         try {
           await sendNativeHistoryCharacter({
             surface: "sidepanel", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
+            sourceIsCurrent: () => actionsMountedRef.current,
             signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId,
             model, currentModel: selectedModel, toolChoice: resolvedToolChoice, settings: currentChatModelSettings,
             message, image, historyRegenerate, setServerChatId, setMessages,
@@ -2902,6 +2903,7 @@ export const useMessage = () => {
                   t,
                   controller: historySelection,
                   originIsCurrent: historyOriginIsCurrent!,
+                  sourceIsCurrent: () => actionsMountedRef.current,
                   signal,
                   temporary: temporaryChat,
                   historyId,
@@ -3075,6 +3077,7 @@ export const useMessage = () => {
                   ? {
                       controller: normalHistorySelection,
                       originIsCurrent: historyOriginIsCurrent!,
+                      sourceIsCurrent: () => actionsMountedRef.current,
                       temporary: temporaryChat
                     }
                   : undefined,
@@ -3131,6 +3134,7 @@ export const useMessage = () => {
                   ? {
                       controller: normalHistorySelection,
                       originIsCurrent: historyOriginIsCurrent!,
+                      sourceIsCurrent: () => actionsMountedRef.current,
                       temporary: temporaryChat,
                       editResend: historyEditResend,
                       createServerChat:

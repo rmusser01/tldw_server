@@ -3904,6 +3904,7 @@ export const useChatActions = ({
         if (historyRegenerate) {
           await sendNativeHistoryCharacter({
             surface: "playground", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
+            sourceIsCurrent: () => actionsMountedRef.current,
             signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId, scope,
             model: effectiveSelectedModel || "", currentModel: getEffectiveSelectedModel(),
             toolChoice: servicePromptChatModeParams.toolChoice, settings: servicePromptChatModeParams.currentChatModelSettings,
@@ -4022,6 +4023,7 @@ export const useChatActions = ({
                 t,
                 controller: historySelection,
                 originIsCurrent: historyOriginIsCurrent!,
+                sourceIsCurrent: () => actionsMountedRef.current,
                 signal,
                 temporary: temporaryChat,
                 historyId,
@@ -4165,6 +4167,7 @@ export const useChatActions = ({
                 ? {
                     controller: normalHistorySelection,
                     originIsCurrent: historyOriginIsCurrent!,
+                    sourceIsCurrent: () => actionsMountedRef.current,
                     temporary: temporaryChat,
                     editResend: historyEditResend,
                     createServerChat:

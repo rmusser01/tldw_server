@@ -178,7 +178,8 @@ vi.mock("@/store/option", async (original) => {
   }
 })
 
-vi.mock("@/services/tldw/server-capabilities", () => ({
+vi.mock("@/services/tldw/server-capabilities", async original => ({
+  ...(await original<typeof import("@/services/tldw/server-capabilities")>()),
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
 }))
 
@@ -191,6 +192,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getChat: vi.fn(async (id: string) => ({ id, title: "Actual owned chat", character_id: "12" })),
     getChatSettings: vi.fn(async (id: string) => ({ conversation_id: id, settings: {} })),
     initialize: vi.fn(async () => null),
+    getOpenAPISpec: (...args: unknown[]) => h1.spec(...args),
     getCharacter: h1.live,
     captureHistorySelection: (...args: any[]) => h1.capture(...args),
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
@@ -313,6 +315,7 @@ const createHookOptions = () => ({
 })
 
 const h1 = vi.hoisted(() => ({
+  spec: vi.fn(),
   connected: false,
   create: vi.fn(),
   live: vi.fn(() => {
@@ -513,6 +516,32 @@ const makeController = () => {
 afterEach(() => vi.restoreAllMocks())
 
 beforeEach(async () => {
+  const strictAdmission = {
+    post: {
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: {
+                tldw_history_branch: {
+                  anyOf: [{ type: "boolean" }, { type: "null" }]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  h1.spec
+    .mockReset()
+    .mockResolvedValue({
+      paths: {
+        "/api/v1/chat/completions": strictAdmission,
+        "/api/v1/chats/{chat_id}/messages": strictAdmission
+      }
+    })
+
   messageStoreState.editRows = null
   nativeChatId = "tracked-chat-1"
   h1.connected = false
@@ -844,7 +873,10 @@ it.each(["capture", "dispatch journal"])("native sampler refuses an identical H1
   const options = createHookOptions()
   const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
   let sending!: Promise<unknown>
-  await act(async () => { sending = result.current.onSubmit({ message: "original input", image: "" }); await ready })
+  await act(async () => {
+    sending = result.current.onSubmit({ message: "original input", image: "" })
+    await Promise.race([ready, sending.then(outcome => { throw new Error(`Sender finished before the ${stage} hold: ${JSON.stringify(outcome)}`) })])
+  })
   h1.controller.retireSameTuple()
   await act(async () => { release(); await sending })
   expect(h1.wire).not.toHaveBeenCalled()
@@ -6252,3 +6284,34 @@ it.each(["H1", "account", "draft", "journal failure"])(
     expect(h1.dismiss).not.toHaveBeenCalled()
   }
 )
+
+it("held full Character contract discovery cannot dispatch from an unmounted composer whose outer H1 survives", async () => {
+  const options = createHookOptions()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  h1.spec.mockImplementation(async () => {
+    await held
+    return null
+  })
+  const hook = renderHook(() =>
+    useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+  )
+  let pending!: Promise<unknown>
+  act(() => {
+    pending = hook.result.current.onSubmit({
+      message: "Original unsent full input",
+      image: ""
+    })
+  })
+  await waitFor(() => expect(h1.spec).toHaveBeenCalledOnce())
+  hook.unmount()
+  await act(async () => {
+    release()
+    await pending
+  })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  expect(h1.recover).not.toHaveBeenCalled()
+})

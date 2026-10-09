@@ -1,4 +1,4 @@
-import { NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
   appendSelectedUser,
@@ -1136,7 +1136,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     if (historyTurn) {
-      if (historyTurn.dispatched) {
+      if (historyTurn.dispatched || e instanceof NativeHistoryBranchChoice) {
         // The question is already saved with its owner. A reply that ended
         // early, or finished after its view went away, stays in the
         // transcript (CS-04, #3104). Failures with nothing to show, and turns

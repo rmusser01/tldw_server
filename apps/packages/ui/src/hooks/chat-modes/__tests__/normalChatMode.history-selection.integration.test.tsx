@@ -133,6 +133,7 @@ const send = (controller: HistorySelectionController, options: {
   image?: string
   snapshot?: ServicePromptSnapshot | null
   originIsCurrent?: () => boolean
+  sourceIsCurrent?: () => boolean
   setHistoryId?: (id: string) => void
   toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
   fixedOverrides?: boolean
@@ -148,7 +149,7 @@ const send = (controller: HistorySelectionController, options: {
       model: options.fixedOverrides ? "explicit" : "global",
       toolChoice: options.fixedOverrides ? "explicit" : "global"
     },
-    historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true), createServerChat: Boolean(options.setServerChatId) },
+    historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true), ...(options.sourceIsCurrent ? { sourceIsCurrent: options.sourceIsCurrent } : {}), createServerChat: Boolean(options.setServerChatId) },
     historyId: options.historyId ?? null,
     serverChatId: options.serverChatId,
     setServerChatId: options.setServerChatId,
@@ -191,6 +192,29 @@ beforeEach(() => {
   useStoreChatModelSettings.getState().reset()
   useMcpToolsStore.setState({ toolsLoading: false, healthState: "unknown" })
   useStoreMessageOption.setState({ selectedModel: "test", toolChoice: "none" })
+  vi.spyOn(tldwClient, "getOpenAPISpec").mockResolvedValue({
+    paths: Object.fromEntries(
+      ["/api/v1/chats/{chat_id}/messages", "/api/v1/chat/completions"].map(
+        (path) => [
+          path,
+          {
+            post: {
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      properties: { tldw_history_branch: { type: "boolean" } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      )
+    )
+  })
+
   vi.spyOn(tldwChat, "streamMessage").mockImplementation(async function* () { yield "First answer" })
 })
 
@@ -1137,3 +1161,136 @@ describe("native latest intent and owned refusal", () => {
     }
   )
 })
+
+it.each(["playground", "sidepanel"] as const)(
+  "holds an unknown older-server continuation before admission in %s and keeps an explicit Branch choice",
+  async (surface) => {
+    vi.spyOn(tldwClient, "getOpenAPISpec").mockResolvedValue(null)
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    let captureReads = 0
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => {
+        const result = emptyServerCapture(
+          request
+        ) as unknown as import("@/types/history-selection").HistorySelectionCaptureV1
+        if (++captureReads === 1) return result as never
+        return {
+          ...result,
+          snapshot: {
+            ...result.snapshot,
+            nodes: [
+              {
+                id: "elsewhere",
+                revision: "1",
+                parent_id: null,
+                role: "user",
+                settled: true
+              }
+            ]
+          }
+        } as never
+      }
+    )
+    const append = vi
+      .spyOn(tldwClient, "addChatMessage")
+      .mockRejectedValue(new Error("Unexpected admission"))
+    const hook = renderHook(() => useHistorySelection())
+    preparation.multimodal = true
+    const image =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VbMAAAAASUVORK5CYII="
+    const message = "  Older-server input retained exactly.\nSecond line.  "
+    let outcome: unknown
+    await act(async () => {
+      outcome = await send(hook.result.current, {
+        surface,
+        message,
+        image,
+        setServerChatId: () => {}
+      })
+    })
+    expect(outcome).toMatchObject({
+      status: "failed",
+      errorMessage: "native_history_branch_choice_required"
+    })
+    expect(append).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    const original = hook.result.current.getCurrent()
+    const recoveries = await loadHistoryTurnRecoveries(
+      original.bookmarkScope!,
+      original.view!
+    )
+    expect(recoveries[0].turn).toMatchObject({
+      state: "refused",
+      input_text: message,
+      input_images: [image],
+      result_text: ""
+    })
+    expect(recoveries[0].turn.admission).toBeUndefined()
+    expect(hook.result.current.sendConflict).toBe(true)
+    act(() => {
+      expect(hook.result.current.branchHere(original.view!, () => true)).toBe(
+        true
+      )
+    })
+    await act(async () => {
+      await send(hook.result.current, {
+        surface,
+        message,
+        image,
+        serverChatId: newServerId
+      })
+    })
+    expect(append).toHaveBeenCalledOnce()
+    expect(append.mock.calls[0][1]).toMatchObject({
+      content: message,
+      tldw_history_branch: true
+    })
+    hook.unmount()
+  }
+)
+
+it.each(["playground", "sidepanel"] as const)(
+  "native first bind keeps its independent %s source lease during held contract discovery",
+  async (surface) => {
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request)
+    )
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    vi.mocked(tldwClient.getOpenAPISpec).mockImplementation(async () => {
+      await held
+      return null
+    })
+    const append = vi
+      .spyOn(tldwClient, "addChatMessage")
+      .mockRejectedValue(new Error("Unexpected late admission"))
+    const hook = renderHook(() => useHistorySelection())
+    let sourceCurrent = true
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = send(hook.result.current, {
+        surface,
+        setServerChatId: () => {},
+        sourceIsCurrent: () => sourceCurrent
+      })
+    })
+    await waitFor(() =>
+      expect(tldwClient.getOpenAPISpec).toHaveBeenCalledOnce()
+    )
+    expect(hook.result.current.getCurrent().owner).toMatchObject({
+      kind: "native",
+      conversation_id: newServerId
+    })
+    sourceCurrent = false
+    await act(async () => {
+      release()
+      await pending
+    })
+    expect(append).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    hook.unmount()
+  }
+)

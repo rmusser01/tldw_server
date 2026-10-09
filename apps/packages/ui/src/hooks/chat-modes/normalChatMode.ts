@@ -3,7 +3,7 @@ import type {
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
 import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
-import { NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
 import type {
   HistorySendTurn,
   NativeHistoryEditResend
@@ -12,6 +12,7 @@ import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
+  nativeHistoryNeedsBranchChoice,
   historyAdmissionReference,
   isDefinitiveNativeBranchRejection,
   nativeEditResendView
@@ -183,6 +184,7 @@ type NormalChatModeParams = {
   historySelection?: {
     controller: HistorySelectionController
     originIsCurrent: () => boolean
+    sourceIsCurrent?: () => boolean
     temporary?: boolean
     createServerChat?: boolean
     /**
@@ -1015,6 +1017,19 @@ const captureNormalHistoryTurn = async (
     beforeDispatch: async () => {
       if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
+      if (
+        owner.kind === "native" &&
+        turn.historyBranch === false &&
+        !turn.retryAdmission &&
+        (await nativeHistoryNeedsBranchChoice(owner, capture, "messages", {
+          signal,
+          validate_lease: editPreparationIsCurrent
+        }))
+      )
+        throw new NativeHistoryBranchChoice(
+          () => canUpdateView() && originalOwner.validate_lease?.() !== false
+        )
+
       await saveRecord(record(turn, "", "dispatching"))
       if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
@@ -1044,16 +1059,20 @@ const captureNormalHistoryTurn = async (
         !turn.resultId &&
         data.content === "" &&
         turn.selection &&
-        isDefinitiveNativeBranchRejection(error, turn.selection)
+        (error instanceof NativeHistoryBranchChoice ||
+          isDefinitiveNativeBranchRejection(error, turn.selection))
       ) {
-        const refusal = new NativeHistoryBranchRefusal(
-          error,
-          () => canUpdateView() && originalOwner.validate_lease?.() !== false
-        )
+        const refusal =
+          error instanceof NativeHistoryBranchChoice
+            ? error
+            : new NativeHistoryBranchRefusal(
+                error,
+                () => canUpdateView() && originalOwner.validate_lease?.() !== false
+              )
         try {
           await saveRecord(record(turn, "", "refused"))
         } catch {
-          console.warn("Could not record a confirmed native branch refusal.")
+          console.warn("Could not retain a native input that was not admitted.")
         }
         if (refusal.isCurrent()) {
           controller.holdStaleSend?.(current.view!, draftIsCurrent)
@@ -1225,7 +1244,7 @@ export const normalChatMode = async (
         servicePromptSnapshot!,
         executionSignal,
         preparation!.dispatchIsCurrent,
-        preparation!.draftIsCurrent,
+        () => params.historySelection?.sourceIsCurrent?.() !== false && preparation!.draftIsCurrent(),
         preparation!.acceptDraftBind,
         preparation!.sourceDraft
       )

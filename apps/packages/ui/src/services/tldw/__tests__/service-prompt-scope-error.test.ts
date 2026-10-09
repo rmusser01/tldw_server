@@ -376,3 +376,18 @@ it.each([
 ])("native Save admits only the exact scoped message read/write: %s %s", (path, method, allowed) => {
   expect(isServicePromptRequestPath(path, method)).toBe(allowed)
 })
+
+// Deployed request contracts are read-only authority for the original native owner.
+it.each([
+  ["/openapi.json", "GET", true],
+  ["/openapi.json", "POST", false],
+  ["/openapi.json", "PUT", false],
+  ["/openapi.json/", "GET", false],
+  ["/openapi.json/other", "GET", false],
+  ["https://foreign.test/openapi.json", "GET", false],
+  ["//foreign.test/openapi.json", "GET", false],
+  ["/api/../openapi.json", "GET", false],
+  ["/openapi%2ejson", "GET", false]
+])("bounds captured schema discovery %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})

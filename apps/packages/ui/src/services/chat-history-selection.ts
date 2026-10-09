@@ -370,6 +370,45 @@ export const captureHistorySnapshot = async (
   return freeze(result)
 }
 
+/** Keep the existing read gate until the deployed operation can enforce P1 atomically. */
+export const nativeHistoryNeedsBranchChoice = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  operation: "messages" | "completion",
+  options?: HistoryOperationOptions
+): Promise<boolean> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.view, true)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.purpose !== "send") fail("selected_content_mismatch")
+  const spec = await tldwClient
+    .getOpenAPISpec(nativeOptions(owner, options?.signal))
+    .catch(() => null)
+  assertOwnerLease(owner, options)
+  const { detectNativeHistoryBranchAdmission } = await import(
+    "./tldw/server-capabilities"
+  )
+  assertOwnerLease(owner, options)
+  if (detectNativeHistoryBranchAdmission(spec, operation)) return false
+  // ponytail: an older server can still change after this read; upgrade it for atomic P1 admission.
+  const parents = new Map(
+    capture.snapshot.nodes.map((node) => [node.id, node.parent_id])
+  )
+  const interpretation = capture.snapshot.interpretation_status
+  if (
+    capture.view.interpretation.kind === "legacy_linear_v1" &&
+    interpretation.kind === "legacy_linear_v1"
+  ) {
+    interpretation.ordered_path_ids.forEach((id, index, path) =>
+      parents.set(id, index ? path[index - 1] : null)
+    )
+  }
+  const selectedParent = capture.rows.at(-1)?.id ?? null
+  return capture.snapshot.nodes.some(
+    (node) => parents.get(node.id) === selectedParent
+  )
+}
+
 /** Read the deployed history fence without loading message content or changing the view. */
 export const readNativeHistoryVersion = async (
   owner: NativeHistoryOwnerV1,

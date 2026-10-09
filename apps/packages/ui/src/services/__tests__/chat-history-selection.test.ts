@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const calls = vi.hoisted(() => ({
   capture: vi.fn(),
+  spec: vi.fn(),
   create: vi.fn(),
   getSettings: vi.fn(),
   detail: vi.fn(),
@@ -14,6 +15,7 @@ const calls = vi.hoisted(() => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getOpenAPISpec: calls.spec,
     createChat: calls.create,
     getChat: calls.detail,
     getChatSettings: calls.getSettings,
@@ -75,6 +77,7 @@ const capture = () => ({
 })
 beforeEach(() => {
   vi.clearAllMocks()
+  calls.spec.mockReset().mockResolvedValue(null)
   calls.pending.mockResolvedValue("view")
   calls.capture.mockResolvedValue(capture())
 })
@@ -1145,3 +1148,189 @@ describe("qualified native history version reads", () => {
     await expect(pending).rejects.toThrow("request_config_scope_changed")
   })
 })
+
+const strictAdmissionSpec = (operation: "messages" | "completion") => ({
+  paths: {
+    [operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"]: {
+      post: {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { tldw_history_branch: { type: "boolean" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})
+
+it.each(["messages", "completion"] as const)(
+  "uses only the captured %s operation contract before holding an older-server empty parent",
+  async (operation) => {
+    const native = owner()
+    const response = capture()
+    response.snapshot.nodes = [
+      {
+        id: "root",
+        revision: "1",
+        parent_id: null,
+        role: "user",
+        settled: true
+      }
+    ] as never
+    calls.capture.mockResolvedValue(response)
+    const result = await service.captureHistorySnapshot(native, view, "send")
+    if (result.status !== "captured") throw Error(result.status)
+    const check = service.nativeHistoryNeedsBranchChoice
+    const signal = new AbortController().signal
+    expect(
+      await check(native, result, operation, {
+        signal,
+        validate_lease: () => true
+      })
+    ).toBe(true)
+    expect(calls.spec).toHaveBeenCalledWith(
+      expect.objectContaining({ requestScope: native.request_scope, signal })
+    )
+    calls.spec.mockResolvedValue(
+      strictAdmissionSpec(operation === "messages" ? "completion" : "messages")
+    )
+    expect(await check(native, result, operation)).toBe(true)
+    calls.spec.mockResolvedValue(strictAdmissionSpec(operation))
+    expect(await check(native, result, operation)).toBe(false)
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+
+it("retires held deployed contract reads before they can authorize an older-server send", async () => {
+  const native = owner()
+  const result = await service.captureHistorySnapshot(native, view, "send")
+  if (result.status !== "captured") throw Error(result.status)
+  let current = true
+  calls.spec.mockImplementation(async () => {
+    current = false
+    return strictAdmissionSpec("messages")
+  })
+  const check = service.nativeHistoryNeedsBranchChoice
+  await expect(
+    check(native, result, "messages", { validate_lease: () => current })
+  ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+  expect(calls.append).not.toHaveBeenCalled()
+})
+
+it.each(["current leaf", "sibling answer", "live child"])(
+  "older-server continuation treats %s according to the captured parent graph",
+  async (scenario) => {
+    const native = owner()
+    const root = {
+      id: "root",
+      revision: "1",
+      parent_id: null,
+      role: "user",
+      settled: true
+    }
+    const answer = {
+      id: "answer",
+      revision: "1",
+      parent_id: "root",
+      role: "assistant",
+      settled: true
+    }
+    const rows = [root, answer]
+    const nodes =
+      scenario === "sibling answer"
+        ? [...rows, { ...answer, id: "sibling" }]
+        : scenario === "live child"
+          ? [...rows, { ...root, id: "child", parent_id: "answer" }]
+          : rows
+    const selectedView = {
+      ...view,
+      cursor: { kind: "after_message" as const, message_id: "answer" }
+    }
+    const response = {
+      ...capture(),
+      view: selectedView,
+      rows,
+      selected_content: rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.id,
+        images: []
+      })),
+      snapshot: { ...capture().snapshot, nodes }
+    }
+    calls.capture.mockResolvedValue(response)
+    const result = await service.captureHistorySnapshot(
+      native,
+      selectedView,
+      "send"
+    )
+    if (result.status !== "captured") throw Error(result.status)
+    expect(
+      await service.nativeHistoryNeedsBranchChoice(native, result, "messages")
+    ).toBe(scenario === "live child")
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+
+it.each([false, true])(
+  "older-server reviewed linear selection respects projected continuation=%s",
+  async (continued) => {
+    const native = owner()
+    const projection = "reviewed"
+    const nodes = ["root", "answer", ...(continued ? ["next"] : [])].map(
+      (id, index) => ({
+        id,
+        revision: "1",
+        parent_id: null,
+        role: index % 2 ? "assistant" : "user",
+        settled: true,
+        legacy_projection_id: projection
+      })
+    )
+    const selectedView = {
+      ...view,
+      interpretation: {
+        kind: "legacy_linear_v1" as const,
+        projection_id: projection
+      },
+      cursor: { kind: "after_message" as const, message_id: "answer" }
+    }
+    const rows = nodes.slice(0, 2)
+    calls.capture.mockResolvedValue({
+      ...capture(),
+      view: selectedView,
+      rows,
+      selected_content: rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.id,
+        images: []
+      })),
+      snapshot: {
+        ...capture().snapshot,
+        nodes,
+        interpretation_status: {
+          kind: "legacy_linear_v1",
+          projection_id: projection,
+          ordered_path_ids: nodes.map((node) => node.id)
+        }
+      }
+    })
+    const result = await service.captureHistorySnapshot(
+      native,
+      selectedView,
+      "send"
+    )
+    if (result.status !== "captured") throw Error(result.status)
+    expect(
+      await service.nativeHistoryNeedsBranchChoice(native, result, "messages")
+    ).toBe(continued)
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)

@@ -83,6 +83,66 @@ describe("background proxy fallback safety", () => {
     mocks.storageRemove.mockResolvedValue(undefined)
   })
 
+  it.each(["direct", "extension"])(
+    "reads the captured deployed contract through the actual %s bridge",
+    async (transport) => {
+      mocks.runtimeId = transport === "extension" ? "test-extension" : null
+      const config = {
+        serverUrl: "https://original.test",
+        authMode: "single-user" as const,
+        authSource: "manual" as const,
+        credentialSource: "manual" as const,
+        apiKeyPersistence: "device" as const,
+        apiKeyServerOrigin: "https://original.test",
+        apiKey: "original-fixture-key"
+      }
+      const servicePromptConfig = {
+        ...config,
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          config.authMode,
+          config.apiKey
+        )
+      }
+      mocks.storageGet.mockImplementation(async (key?: string) =>
+        key === "tldwConfig" ? (config as never) : null
+      )
+      const spec = { openapi: "3.1.0", paths: {} }
+      mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: spec })
+      mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: spec })
+      const { bgRequest } = await importProxy()
+      const signal = new AbortController().signal
+      expect(
+        await bgRequest<unknown>({
+          path: "/openapi.json",
+          method: "GET",
+          servicePromptConfig,
+          abortSignal: signal
+        })
+      ).toEqual(spec)
+      if (transport === "extension") {
+        expect(mocks.sendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              path: "/openapi.json",
+              method: "GET",
+              servicePromptConfig
+            })
+          })
+        )
+        expect(mocks.tldwRequest).not.toHaveBeenCalled()
+      } else {
+        const [payload, runtime] = mocks.tldwRequest.mock.calls[0]
+        expect(payload).toMatchObject({
+          path: "/openapi.json",
+          method: "GET",
+          abortSignal: signal
+        })
+        expect(await runtime.getConfig()).toMatchObject(config)
+        expect(mocks.sendMessage).not.toHaveBeenCalled()
+      }
+    }
+  )
+
   it("keeps a size-limited preview failure from marking the backend unreachable", async () => {
     mocks.tldwRequest.mockResolvedValue({ ok: false, status: 0, code: "RESPONSE_TOO_LARGE", error: "Response exceeds the size limit." })
     const offline = vi.fn()
