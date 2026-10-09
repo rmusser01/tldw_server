@@ -1,5 +1,5 @@
-import configparser
 import asyncio
+import configparser
 
 
 def _fake_config_openrouter():
@@ -26,7 +26,7 @@ class _FakeResponse:
 
 def test_llm_models_metadata_refresh_openrouter_includes_live_models(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
-    import tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory as openrouter_inventory
+    import tldw_Server_API.app.core.LLM_Calls.provider_model_inventory as openrouter_inventory
 
     calls = {"count": 0}
 
@@ -42,12 +42,11 @@ def test_llm_models_metadata_refresh_openrouter_includes_live_models(monkeypatch
         )
 
     monkeypatch.setattr(llm_providers, "load_comprehensive_config", _fake_config_openrouter)
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"openrouter": "sk-or-test"})
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
-    monkeypatch.setattr(llm_providers, "_http_fetch", _fake_fetch)
-    openrouter_inventory.clear_openrouter_model_cache()
+    monkeypatch.setattr(openrouter_inventory, "_http_fetch", _fake_fetch)
+    monkeypatch.setattr(openrouter_inventory, "_CACHE", {})
 
     refreshed = asyncio.run(
         llm_providers.get_models_metadata(

@@ -126,7 +126,11 @@ def provider_readiness(
     reason_code: str | None = None
     message: str | None = None
 
-    if not is_configured:
+    if availability == "disabled":
+        provider_enabled = False
+        reason_code = "provider_disabled"
+        message = "Provider is disabled."
+    elif not is_configured:
         provider_enabled = False
         availability = "not-configured"
         reason_code = "provider_not_configured"
@@ -183,16 +187,23 @@ def provider_readiness(
 
     should_reduce_discovery = (
         provider_enabled
-        and provider_info.get("type") == "local"
-        and endpoint_url is not None
-        and (endpoint_probe_enabled or not has_explicit_models)
+        and (provider_info.get("type") == "commercial" or (
+            provider_info.get("type") == "local"
+            and endpoint_url is not None
+            and (endpoint_probe_enabled or not has_explicit_models)
+        ))
     )
     if should_reduce_discovery:
         result = discovery_result or ModelDiscoveryResult("unreachable")
         display_name = provider_info.get("display_name") or provider_name
-        if result.status == "ready" and not result.models and not has_explicit_models:
+        if result.status == "ready" and not result.models and (
+            provider_info.get("type") == "commercial" or not has_explicit_models
+        ):
             reason_code = "no_models_reported"
             message = f"{display_name} did not report any models."
+            if provider_info.get("type") == "commercial":
+                provider_enabled = False
+                availability = "unavailable"
         elif result.status == "auth_failed":
             provider_enabled = False
             availability = "unavailable"
@@ -206,6 +217,9 @@ def provider_readiness(
         elif result.status == "unsupported":
             reason_code = "model_discovery_unavailable"
             message = f"{display_name} does not expose a supported model discovery response."
+            if provider_info.get("type") == "commercial":
+                provider_enabled = False
+                availability = "unavailable"
         elif result.status == "unreachable":
             provider_enabled = False
             availability = "unavailable"

@@ -73,8 +73,8 @@ def _enable_adapters(monkeypatch):
 
 
 def test_openai_app_config_base_url_and_timeout(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 
     captured: Dict[str, Any] = {}
 
@@ -233,6 +233,10 @@ def test_concurrent_invalid_credential_headers_fail_before_valid_adapter_dispatc
 
 @pytest.mark.asyncio
 async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelated_secrets(monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
@@ -312,6 +316,10 @@ async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelate
 @pytest.mark.asyncio
 @pytest.mark.concurrent
 async def test_concurrent_rag_openai_fallbacks_keep_key_base_and_headers_paired(monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
@@ -401,8 +409,8 @@ async def test_concurrent_rag_openai_fallbacks_keep_key_base_and_headers_paired(
 
 @pytest.mark.parametrize("legacy_key", ["api_base", "base_url"])
 def test_openai_app_config_legacy_base_url_keys(monkeypatch, legacy_key: str):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 
     captured: Dict[str, Any] = {}
 
@@ -425,8 +433,8 @@ def test_openai_app_config_legacy_base_url_keys(monkeypatch, legacy_key: str):
 
 
 def test_groq_app_config_base_url_and_timeout(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.groq_adapter import GroqAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.groq_adapter as mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.groq_adapter import GroqAdapter
 
     captured: Dict[str, Any] = {}
     monkeypatch.setattr(mod, "http_client_factory", lambda *a, timeout=None, **k: (captured.setdefault("timeout", timeout) or _FakeClient(captured)) and _FakeClient(captured), raising=True)
@@ -444,8 +452,8 @@ def test_groq_app_config_base_url_and_timeout(monkeypatch):
 
 
 def test_openrouter_app_config_base_url_and_timeout(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openrouter_adapter import OpenRouterAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.openrouter_adapter as mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openrouter_adapter import OpenRouterAdapter
 
     captured: Dict[str, Any] = {}
 

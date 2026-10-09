@@ -816,11 +816,14 @@ def apply_llm_provider_overrides_to_listing(
         merged["enabled"] = override.is_enabled if override.is_enabled is not None else merged.get("enabled", True)
 
         models = list(merged.get("models") or [])
+        authoritative = merged.get("model_inventory_source") == "provider"
         config_models = override.config.get("models")
         if isinstance(config_models, list):
-            models = [str(v).strip() for v in config_models if str(v).strip()]
+            configured = [str(v).strip() for v in config_models if str(v).strip()]
+            models = [m for m in models if m in configured] if authoritative else configured
         if override.allowed_models:
-            models = [m for m in models if m in override.allowed_models] if models else list(override.allowed_models)
+            models = ([m for m in models if m in override.allowed_models]
+                      if authoritative or models else list(override.allowed_models))
 
         preferred_order = _get_model_priority_from_override(override, "highest_quality")
         if preferred_order:
@@ -856,7 +859,10 @@ def apply_llm_provider_overrides_to_listing(
 
         default_model = override.config.get("default_model")
         if isinstance(default_model, str) and default_model.strip():
-            merged["default_model"] = default_model.strip()
+            if not authoritative or default_model.strip() in models:
+                merged["default_model"] = default_model.strip()
+        if authoritative and merged.get("default_model") not in models:
+            merged["default_model"] = models[0] if models else None
 
         updated_providers.append(merged)
 

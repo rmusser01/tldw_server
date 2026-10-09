@@ -104,6 +104,16 @@ def _resolve_app_for_fallback_client():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_inventory_from_adapter_payload_units(monkeypatch, request):
+    """Payload units mock generation; inventory enforcement has separate boundary tests."""
+    if request.node.path.parent.name != "unit":
+        return
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
+
+    monkeypatch.setattr(ChatProvider, "_validate_model_inventory", lambda _self, _request: None)
+
+
+@pytest.fixture(autouse=True)
 def _preserve_app_main_state(monkeypatch):
     monkeypatch.setenv(
         "ROUTES_DISABLE",
