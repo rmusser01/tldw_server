@@ -2111,7 +2111,17 @@ it.each([
   },
 );
 
-it.each(["cancel", "workspace", "account", "clear", "confirm"])(
+it.each([
+  "cancel",
+  "workspace",
+  "workspace-return",
+  "account",
+  "server",
+  "clear",
+  "edit",
+  "unmount",
+  "confirm",
+])(
   "keeps explicit local draft resume separate from a dirty replacement through %s",
   async (boundary) => {
     const { servicePromptAuthorityKey } =
@@ -2178,7 +2188,7 @@ it.each(["cancel", "workspace", "account", "clear", "confirm"])(
       confirmation = config;
       return { destroy: vi.fn(), update: vi.fn() };
     });
-    render(<QuickNotesSection />);
+    const view = render(<QuickNotesSection />);
     await screen.findByRole("button", { name: "Resume local unsaved draft" });
     fireEvent.change(screen.getByLabelText("Note content"), {
       target: { value: "Unrelated replacement" },
@@ -2191,13 +2201,15 @@ it.each(["cancel", "workspace", "account", "clear", "confirm"])(
       screen.getByRole("button", { name: "Resume local unsaved draft" }),
     );
     expect(confirmation?.title).toBe("Unsaved Changes");
-    if (
-      boundary === "workspace" ||
-      boundary === "account" ||
-      boundary === "clear"
-    )
+    if (boundary === "unmount") view.unmount();
+    else if (boundary === "edit")
+      act(() => {
+        useWorkspaceStore.getState().updateNoteContent("Later edit");
+      });
+    else if (boundary !== "cancel" && boundary !== "confirm")
       act(() => changeContext(boundary));
     const expected = useWorkspaceStore.getState().currentNote;
+    if (boundary === "cancel") confirmation?.onCancel?.();
     if (boundary !== "cancel")
       await act(async () => {
         await confirmation?.onOk?.();
@@ -2230,3 +2242,196 @@ it("reports missing record-lock persistence and dispatches no unsafe save", asyn
   );
   expect(writes()).toHaveLength(0);
 });
+
+it.each([
+  "server",
+  "account",
+  "unmount",
+  "workspace-return",
+  "clear",
+  "edit",
+  "account-return",
+  "server-return",
+  "cancel",
+  "confirm",
+])("cancels saved selection while confirmation awaits %s", async (boundary) => {
+  let confirmation: Parameters<typeof Modal.confirm>[0] | undefined;
+  vi.spyOn(Modal, "confirm").mockImplementation((config) => {
+    confirmation = config;
+    return { destroy: vi.fn(), update: vi.fn() };
+  });
+  mocks.request.mockImplementation(async (request: BgRequestInit) =>
+    request.path.includes("/search/")
+      ? [{ id: otherId, title: "Probe saved chip", keywords: ["workspace:a"] }]
+      : {
+          id: otherId,
+          title: "Probe saved chip",
+          content: "Canonical replacement",
+          version: 3,
+        },
+  );
+  const view = render(<QuickNotesSection />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Probe saved chip" }),
+  );
+  expect(confirmation).toBeTruthy();
+  if (boundary === "unmount") view.unmount();
+  else if (boundary === "edit")
+    act(() => {
+      useWorkspaceStore.getState().updateNoteContent("Later edit");
+    });
+  else if (boundary !== "cancel" && boundary !== "confirm")
+    act(() => {
+      changeContext(boundary.replace("-return", ""));
+      if (boundary === "account-return") {
+        mocks.userId = "alice";
+        window.dispatchEvent(new Event("tldw:auth-principal-changed"));
+      }
+      if (boundary === "server-return") {
+        mocks.serverUrl = "https://research-a.example";
+        window.dispatchEvent(
+          new CustomEvent("tldw:config-updated", {
+            detail: { authorityChanged: true },
+          }),
+        );
+      }
+      if (boundary === "workspace-return")
+        useWorkspaceStore.setState({
+          workspaceId: "workspace-a",
+          workspaceTag: "workspace:a",
+        });
+    });
+  const expected = useWorkspaceStore.getState().currentNote;
+  if (boundary === "cancel") confirmation?.onCancel?.();
+  else
+    await act(async () => {
+      await confirmation?.onOk?.();
+    });
+  if (boundary === "confirm")
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: otherId,
+      content: "Canonical replacement",
+      version: 3,
+    });
+  else expect(useWorkspaceStore.getState().currentNote).toBe(expected);
+});
+it.each(["lost-response", "accepted", "rejected-update"])(
+  "preserves later edits after collapse and reopen without another save: %s",
+  async (outcome) => {
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+        deletedAt: "2026-10-08T00:00:00Z",
+      }),
+    );
+    useWorkspaceStore.setState({
+      currentNote: {
+        ...draft(),
+        id: outcome === "lost-response" ? undefined : noteId,
+        version: outcome === "lost-response" ? undefined : 2,
+      },
+    });
+    const owner = createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId);
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return [];
+      if (outcome === "accepted")
+        return { ...request.body, id: noteId, version: 3 };
+      if (outcome === "rejected-update") throw { status: 409 };
+      throw new Error("Lost response");
+    });
+    render(<CollapsibleQuickNotes />);
+    fireEvent.click(screen.getByRole("button", { name: /^(Save|Update)$/ }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    await waitFor(() =>
+      expect(document.querySelector("button.ant-btn-loading")).toBeNull(),
+    );
+    if (outcome !== "accepted")
+      fireEvent.change(screen.getByLabelText("Note content"), {
+        target: { value: "Before collapse" },
+      });
+    await waitFor(async () =>
+      expect(
+        Object.values(await readSurfaceOfflineDraftQueue(owner))[0].content,
+      ).toBe(
+        outcome === "accepted" ? "Original draft body" : "Before collapse",
+      ),
+    );
+    const before = Object.values(await readSurfaceOfflineDraftQueue(owner))[0];
+    if (outcome === "accepted") {
+      expect(before.pendingWrite).toBeUndefined();
+      expect(before.metadata?.quickNotesDirty).toBe(false);
+      expect(before.baseVersion).toBe(3);
+    } else if (outcome === "rejected-update") {
+      expect(before.pendingWrite).toBeUndefined();
+      expect(before.baseVersion).toBe(2);
+    } else
+      expect(before.pendingWrite?.body.content).toBe("Original draft body");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
+    fireEvent.change(screen.getByLabelText("Note content"), {
+      target: { value: "After reopen" },
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    await waitFor(async () =>
+      expect(
+        Object.values(await readSurfaceOfflineDraftQueue(owner))[0].content,
+      ).toBe("After reopen"),
+    );
+    const after = Object.values(await readSurfaceOfflineDraftQueue(owner))[0];
+    expect(after.pendingWrite).toEqual(before.pendingWrite);
+    expect(after.noteId).toBe(before.noteId);
+    expect(after.baseVersion).toBe(before.baseVersion);
+    expect(writes()).toHaveLength(1);
+  },
+);
+
+it.each(["clear", "workspace-return", "account", "server", "unmount", "note"])(
+  "does not bind a reopened draft when %s changes during the retained-row read",
+  async (boundary) => {
+    useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
+    const owner = createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId);
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return [];
+      throw new Error("Lost response");
+    });
+    const view = render(<CollapsibleQuickNotes />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalled());
+    const before = Object.values(await readSurfaceOfflineDraftQueue(owner))[0];
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    const gate = deferred();
+    const original = PlasmoStorage.prototype.getAll;
+    const reading = vi
+      .spyOn(PlasmoStorage.prototype, "getAll")
+      .mockImplementationOnce(async function () {
+        await gate.promise;
+        return original.call(this);
+      });
+    fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
+    await waitFor(() => expect(reading).toHaveBeenCalled());
+    if (boundary === "unmount") view.unmount();
+    else
+      act(() => {
+        changeContext(boundary);
+      });
+    await act(async () => {
+      gate.resolve();
+      await gate.promise;
+    });
+    act(() => {
+      useWorkspaceStore.getState().updateNoteContent("Unrelated later text");
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(Object.values(await readSurfaceOfflineDraftQueue(owner))[0]).toEqual(
+      before,
+    );
+  },
+);
