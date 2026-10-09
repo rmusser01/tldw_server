@@ -21,11 +21,35 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { serverSupportsPath } from "@/services/tldw/capability-probe"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const BILLING_OVERVIEW_PATH = "/api/v1/admin/billing/overview"
+
+// Deterministic row keys for subscription/event rows the server sends
+// without an id: a `user|created_at` composite (never Math.random, which
+// churned every row's identity on each render) plus a fetch-order suffix
+// for duplicates such as batch events sharing a timestamp (C-S5).
+const billingRowKey = (r: any): string =>
+  `${r.user_id ?? r.id ?? "u"}|${r.created_at ?? ""}`
+
+const tagDuplicateBillingRowKeys = (records: any[]): any[] => {
+  const seen = new Map<string, number>()
+  let tagged = false
+  const result = records.map((record) => {
+    const base = billingRowKey(record)
+    const nth = (seen.get(base) ?? 0) + 1
+    seen.set(base, nth)
+    if (nth > 1) {
+      tagged = true
+      return { ...record, _rowKey: `${base}#${nth}` }
+    }
+    return record
+  })
+  return tagged ? result : records
+}
 
 // ── Overview Tab ──
 
@@ -180,7 +204,11 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       const result = await tldwClient.listAllSubscriptions(params)
       // The server returns the {items, total} envelope; legacy shapes
       // (data/subscriptions arrays) stay as fallbacks for older builds.
-      setSubscriptions(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.subscriptions ?? [])
+      setSubscriptions(
+        tagDuplicateBillingRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.subscriptions ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -274,7 +302,7 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       title: t("settings:adminBilling.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleDateString() : "N/A"
+      render: (val: string) => val ? formatAdminDateTime(val) : "N/A"
     },
     {
       title: t("settings:adminBilling.colActions", "Actions"),
@@ -330,7 +358,7 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       <Table
         dataSource={subscriptions}
         columns={columns}
-        rowKey={(r) => r.user_id ?? r.id ?? Math.random()}
+        rowKey={(r) => r._rowKey ?? billingRowKey(r)}
         loading={loading}
         pagination={{ pageSize: 20 }}
         size="small"
@@ -385,7 +413,11 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
     try {
       const result = await tldwClient.listBillingEvents({ limit: 100 })
       // Same {items, total} envelope as subscriptions; legacy fallbacks kept.
-      setEvents(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.events ?? [])
+      setEvents(
+        tagDuplicateBillingRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.events ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -426,7 +458,7 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       title: t("settings:adminBilling.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleString() : "N/A"
+      render: (val: string) => val ? formatAdminDateTime(val) : "N/A"
     }
   ]
 
@@ -448,7 +480,7 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       <Table
         dataSource={events}
         columns={columns}
-        rowKey={(r) => r.id ?? r.event_id ?? Math.random()}
+        rowKey={(r) => r._rowKey ?? billingRowKey(r)}
         loading={loading}
         pagination={{ pageSize: 25 }}
         size="small"

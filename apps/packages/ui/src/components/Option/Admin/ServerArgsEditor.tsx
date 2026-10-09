@@ -7,6 +7,8 @@ const { Text } = Typography
 const { TextArea } = Input
 
 interface KeyValuePair {
+  /** Stable per-row id, assigned at pair creation; survives sibling deletion. */
+  id: string
   key: string
   value: string
 }
@@ -35,12 +37,36 @@ export const ServerArgsEditor: React.FC<ServerArgsEditorProps> = ({
   const [jsonText, setJsonText] = React.useState("")
   const [jsonError, setJsonError] = React.useState<string | null>(null)
 
-  // Convert object to key-value pairs for form mode
+  // Convert object to key-value pairs for form mode. Each pair carries a
+  // stable id assigned when its argument key first appears (pair creation):
+  // React keys then survive deletion of sibling rows instead of shifting
+  // with the list index (C-S5).
+  const pairIdByArgKeyRef = React.useRef(new Map<string, string>())
+  const nextPairIdRef = React.useRef(0)
+
   const pairs: KeyValuePair[] = React.useMemo(() => {
-    return Object.entries(value).map(([key, val]) => ({
-      key,
-      value: typeof val === "string" ? val : JSON.stringify(val)
-    }))
+    const idByArgKey = pairIdByArgKeyRef.current
+    const result = Object.entries(value).map(([argKey, val]) => {
+      let id = idByArgKey.get(argKey)
+      if (id === undefined) {
+        nextPairIdRef.current += 1
+        id = `pair-${nextPairIdRef.current}`
+        idByArgKey.set(argKey, id)
+      }
+      return {
+        id,
+        key: argKey,
+        value: typeof val === "string" ? val : JSON.stringify(val)
+      }
+    })
+    // Prune ids for keys that no longer exist so the cache stays bounded.
+    if (idByArgKey.size > result.length) {
+      const liveKeys = new Set(Object.keys(value))
+      for (const knownKey of Array.from(idByArgKey.keys())) {
+        if (!liveKeys.has(knownKey)) idByArgKey.delete(knownKey)
+      }
+    }
+    return result
   }, [value])
 
   // Sync JSON text when switching to JSON mode or when value changes
@@ -157,8 +183,8 @@ export const ServerArgsEditor: React.FC<ServerArgsEditorProps> = ({
               {placeholder}
             </Text>
           ) : (
-            pairs.map((pair, index) => (
-              <Space key={index} className="w-full" align="start">
+            pairs.map((pair) => (
+              <Space key={pair.id} className="w-full" align="start">
                 <Input
                   size="small"
                   placeholder="key"

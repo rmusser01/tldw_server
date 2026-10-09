@@ -17,6 +17,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
@@ -217,7 +218,7 @@ const ApiKeyManagementPage: React.FC = () => {
       title: t("settings:adminApiKeys.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleDateString() : "\u2014",
+      render: (val: string) => val ? formatAdminDateTime(val) : "\u2014",
     },
     {
       title: t("settings:adminApiKeys.colStatus", "Status"),

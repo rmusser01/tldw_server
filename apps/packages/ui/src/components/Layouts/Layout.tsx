@@ -773,9 +773,16 @@ function RootLayoutShell({
     }
   }, [location.pathname, overrides?.sourcePath])
 
+  // Memoized context value: an inline object literal here gave every shell
+  // consumer a fresh value on each shell render (C-S5).
+  const shellContextValue = React.useMemo(
+    () => ({ inShell: true, setOverrides }),
+    [setOverrides]
+  )
+
   const content = (
     <DemoModeProvider>
-      <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
+      <LayoutShellContext.Provider value={shellContextValue}>
         <OptionLayoutInner
           {...props}
           hideHeader={effectiveHideHeader}

@@ -21,6 +21,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { CollapsibleSection } from "./CollapsibleSection"
 import RefreshedAtLabel from "./RefreshedAtLabel"
 import { Alert } from "@/components/ui/primitives"
@@ -629,7 +630,7 @@ const MonitoringDashboardPage: React.FC = () => {
         return <Tag color={color}>{severity || "low"}</Tag>
       }
     },
-    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "triggered_at", key: "triggered_at", render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014" },
+    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "triggered_at", key: "triggered_at", render: (val: string) => val ? formatAdminDateTime(val) : "\u2014" },
     {
       title: t("settings:adminMonitoring.colStatus", "Status"), dataIndex: "status", key: "status",
       render: (status: string) => {
@@ -725,7 +726,7 @@ const MonitoringDashboardPage: React.FC = () => {
   // (Declared with the other hooks, above the admin-guard early returns.)
 
   const activityColumns = useMemo<ColumnsType<ActivityRow>>(() => [
-    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? new Date(val).toLocaleString() : "\u2014" },
+    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? formatAdminDateTime(val) : "\u2014" },
     { title: t("settings:adminMonitoring.colAction", "Action"), dataIndex: "action", key: "action" },
     { title: t("settings:adminMonitoring.colUser", "User"), dataIndex: "user", key: "user", render: (val: string | undefined) => val || "\u2014" },
     { title: t("settings:adminMonitoring.colDetails", "Details"), dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }

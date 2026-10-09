@@ -315,7 +315,12 @@ const RateLimitingPage: React.FC = () => {
                 )}
                 <Table
                   dataSource={unprotectedRoutes.map((r: any, i: number) =>
-                    typeof r === "string" ? { route: r, key: i } : { ...r, key: i }
+                    // Rows key by the route/path value (unique per the audit
+                    // list) instead of the list index (C-S5); the index is
+                    // only the last-resort fallback for malformed entries.
+                    typeof r === "string"
+                      ? { route: r, key: r }
+                      : { ...r, key: r.route ?? r.path ?? String(i) }
                   )}
                   columns={routeColumns}
                   pagination={{ pageSize: 25, showSizeChanger: false }}
