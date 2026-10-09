@@ -15,7 +15,9 @@ void i18next.use(initReactI18next).init({ lng: "en", resources: {} })
  */
 const apiMock = vi.hoisted(() => ({
   getRolePermissionMatrix: vi.fn(),
-  listPermissionCategories: vi.fn()
+  listPermissionCategories: vi.fn(),
+  grantRolePermission: vi.fn(),
+  revokeRolePermission: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -105,5 +107,38 @@ describe("RbacEditorPage matrix pagination (C-S4)", () => {
     } finally {
       roleMapSpy.mockRestore()
     }
+  })
+
+  it("test_matrix_checkbox_disabled_while_toggling", async () => {
+    apiMock.getRolePermissionMatrix.mockResolvedValue(
+      buildMatrix(1, [{ id: 1, name: "Admins" }])
+    )
+    // Park the grant so the toggle stays in flight until the test resolves it.
+    let resolveGrant!: () => void
+    apiMock.grantRolePermission.mockImplementation(
+      () => new Promise<void>((resolve) => { resolveGrant = resolve })
+    )
+
+    render(<RbacEditorPage />)
+
+    const checkbox = await screen.findByRole("checkbox")
+    expect(checkbox).not.toBeDisabled()
+    expect(apiMock.grantRolePermission).not.toHaveBeenCalled()
+
+    // Clicking routes through the memoized role-column closure's captured
+    // handleToggle (role 1 x permission 1, ungranted -> grant path).
+    fireEvent.click(checkbox)
+
+    await waitFor(() => {
+      expect(apiMock.grantRolePermission).toHaveBeenCalledWith(1, 1)
+    })
+    // While the grant is pending, the checkbox is disabled via the closure's
+    // latest-value ref read — the memoized columns are NOT rebuilt for this.
+    expect(checkbox).toBeDisabled()
+
+    resolveGrant()
+    await waitFor(() => {
+      expect(checkbox).not.toBeDisabled()
+    })
   })
 })
