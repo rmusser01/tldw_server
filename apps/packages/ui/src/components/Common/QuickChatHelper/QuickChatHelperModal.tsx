@@ -1,5 +1,6 @@
+import { flushSync } from "react-dom"
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
-import React, { useRef, useEffect, useCallback } from "react"
+import React, { useRef, useEffect, useCallback, useState } from "react"
 import { Modal, Button, Tooltip, Select, Segmented } from "antd"
 import { ExternalLink, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -14,7 +15,7 @@ import { useChatModelsSelect } from "@/hooks/useChatModelsSelect"
 import { QuickChatGuidesPanel } from "./QuickChatGuidesPanel"
 import { buildQuickChatPopoutState } from "./popout-state"
 import { useLocation, useNavigate } from "react-router-dom"
-import { useTutorialStore } from "@/store/tutorials"
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 
 const EMPTY_POP_OUT_TOOLTIP_STYLES = {
   root: { maxWidth: "200px" }
@@ -23,15 +24,17 @@ const EMPTY_POP_OUT_TOOLTIP_STYLES = {
 type Props = {
   open: boolean
   onClose: () => void
+  getTutorialFocusTarget?: () => HTMLElement | null
 }
 
-export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
+export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutorialFocusTarget }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
   const location = useLocation()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { assistantMode, setAssistantMode } = useQuickChatStore()
-  const startTutorial = useTutorialStore((state) => state.startTutorial)
+  const startTutorial = useStartTutorial()
+  const [handedOff, setHandedOff] = useState(false)
   const {
     messages,
     sendMessage,
@@ -166,10 +169,12 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
 
   const handleStartTutorial = useCallback(
     (tutorialId: string) => {
+      if (!startTutorial(tutorialId, getTutorialFocusTarget?.())) return
+      // Commit the handoff before the parent unmounts this modal.
+      flushSync(() => setHandedOff(true))
       onClose()
-      startTutorial(tutorialId)
     },
-    [onClose, startTutorial]
+    [onClose, startTutorial, getTutorialFocusTarget]
   )
 
   return (
@@ -195,6 +200,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
       }
       open={open}
       onCancel={onClose}
+      focusable={{ focusTriggerAfterClose: !handedOff }}
       footer={null}
       width={480}
       className="quick-chat-helper-modal"

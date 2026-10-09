@@ -692,6 +692,108 @@ it("the actual outer shell capture cannot republish old messages after synchrono
   }
 })
 
+// Actual Host → Page Help → Joyride, with jsdom geometry declared. The real
+// Skip/Finish callback happens after the tooltip is removed, unlike control doubles.
+it.each(["Close", "Skip tour", "Finish"])(
+  "real Joyride %s returns to the original Help opener",
+  async (action) => {
+    useTutorialStore.getState().resetProgress()
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <OptionLayout hideHeader>
+          <PlaygroundEmpty />
+          <button data-testid="model-selector">Select a model</button>
+          <textarea
+            data-testid="chat-input"
+            aria-label="Exact tour draft"
+            defaultValue={"Real tour draft.  \nSecond line."}
+          />
+        </OptionLayout>
+      </MemoryRouter>
+    )
+    for (const target of [
+      screen.getByRole("button", { name: "Select a model" }),
+      screen.getByRole("textbox", { name: "Exact tour draft" })
+    ]) {
+      vi.spyOn(target, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(10, 10, 120, 44)
+      )
+    }
+    const opener = screen.getByRole("button", { name: "Take a quick tour" })
+    opener.focus()
+    fireEvent.click(opener)
+    await screen.findByRole("dialog", { name: "Page Help" })
+    const start = screen.getByRole("button", { name: "Start", exact: true })
+    start.focus()
+    fireEvent.click(start)
+    await screen.findByRole("alertdialog", { name: "Choose a Model" })
+    if (action === "Finish") {
+      for (let step = 1; step < 5; step++) {
+        const next = await screen.findByRole("button", {
+          name: `Next (Step ${step} of 5)`
+        })
+        next.focus()
+        fireEvent.click(next)
+      }
+    }
+    const exit = await screen.findByRole("button", {
+      name: action,
+      exact: true
+    })
+    exit.focus()
+    fireEvent.click(exit)
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(
+      screen.getByRole("textbox", { name: "Exact tour draft" })
+    ).toHaveValue("Real tour draft.  \nSecond line.")
+    expect(useTutorialStore.getState().completedTutorials).toEqual(
+      action === "Finish" ? ["playground-basics"] : []
+    )
+    act(() => useTutorialStore.getState().resetProgress())
+  }
+)
+
+it("real Joyride cannot adopt BODY after outside focus even on explicit Skip", async () => {
+  useTutorialStore.getState().resetProgress()
+  render(
+    <MemoryRouter initialEntries={["/chat"]}>
+      <OptionLayout hideHeader>
+        <PlaygroundEmpty />
+        <button data-testid="model-selector">Select a model</button>
+        <textarea data-testid="chat-input" aria-label="Outside tour input" />
+      </OptionLayout>
+    </MemoryRouter>
+  )
+  vi.spyOn(
+    screen.getByRole("button", { name: "Select a model" }),
+    "getBoundingClientRect"
+  ).mockReturnValue(new DOMRect(10, 10, 120, 44))
+  const opener = screen.getByRole("button", { name: "Take a quick tour" })
+  opener.focus()
+  fireEvent.click(opener)
+  await screen.findByRole("dialog", { name: "Page Help" })
+  const start = screen.getByRole("button", { name: "Start", exact: true })
+  start.focus()
+  fireEvent.click(start)
+  await screen.findByRole("alertdialog", { name: "Choose a Model" })
+  const skip = screen.getByRole("button", { name: "Skip tour" })
+  skip.focus()
+  const outside = screen.getByRole("textbox", { name: "Outside tour input" })
+  outside.focus()
+  outside.blur()
+  const focus = vi.spyOn(opener, "focus")
+  fireEvent.click(skip)
+  await waitFor(() => expect(useTutorialStore.getState().activeRun).toBeNull())
+  await act(
+    async () => new Promise((resolve) => window.requestAnimationFrame(resolve))
+  )
+  expect(focus).not.toHaveBeenCalled()
+  expect(useTutorialStore.getState().completedTutorials).toEqual([])
+})
+
 it("starts the real shared tutorial runner from Tour while the full extension header is hidden", async () => {
   useTutorialStore.getState().resetProgress()
   render(

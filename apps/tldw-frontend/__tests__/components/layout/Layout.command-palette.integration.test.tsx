@@ -47,10 +47,13 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
   useModeNavigationShortcuts: () => undefined
 }))
 vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => messageState }))
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (select: (state: { historyId: null; serverChatId: null }) => unknown) =>
-    select({ historyId: null, serverChatId: null })
-}))
+vi.mock("@/store/option", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/option")>()
+  const state = { ...actual.useStoreMessageOption.getState(), historyId: null, serverChatId: null }
+  return { ...actual, useStoreMessageOption: Object.assign((select: (value: typeof state) => unknown) => select(state), {
+    getState: () => state, subscribe: () => () => undefined
+  }) }
+})
 vi.mock("@/store/quick-chat", () => ({
   useQuickChatStore: () => ({ isOpen: false, setIsOpen: vi.fn() })
 }))

@@ -582,6 +582,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   }
 
   try {
+    // The pipeline owns response preparation as well as token delivery. Compact
+    // ordinary sends do not acquire streaming in their native-only caller.
+    if (
+      !signal.aborted &&
+      (!historyTurn || historyTurn.canUpdateView()) &&
+      (!params.ownsAbortController || params.ownsAbortController(signal))
+    ) {
+      setStreaming(true)
+    }
     const preflight = mode.preflight ? await mode.preflight(context) : null
     if (preflight?.handled) {
       fullText = preflight.fullText

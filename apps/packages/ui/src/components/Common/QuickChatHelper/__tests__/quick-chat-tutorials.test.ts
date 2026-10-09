@@ -109,15 +109,13 @@ describe("quick chat per-page tutorials", () => {
     )
   })
 
-  it("still resolves tutorials when runtime path is sidepanel", () => {
+  it("suppresses options tours when the compact runtime has no runner", () => {
     const originalPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
 
     try {
       window.history.replaceState({}, "", "/sidepanel.html")
       const entries = buildQuickChatPageTutorialEntries("/chat", [])
-      expect(entries.some((entry) => entry.tutorial.id === "playground-basics")).toBe(
-        true
-      )
+      expect(entries).toEqual([])
     } finally {
       window.history.replaceState({}, "", originalPath || "/")
     }

@@ -475,6 +475,8 @@
     "showRawContent": "Show raw content"
   },
   "commandPalette": {
+    "loading": "Loading commands…",
+    "loadFailed": "Commands could not be loaded. Reconnect, save any edits, then reload the page.",
     "goToChat": "Go to Chat",
     "goToKnowledge": "Go to Knowledge",
     "goToMedia": "Go to Media",

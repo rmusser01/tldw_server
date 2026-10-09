@@ -1,4 +1,5 @@
 import { createElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { render, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import i18n from '../lib/i18n-web';
@@ -14,11 +15,15 @@ it('loads the tutorial namespace with real Guides before Help while keeping star
   const { QuickChatGuidesPanel } =
     await import('@/components/Common/QuickChatHelper/QuickChatGuidesPanel');
   const view = render(
-    createElement(QuickChatGuidesPanel, {
-      currentRoute: '/chat',
-      onAskGuide: vi.fn(),
-      onOpenRoute: vi.fn(),
-    })
+    createElement(
+      MemoryRouter,
+      { initialEntries: ['/chat'] },
+      createElement(QuickChatGuidesPanel, {
+        currentRoute: '/chat',
+        onAskGuide: vi.fn(),
+        onOpenRoute: vi.fn(),
+      })
+    )
   );
   expect(
     within(view.getByTestId('quick-chat-guides-tutorial-playground-basics')).getByText('5 steps')

@@ -28,7 +28,10 @@ import {
   releaseHistoryTurn
 } from "@/services/history-turn-keep"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
-import { wasChatTurnStoppedByUser } from "@/hooks/chat/abort-turn-cleanup"
+import {
+  beginChatTurnSettlement,
+  wasChatTurnStoppedByUser
+} from "@/hooks/chat/abort-turn-cleanup"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
@@ -741,7 +744,8 @@ const captureNormalHistoryTurn = async (
   dispatchIsCurrent: () => boolean,
   draftIsCurrent: () => boolean,
   acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
-  sourceDraft: ChatDraftAddress | null
+  sourceDraft: ChatDraftAddress | null,
+  stopSignal: AbortSignal
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
   let creationHandle: ChatDraftHandle | undefined
@@ -1176,10 +1180,14 @@ const captureNormalHistoryTurn = async (
       await recoveryWrites
       if (!lastRecord?.outcome) return
       releaseHistoryTurn(operationId)
-      await keepHistoryTurnRecovery(controller, {
-        scope: bookmarkScope,
-        turn: lastRecord
-      })
+      await keepHistoryTurnRecovery(
+        controller,
+        {
+          scope: bookmarkScope,
+          turn: lastRecord
+        },
+        stopSignal
+      )
     },
     release: () => {
       stopCheckpoints()
@@ -1228,6 +1236,9 @@ export const normalChatMode = async (
     ? servicePromptSnapshot.scopeSignal
     : signal
   let createdTurn: HistorySendTurn | undefined
+  const settlement = params.historySelection
+    ? beginChatTurnSettlement(signal)
+    : undefined
   try {
     if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
       return chatSubmitFailed("Request cancelled")
@@ -1246,7 +1257,8 @@ export const normalChatMode = async (
         preparation!.dispatchIsCurrent,
         () => params.historySelection?.sourceIsCurrent?.() !== false && preparation!.draftIsCurrent(),
         preparation!.acceptDraftBind,
-        preparation!.sourceDraft
+        preparation!.sourceDraft,
+        signal
       )
       createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
@@ -1347,5 +1359,6 @@ export const normalChatMode = async (
     if (ownsServicePromptSnapshot && servicePromptSnapshot) {
       servicePromptSnapshot.release()
     }
+    settlement?.finish()
   }
 }

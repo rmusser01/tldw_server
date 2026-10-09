@@ -102,6 +102,91 @@ describe("runChatPipeline abort lifecycle", () => {
     })
   })
 
+  it("holds Stop activity through preparation and releases it after its response settles", async () => {
+    let release!: () => void, enter!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const heldMode = {
+      ...mode,
+      preflight: async () => {
+        enter()
+        await gate
+        return null
+      }
+    }
+    const pending = runChatPipeline(
+      heldMode,
+      "Tell me a story",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      buildParams({
+        ownsAbortController: () => true,
+        releaseAbortControllerIfOwned: () => true
+      })
+    )
+    try {
+      await entered
+      expect(mocks.setStreaming).toHaveBeenLastCalledWith(true)
+      expect(mocks.setAbortController).not.toHaveBeenCalledWith(null)
+      release()
+      await pending
+      expect(mocks.setStreaming).toHaveBeenLastCalledWith(false)
+    } finally {
+      release()
+      await pending
+    }
+  })
+
+  it("does not acquire or release activity after its controller has been replaced", async () => {
+    await runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      buildParams({
+        ownsAbortController: () => false,
+        releaseAbortControllerIfOwned: () => false
+      })
+    )
+    expect(mocks.setStreaming).not.toHaveBeenCalled()
+    expect(mocks.setAbortController).not.toHaveBeenCalled()
+  })
+
+  it("does not acquire activity for a detached history view", async () => {
+    const detachedMode = {
+      ...mode,
+      preflight: async () => ({
+        handled: true as const,
+        fullText: "prepared result"
+      })
+    }
+    await runChatPipeline(
+      detachedMode,
+      "Tell me a story",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      buildParams({
+        historyTurn: { canUpdateView: () => false },
+        ownsAbortController: () => true,
+        releaseAbortControllerIfOwned: () => false
+      })
+    )
+    expect(mocks.setStreaming).not.toHaveBeenCalled()
+  })
+
   it("discards the empty assistant bubble when aborted before any token", async () => {
     mocks.pageAssistModel.mockResolvedValue({
       saveToDb: false,
@@ -125,6 +210,7 @@ describe("runChatPipeline abort lifecycle", () => {
     )
 
     expect(result).toMatchObject({ status: "skipped" })
+    expect(mocks.setStreaming).not.toHaveBeenCalledWith(true)
     // Never persisted as a complete answer nor as an empty error bubble.
     expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
     expect(mocks.saveMessageOnError).not.toHaveBeenCalled()

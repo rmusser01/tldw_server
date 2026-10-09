@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { useShortcutConfig, formatShortcut } from "@/hooks/keyboard/useShortcutConfig"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useHelpModal, useTutorialStore } from "@/store/tutorials"
 import {
   getTutorialsForRoute,
@@ -217,6 +218,7 @@ export type PageHelpModalProps = {
   modeNavigationEnabled?: boolean
   sidebarToggleEnabled?: boolean
   quickChatEnabled?: boolean
+  onStartTutorial?: (tutorialId: string) => boolean
 }
 
 export function PageHelpModal({
@@ -224,10 +226,11 @@ export function PageHelpModal({
   scope = "full",
   modeNavigationEnabled = true,
   sidebarToggleEnabled = true,
-  quickChatEnabled = true
+  quickChatEnabled = true,
+  onStartTutorial
 }: PageHelpModalProps = {}) {
   const { isOpen, close } = useHelpModal()
-  const startTutorial = useTutorialStore((state) => state.startTutorial)
+  const startTutorial = useStartTutorial()
   const completedTutorials = useTutorialStore(
     (state) => state.completedTutorials
   )
@@ -470,10 +473,12 @@ export function PageHelpModal({
 
   const handleStartTutorial = useCallback(
     (tutorialId: string) => {
-      close()
-      startTutorial(tutorialId)
+      const accepted = onStartTutorial
+        ? onStartTutorial(tutorialId)
+        : startTutorial(tutorialId)
+      if (accepted) close()
     },
-    [close, startTutorial]
+    [close, startTutorial, onStartTutorial]
   )
 
   const handleKeyDownInModal = useCallback(

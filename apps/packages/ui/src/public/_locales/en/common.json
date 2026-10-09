@@ -1892,6 +1892,12 @@
   "chatSidebar_searchFromFolders": {
     "message": "Typing searches Server and On this device history."
   },
+  "commandPalette_loading": {
+    "message": "Loading commands…"
+  },
+  "commandPalette_loadFailed": {
+    "message": "Commands could not be loaded. Reconnect, save any edits, then reload the page."
+  },
   "commandPalette_searchCommands": {
     "message": "Search commands"
   },

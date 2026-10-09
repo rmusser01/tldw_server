@@ -2203,6 +2203,7 @@ export const PlaygroundForm = ({
     draftOwnerKey,
     isDraftOwnerCurrent,
     captureCompletionGuard,
+    captureStopGuard,
     retainCurrentDraft,
     creationRecovery,
     reviewCreatedChat,
@@ -2210,11 +2211,10 @@ export const PlaygroundForm = ({
     listRetainedDrafts,
     copyRetainedDraft,
   } = composerInput;
-  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest, () => {
-    const current = captureCompletionGuard(),
-      revision = form.getRevision()
-    return () => current() && form.getRevision() === revision
-  })
+  const stopStreamingFromUi = useExplicitStopFocus(
+    stopStreamingRequest,
+    captureStopGuard
+  )
   React.useLayoutEffect(() => {
     composerImageRef.current = form.values.image;
     assistantComposerRef.current = { getRevision: form.getRevision, retainCurrentDraft, draftReady };

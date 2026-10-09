@@ -131,9 +131,19 @@ vi.mock("@/utils/safe-storage", () => ({
     get: mockStorageGet,
     set: mockStorageSet,
     remove: mockStorageRemove,
-    watch: vi.fn(),
+    watch: vi.fn(() => vi.fn()),
     unwatch: vi.fn()
   })
+}))
+
+// This suite qualifies Notes storage/shortcut behavior; actual source/AntD handoff has a dedicated integration test.
+vi.mock("@/hooks/useStartTutorial", () => ({
+  useStartTutorial:
+    () =>
+    (...args: unknown[]) => {
+      mockStartTutorial(...args)
+      return true
+    }
 }))
 
 vi.mock("@/store/tutorials", () => {
@@ -288,12 +298,14 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
   it("removes tutorial state from shared storage when restarting the tutorial", async () => {
     renderPage()
 
-    fireEvent.click(screen.getByTestId("notes-shortcuts-help-button"))
+    const opener = screen.getByTestId("notes-shortcuts-help-button")
+    opener.focus()
+    fireEvent.click(opener)
     fireEvent.click(await screen.findByTestId("notes-restart-tutorial"))
 
     await waitFor(() => {
       expect(mockStorageRemove).toHaveBeenCalledWith("notes-tutorial-shown")
     })
-    expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics")
+    expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics", opener)
   })
 })

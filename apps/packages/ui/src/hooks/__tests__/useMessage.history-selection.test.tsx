@@ -3276,6 +3276,79 @@ it.each(["regenerate", "send"])("compact an older regeneration cannot clear a ne
   })
 
 
+it.each([false, true])(
+  "compact ordinary response exposes Stop until its owned stream settles (Temporary=%s)",
+  async (temporary) => {
+    mocks.useRealPageAssist = true
+    mocks.storeState.temporaryChat = temporary
+    if (temporary) {
+      const current = h1.controller.getCurrent()
+      current.status = "idle"
+      current.owner = null
+      current.view = null
+      mocks.storeState.serverChatId = null
+      mocks.chatBaseState.historyId = "temp"
+    }
+    mocks.setStreaming.mockImplementation((value) => {
+      mocks.chatBaseState.streaming = value
+    })
+    mocks.setIsProcessing.mockImplementation((value) => {
+      mocks.chatBaseState.isProcessing = value
+    })
+    let release!: () => void, enter!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    h1.wire.mockImplementation(async function* () {
+      yield { choices: [{ delta: { content: "partial answer" } }] }
+      enter()
+      await gate
+    })
+    const hook = renderHook(
+      () => ({ context: usePageAssist(), actions: useMessage() }),
+      { wrapper: PageAssistProvider }
+    )
+    let pending!: Promise<unknown>
+    try {
+      act(() => {
+        pending = hook.result.current.actions.onSubmit({
+          message: "Exact compact question",
+          image: ""
+        })
+      })
+      await act(async () => {
+        await entered
+      })
+      expect(mocks.chatBaseState.streaming).toBe(true)
+      const owned = hook.result.current.context.getController!()!
+      act(() => {
+        hook.result.current.actions.stopStreamingRequest()
+      })
+      expect(owned.signal.aborted).toBe(true)
+      expect(mocks.chatBaseState.streaming).toBe(true)
+      release()
+      await act(async () => {
+        await pending
+      })
+      expect(mocks.chatBaseState.streaming).toBe(false)
+      expect(mocks.chatBaseState.isProcessing).toBe(false)
+      expect(hook.result.current.context.getController!()).toBeNull()
+    } finally {
+      release()
+      await pending
+      hook.unmount()
+      mocks.chatBaseState.streaming = false
+      mocks.chatBaseState.isProcessing = false
+      mocks.setStreaming.mockReset()
+      mocks.setIsProcessing.mockReset()
+      mocks.useRealPageAssist = false
+    }
+  }
+)
+
 it("compact Stop releases native busy state through the actual shared provider after the aborted turn finishes", async () => {
   mocks.useRealPageAssist = true
   mocks.storeState.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },

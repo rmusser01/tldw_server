@@ -17,6 +17,7 @@
  * turn uses, so ownership and lease checks stay where they are.
  */
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { followStoppedChatTurnSelection } from "@/hooks/chat/abort-turn-cleanup"
 import {
   canonicalHistoryJson,
   dismissHistoryTurnRecovery,
@@ -155,7 +156,8 @@ const inFlight = new Map<string, Promise<HistoryTurnKeepResult>>()
 
 const keep = async (
   controller: HistorySelectionController,
-  entry: HistoryTurnRecoveryEntry
+  entry: HistoryTurnRecoveryEntry,
+  stopSignal?: AbortSignal
 ): Promise<HistoryTurnKeepResult> => {
   const skipped = (reason: string): HistoryTurnKeepResult => ({
     status: "skipped",
@@ -247,12 +249,16 @@ const keep = async (
     )
   }
   let followed = false
-  if (isCurrent() && sameBoundary(controller.getCurrent().view, turn.origin_view)) {
-    followed = await controller.choose({
+  if (
+    isCurrent() &&
+    sameBoundary(controller.getCurrent().view, turn.origin_view)
+  ) {
+    followed = await followStoppedChatTurnSelection(stopSignal, controller, {
       kind: "after_message",
       message_id: resultId
     })
   }
+
   await controller.refreshRecovery?.()
   return { status: "kept", resultId, followed, retained }
 }
@@ -264,12 +270,13 @@ const keep = async (
  */
 export const keepHistoryTurnRecovery = (
   controller: HistorySelectionController,
-  entry: HistoryTurnRecoveryEntry
+  entry: HistoryTurnRecoveryEntry,
+  stopSignal?: AbortSignal
 ): Promise<HistoryTurnKeepResult> => {
   const operationId = entry.turn.operation_id
   const running = inFlight.get(operationId)
   if (running) return running
-  const attempt = keep(controller, entry)
+  const attempt = keep(controller, entry, stopSignal)
     .catch((error): HistoryTurnKeepResult => ({
       status: "skipped",
       reason: errorCode(error)

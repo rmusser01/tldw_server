@@ -1,3 +1,4 @@
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React from "react"
 import { Button, Input } from "antd"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -47,7 +48,6 @@ export const buildQuickChatPageTutorialEntries = (
   }
 
   const tutorials = getTutorialsForRoute(normalizedRoute, {
-    ignoreRuntimeSuppression: true,
     completedTutorialIds,
     includeLocked: true
   })
@@ -80,7 +80,7 @@ export const QuickChatGuidesPanel: React.FC<Props> = ({
     QUICK_CHAT_WORKFLOW_GUIDES
   )
   const completedTutorials = useTutorialStore((state) => state.completedTutorials)
-  const startTutorial = useTutorialStore((state) => state.startTutorial)
+  const startTutorial = useStartTutorial()
   const [search, setSearch] = React.useState("")
   const guides = React.useMemo(
     () => resolveQuickChatWorkflowGuides(storedGuidesRaw),

@@ -153,6 +153,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     promptAssistSavedAttemptId,
     textAreaFocus,
     captureCompletionGuard,
+    captureStopGuard,
     draftSaved,
     draftReady,
     textareaMaxHeight,
@@ -711,6 +712,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     collapsedDisplayMeta,
     textAreaFocus,
     captureCompletionGuard,
+    captureStopGuard,
     // Collapsed editing
     syncCollapsedCaret,
     commitCollapsedEdit,

@@ -404,6 +404,7 @@ export const SidepanelForm = ({
     draftOwnerKey,
     isDraftOwnerCurrent,
     captureCompletionGuard,
+    captureStopGuard,
     retainCurrentDraft,
     clearDraft,
     creationRecovery,
@@ -806,11 +807,10 @@ export const SidepanelForm = ({
     serverChatId,
     conversationMetadata
   } = useMessage()
-  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest, () => {
-    const current = captureCompletionGuard(),
-      revision = form.getRevision()
-    return () => current() && form.getRevision() === revision
-  })
+  const stopStreamingFromUi = useExplicitStopFocus(
+    stopStreamingRequest,
+    captureStopGuard
+  )
   const greetingSubmitGateRef = React.useRef<() => boolean>(() => false)
   const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) =>
     greetingSubmitGateRef.current() ? Promise.resolve({ status: "skipped" as const,

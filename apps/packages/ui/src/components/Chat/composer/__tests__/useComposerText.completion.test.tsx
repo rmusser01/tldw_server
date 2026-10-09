@@ -179,19 +179,22 @@ const deployedMutation = (
 };
 
 const mount = () => {
-  const textarea = document.createElement("textarea");
-  document.body.append(textarea);
+  const textarea = document.createElement("textarea")
+  document.body.append(textarea)
   const hook = renderHook(() => {
-    const address = useStoreMessageOption((state) => state.chatDraftAddress)!;
+    const address = useStoreMessageOption((state) => state.chatDraftAddress)
     return useComposerText({
-      draftAddress: address,
-      draftKey: conversationDraftKey("completion-test", address),
+      draftAddress: address ?? undefined,
+      draftEnabled: address !== null,
+      draftKey: address
+        ? conversationDraftKey("completion-test", address)
+        : "completion-test",
       textareaRef: { current: textarea },
-      tabScopedDraft: true,
-    });
-  });
-  return { ...hook, textarea };
-};
+      tabScopedDraft: true
+    })
+  })
+  return { ...hook, textarea }
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -307,6 +310,80 @@ describe("completion source and input", () => {
     expect(current()).toBe(false);
   });
 });
+
+
+describe("explicit Stop input ownership", () => {
+  it("admits only its own accepted untouched optimistic restore", async () => {
+    const view = mount()
+    await waitFor(() => expect(view.result.current.draftReady).toBe(true))
+    act(() =>
+      view.result.current.setMessageValue(
+        "Exact stopped input.  \nSecond line."
+      )
+    )
+    let attempt!: number
+    act(() => {
+      attempt = view.result.current.beginPromptAssistReset()
+    })
+    const current = view.result.current.captureStopGuard()
+    expect(current()).toBe(true)
+    act(() => view.result.current.restorePromptAssistAttempt(attempt))
+    expect(view.result.current.form.values.message).toBe(
+      "Exact stopped input.  \nSecond line."
+    )
+    expect(current()).toBe(true)
+    act(() => view.result.current.setMessageValue("Newer input"))
+    expect(current()).toBe(false)
+  })
+
+  it.each([
+    "text Undo",
+    "image Undo",
+    "new attempt",
+    "empty new attempt",
+    "New",
+    "ABA",
+    "account",
+    "unmount"
+  ])("does not admit a restore or focus after %s", async (boundary) => {
+    const view = mount()
+    await waitFor(() => expect(view.result.current.draftReady).toBe(true))
+    act(() => view.result.current.setMessageValue("Original stopped input"))
+    let attempt!: number
+    act(() => {
+      attempt = view.result.current.beginPromptAssistReset()
+    })
+    const current = view.result.current.captureStopGuard()
+    const source = useStoreMessageOption.getState().chatDraftAddress!
+    const restore = view.result.current.restorePromptAssistAttempt
+    act(() => {
+      if (boundary === "text Undo")
+        view.result.current.setMessageValue("Edited input")
+      else if (boundary === "image Undo")
+        view.result.current.form.setFieldValue("image", "new-image")
+      else if (boundary === "new attempt") {
+        view.result.current.setMessageValue("Another attempt")
+        view.result.current.beginPromptAssistReset()
+      } else if (boundary === "empty new attempt")
+        view.result.current.beginPromptAssistReset()
+      else if (boundary === "New" || boundary === "ABA")
+        useStoreMessageOption.getState().startNewChatDraft()
+      else if (boundary === "account") {
+        authority.user = "bob"
+        window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+      } else view.unmount()
+    })
+    act(() => {
+      if (boundary === "text Undo") view.result.current.setMessageValue("")
+      else if (boundary === "image Undo")
+        view.result.current.form.setFieldValue("image", "")
+      else if (boundary === "ABA")
+        useStoreMessageOption.getState().setChatDraftAddress(source)
+      restore(attempt)
+    })
+    expect(current()).toBe(false)
+  })
+})
 
 const compactCleanup = (imageCommand = false) => {
   const file = path.resolve(__dirname, "../../../Sidepanel/Chat/form.tsx");

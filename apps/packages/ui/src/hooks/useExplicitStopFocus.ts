@@ -3,6 +3,8 @@ import { focusComposer } from "@/hooks/useComposerFocus"
 import { usePageAssist } from "@/context"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { addressesNoConversation } from "@/hooks/chat/fresh-chat-selection"
+import { getChatTurnSettlement } from "@/hooks/chat/abort-turn-cleanup"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 
@@ -17,9 +19,29 @@ export const useExplicitStopFocus = (
   const selection = useHistorySelectionContext()
   const { controller, getController } = usePageAssist()
   const response = getController ? getController() : controller
-  const fence = selection?.fence() ?? (() => true)
+  let historyIsCurrent = selection?.fence() ?? (() => true)
   const owner = selection?.owner
-  const source = captureCurrent?.() ?? captureChatDraftSource().isCurrent
+  const draft = useStoreMessageOption.getState()
+  const source =
+    captureCurrent?.() ??
+    captureChatDraftSource(
+      () => true,
+      (current, original) => {
+        const live = useStoreMessageOption.getState()
+        // Temporary abort settlement marks the same fresh draft with "temp".
+        return (
+          current === original ||
+          (original === null &&
+            current === "temp" &&
+            draft.chatDraftAddress?.kind === "fresh" &&
+            draft.chatDraftAddress.temporary &&
+            draft.temporaryChat &&
+            live.temporaryChat &&
+            addressesNoConversation(draft) &&
+            addressesNoConversation(live))
+        )
+      }
+    ).isCurrent
   const mounted = useRef(true)
   const pending = useRef<{
     isCurrent: () => boolean
@@ -33,7 +55,7 @@ export const useExplicitStopFocus = (
   const sourceIsCurrent = () =>
     mounted.current &&
     source() &&
-    fence() &&
+    historyIsCurrent() &&
     owner?.kind !== "unavailable" &&
     owner?.validate_lease?.() !== false &&
     responseIsCurrent()
@@ -70,6 +92,9 @@ export const useExplicitStopFocus = (
       stop()
       return
     }
+    const settlement = response
+      ? getChatTurnSettlement(response.signal)
+      : undefined
     let frame: number | null = null
     let becameIdle = false
     const cancel = () => {
@@ -78,6 +103,7 @@ export const useExplicitStopFocus = (
       document.removeEventListener("pointerdown", leaveFocus)
       document.removeEventListener("input", leaveFocus)
       unsubscribe()
+      if (settlement?.focusReturn === focusReturn) settlement.focusReturn = null
       if (pending.current === attempt) pending.current = null
     }
     const leaveFocus = (event: Event) => {
@@ -89,10 +115,16 @@ export const useExplicitStopFocus = (
       if (!active) becameIdle = true
     })
     const attempt = {
-      isCurrent: () => pending.current === attempt && sourceIsCurrent(),
+      isCurrent: () =>
+        pending.current === attempt &&
+        sourceIsCurrent() &&
+        (!settlement ||
+          (response &&
+            getChatTurnSettlement(response.signal) === settlement &&
+            settlement.focusReturn === focusReturn)),
       cancel,
       finish: () => {
-        if (frame !== null) return
+        if (frame !== null || settlement?.pending) return
         frame = requestAnimationFrame(() => {
           const owned =
             attempt.isCurrent() &&
@@ -110,7 +142,23 @@ export const useExplicitStopFocus = (
         })
       }
     }
+    const focusReturn = {
+      history: selection,
+      isCurrent: attempt.isCurrent,
+      acceptHistory: (current: () => boolean) => {
+        historyIsCurrent = current
+      },
+      finish: () => {
+        const activity = useStoreMessageOption.getState()
+        if (!attempt.isCurrent()) cancel()
+        else if (
+          !(activity.isLoading || activity.streaming || activity.isProcessing)
+        )
+          attempt.finish()
+      }
+    }
     pending.current = attempt
+    if (settlement) settlement.focusReturn = focusReturn
     document.addEventListener("focusin", leaveFocus)
     document.addEventListener("pointerdown", leaveFocus)
     document.addEventListener("input", leaveFocus)

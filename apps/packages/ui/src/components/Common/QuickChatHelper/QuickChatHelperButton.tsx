@@ -1,4 +1,12 @@
-import React, { Suspense, lazy, useCallback, useEffect, useState } from "react"
+import React, {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useState,
+  useRef,
+  useLayoutEffect
+} from "react"
 import { Tooltip, Switch, type TooltipProps } from "antd"
 import { MessageCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -35,6 +43,15 @@ export const QuickChatHelperButton: React.FC<QuickChatHelperButtonProps> = ({
   )
   const { isOpen, setIsOpen } = useQuickChatStore()
   const [isCompactViewport, setIsCompactViewport] = useState(false)
+  const openerRef = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (isOpen) {
+      const active = document.activeElement
+      openerRef.current =
+        active instanceof HTMLElement && active !== document.body ? active : null
+    }
+  }, [isOpen])
+  const getTutorialFocusTarget = useCallback(() => openerRef.current, [])
 
   const handleOpen = useCallback(() => {
     setIsOpen(true)
@@ -157,7 +174,7 @@ export const QuickChatHelperButton: React.FC<QuickChatHelperButtonProps> = ({
       {/* Modal - lazy loaded */}
       {isOpen && (
         <Suspense fallback={null}>
-          <QuickChatHelperModal open={isOpen} onClose={handleClose} />
+          <QuickChatHelperModal open={isOpen} onClose={handleClose} getTutorialFocusTarget={getTutorialFocusTarget} />
         </Suspense>
       )}
     </>

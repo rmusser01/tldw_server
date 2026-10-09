@@ -112,6 +112,8 @@ export interface UseComposerTextResult {
   textAreaFocus: () => void
   /** Retain the rendered source through delivery; focus also belongs to its initiator. */
   captureCompletionGuard: (forFocus?: boolean) => () => boolean
+  /** Stop may accept only its own untouched input restore, never a later edit. */
+  captureStopGuard: () => () => boolean
   /** Whether the draft was recently persisted — for the "Draft saved" indicator. */
   draftSaved: boolean
   /** Whether this owner's saved draft has finished restoring. */
@@ -172,6 +174,11 @@ export function useComposerText(
     metadata?: DraftMetadataObject
     messageRevision: number
     imageRevision: number
+  } | null>(null)
+  const stopInputRestore = React.useRef<{
+    attemptId: number
+    fromRevision: number
+    toRevision: number
   } | null>(null)
   const [restoreAttemptId, setRestoreAttemptId] = React.useState<number | null>(
     null
@@ -460,6 +467,24 @@ export function useComposerText(
         (!forFocus || (focused !== null && typeof document !== "undefined" && focused !== document.body && document.activeElement === focused && getRevision() === inputRevision))
     }
   }, [draftReady, isCurrent, renderedAddress, draftRevision, sourceSelectionRevision, restoreRevision, getRevision])
+  const captureStopGuard = React.useCallback(() => {
+    const sourceIsCurrent = captureCompletionGuard()
+    const inputRevision = getRevision()
+    const attemptId = attemptSourceRef.current?.id
+    const latestAttemptId = nextPromptAssistAttemptIdRef.current
+    return () => {
+      const receipt = stopInputRestore.current
+      return (
+        sourceIsCurrent() &&
+        nextPromptAssistAttemptIdRef.current === latestAttemptId &&
+        (getRevision() === inputRevision ||
+          (attemptId !== undefined &&
+            receipt?.attemptId === attemptId &&
+            receipt.fromRevision === inputRevision &&
+            receipt.toRevision === getRevision()))
+      )
+    }
+  }, [captureCompletionGuard, getRevision])
   React.useLayoutEffect(() => {
     const checkpoint = initialSetup.current
     if (!checkpoint) return
@@ -629,6 +654,7 @@ export function useComposerText(
               imageRevisionRef.current + Number(form.values.image !== "")
           }
         : null
+    stopInputRestore.current = null
     setRestoreAttemptId(null)
     pendingPromptAssistResetRef.current = {
       attemptId,
@@ -696,7 +722,13 @@ export function useComposerText(
     attemptSourceRef.current = null
     pendingPromptAssistResetRef.current = null
     setRestoreAttemptId(null)
+    const fromRevision = getRevision()
     form.setValues(attempt.values)
+    stopInputRestore.current = {
+      attemptId: attempt.id,
+      fromRevision,
+      toRevision: getRevision()
+    }
     restoreWithMetadata?.(attempt.values.message, attempt.metadata)
   }, [
     restoreAttemptId,
@@ -705,6 +737,7 @@ export function useComposerText(
     bindFromDraftKey,
     draftReady,
     form,
+    getRevision,
     promptAssistMutation,
     restoreWithMetadata
   ])
@@ -819,6 +852,7 @@ export function useComposerText(
     setMessageValue,
     textAreaFocus,
     captureCompletionGuard,
+    captureStopGuard,
     draftSaved,
     draftReady,
     draftOwnerVerificationState: verificationState,

@@ -1,7 +1,15 @@
-import React, { useEffect, useLayoutEffect, useState } from "react"
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo
+} from "react"
 import { useTranslation } from "react-i18next"
 import { useLocation } from "react-router-dom"
 import { CHAT_PATH } from "@/routes/route-paths"
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useHelpModal } from "@/store/tutorials"
 import { shouldOpenShortcutsHelp } from "@/components/Option/Playground/playground-shortcuts"
 import { isEditableTarget } from "@/utils/editable-target"
@@ -40,6 +48,28 @@ export function PageHelpModalHost({
   quickChatEnabled = true
 }: PageHelpModalHostProps) {
   const { isOpen, open, close } = useHelpModal()
+  const startTutorial = useStartTutorial()
+  const openerRef = useRef<HTMLElement | null>(null)
+  const handedOffRef = useRef(false)
+  const openInstance = useMemo(() => (isOpen ? {} : null), [isOpen])
+  const liveOpenInstance = useRef<object | null>(null)
+  useLayoutEffect(() => {
+    liveOpenInstance.current = openInstance
+    return () => {
+      liveOpenInstance.current = null
+    }
+  }, [openInstance])
+  const onStartTutorial = useCallback(
+    (tutorialId: string) => {
+      if (!openInstance || liveOpenInstance.current !== openInstance) return false
+      handedOffRef.current = true
+      const accepted = startTutorial(tutorialId, openerRef.current)
+      if (!accepted) handedOffRef.current = false
+      return accepted
+    },
+    [startTutorial, openInstance]
+  )
+
   const { pathname } = useLocation()
   const chatKeyboardEnabled =
     pathname === CHAT_PATH || (scope === "sidepanel" && pathname === "/")
@@ -113,6 +143,11 @@ export function PageHelpModalHost({
   useLayoutEffect(() => {
     if (!isOpen) return
     const previousFocus = document.activeElement
+    openerRef.current =
+      previousFocus instanceof HTMLElement && previousFocus !== document.body
+        ? previousFocus
+        : null
+    handedOffRef.current = false
     const onEscape = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== "Escape") return
       if (hasOtherOpenDialog()) return
@@ -124,8 +159,10 @@ export function PageHelpModalHost({
     return () => {
       window.removeEventListener("keydown", onEscape, true)
       if (
+        !handedOffRef.current &&
         previousFocus instanceof HTMLElement &&
-        document.contains(previousFocus)
+        document.contains(previousFocus) &&
+        !isHiddenBySelfOrAncestor(previousFocus)
       )
         previousFocus.focus()
     }
@@ -135,6 +172,7 @@ export function PageHelpModalHost({
   if (HelpModal)
     return (
       <HelpModal
+        onStartTutorial={onStartTutorial}
         initialTab={initialTab}
         scope={scope}
         modeNavigationEnabled={modeNavigationEnabled}
