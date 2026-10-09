@@ -1,15 +1,24 @@
 # VN PR 3016 Review And Merge
 
-Task: TASK-13369. Parent [#3016](https://github.com/rmusser01/tldw_server/pull/3016);
+Task: TASK-13526 (formerly TASK-13369; interim TASK-13518). Parent [#3016](https://github.com/rmusser01/tldw_server/pull/3016);
 stacked follow-up [#3067](https://github.com/rmusser01/tldw_server/pull/3067).
 Designs: Docs/Design/2026-09-25-vn-pr-3016-review.md and
 Docs/Design/2026-10-02-vn-pr-3067-review-tests.md.
+
+## Tracking Closeout (2026-10-06)
+
+Current tracking is TASK-13526. PR3016 is verified merged as
+1e06e03b587310ec023f3810c4480ea4e69b05f5; PR3067 is closed as superseded,
+not merged. The sections below are preserved historical checkpoints. Their
+"live", "current", pending-state wording and original TASK-13369 associations
+describe those checkpoints, not the current task or merge state.
 
 ## Current State
 The latest direct human instruction authorizes rebasing PR3016 onto latest dev,
 addressing all PR findings/comments and normal gated merge. The previously
 presented Task69 four-source-fix and two CI-test-double designs are now approved
-for execution under original TASK-13369. Local merge-preserving rebase onto
+for execution under original TASK-13369 (historical approval; current tracking:
+TASK-13526). Local merge-preserving rebase onto
 actualdev4c4f197 completed at2f3d3e09c0. At that checkpoint all production/test/configuration bytes
 matched the preserved current-dev union tree c3342dca64; only this plan drifted
 while replaying historical merges, and its qualified checkpoint text is restored

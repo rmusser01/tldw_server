@@ -1,5 +1,5 @@
 ---
-id: TASK-13356
+id: TASK-13524
 title: Snapshot VN asset generation inputs at batch creation
 status: Done
 assignee: []
@@ -40,6 +40,8 @@ Stages 1-2 of IMPLEMENTATION_PLAN_vn_generation_durability.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 41 focused VN repository/generation tests passed; scoped Ruff E,F,I passed; Bandit on three touched production modules reported zero findings; git diff --check passed. Existing BLE001 lint findings in preexisting broad exception handlers remain.
+2026-10-06: requester-approved scoped identity migration changed the VN snapshot record from TASK-13356 to TASK-13516 and its matching filename because TASK-13356 also identifies unrelated ADR work. Historical sections remain intact; the unrelated ADR record is unchanged. Migration is tracked by TASK-13515.
+2026-10-06 requester-approved second identity migration: original VN TASK-13356, interim TASK-13516, now TASK-13524. A concurrent performance-program allocation reused the interim ID. Only this VN-owned identity/filename and current references move; every earlier historical section and note is retained verbatim. Fresh global inventory reserved this ID above existing maximum13522; unrelated performance records remain untouched. The approval explicitly covers this narrow manual identity exception; this note is added through official backlog-py. PR3207 normal exact-head review/CI gates remain required; no runtime or fresh product-test/Bandit claim.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

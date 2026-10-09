@@ -1,7 +1,7 @@
 ---
-id: TASK-13369
+id: TASK-13526
 title: Address PR 3016 Qodo durability findings
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-09-26 00:52
 updated_date: 2026-10-06 16:15
@@ -28,8 +28,8 @@ Rebase PR 3016 onto dev; address all verified Qodo and independent-review VN gen
 - [x] #2 Storage handoff failures replay without terminalizing the variant.
 - [x] #3 Concurrent deliveries use a fenced claim and cannot publish duplicate assets.
 - [x] #4 Cancellation clears outstanding reservation capacity and preserves counters.
-- [ ] #5 All remaining review comments are addressed with tests or reasoned thread replies.
-- [ ] #6 PR checks and human summary gate pass before merge.
+- [x] #5 All remaining review comments are addressed with tests or reasoned thread replies.
+- [x] #6 PR checks and human summary gate pass before merge.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -441,13 +441,29 @@ Task81 new exact04 CI failure diagnosed: container-build-check112363232534/run37
 Task81 bounded verification: original timeout focused1RED at30 versus matrix budget expression, zero errors/skips; minimal worker-only45/default30 repair then four affected CI files104PASS0failure0error0skip/4warnings6.69s. YAML structured comparison proves every other workflow field/job/step/permission/trigger exactly unchanged; all original test-function ASTs exact, one new regression only. Source51 hashes frozen. Touched Ruff clean, Bandit41->43B101/errors[]/0newnonassert (two new assertions only). Local Python3.11/pytest8.4/asyncio1.1 below declared floors; actionlint unavailable on PATH, no local actionlint or actual GitHub-expression/Docker build certification inferred. Fresh Harvey independent SPEC/QUALITY review is running; full configured hooks and exact currentdev/remote preflight precede normal publication. Original current04 required failure remains failed, not relabeled or rerun. No child mutation.
 Task81 independent Harvey SPEC/QUALITY PASS/no actionable findings, reviewer CLOSED/all sessions reaped. Independent17PASS/0skip with conftest disabled; baseline PASS and four copied omission/budget/wiring controls RED. Controller104PASS uses root fixtures, source51 and earlier Task80 source162 hashes exact; Ruff clean/Bandit41->43B101 only/errors[]/0newnonassert. FullPR99 configured hooks11PASS3no-fileSKIP/no changes/no bypass; installed hook absent. Actionlint unavailable/native CI and supported runtimes unverified. Finite45m worker/30m other4 is a duration/cost tradeoff, no future guarantee. Normal four-file repair commit/exact fresh04 lease publication next; failed old04 gate remains failed and external current-head CI/full Qodo/verified normal merge remain pending. Evidence task-81-worker-timeout-20261006-r1 and task-81-prepublication-20261006-r1.
 Task81 normal4file commit f1f063f5e30f9b93061c75352f1db92e1b4bb29f/tree48091e8da2a4c17addf1bc9de35b8d8c44f8c43f exactly preserved intended staged tree, contains fresh actualdev1fc353c3f67c93ba05102e7b0136ac4acac8f510. Final4WIP/backupref preserved; exact freshly verified04 lease push succeeded ONCE. ActualGitremote/uncachedbranch/commit-tree/later independentPR verifyf1/1fc. Initial REST PR lagged04 retained/no repeated push. Initial precommit outer NUL path validator failure retained; trailing empty delimiter excluded, exact4-path assertion unchanged. FullPR99 and final4 hooks11PASS3no-fileSKIP/no changes/no bypass. Complete16:13UTC new-head r1 validates19JSON/3raw thread pages/ALL200parent+2child replies. ParentOPEN/unmerged/BLOCKED;30checks14skip16queued0failure, all7 current-head gates absent/pending, old04 license/gates never transfer.124reviews200inline61conversation/102threads0unresolved/replies exact; only CodeRabbit runID/79commit anchors/parenthead metadata. Entire PRbody/human summary exact, no agent body edit. Child6909 ALLfields/replies exact OPEN/unmerged15complete/2threads1unresolved/base04/read-only. Qodo full exactf1 request/review absent/two credit notices unchanged; no retry/purchase/waiver/repeated admin question. AC5/6/DoD pending externalreview/all7 exacthead gates/independently verified normal merge. Checkpoint task-81-publication-20261006-r1/publication-checkpoint.md, task-81-published-f1f063f-20261006-r1 validation and separate classification/manifests. Postpublication notes remain one local tracking WIP and will be explicitly archived; source clean, all failed evidence preserved.
+2026-10-06: requester approved the narrow manual identity migration from the VN-owned TASK-13369 to TASK-13518, with matching filename, because two unrelated webhook-security and email-benchmark records also use TASK-13369. Their bytes and all historical VN notes are preserved. Verified GitHub PR3016 is MERGED at 1e06e03b587310ec023f3810c4480ea4e69b05f5 (2026-10-06T20:57:17Z), head a6250c853bbb875686a3fc793de4c8749cf41868, with all seven required gates successful and all 102 review threads resolved across both pages, with no nested pagination. Its requester-provided Change summary remains present. PR3067 was closed as superseded after its useful code/test changes were verified already in dev; no second product merge or summary waiver was used. Official Backlog edits now finalize this unique record. This tracking-only cleanup does not rerun or claim new product tests, live PostgreSQL/GPU/deployment acceptance, or current-head hosted qualification for the new follow-up PR. Historical plan stages remain dated records; that other agent-owned plan is preserved.
+CodeRabbit PR3207 finding 4202448522 was verified on published head ce72891c0d066e132e4f584f11235dee561c1e1d: all six Definition of Done items were unchecked despite the independently verified PR3016 completion. Reconciled all six applicable entries through the official Backlog CLI. The six acceptance criteria, merged PR3016 evidence, retained implementation notes, current documentation links, final summary and documented limitations support completion. Historical production Bandit and product verification results remain recorded in their original notes; this task-ID/checklist correction changes documentation only, so no fresh Python security scan or product tests are applicable or claimed. No runtime, environment, CI or unrelated task changes were made.
+2026-10-06 requester-approved second identity migration: original VN TASK-13369, interim TASK-13518, now TASK-13526. A concurrent performance-program allocation reused the interim ID. Only this VN-owned identity/filename and current references move; every earlier historical section and note is retained verbatim. Fresh global inventory reserved this ID above existing maximum13522; unrelated performance records remain untouched. The approval explicitly covers this narrow manual identity exception; this note is added through official backlog-py. PR3207 normal exact-head review/CI gates remain required; no runtime or fresh product-test/Bandit claim.
+PR3207 independent rebased-head review found the interim TASK-13518 final-summary paragraph still presented as current. Verified the finding; add the current TASK-13526 mapping and explicitly label the entire earlier finalization checkpoint as historical, retaining every original summary sentence verbatim. Official backlog-py only; no runtime change or fresh product-test claim.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Current tracking is TASK-13526, formerly TASK-13369 and interim TASK-13518. The requester-approved second identity correction preserves all historical notes and unrelated records. Current VN documentation associations use TASK-13526; PR3207 review and CI qualification are separate from the verified PR3016 completion.
+
+Historical finalization checkpoint (retained verbatim):
+
+PR3016 merged normally on 2026-10-06T20:57:17Z as 1e06e03b587310ec023f3810c4480ea4e69b05f5, from reviewed head a6250c853bbb875686a3fc793de4c8749cf41868. The merged PR has all seven required gates successful, all 102 review threads resolved, and the requester-provided Change summary retained. PR3067 was closed as superseded, not merged again.
+
+This VN record is now uniquely TASK-13518, formerly TASK-13369. The requester-approved identity-only exception preserves every earlier implementation note and both unrelated colliding records. Current VN associations use the new identity. Finalization is performed through official Backlog editing; no new runtime or environment changes and no fresh product-test or security-scan claims are made.
+<!-- SECTION:FINAL_SUMMARY:END -->
