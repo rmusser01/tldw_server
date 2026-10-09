@@ -255,6 +255,7 @@ async def test_paused_definition_skips_with_reason(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert run is not None
     assert run["status"] == "skipped"
     assert run["error"] == "definition_paused"
@@ -408,6 +409,7 @@ async def test_queued_agent_job_is_blocked_before_registered_executor(
         run_slot_key=SLOT,
     )
     assert run is not None  # nosec B101
+    assert run is not None  # nosec B101
     assert run["status"] == "skipped"  # nosec B101
     assert run["error"] == "agent_execution_stack_unimplemented"  # nosec B101
     audits, _total = sdb.list_audit_events(
@@ -418,7 +420,7 @@ async def test_queued_agent_job_is_blocked_before_registered_executor(
 
 
 @pytest.mark.asyncio
-async def test_tool_requesting_config_skips_with_actionable_reason(consumer_env) -> None:
+async def test_tool_requesting_config_terminates_approval_required(consumer_env) -> None:
     user_id = 1014
     definition = _create_definition(
         user_id, input_config={"question": "q", "tools": ["fs_read", "http_fetch"]}
@@ -427,13 +429,17 @@ async def test_tool_requesting_config_skips_with_actionable_reason(consumer_env)
 
     result = await handle_agent_task_job(_job(definition, user_id))
 
-    assert result["status"] == "skipped"
+    # ADR-184 2A: a terminal outcome with a pass-back notification, not a
+    # skip -- the read-only envelope routes here until it exists.
+    assert result["status"] == "approval_required"
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
-    assert run["error"] == "tools_not_executable_in_phase1"
-    assert "approval-escalation" in (run["result_summary"] or "")
+    assert run is not None  # nosec B101
+    assert run["status"] == "approval_required"
+    assert run["error"] == "tools_require_read_only_envelope"
+    assert "read-only tool envelope" in (run["result_summary"] or "")
 
 
 @pytest.mark.asyncio
@@ -451,6 +457,7 @@ async def test_no_executor_fails_honestly(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert run["error"] == "family_not_wired_for_execution:recurring_question"
 
 
@@ -479,6 +486,7 @@ async def test_execution_deadline_records_timed_out(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert run["status"] == "timed_out"
     notification = _latest_notification(user_id)
     assert notification is not None
@@ -507,6 +515,7 @@ async def test_executor_exception_records_failed(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert "RuntimeError" in (run["error"] or "")
 
 
@@ -538,6 +547,7 @@ async def test_failed_run_degrades_health_and_audits(consumer_env) -> None:
 
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     updated = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert updated is not None  # nosec B101
     assert updated.health == "degraded"
     audits, _total = sdb.list_audit_events(
         owner_id=user_id, definition_id=definition.id
@@ -634,6 +644,7 @@ async def test_reclaimed_jobs_lease_requires_explicit_stopped_claim_reconciliati
         owner_user_id=str(user_id),
     )
     original = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="first", lease_seconds=60)
+    assert original is not None  # nosec B101
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     run = sdb.create_scheduled_task_run(
         definition_id=definition.id,
@@ -660,6 +671,7 @@ async def test_reclaimed_jobs_lease_requires_explicit_stopped_claim_reconciliati
     replacement = manager.acquire_next_job(
         domain="scheduled_tasks", queue="default", worker_id="second", lease_seconds=60
     )
+    assert replacement is not None  # nosec B101
     with pytest.raises(ValueError, match="stale Jobs lease"):
         await handle_agent_task_job(original, scheduled_db=sdb, jobs_manager=manager)
     with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
@@ -746,6 +758,7 @@ async def test_replaced_lease_cannot_overlap_cancellation_resistant_executor(con
         owner_user_id=str(user_id),
     )
     original = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="old", lease_seconds=60)
+    assert original is not None  # nosec B101
     started, cancelling, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
     calls = []
 
@@ -768,6 +781,7 @@ async def test_replaced_lease_cannot_overlap_cancellation_resistant_executor(con
     await asyncio.wait_for(cancelling.wait(), timeout=2)
     assert manager.release_job(int(original["id"]), worker_id="old", lease_id=original["lease_id"])
     replacement = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="new", lease_seconds=60)
+    assert replacement is not None  # nosec B101
     try:
         with pytest.raises(RuntimeError, match="claim.*active|reconciliation"):
             await handle_agent_task_job(replacement, jobs_manager=manager)
@@ -839,10 +853,15 @@ async def test_repeated_handler_cancellation_retains_live_executor_claim(consume
     with pytest.raises(asyncio.CancelledError):
         await first
     try:
-        assert not executor_tasks[0].done()
+        first_task = executor_tasks[0]
+        assert first_task is not None  # nosec B101
+        assert not first_task.done()
         with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
             await handle_agent_task_job(_job(definition, user_id))
         assert len(executor_tasks) == 1
     finally:
         stop_executor.set()
-        await asyncio.gather(*executor_tasks, return_exceptions=True)
+        await asyncio.gather(
+            *[task for task in executor_tasks if task is not None],
+            return_exceptions=True,
+        )
