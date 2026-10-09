@@ -50,6 +50,54 @@ const deferred = <T,>() => {
   return { promise, resolve }
 }
 
+describe("startup preview incarnation", () => {
+  it("retires a cancelled preview even when reopening the same bundle in one render batch", () => {
+    const deps = createDeps()
+    const { result } = renderHook(() => usePromptTemplates(deps))
+    act(() => result.current.setStartupTemplatePreview(bundle))
+    const older = result.current.startupTemplatePreviewLease!
+    act(() => {
+      result.current.setStartupTemplatePreview(null)
+      result.current.setStartupTemplatePreview(bundle)
+    })
+    const newer = result.current.startupTemplatePreviewLease!
+    expect({
+      old: older.isCurrent(),
+      new: newer.isCurrent(),
+      same: older.id === newer.id
+    }).toEqual({ old: false, new: true, same: false })
+  })
+  it("captures the reviewed source at Open and keeps it distinct from the preview lifetime", () => {
+    let sourceRevision = 0
+    const captureStartupTemplateSource = vi.fn(() => {
+      const original = sourceRevision
+      return {
+        isCurrent: () => original === sourceRevision,
+        continuationIsCurrent: () => true
+      }
+    })
+    const deps = createDeps({ captureStartupTemplateSource })
+    const { result } = renderHook(() => usePromptTemplates(deps))
+    act(() => result.current.setStartupTemplatePreview(bundle))
+    const lease = result.current.startupTemplatePreviewLease!
+    sourceRevision++
+    expect({
+      source: lease.sourceIsCurrent(),
+      preview: lease.isCurrent(),
+      captures: captureStartupTemplateSource.mock.calls.length
+    }).toEqual({ source: false, preview: true, captures: 1 })
+  })
+  it("retires the preview lease on owner unmount", () => {
+    const { result, unmount } = renderHook(() =>
+      usePromptTemplates(createDeps())
+    )
+    act(() => result.current.setStartupTemplatePreview(bundle))
+    const lease = result.current.startupTemplatePreviewLease!
+    unmount()
+    expect(lease.isCurrent()).toBe(false)
+  })
+})
+
 describe("startup template model and publication acknowledgements", () => {
   it("awaits model persistence before reporting success or publishing later settings", async () => {
     const held = deferred<boolean>()

@@ -18,6 +18,7 @@ export interface PlaygroundStartupTemplateModalProps {
   onClose: () => void
   onDelete: (id: string) => void
   onApply: () => void
+  busy?: boolean
   promptDescription: string | null
   promptResolution: { source?: string } | null
   preset: ParameterPreset | undefined
@@ -35,6 +36,7 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
       onClose,
       onDelete,
       onApply,
+      busy = false,
       promptDescription,
       promptResolution,
       preset,
@@ -69,7 +71,7 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
                   if (!preview) return
                   onDelete(preview.id)
                 },
-                disabled: !preview,
+                disabled: !preview || busy,
                 danger: true
               }
             ]}
@@ -81,7 +83,8 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
                 "Apply template"
               ),
               onClick: onApply,
-              disabled: !preview
+              loading: busy,
+              disabled: !preview || busy
             }}
           />
         }

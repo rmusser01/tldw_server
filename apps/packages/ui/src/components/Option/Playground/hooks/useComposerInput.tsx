@@ -145,6 +145,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   });
   const {
     form,
+    getSetupInputRevision,
     messageRevision,
     promptAssistMutation,
     beginPromptAssistReset,
@@ -697,6 +698,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
 
   return {
     form,
+    getSetupInputRevision,
     messageRevision,
     promptAssistMutation,
     beginPromptAssistReset,

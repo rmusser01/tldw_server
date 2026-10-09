@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Storage } from "@web/extension/shims/plasmo-storage";
 import { useStorage } from "@web/extension/shims/plasmo-storage-hook";
 import { useStoreMessageOption } from "@/store/option";
-import { useSelectedModel } from "../useSelectedModel";
+import { captureSelectedModelGuard, useSelectedModel } from "../useSelectedModel";
 
 // Two deployed model-hook owners, the option store, and the WebUI storage hook
 // and Storage implementation are real. Only the localStorage write failure or
@@ -63,6 +63,71 @@ afterEach(() => {
 });
 
 describe("explicit model persistence with multiple actual hook owners", () => {
+  it("captures inherited model ownership without a write and retires on a same-value selection", async () => {
+    const view = mount()
+    await ready(view)
+    const { writes } = recordWrites()
+    const isCurrent = captureSelectedModelGuard()
+    expect(isCurrent()).toBe(true)
+    expect(writes).toEqual([])
+    await act(async () => {
+      expect(await view.result.current.second.setSelectedModel(oldModel)).toBe(
+        true
+      )
+    })
+    expect(isCurrent()).toBe(false)
+    expect(writes).toEqual([JSON.stringify(oldModel)])
+  })
+  it("keeps an exact model operation retry bound to its failed revision without another selection", async () => {
+    const view = mount()
+    await ready(view)
+    let failed = true
+    const { writes, error } = recordWrites(() => failed)
+    let operation!: ReturnType<
+      typeof view.result.current.first.beginSelectedModelSave
+    >
+    await act(async () => {
+      operation = view.result.current.first.beginSelectedModelSave(nextModel)
+      await expect(operation.completion).rejects.toBe(error)
+    })
+    const revision = useStoreMessageOption.getState().selectedModelRevision
+    expect(operation.isCurrent()).toBe(true)
+    failed = false
+    await act(async () => {
+      expect(await operation.retry()).toBe(true)
+    })
+    expect({
+      revision: useStoreMessageOption.getState().selectedModelRevision,
+      writes,
+      stored: window.localStorage.getItem("selectedModel")
+    }).toEqual({
+      revision,
+      writes: [JSON.stringify(nextModel), JSON.stringify(nextModel)],
+      stored: JSON.stringify(nextModel)
+    })
+  })
+  it("retires the captured operation after a later same-value selection without retrying its device write", async () => {
+    const view = mount()
+    await ready(view)
+    const { writes } = recordWrites()
+    let operation!: ReturnType<
+      typeof view.result.current.first.beginSelectedModelSave
+    >
+    await act(async () => {
+      operation = view.result.current.first.beginSelectedModelSave(nextModel)
+      expect(await operation.completion).toBe(true)
+      expect(operation.isCurrent()).toBe(true)
+      expect(await view.result.current.second.setSelectedModel(nextModel)).toBe(
+        true
+      )
+    })
+    expect(operation.isCurrent()).toBe(false)
+    await act(async () => {
+      expect(await operation.retry()).toBe(false)
+    })
+    expect(writes).toEqual([JSON.stringify(nextModel), JSON.stringify(nextModel)])
+  })
+
   it("returns a failed explicit write without a sibling retry and permits a deliberate retry", async () => {
     const view = mount();
     await ready(view);

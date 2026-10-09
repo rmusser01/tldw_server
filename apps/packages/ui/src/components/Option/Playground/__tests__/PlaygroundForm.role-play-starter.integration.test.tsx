@@ -16,6 +16,7 @@ import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLo
 import { createStartupTemplateBundle } from "../startup-template-bundles"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useBuddyManagementStore } from "@/store/buddy-management"
+import { useActorStore } from "@/store/actor"
 import { buildQueuedRequest } from "@/utils/chat-request-queue"
 
 // Declared local sources have acknowledged rows/profile; only the table engine is doubled.
@@ -67,6 +68,9 @@ vi.mock("@/services/service-prompts", async importOriginal => ({
   loadServicePromptSnapshot: nativeSetupFixture.snapshot
 }))
 const savedSetupFixture = vi.hoisted(() => ({ raw: "[]" }))
+const startupPreviewFixture = vi.hoisted(() => ({
+  apply: null as null | (() => Promise<unknown>)
+}))
 const viewportState = vi.hoisted(() => ({ mobile: false, mode: "pro", realToolbar: false }))
 const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
 const createChatCompletionMock = vi.hoisted(() =>
@@ -144,8 +148,17 @@ const createMessageOptionState = () => ({
   onSubmit: onSubmitMock,
   messages: [],
   selectedModel: "deepseek-chat",
+  selectedModelRevision: 0,
   selectedModelIsLoading: false,
   setSelectedModel: vi.fn(),
+  beginSelectedModelSave: vi.fn((model: string) => {
+    // Declared Form model boundary; the actual device lease is checked separately.
+    const source = playgroundFormMessageOptionState.value
+    source.setSelectedModel(model)
+    const revision = source.selectedModelRevision
+    const isCurrent = () => source.selectedModel === model && source.selectedModelRevision === revision
+    return { completion: Promise.resolve(isCurrent()), isCurrent, retry: async () => isCurrent() }
+  }),
   chatMode: "normal",
   setChatMode: vi.fn(),
   compareMode: false,
@@ -903,7 +916,31 @@ vi.mock("../RolePlaySetupDrawer", () => ({
   }
 }))
 
-vi.mock("../PlaygroundStartupTemplateModal", () => ({ PlaygroundStartupTemplateModal: ({ onApply }: { onApply: () => Promise<void> }) => <button onClick={() => { void onApply() }}>Apply saved template</button> }))
+vi.mock("../PlaygroundStartupTemplateModal", () => ({
+  PlaygroundStartupTemplateModal: ({
+    onApply,
+    onClose,
+    busy = false
+  }: {
+    onApply: () => Promise<unknown>
+    onClose: () => void
+    busy?: boolean
+  }) => {
+    startupPreviewFixture.apply = onApply
+    return (
+      <>
+        <button
+          disabled={busy}
+          onClick={() => {
+            void onApply()
+          }}>
+          Apply saved template
+        </button>
+        <button onClick={onClose}>Cancel template preview</button>
+      </>
+    )
+  }
+}))
 
 vi.mock("../ParameterPresets", () => ({
   detectCurrentPreset: () => "balanced",
@@ -1184,6 +1221,7 @@ beforeEach(async () => {
   selectedAssistantMock.defaultCharacter = null
   selectedAssistantMock.ownedDefaultCharacter = null
   savedSetupFixture.raw = "[]"
+  startupPreviewFixture.apply = null
   saveActorSettingsMock.mockReset().mockResolvedValue(true)
   viewportState.mobile = false
   viewportState.mode = "pro"
@@ -1233,7 +1271,7 @@ const prepareNativeSource = () => {
     const source = playgroundFormMessageOptionState.value
     source.setHistoryId.mockImplementation((id: string | null) => { source.historyId = id })
     source.setServerChatId.mockImplementation((id: string | null) => { source.serverChatId = id })
-    source.setSelectedModel.mockImplementation((model: string) => { source.selectedModel = model })
+    source.setSelectedModel.mockImplementation((model: string) => { source.selectedModel = model; source.selectedModelRevision++ })
     source.setQueuedMessages.mockImplementation((next: import("@/utils/chat-request-queue").QueuedRequest[] | ((previous: import("@/utils/chat-request-queue").QueuedRequest[]) => import("@/utils/chat-request-queue").QueuedRequest[])) => { source.queuedMessages = typeof next === "function" ? next(source.queuedMessages) : next })
     return { reset, source, owner: () => current.owner }
 }
@@ -1394,6 +1432,571 @@ describe("PlaygroundForm role-play starter", () => {
     await act(async () => { finish(); await pending })
     await waitFor(() => expect(screen.queryByRole("button", { name: "Apply saved template" })).not.toBeInTheDocument())
   })
+
+  it("retries only the failed scene save for the same startup preview", async () => {
+    prepareNativeSource()
+    savedSetupFixture.raw = JSON.stringify([
+      createStartupTemplateBundle({
+        name: "Scene retry",
+        selectedModel: null,
+        systemPrompt: "",
+        rolePlay: {
+          source: "role-play-setup",
+          identity: { kind: "persona", id: "guide", name: "Guide" },
+          behavior: null,
+          scene: null,
+          generation: null,
+          context: null
+        }
+      })
+    ])
+    saveActorSettingsMock.mockResolvedValueOnce(false)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Preview saved setup" })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Apply saved template" })
+    )
+    await waitFor(() => expect(nativeSetupFixture.error).toHaveBeenCalledOnce())
+    expect(
+      screen.getByRole("button", { name: "Apply saved template" })
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Apply saved template" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Apply saved template" })
+      ).not.toBeInTheDocument()
+    )
+    expect({
+      identityWrites:
+        selectedAssistantMock.setSelectedAssistant.mock.calls.length,
+      sceneWrites: saveActorSettingsMock.mock.calls.length,
+      settingsWrites: chatModelSettingsState.updateSettings.mock.calls.length
+    }).toEqual({ identityWrites: 1, sceneWrites: 2, settingsWrites: 1 })
+  })
+
+  it("admits one startup preview attempt while identity persistence is held", async () => {
+    prepareNativeSource()
+    savedSetupFixture.raw = JSON.stringify([
+      createStartupTemplateBundle({
+        name: "One attempt",
+        selectedModel: null,
+        systemPrompt: "",
+        rolePlay: {
+          source: "role-play-setup",
+          identity: { kind: "persona", id: "guide", name: "Guide" },
+          behavior: null,
+          scene: null,
+          generation: null,
+          context: null
+        }
+      })
+    ])
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Preview saved setup" })
+    )
+    const apply = startupPreviewFixture.apply!
+    try {
+      act(() => {
+        void apply()
+        void apply()
+      })
+      await waitFor(() =>
+        expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalled()
+      )
+      expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledTimes(1)
+      expect(
+        screen.getByRole("button", { name: "Apply saved template" })
+      ).toBeDisabled()
+    } finally {
+      await act(async () => {
+        finish()
+        await pending
+      })
+    }
+  })
+
+  it("keeps a reopened same-template preview when an older scene save completes", async () => {
+    prepareNativeSource()
+    savedSetupFixture.raw = JSON.stringify([
+      createStartupTemplateBundle({
+        name: "Same preview",
+        selectedModel: null,
+        systemPrompt: "",
+        rolePlay: {
+          source: "role-play-setup",
+          identity: { kind: "persona", id: "guide", name: "Guide" },
+          behavior: null,
+          scene: null,
+          generation: null,
+          context: null
+        }
+      })
+    ])
+    let finish!: () => void
+    const pending = new Promise<boolean>((resolve) => {
+      finish = () => resolve(true)
+    })
+    saveActorSettingsMock.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Preview saved setup" })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Apply saved template" })
+    )
+    try {
+      await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledOnce())
+      await user.click(
+        screen.getByRole("button", { name: "Cancel template preview" })
+      )
+      await user.click(
+        screen.getByRole("button", { name: "Preview saved setup" })
+      )
+      await screen.findByRole("button", { name: "Apply saved template" })
+      await act(async () => {
+        finish()
+        await pending
+      })
+      expect(
+        screen.getByRole("button", { name: "Apply saved template" })
+      ).toBeEnabled()
+    } finally {
+      await act(async () => {
+        finish()
+        await pending
+      })
+    }
+  })
+
+  it.each(["new destination draft", "destination edit and Undo"])(
+    "retires a held startup scene after accepted hydration and %s",
+    async (change) => {
+      const { source } = prepareNativeSource()
+      source.serverChatId = "hydration-source"
+      nativeSetupFixture.realDrafts = true
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Owned hydration",
+          selectedModel: null,
+          systemPrompt: "",
+          rolePlay: {
+            source: "role-play-setup",
+            identity: { kind: "persona", id: "guide", name: "Guide" },
+            behavior: null,
+            scene: null,
+            generation: null,
+            context: null
+          }
+        })
+      ])
+      let finish!: () => void
+      const pending = new Promise<boolean>((resolve) => {
+        finish = () => resolve(true)
+      })
+      saveActorSettingsMock.mockReturnValueOnce(pending)
+      const actor = useActorStore.getState()
+      const publish = vi.spyOn(actor, "setSettings")
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.type(
+          screen.getByTestId("composer-textarea"),
+          "Source to retain"
+        )
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Preview saved setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Apply saved template" })
+        )
+        await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledOnce())
+        await waitFor(() =>
+          expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+        )
+        await user.type(screen.getByTestId("composer-textarea"), "My newer draft")
+        if (change === "destination edit and Undo")
+          await user.clear(screen.getByTestId("composer-textarea"))
+        await act(async () => {
+          finish()
+          await pending
+        })
+        expect(publish).not.toHaveBeenCalled()
+        expect(
+          screen.getByRole("button", { name: "Apply saved template" })
+        ).toBeInTheDocument()
+        expect(screen.getByTestId("composer-textarea")).toHaveValue(
+          change === "new destination draft" ? "My newer draft" : ""
+        )
+      } finally {
+        view.unmount()
+        finish()
+        await pending
+        publish.mockRestore()
+      }
+    }
+  )
+
+  it.each(["other model", "same model newer revision"])(
+    "does not adopt a synchronous settings subscriber's %s after startup model ACK",
+    async (change) => {
+      const { source } = prepareNativeSource()
+      nativeSetupFixture.realSettings = true
+      const store = nativeSetupFixture.actualSettingsStore!
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Frozen model",
+          selectedModel: "openai:proposal",
+          systemPrompt: "Proposed behavior",
+          rolePlay: {
+            source: "role-play-setup",
+            identity: { kind: "persona", id: "guide", name: "Guide" },
+            behavior: {
+              source: "template",
+              templateId: "proposal",
+              templateTitle: "Proposal",
+              templateCategory: "roleplay",
+              systemPrompt: "Proposed behavior",
+              modified: false
+            },
+            scene: null,
+            generation: null,
+            context: null
+          }
+        })
+      ])
+      let armed = true
+      const unsubscribe = store.subscribe((state) => {
+        if (armed && state.systemPrompt === "Proposed behavior") {
+          armed = false
+          source.setSelectedModel(
+            change === "other model" ? "openai:newer" : "openai:proposal"
+          )
+        }
+      })
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Preview saved setup" })
+        )
+        const apply = startupPreviewFixture.apply!
+        await act(async () => {
+          await apply()
+        })
+        expect(armed).toBe(false)
+        expect(saveActorSettingsMock).not.toHaveBeenCalled()
+        expect(
+          screen.getByRole("button", { name: "Apply saved template" })
+        ).toBeInTheDocument()
+      } finally {
+        view.unmount()
+        unsubscribe()
+      }
+    }
+  )
+
+  it.each(
+    ["inherited", "explicit"].flatMap((model) =>
+      ["other model", "same model newer revision"].map((change) => ({
+        model,
+        change
+      }))
+    )
+  )(
+    "retires $model startup model ownership when selecting $change during held identity persistence",
+    async ({ model, change }) => {
+      const { source } = prepareNativeSource()
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Held identity",
+          selectedModel: model === "explicit" ? "openai:proposal" : null,
+          systemPrompt: "",
+          rolePlay: {
+            source: "role-play-setup",
+            identity: { kind: "persona", id: "guide", name: "Guide" },
+            behavior: null,
+            scene: null,
+            generation: null,
+            context: null
+          }
+        })
+      ])
+      let finish!: () => void
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Preview saved setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Apply saved template" })
+        )
+        await waitFor(() =>
+          expect(
+            selectedAssistantMock.setSelectedAssistant
+          ).toHaveBeenCalledOnce()
+        )
+        const chosen =
+          change === "other model" ? "openai:newer" : source.selectedModel
+        act(() => source.setSelectedModel(chosen))
+        await act(async () => {
+          finish()
+          await pending
+        })
+        expect(source.setSelectedModel).toHaveBeenCalledExactlyOnceWith(chosen)
+        expect(source.beginSelectedModelSave).not.toHaveBeenCalled()
+        expect(saveActorSettingsMock).not.toHaveBeenCalled()
+        expect(
+          screen.getByRole("button", { name: "Apply saved template" })
+        ).toBeInTheDocument()
+      } finally {
+        view.unmount()
+        finish()
+        await pending
+      }
+    }
+  )
+
+  it.each(["other model", "same model newer revision"])(
+    "retires an inherited-model startup scene when selecting %s while its save is held",
+    async (change) => {
+      const { source } = prepareNativeSource()
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Inherited model",
+          selectedModel: null,
+          systemPrompt: "",
+          rolePlay: {
+            source: "role-play-setup",
+            identity: { kind: "persona", id: "guide", name: "Guide" },
+            behavior: null,
+            scene: null,
+            generation: null,
+            context: null
+          }
+        })
+      ])
+      let finish!: () => void
+      const pending = new Promise<boolean>((resolve) => {
+        finish = () => resolve(true)
+      })
+      saveActorSettingsMock.mockReturnValueOnce(pending)
+      const actor = useActorStore.getState()
+      const publish = vi.spyOn(actor, "setSettings")
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Preview saved setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Apply saved template" })
+        )
+        await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledOnce())
+        act(() =>
+          source.setSelectedModel(
+            change === "other model" ? "openai:newer" : source.selectedModel
+          )
+        )
+        await act(async () => {
+          finish()
+          await pending
+        })
+        expect(publish).not.toHaveBeenCalled()
+        expect(
+          screen.getByRole("button", { name: "Apply saved template" })
+        ).toBeInTheDocument()
+        expect(source.beginSelectedModelSave).not.toHaveBeenCalled()
+      } finally {
+        view.unmount()
+        finish()
+        await pending
+        publish.mockRestore()
+      }
+    }
+  )
+
+  it.each(["other model", "same model newer revision"])(
+    "refuses an inherited-model scene Retry after explicitly selecting %s",
+    async (change) => {
+      const { source } = prepareNativeSource()
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Inherited Retry",
+          selectedModel: null,
+          systemPrompt: "",
+          rolePlay: {
+            source: "role-play-setup",
+            identity: { kind: "persona", id: "guide", name: "Guide" },
+            behavior: null,
+            scene: null,
+            generation: null,
+            context: null
+          }
+        })
+      ])
+      saveActorSettingsMock.mockResolvedValueOnce(false)
+      const user = userEvent.setup()
+      render(<PlaygroundForm droppedFiles={[]} />)
+      await user.click(
+        screen.getByRole("button", { name: "Open role-play setup" })
+      )
+      await user.click(
+        await screen.findByRole("button", { name: "Preview saved setup" })
+      )
+      await user.click(
+        await screen.findByRole("button", { name: "Apply saved template" })
+      )
+      await waitFor(() => expect(nativeSetupFixture.error).toHaveBeenCalledOnce())
+      act(() =>
+        source.setSelectedModel(
+          change === "other model" ? "openai:newer" : source.selectedModel
+        )
+      )
+      await act(async () => {
+        await startupPreviewFixture.apply!()
+      })
+      expect({
+        identities: selectedAssistantMock.setSelectedAssistant.mock.calls.length,
+        scenes: saveActorSettingsMock.mock.calls.length
+      }).toEqual({ identities: 1, scenes: 1 })
+      expect(
+        screen.getByRole("button", { name: "Apply saved template" })
+      ).toBeInTheDocument()
+      expect(source.beginSelectedModelSave).not.toHaveBeenCalled()
+    }
+  )
+
+  it("stops startup preview publication when the scene setter synchronously starts New", async () => {
+    const { source } = prepareNativeSource()
+    savedSetupFixture.raw = JSON.stringify([
+      createStartupTemplateBundle({
+        name: "Retired publication",
+        selectedModel: null,
+        systemPrompt: "",
+        rolePlay: {
+          source: "role-play-setup",
+          identity: { kind: "persona", id: "guide", name: "Guide" },
+          behavior: null,
+          scene: null,
+          generation: null,
+          context: null
+        }
+      })
+    ])
+    const actor = useActorStore.getState()
+    const original = actor.setSettings
+    const publish = vi
+      .spyOn(actor, "setSettings")
+      .mockImplementation((settings) => {
+        original(settings)
+        source.startNewChatDraft(false)
+      })
+    const originalPreview = actor.setPreviewAndTokens
+    const preview = vi.spyOn(actor, "setPreviewAndTokens")
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.click(
+        screen.getByRole("button", { name: "Open role-play setup" })
+      )
+      await user.click(
+        await screen.findByRole("button", { name: "Preview saved setup" })
+      )
+      await user.click(
+        await screen.findByRole("button", { name: "Apply saved template" })
+      )
+      await waitFor(() => expect(publish).toHaveBeenCalledOnce())
+      expect(preview).not.toHaveBeenCalled()
+      expect(
+        screen.getByRole("button", { name: "Apply saved template" })
+      ).toBeInTheDocument()
+    } finally {
+      view.unmount()
+      publish.mockRestore()
+      preview.mockRestore()
+      useActorStore.setState({
+        setSettings: original,
+        setPreviewAndTokens: originalPreview
+      })
+    }
+  })
+
+  it.each(["New", "input edit and Undo"])(
+    "refuses a retained startup Apply after its original source retires by %s",
+    async (change) => {
+      const { source } = prepareNativeSource()
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Original source",
+          selectedModel: null,
+          systemPrompt: "",
+          rolePlay: {
+            source: "role-play-setup",
+            identity: { kind: "persona", id: "guide", name: "Guide" },
+            behavior: null,
+            scene: null,
+            generation: null,
+            context: null
+          }
+        })
+      ])
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      await user.click(
+        screen.getByRole("button", { name: "Open role-play setup" })
+      )
+      await user.click(
+        await screen.findByRole("button", { name: "Preview saved setup" })
+      )
+      const retainedApply = startupPreviewFixture.apply!
+      if (change === "New") {
+        act(() => source.startNewChatDraft(false))
+        view.rerender(<PlaygroundForm droppedFiles={[]} />)
+      } else {
+        await user.type(screen.getByTestId("composer-textarea"), "Changed")
+        await user.clear(screen.getByTestId("composer-textarea"))
+      }
+      await act(async () => {
+        await retainedApply()
+      })
+      expect({
+        identityWrites:
+          selectedAssistantMock.setSelectedAssistant.mock.calls.length,
+        sceneWrites: saveActorSettingsMock.mock.calls.length
+      }).toEqual({ identityWrites: 0, sceneWrites: 0 })
+    }
+  )
 
   it.each(["accepted", "declined"])("retires an obsolete route only after an %s fresh picker identity", async outcome => {
     const { source, reset } = prepareNativeSource()
@@ -1809,6 +2412,173 @@ describe("PlaygroundForm role-play starter", () => {
     if (!blocked) {
       expect(store.getState().getEffectiveSettings(targetScope).systemPrompt).toBe("Target instructions")
       expect(source.setSelectedModel).toHaveBeenCalledWith(targetScope)
+    }
+  })
+
+  it.each(
+    ["model setter", "settings scope subscriber"].flatMap((boundary) =>
+      ["other model", "same model newer revision"].map((change) => ({
+        boundary,
+        change
+      }))
+    )
+  )(
+    "does not certify native startup destination after $boundary selects $change",
+    async ({ boundary, change }) => {
+      const { source } = prepareNativeSource()
+      nativeSetupFixture.realSettings = true
+      const store = nativeSetupFixture.actualSettingsStore!
+      const targetScope = "openai:gpt-4.1"
+      const newerScope =
+        change === "other model" ? "openai:deepseek-chat" : targetScope
+      store.getState().setActiveSettingsScope("openai:deepseek-chat")
+      savedSetupFixture.raw = JSON.stringify([
+        createStartupTemplateBundle({
+          name: "Native model ownership",
+          selectedModel: targetScope,
+          systemPrompt: "Proposed native behavior",
+          presetKey: "custom",
+          character: { id: "new", name: "New" } as Character
+        })
+      ])
+      let armed = true
+      const replace = () => {
+        armed = false
+        source.setSelectedModel(newerScope)
+        store.getState().setActiveSettingsScope(newerScope)
+      }
+      source.setSelectedModel.mockImplementation((model: string) => {
+        source.selectedModel = model
+        source.selectedModelRevision++
+        if (armed && boundary === "model setter" && model === targetScope)
+          replace()
+      })
+      const unsubscribe = store.subscribe((state) => {
+        if (
+          armed &&
+          boundary === "settings scope subscriber" &&
+          state.activeSettingsScope === targetScope
+        )
+          replace()
+      })
+      startupPreviewFixture.apply = null
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Preview saved setup" })
+        )
+        await screen.findByRole("button", { name: "Apply saved template" })
+        const apply = startupPreviewFixture.apply!
+        await act(async () => {
+          await apply()
+        })
+        expect(armed).toBe(false)
+        expect(store.getState().activeSettingsScope).toBe(newerScope)
+        expect(store.getState().systemPrompt).not.toBe("Proposed native behavior")
+        expect(source.beginSelectedModelSave).not.toHaveBeenCalled()
+        expect(saveActorSettingsMock).not.toHaveBeenCalled()
+        const identityWrites =
+          selectedAssistantMock.setSelectedAssistant.mock.calls.length
+        const modelWrites = source.setSelectedModel.mock.calls.length
+        await act(async () => {
+          await apply()
+        })
+        expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledTimes(
+          identityWrites
+        )
+        expect(source.setSelectedModel).toHaveBeenCalledTimes(modelWrites)
+        expect(source.beginSelectedModelSave).not.toHaveBeenCalled()
+        expect(
+          screen.getByRole("button", { name: "Apply saved template" })
+        ).toBeInTheDocument()
+      } finally {
+        view.unmount()
+        unsubscribe()
+      }
+    }
+  )
+
+  it.each(["other model", "same model newer revision"])(
+    "does not export native ownership after a scope subscriber selects %s",
+    async (change) => {
+      const { source } = prepareNativeSource()
+      nativeSetupFixture.realSettings = true
+      source.selectedModel = "openai:deepseek-chat"
+      const store = nativeSetupFixture.actualSettingsStore!
+      store.getState().updateSettings({ apiProvider: "openai" })
+      store.getState().setActiveSettingsScope("openai:gpt-4.1")
+      let armed = true
+      const unsubscribe = store.subscribe((state) => {
+        if (armed && state.activeSettingsScope === "openai:deepseek-chat") {
+          armed = false
+          source.setSelectedModel(
+            change === "other model" ? "openai:gpt-4.1" : "openai:deepseek-chat"
+          )
+        }
+      })
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Apply Character setup" })
+        )
+        await screen.findByText("Apply failed")
+        expect(armed).toBe(false)
+        expect(nativeSetupFixture.destinationCurrent).toBeNull()
+      } finally {
+        view.unmount()
+        unsubscribe()
+      }
+    }
+  )
+
+  it("does not publish a native saved route after its scope subscriber selects a newer model", async () => {
+    const { source } = prepareNativeSource()
+    nativeSetupFixture.controller!.getCurrent().owner = { kind: "native" }
+    source.historyId = null
+    source.serverChatId = "native-current"
+    source.serverChatAssistantKind = "character"
+    source.serverChatCharacterId = "char-new"
+    source.serverChatAssistantId = "char-new"
+    source.serverChatMetaLoaded = true
+    source.selectedModel = "openai:deepseek-chat"
+    nativeSetupFixture.realSettings = true
+    const store = nativeSetupFixture.actualSettingsStore!
+    store.getState().updateSettings({ apiProvider: "openai" })
+    store.getState().setActiveSettingsScope("openai:gpt-4.1")
+    let armed = true
+    const unsubscribe = store.subscribe((state) => {
+      if (armed && state.activeSettingsScope === "openai:deepseek-chat") {
+        armed = false
+        source.setSelectedModel("openai:gpt-4.1")
+      }
+    })
+    const route = vi.fn()
+    window.addEventListener("tldw:chat-route-replacement", route)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.click(
+        screen.getByRole("button", { name: "Open role-play setup" })
+      )
+      await user.click(
+        await screen.findByRole("button", { name: "Apply Character setup" })
+      )
+      await screen.findByText("Apply failed")
+      expect(armed).toBe(false)
+      expect(route).not.toHaveBeenCalled()
+      expect(nativeSetupFixture.destinationCurrent).toBeNull()
+    } finally {
+      view.unmount()
+      unsubscribe()
+      window.removeEventListener("tldw:chat-route-replacement", route)
     }
   })
 

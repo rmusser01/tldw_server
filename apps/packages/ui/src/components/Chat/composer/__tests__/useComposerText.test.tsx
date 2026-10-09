@@ -112,6 +112,33 @@ describe("useComposerText", () => {
     expect(result.current.messageRevision).toBe(1)
   })
 
+  it("separates qualified draft hydration from later input edits and Undo for setup retirement", async () => {
+    const draftKey = "tldw:test:setup-input-lineage"
+    window.localStorage.setItem(
+      `registry:draft:${draftKey}:owner:unit-owner`,
+      JSON.stringify({ value: "Restored owned draft", updatedAt: Date.now() })
+    )
+    const { result } = renderHook(() =>
+      useComposerText({ draftKey, textareaRef: createRef() })
+    )
+    await waitFor(() =>
+      expect(result.current.form.values.message).toBe("Restored owned draft")
+    )
+    expect({
+      raw: result.current.form.getRevision(),
+      input: result.current.getSetupInputRevision()
+    }).toEqual({ raw: 1, input: 0 })
+    act(() => {
+      result.current.form.setFieldValue("message", "Changed")
+      result.current.form.setFieldValue("message", "Restored owned draft")
+    })
+    expect({
+      raw: result.current.form.getRevision(),
+      input: result.current.getSetupInputRevision(),
+      value: result.current.form.getValues().message
+    }).toEqual({ raw: 3, input: 2, value: "Restored owned draft" })
+  })
+
   it("uses reset as the send invalidation signal while clearDraft only clears persistence", () => {
     const { result } = renderHook(() =>
       useComposerText({

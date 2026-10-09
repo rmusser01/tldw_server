@@ -94,6 +94,8 @@ export interface UseComposerTextResult {
   copyRetainedDraft: (draft: RecoveredChatDraft, surfaceKey: string, destination?: Extract<ChatDraftAddress, { kind: "fresh" }>) => Promise<boolean>
   /** The underlying `useSimpleForm` instance. Callers can use `getInputProps("message")`. */
   form: ReturnType<typeof useSimpleForm<{ message: string; image: string }>>
+  /** Input changes excluding acknowledged draft hydration; edits and Undo retire setup. */
+  getSetupInputRevision: () => number
   /** Monotonic signal that advances once for each committed message change. */
   messageRevision: number
   /** The committed message change and whether the owner explicitly reset it for an attempt. */
@@ -155,6 +157,11 @@ export function useComposerText(
     initialValues: { message: "", image: "" }
   })
   const { getValues, getRevision, reset, setValues } = form
+  const draftHydrationChangesRef = React.useRef(0)
+  const getSetupInputRevision = React.useCallback(
+    () => getRevision() - draftHydrationChangesRef.current,
+    [getRevision]
+  )
   const [promptAssistMutation, setPromptAssistMutation] =
     React.useState<ComposerPromptAssistMutation>({
       revision: 0,
@@ -226,7 +233,10 @@ export function useComposerText(
 
   const restoreMessage = React.useCallback(
     (value: string, metadata?: DraftMetadataObject) => {
+      const revision = form.getRevision()
       form.setFieldValue("message", value)
+      // This callback runs only after the existing owned draft-read fence.
+      draftHydrationChangesRef.current += form.getRevision() - revision
       restoreWithMetadata?.(value, metadata)
     },
     [form, restoreWithMetadata]
@@ -843,6 +853,7 @@ export function useComposerText(
     listRetainedDrafts,
     copyRetainedDraft,
     form,
+    getSetupInputRevision,
     messageRevision: promptAssistMutation.revision,
     promptAssistMutation,
     beginPromptAssistReset,

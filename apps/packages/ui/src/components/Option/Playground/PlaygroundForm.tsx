@@ -42,6 +42,7 @@ import { parseProviderQualifiedModelSelection, resolveExplicitProviderForSelecte
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, resolveOutputFormattingGuideSuffix } from "@/utils/output-formatting-guide";
 import { resolveMessageSteering } from "@/utils/message-steering";
 import type { AssistantSetupApplyOptions } from "./hooks/usePromptTemplates";
+import { captureSelectedModelGuard, createSelectedModelGuard } from "@/hooks/chat/useSelectedModel";
 import type { RolePlayApplyContext } from "./RolePlaySetupDrawer";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
@@ -576,6 +577,7 @@ export const PlaygroundForm = ({
     selectedAssistant: resolvedAssistantSelection,
     effectiveAssistantState,
     setSelectedModel,
+    beginSelectedModelSave,
     chatMode,
     setChatMode,
     compareMode,
@@ -1665,7 +1667,12 @@ export const PlaygroundForm = ({
 
   const assistantActionMountedRef = React.useRef(true);
   const composerImageRef = React.useRef("");
-  const assistantComposerRef = React.useRef<{ getRevision: () => number; retainCurrentDraft: () => Promise<boolean>; draftReady: boolean } | null>(null);
+  const assistantComposerRef = React.useRef<{
+    getRevision: () => number
+    getSetupInputRevision: () => number
+    retainCurrentDraft: () => Promise<boolean>
+    draftReady: boolean
+  } | null>(null)
   const assistantConnectionRevisionRef = React.useRef(0);
   React.useLayoutEffect(() => { assistantConnectionRevisionRef.current++; }, [phase, isConnected, canonicalConnectionConfig, canonicalConnectionLoading]);
   const [appendFormattingGuidePrompt] = useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false);
@@ -1726,7 +1733,9 @@ export const PlaygroundForm = ({
     async (selection: AssistantSelection | null, options: AssistantSetupApplyOptions = {}): Promise<boolean> => {
       assistantActionRevisionRef.current++;
       const activeChat = useStoreMessageOption.getState();
-      const sourceIsCurrent = captureAssistantPreparationGuard();
+      let modelIsCurrent = captureSelectedModelGuard()
+      const sourcePreparationIsCurrent = captureAssistantPreparationGuard();
+      const sourceIsCurrent = () => sourcePreparationIsCurrent() && modelIsCurrent();
       const matchesActiveChat = selection?.kind === "character"
         ? activeChat.serverChatAssistantKind === "character" &&
           String(activeChat.serverChatCharacterId) === selection.id
@@ -1821,8 +1830,14 @@ export const PlaygroundForm = ({
       }
       if (nativeCharacter) {
         activeChat.setTemporaryChat(false);
-        if (options.model) activeChat.setSelectedModel(options.model);
+        if (options.model) {
+          const revision = useStoreMessageOption.getState().selectedModelRevision + 1
+          modelIsCurrent = createSelectedModelGuard(options.model, revision)
+          activeChat.setSelectedModel(options.model)
+        }
+        if (!modelIsCurrent()) return false;
         useStoreChatModelSettings.getState().setActiveSettingsScope(preparedModelScope);
+        if (!modelIsCurrent()) return false;
       }
       if (nativeCharacter && !replacing && !options.freshCharacterRoute) {
         const target = useStoreMessageOption.getState();
@@ -1831,11 +1846,12 @@ export const PlaygroundForm = ({
           restoreRevision: usePlaygroundSessionStore.getState().restoreRevision, characterId: String(selection!.id),
           nextChatId: owner?.kind === "native" && owner.conversation_id === target.serverChatId ? target.serverChatId : null });
       }
+      if (!modelIsCurrent()) return false;
       const isCurrent = captureAssistantActionGuard();
       const destination = useStoreMessageOption.getState();
       options.onDestination?.({ historyId: destination.historyId, serverChatId: destination.serverChatId, isCurrent });
       if (!nativeCharacter && options.applyIdentity !== false && !await setSelectedAssistant(selection, { isCurrent })) return false;
-      return isCurrent() && options.isCurrent?.() !== false;
+      return isCurrent() && modelIsCurrent() && options.isCurrent?.() !== false;
       } finally { snapshot?.release(); }
     },
     [appendFormattingGuidePrompt, captureAssistantActionGuard, captureAssistantPreparationGuard, composerModels, composerModelsLoading, historySelection,
@@ -1850,6 +1866,43 @@ export const PlaygroundForm = ({
     }
   }, [applyAssistantSelection, notificationApi, t]);
 
+  const captureStartupTemplateSource = React.useCallback(() => {
+    const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+    const { chatDraftAddress, chatDraftRevision, historyId, serverChatId } =
+      useStoreMessageOption.getState()
+    const { restoreRevision, sourceSelectionRevision } =
+      usePlaygroundSessionStore.getState()
+    const inputRevision = assistantComposerRef.current?.getRevision()
+    const inputEditRevision =
+      assistantComposerRef.current?.getSetupInputRevision()
+    const connectionRevision = assistantConnectionRevisionRef.current
+    return {
+      isCurrent: () => {
+        const current = useStoreMessageOption.getState()
+        const session = usePlaygroundSessionStore.getState()
+        return (
+          assistantActionMountedRef.current &&
+          selectionIsCurrent() &&
+          (assistantOwnerIsCurrent?.() ?? true) &&
+          current.chatDraftAddress === chatDraftAddress &&
+          current.chatDraftRevision === chatDraftRevision &&
+          current.historyId === historyId &&
+          current.serverChatId === serverChatId &&
+          session.restoreRevision === restoreRevision &&
+          session.sourceSelectionRevision === sourceSelectionRevision &&
+          assistantComposerRef.current?.getRevision() === inputRevision &&
+          assistantConnectionRevisionRef.current === connectionRevision
+        )
+      },
+      continuationIsCurrent: () =>
+        assistantActionMountedRef.current &&
+        (assistantOwnerIsCurrent?.() ?? true) &&
+        assistantComposerRef.current?.getSetupInputRevision() ===
+          inputEditRevision &&
+        assistantConnectionRevisionRef.current === connectionRevision
+    }
+  }, [captureSelectionFence, assistantOwnerIsCurrent])
+
   const promptTemplates = usePromptTemplates({
     startupTemplatesRaw,
     setStartupTemplatesRaw,
@@ -1861,7 +1914,9 @@ export const PlaygroundForm = ({
     selectedCharacter,
     ragPinnedResults,
     currentChatModelSettings,
+    captureStartupTemplateSource,
     setSelectedModel,
+    beginSelectedModelSave,
     setSelectedSystemPrompt,
     setSelectedQuickPrompt,
     setSystemPrompt,
@@ -1880,6 +1935,7 @@ export const PlaygroundForm = ({
     startupTemplateDraftName,
     setStartupTemplateDraftName,
     startupTemplatePreview,
+    startupTemplatePreviewLease,
     setStartupTemplatePreview,
     startupTemplateNameFallback,
     selectedSystemPromptRecord,
@@ -2177,6 +2233,7 @@ export const PlaygroundForm = ({
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
     typing,
+    getSetupInputRevision,
     setMessageValue,
     restoreMessageValue,
     messageDisplayValue,
@@ -2216,9 +2273,20 @@ export const PlaygroundForm = ({
     captureStopGuard
   )
   React.useLayoutEffect(() => {
-    composerImageRef.current = form.values.image;
-    assistantComposerRef.current = { getRevision: form.getRevision, retainCurrentDraft, draftReady };
-  }, [form.getRevision, form.values.image, retainCurrentDraft, draftReady]);
+    composerImageRef.current = form.values.image
+    assistantComposerRef.current = {
+      getRevision: form.getRevision,
+      getSetupInputRevision: getSetupInputRevision ?? form.getRevision,
+      retainCurrentDraft,
+      draftReady
+    }
+  }, [
+    form.getRevision,
+    getSetupInputRevision,
+    form.values.image,
+    retainCurrentDraft,
+    draftReady
+  ])
 
   const applyCharacterRoute = React.useCallback<ApplyCharacterRoute>(async (characterId, routeIsCurrent) => {
     let sourceIsCurrent = captureAssistantPreparationGuard();
@@ -2578,56 +2646,134 @@ export const PlaygroundForm = ({
       updateChatModelSettings,
     ],
   );
+  const startupTemplateProgressRef = React.useRef<{
+    leaseId: object
+    template: StartupTemplateBundle
+    destination: {
+      historyId: string | null
+      serverChatId: string | null
+      isCurrent: () => boolean
+    }
+    settingsAccepted: boolean
+  } | null>(null)
+  const startupTemplateAttemptRef = React.useRef<{
+    leaseId: object
+    id: object
+  } | null>(null)
+  const [startupTemplateBusyLease, setStartupTemplateBusyLease] = React.useState<object | null>(null);
+  const startupTemplateApplying = Boolean(
+    startupTemplatePreviewLease &&
+      startupTemplateBusyLease === startupTemplatePreviewLease.id
+  )
   const handleApplyStartupTemplatePreview = React.useCallback(async () => {
-    if (!startupTemplatePreview) return;
-    const destination = useStoreMessageOption.getState();
-    let targetId = destination.serverChatId;
-    let targetHistoryId = destination.historyId;
-    const sourceViewIsCurrent = captureSelectionFence?.() ?? (() => true);
-    const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision;
-    let isCurrent = () => assistantActionMountedRef.current && sourceViewIsCurrent() &&
-      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
-      useStoreMessageOption.getState().serverChatId === targetId && useStoreMessageOption.getState().historyId === targetHistoryId;
-    let settingsAccepted = false;
-    try {
-      const applied = applyStartupTemplateBundle(startupTemplatePreview, {
-        isCurrent: () => isCurrent(),
-        onDestination: (next) => {
-          targetId = next.serverChatId;
-          targetHistoryId = next.historyId;
-          isCurrent = next.isCurrent;
+    const lease = startupTemplatePreviewLease
+    if (
+      !startupTemplatePreview ||
+      !lease?.isCurrent() ||
+      startupTemplateAttemptRef.current?.leaseId === lease.id
+    )
+      return false
+    let progress = startupTemplateProgressRef.current
+    if (progress?.leaseId !== lease.id) {
+      if (!lease.sourceIsCurrent()) return false
+      const destination = useStoreMessageOption.getState()
+      progress = {
+        leaseId: lease.id,
+        template: JSON.parse(
+          JSON.stringify(startupTemplatePreview)
+        ) as StartupTemplateBundle,
+        destination: {
+          historyId: destination.historyId,
+          serverChatId: destination.serverChatId,
+          isCurrent: lease.sourceIsCurrent
         },
-      });
-      if (await applied === false || !isCurrent()) return;
-      settingsAccepted = true;
-      if (startupTemplatePreview.rolePlay) {
-        const nextScene = startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
-        const saved = await saveActorSettingsForChat({
-          historyId: targetHistoryId,
-          serverChatId: targetId,
-          settings: nextScene,
-        });
-        if (!isCurrent()) return;
-        if (!saved) throw new Error("Scene settings save failed");
-        setActorSettings(nextScene);
-        const preview = summarizeRolePlayScene(nextScene);
-        setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
+        settingsAccepted: false
       }
-      setStartupTemplatePreview(null);
-      setModeAnnouncement(startupTemplatePreview.rolePlay
-        ? t("playground:composer.rolePlaySetupAppliedNotice", "Role-play setup applied.")
-        : t("playground:composer.startupTemplateAppliedNotice", "Startup template applied."));
+      startupTemplateProgressRef.current = progress
+    }
+    if (!progress.destination.isCurrent()) return false
+    const proposal = progress
+    const attempt = {}
+    startupTemplateAttemptRef.current = { leaseId: lease.id, id: attempt }
+    setStartupTemplateBusyLease(lease.id)
+    const isCurrent = () =>
+      assistantActionMountedRef.current &&
+      lease.isCurrent() &&
+      lease.continuationIsCurrent() &&
+      startupTemplateAttemptRef.current?.id === attempt &&
+      proposal.destination.isCurrent()
+    try {
+      if (!proposal.settingsAccepted) {
+        const applied = await applyStartupTemplateBundle(proposal.template, {
+          isCurrent,
+          onDestination: (next) => {
+            proposal.destination = {
+              ...next,
+              isCurrent: () => lease.isCurrent() && next.isCurrent()
+            }
+          }
+        })
+        if (applied === false || !isCurrent()) return false
+        proposal.settingsAccepted = true
+      }
+      if (!isCurrent()) return false
+      if (proposal.template.rolePlay) {
+        const nextScene =
+          proposal.template.rolePlay.scene ?? createDefaultActorSettings()
+        const saved = await saveActorSettingsForChat({
+          historyId: proposal.destination.historyId,
+          serverChatId: proposal.destination.serverChatId,
+          settings: nextScene
+        })
+        if (!isCurrent()) return false
+        if (!saved) throw new Error("Scene settings save failed")
+        setActorSettings(nextScene)
+        if (!isCurrent()) return false
+        const preview = summarizeRolePlayScene(nextScene)
+        setActorPreviewAndTokens(preview.prompt, preview.tokenCount)
+        if (!isCurrent()) return false
+      }
+      setModeAnnouncement(
+        proposal.template.rolePlay
+          ? t(
+              "playground:composer.rolePlaySetupAppliedNotice",
+              "Role-play setup applied."
+            )
+          : t(
+              "playground:composer.startupTemplateAppliedNotice",
+              "Startup template applied."
+            )
+      )
+      if (!isCurrent()) return false
+      setStartupTemplatePreview(null)
+      return true
     } catch (error) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false
       notificationApi.error({
         message: t("common:error", "Error"),
-        description: nativeCharacterPreflightMessage(error, t) ?? (settingsAccepted && startupTemplatePreview.rolePlay
-          ? t("playground:composer.rolePlayScenePartialSaveError", "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply.")
-          : t("playground:composer.rolePlayApplyError", "Settings could not be applied. Your draft is still here; retry Apply.")),
-      });
+        description:
+          nativeCharacterPreflightMessage(error, t) ??
+          (proposal.settingsAccepted && proposal.template.rolePlay
+            ? t(
+                "playground:composer.rolePlayScenePartialSaveError",
+                "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply."
+              )
+            : t(
+                "playground:composer.rolePlayApplyError",
+                "Settings could not be applied. Your draft is still here; retry Apply."
+              ))
+      })
+      return false
+    } finally {
+      if (startupTemplateAttemptRef.current?.id === attempt) {
+        startupTemplateAttemptRef.current = null
+        if (assistantActionMountedRef.current)
+          setStartupTemplateBusyLease((current) =>
+            current === lease.id ? null : current
+          )
+      }
     }
   }, [
-    captureSelectionFence,
     applyStartupTemplateBundle,
     notificationApi,
     setModeAnnouncement,
@@ -2636,7 +2782,8 @@ export const PlaygroundForm = ({
     setActorPreviewAndTokens,
     setActorSettings,
     startupTemplatePreview,
-  ]);
+    startupTemplatePreviewLease
+  ])
   const clearPinnedSourceContext = React.useCallback(() => {
     setRagPinnedResults([]);
   }, [setRagPinnedResults]);
@@ -7043,6 +7190,7 @@ export const PlaygroundForm = ({
               onClose={() => setStartupTemplatePreview(null)}
               onDelete={handleDeleteStartupTemplate}
               onApply={handleApplyStartupTemplatePreview}
+              busy={startupTemplateApplying}
               promptDescription={startupTemplatePromptDescription}
               promptResolution={startupTemplatePromptResolution}
               preset={startupTemplatePreset}

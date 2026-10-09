@@ -18,6 +18,7 @@ import type { Prompt } from "@/db/dexie/types";
 import type { ChatModelSettings } from "@/store/model";
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor";
 import type { RolePlayApplyContext } from "../RolePlaySetupDrawer";
+import { captureSelectedModelGuard, type SelectedModelSaveOperation } from "@/hooks/chat/useSelectedModel";
 import {
   personaToAssistantSelection,
   characterToAssistantSelection,
@@ -43,8 +44,14 @@ export interface UsePromptTemplatesDeps {
   selectedCharacter: any | null;
   ragPinnedResults: any[];
   currentChatModelSettings: Record<string, any>;
+  /** Capture the reviewed source before opening a preview. */
+  captureStartupTemplateSource?: () => {
+    isCurrent: () => boolean;
+    continuationIsCurrent: () => boolean;
+  };
   /** Setters for applying templates */
   setSelectedModel: (model: string) => Promise<boolean | void> | boolean | void;
+  beginSelectedModelSave?: (model: string) => SelectedModelSaveOperation;
   setSelectedSystemPrompt: (id: string | undefined) => void;
   setSelectedQuickPrompt: (prompt: string | null) => void;
   setSystemPrompt: (prompt: string) => void;
@@ -76,6 +83,13 @@ export type AssistantSetupApplyOptions = RolePlayApplyContext & {
   freshCharacterRoute?: boolean;
 };
 
+export type StartupTemplatePreviewLease = {
+  id: object
+  isCurrent: () => boolean
+  sourceIsCurrent: () => boolean
+  continuationIsCurrent: () => boolean
+}
+
 export type SaveRolePlaySetupInput = {
   name: string;
   rolePlay: StartupTemplateRolePlayMetadata;
@@ -96,7 +110,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     selectedCharacter,
     ragPinnedResults,
     currentChatModelSettings,
+    captureStartupTemplateSource,
     setSelectedModel,
+    beginSelectedModelSave,
     setSelectedSystemPrompt,
     setSelectedQuickPrompt,
     setSystemPrompt,
@@ -111,8 +127,43 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
 
   const [startupTemplateDraftName, setStartupTemplateDraftName] =
     React.useState("");
-  const [startupTemplatePreview, setStartupTemplatePreview] =
-    React.useState<StartupTemplateBundle | null>(null);
+  const previewMountedRef = React.useRef(true)
+  React.useEffect(() => {
+    previewMountedRef.current = true
+    return () => {
+      previewMountedRef.current = false
+    }
+  }, [])
+  const previewRef = React.useRef<{
+    template: StartupTemplateBundle
+    lease: StartupTemplatePreviewLease
+  } | null>(null)
+  const [previewEntry, setPreviewEntry] =
+    React.useState<typeof previewRef.current>(null)
+  const setStartupTemplatePreview = React.useCallback(
+    (template: StartupTemplateBundle | null) => {
+      const id = {}
+      const source = template ? captureStartupTemplateSource?.() : undefined
+      const entry = template
+        ? {
+            template,
+            lease: {
+              id,
+              isCurrent: () =>
+                previewMountedRef.current && previewRef.current?.lease.id === id,
+              sourceIsCurrent: source?.isCurrent ?? (() => true),
+              continuationIsCurrent: source?.continuationIsCurrent ?? (() => true)
+            }
+          }
+        : null
+      // Retire synchronously, including Cancel/reopen of the same saved bundle.
+      previewRef.current = entry
+      setPreviewEntry(entry)
+    },
+    [captureStartupTemplateSource]
+  )
+  const startupTemplatePreview = previewEntry?.template ?? null
+  const startupTemplatePreviewLease = previewEntry?.lease ?? null
 
   const currentPresetKey = React.useMemo(
     () =>
@@ -284,12 +335,13 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         startupTemplates.find((entry) => entry.id === templateId) || null;
       setStartupTemplatePreview(template);
     },
-    [startupTemplates],
+    [startupTemplates, setStartupTemplatePreview],
   );
 
   const applyStartupTemplateBundle = React.useCallback(
     async (template: StartupTemplateBundle, context?: RolePlayApplyContext) => {
-      const isCurrent = () => context?.isCurrent?.() !== false
+      let modelIsCurrent = captureSelectedModelGuard()
+      const isCurrent = () => context?.isCurrent?.() !== false && modelIsCurrent()
       if (!isCurrent()) return false
       const rolePlayIdentity = template.rolePlay?.identity
       const selection = template.rolePlay
@@ -329,6 +381,13 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       if (
         (await applyAssistantSelection(selection, {
           ...context,
+          onDestination: (destination) => {
+            modelIsCurrent = captureSelectedModelGuard()
+            context?.onDestination?.({
+              ...destination,
+              isCurrent: () => destination.isCurrent() && modelIsCurrent()
+            })
+          },
           model: template.selectedModel || selectedModel,
           settings,
           selectedSystemPrompt: resolvedPromptId,
@@ -337,16 +396,17 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
             : undefined,
           hasExplicitContext: Boolean(template.ragPinnedResults?.length)
         })) === false ||
-        context?.isCurrent?.() === false
+        !isCurrent()
       )
         return false
 
       if (template.selectedModel) {
-        if (
-          (await setSelectedModel(template.selectedModel)) === false ||
-          !isCurrent()
-        )
-          return false
+        const modelSave = beginSelectedModelSave?.(template.selectedModel)
+        if (modelSave) modelIsCurrent = modelSave.isCurrent
+        const acknowledged = modelSave
+          ? await modelSave.completion
+          : await setSelectedModel(template.selectedModel)
+        if (acknowledged === false || !isCurrent()) return false
         if (compareModeActive) {
           setCompareSelectedModels((prev: string[]) => {
             if (!isCurrent()) return prev
@@ -375,30 +435,12 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       setRagPinnedResults,
       applyAssistantSelection,
       setSelectedModel,
+      beginSelectedModelSave,
       setSelectedSystemPrompt,
       setSystemPrompt,
       updateChatModelSettings
     ]
   )
-
-  const handleApplyStartupTemplate = React.useCallback(async () => {
-    if (!startupTemplatePreview) return;
-    if ((await applyStartupTemplateBundle(startupTemplatePreview)) === false)
-      return false;
-    setStartupTemplatePreview(null);
-    setModeAnnouncement(
-      t(
-        "playground:composer.startupTemplateAppliedNotice",
-        "Startup template applied.",
-      ),
-    );
-    return true;
-  }, [
-    applyStartupTemplateBundle,
-    setModeAnnouncement,
-    startupTemplatePreview,
-    t,
-  ]);
 
   const handleApplySavedRolePlaySetup = React.useCallback(
     async (template: StartupTemplateBundle, context?: RolePlayApplyContext) => {
@@ -413,7 +455,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       );
       return true;
     },
-    [applyStartupTemplateBundle, setModeAnnouncement, t],
+    [applyStartupTemplateBundle, setModeAnnouncement, setStartupTemplatePreview, t],
   );
 
   const handleDeleteStartupTemplate = React.useCallback(
@@ -437,6 +479,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       persistStartupTemplates,
       setModeAnnouncement,
       startupTemplatePreview?.id,
+      setStartupTemplatePreview,
       startupTemplates,
       t,
     ],
@@ -470,6 +513,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       persistStartupTemplates,
       setModeAnnouncement,
       startupTemplatePreview?.id,
+      setStartupTemplatePreview,
       startupTemplates,
       t,
     ],
@@ -510,6 +554,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     startupTemplateDraftName,
     setStartupTemplateDraftName,
     startupTemplatePreview,
+    startupTemplatePreviewLease,
     setStartupTemplatePreview,
     startupTemplateNameFallback,
     selectedSystemPromptRecord,
@@ -518,7 +563,6 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     handleSaveStartupTemplate,
     handleSaveRolePlaySetup,
     handleOpenStartupTemplatePreview,
-    handleApplyStartupTemplate,
     handleApplySavedRolePlaySetup,
     handleDeleteStartupTemplate,
     handleRenameStartupTemplate,

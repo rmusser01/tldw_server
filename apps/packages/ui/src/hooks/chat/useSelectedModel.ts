@@ -19,6 +19,28 @@ export const normalizeSelectedModel = (
   return trimmed.length > 0 ? trimmed : null;
 };
 
+/** Freeze a specific selection revision, including a synchronously claimed own selection. */
+export const createSelectedModelGuard = (
+  value: string | null | undefined,
+  revision: number
+) => {
+  const normalized = normalizeSelectedModel(value)
+  return () => {
+    const current = useStoreMessageOption.getState()
+    return (
+      current.selectedModelRevision === revision &&
+      normalizeSelectedModel(current.selectedModel) === normalized
+    )
+  }
+}
+
+/** Capture an inherited model selection without issuing a preference write. */
+export const captureSelectedModelGuard = () => {
+  const { selectedModel, selectedModelRevision } =
+    useStoreMessageOption.getState()
+  return createSelectedModelGuard(selectedModel, selectedModelRevision)
+}
+
 // ponytail: serialize this document's model writes; use a browser lock if
 // preferences need ordered writes across independent windows (TASK-13549).
 let selectedModelWrites: Promise<void> = Promise.resolve();
@@ -45,6 +67,12 @@ const persistSelectedModel = (
     () => undefined
   )
   return pending
+}
+
+export type SelectedModelSaveOperation = {
+  completion: Promise<boolean>
+  isCurrent: () => boolean
+  retry: () => Promise<boolean>
 }
 
 /**
@@ -79,24 +107,37 @@ export const useSelectedModel = () => {
     [selectedModelFromStore, storedSelectedModel, selectedModelStorageHandled],
   );
 
-  const setSelectedModel = React.useCallback(
+  const beginSelectedModelSave = React.useCallback(
     (
-      nextOrUpdater:
-        | string
-        | null
-        | ((current: string | null) => string | null),
+      nextOrUpdater: string | null | ((current: string | null) => string | null)
     ) => {
       const resolved =
         typeof nextOrUpdater === "function"
           ? nextOrUpdater(selectedModel)
-          : nextOrUpdater;
-      const normalized = normalizeSelectedModel(resolved);
-      const revision = useStoreMessageOption.getState().selectedModelRevision + 1;
-      setSelectedModelInStore(normalized, { storageHandled: true });
-      return persistSelectedModel(normalized, revision, setStoredSelectedModel);
+          : nextOrUpdater
+      const normalized = normalizeSelectedModel(resolved)
+      const revision = useStoreMessageOption.getState().selectedModelRevision + 1
+      const isCurrent = createSelectedModelGuard(normalized, revision)
+      setSelectedModelInStore(normalized, { storageHandled: true })
+      return {
+        completion: persistSelectedModel(
+          normalized,
+          revision,
+          setStoredSelectedModel
+        ),
+        isCurrent,
+        retry: () =>
+          persistSelectedModel(normalized, revision, setStoredSelectedModel)
+      } satisfies SelectedModelSaveOperation
     },
-    [selectedModel, setSelectedModelInStore, setStoredSelectedModel],
-  );
+    [selectedModel, setSelectedModelInStore, setStoredSelectedModel]
+  )
+
+  const setSelectedModel = React.useCallback(
+    (next: Parameters<typeof beginSelectedModelSave>[0]) =>
+      beginSelectedModelSave(next).completion,
+    [beginSelectedModelSave]
+  )
 
   const retrySelectedModelSave = React.useCallback(
     () => persistSelectedModel(selectedModel, selectedModelRevision, setStoredSelectedModel),
@@ -140,6 +181,7 @@ export const useSelectedModel = () => {
   return {
     selectedModel,
     setSelectedModel,
+    beginSelectedModelSave,
     retrySelectedModelSave,
     selectedModelIsLoading: selectedModelStorageMeta.isLoading,
   };
