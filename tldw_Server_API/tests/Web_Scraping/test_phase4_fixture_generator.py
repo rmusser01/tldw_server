@@ -383,9 +383,46 @@ def _assert_lock_file_closed_once(lock_files: list[_CloseFailingLockFile]) -> No
         descriptor_owner.fileno()
 
 
+@pytest.fixture
+def descriptor_reuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    """Transfer an owned native slot and retain a real neighboring file for cleanup checks."""
+    native_close = os.close
+    native_fstat = os.fstat
+    native_write = os.write
+    transferred: list[int] = []
+    with (tmp_path / "neighboring-descriptor").open("w+b", buffering=0) as replacement:
+        metadata = native_fstat(replacement.fileno())
+        identity = (metadata.st_dev, metadata.st_ino)
+
+        def _reuse(descriptor: int) -> None:
+            original = native_fstat(descriptor)
+            assert (original.st_dev, original.st_ino) != identity
+            os.dup2(replacement.fileno(), descriptor)
+            transferred.append(descriptor)
+
+        def _assert_preserved() -> None:
+            assert len(transferred) == 1
+            current = native_fstat(transferred[0])
+            assert (current.st_dev, current.st_ino) == identity
+            assert native_write(transferred[0], b"neighbor preserved") == 18
+            replacement.seek(0)
+            assert replacement.read() == b"neighbor preserved"
+
+        try:
+            yield SimpleNamespace(reuse=_reuse, assert_preserved=_assert_preserved)
+        finally:
+            for descriptor in transferred:
+                try:
+                    current = native_fstat(descriptor)
+                    if (current.st_dev, current.st_ino) == identity:
+                        native_close(descriptor)
+                except OSError:
+                    pass
+
+
 def test_lock_close_assertion_is_independent_of_descriptor_number_reuse(tmp_path: Path) -> None:
     descriptor = os.open(tmp_path / "closed-lock", os.O_CREAT | os.O_RDWR, 0o600)
-    lock_file = _CloseFailingLockFile(os.fdopen(descriptor, "r+b", buffering=0), "close failed")
+    lock_file = _CloseFailingLockFile(os.fdopen(descriptor, "r+b", buffering=0, closefd=False), "close failed")
     with pytest.raises(OSError, match="^close failed$"):
         lock_file.close()
 
@@ -398,6 +435,7 @@ def test_lock_close_assertion_is_independent_of_descriptor_number_reuse(tmp_path
         fileno=_released_fileno,
     )
 
+    os.fstat(descriptor)
     replacement = os.open(tmp_path / "replacement", os.O_CREAT | os.O_RDWR, 0o600)
     if replacement != descriptor:
         os.dup2(replacement, descriptor)
@@ -1350,9 +1388,12 @@ def test_no_dirfd_fallback_rejects_preexisting_lock_identity_change(
     assert closed.value.errno == errno.EBADF
 
 
+@pytest.mark.parametrize("reuse_descriptor", [False, True], ids=["native-close", "reuse-before-cleanup"])
 def test_no_dirfd_fallback_closes_descriptor_on_direct_baseexception(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    descriptor_reuse: Any,
+    reuse_descriptor: bool,
 ) -> None:
     class DirectInspectionFailure(BaseException):
         pass
@@ -1361,6 +1402,7 @@ def test_no_dirfd_fallback_closes_descriptor_on_direct_baseexception(
     lock_root.mkdir(mode=0o700)
     lock_path = lock_root / "output.lock"
     monkeypatch.setattr(generator, "fcntl", None)
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
     real_open = generator.os.open
     real_close = generator.os.close
     real_fstat = generator.os.fstat
@@ -1391,7 +1433,10 @@ def test_no_dirfd_fallback_closes_descriptor_on_direct_baseexception(
         if descriptor in opened_descriptors:
             closed_descriptors.append(descriptor)
             primary_tracebacks_during_close.append(primary_error.__traceback__)
-        real_close(descriptor)
+        if reuse_descriptor and descriptor in opened_descriptors:
+            descriptor_reuse.reuse(descriptor)
+        else:
+            real_close(descriptor)
 
     monkeypatch.setattr(generator.os, "open", _tracking_open)
     monkeypatch.setattr(generator.os, "fstat", _fail_opened_descriptor_inspection)
@@ -1417,15 +1462,20 @@ def test_no_dirfd_fallback_closes_descriptor_on_direct_baseexception(
         while final_tail.tb_next is not None:
             final_tail = final_tail.tb_next
         assert final_tail is recorded_tail
-        with pytest.raises(OSError) as closed:
-            real_fstat(opened_descriptors[0])
-        assert closed.value.errno == errno.EBADF
+        if not reuse_descriptor:
+            with pytest.raises(OSError) as closed:
+                real_fstat(opened_descriptors[0])
+            assert closed.value.errno == errno.EBADF
     finally:
         for descriptor in opened_descriptors:
+            if descriptor in closed_descriptors:
+                continue
             try:
                 real_close(descriptor)
             except OSError:
                 pass
+    if reuse_descriptor:
+        descriptor_reuse.assert_preserved()
 
 
 def test_no_dirfd_fallback_rejects_junction_like_lock_root(
@@ -1689,17 +1739,22 @@ def test_fake_windows_acquisition_retries_transient_lock_errors(
     generator.fcntl is None or os.open not in os.supports_dir_fd,
     reason="descriptor-relative POSIX lock opening is unavailable",
 )
+@pytest.mark.parametrize("reuse_descriptor", [False, True], ids=["native-close", "reuse-before-cleanup"])
 @pytest.mark.parametrize("lock_open_fails", [False, True], ids=["close-only", "primary-open-error"])
 def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_resources(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
     lock_open_fails: bool,
+    descriptor_reuse: Any,
+    reuse_descriptor: bool,
 ) -> None:
     lock_root = tmp_path / "locks"
     lock_root.mkdir(mode=0o700)
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
     real_open = generator.os.open
     real_close = generator.os.close
+    real_fstat = generator.os.fstat
     root_descriptor: int | None = None
     lock_descriptor: int | None = None
     unrelated_descriptor: int | None = None
@@ -1709,14 +1764,31 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
     sensitive_marker = "sensitive root close failure"
     sensitive_path = str(tmp_path / "private-root-descriptor")
     unrelated_path = tmp_path / "unrelated-open"
+    owners = _install_tracking_owned_descriptors(monkeypatch)
+    if reuse_descriptor:
+        request.addfinalizer(descriptor_reuse.assert_preserved)
 
     def _retire_descriptors() -> None:
-        for descriptor in (lock_descriptor, root_descriptor, unrelated_descriptor):
-            if descriptor is not None:
-                try:
-                    real_close(descriptor)
-                except OSError:
-                    pass
+        for owner in owners:
+            try:
+                owner.fileno()
+            except RuntimeError:
+                continue
+            owner.close_quietly()
+        # Only the injected pre-release root error can leave this known slot open.
+        if root_descriptor is not None:
+            try:
+                current = real_fstat(root_descriptor)
+                expected = lock_root.stat()
+                if (current.st_dev, current.st_ino) == (expected.st_dev, expected.st_ino):
+                    real_close(root_descriptor)
+            except OSError:
+                pass
+        if unrelated_descriptor is not None:
+            try:
+                real_close(unrelated_descriptor)
+            except OSError:
+                pass
 
     request.addfinalizer(_retire_descriptors)
 
@@ -1753,7 +1825,10 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
                 raise OSError(f"{sensitive_marker} at {sensitive_path}")
         elif descriptor == lock_descriptor:
             lock_close_attempts.append(descriptor)
-        real_close(descriptor)
+        if reuse_descriptor and (descriptor == lock_descriptor or (lock_open_fails and descriptor == root_descriptor)):
+            descriptor_reuse.reuse(descriptor)
+        else:
+            real_close(descriptor)
 
     monkeypatch.setattr(generator.os, "open", _controlled_open)
     monkeypatch.setattr(
@@ -1777,17 +1852,27 @@ def test_lock_root_descriptor_close_failure_preserves_precedence_and_releases_re
     assert str(exc_info.value) == expected
     assert root_close_attempts == [root_descriptor]
     if lock_open_fails:
-        with pytest.raises(OSError) as root_closed:
-            os.fstat(root_descriptor)
-        assert root_closed.value.errno == errno.EBADF
+        if reuse_descriptor:
+            assert owners[0].close_calls == owners[0].detach_calls == 1
+            with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
+                owners[0].fileno()
+        else:
+            with pytest.raises(OSError) as root_closed:
+                os.fstat(root_descriptor)
+            assert root_closed.value.errno == errno.EBADF
     else:
         # A pre-release close failure may leak; retrying the numeric fd is unsafe.
         os.fstat(root_descriptor)
     if lock_descriptor is not None:
         assert lock_close_attempts == [lock_descriptor]
-        with pytest.raises(OSError) as lock_closed:
-            os.fstat(lock_descriptor)
-        assert lock_closed.value.errno == errno.EBADF
+        if reuse_descriptor:
+            assert owners[1].close_calls == owners[1].detach_calls == 1
+            with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
+                owners[1].fileno()
+        else:
+            with pytest.raises(OSError) as lock_closed:
+                os.fstat(lock_descriptor)
+            assert lock_closed.value.errno == errno.EBADF
     formatted_diagnostic = "".join(
         traceback.format_exception(
             type(exc_info.value),
@@ -2604,17 +2689,24 @@ def test_publication_lock_oserror_close_before_underlying_is_sanitized_and_close
     assert closed_descriptor.value.errno == errno.EBADF
 
 
+@pytest.mark.parametrize("reuse_descriptor", [False, True], ids=["native-close", "reuse-before-cleanup"])
 def test_publication_lock_fdopen_failure_closes_descriptor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    descriptor_reuse: Any,
+    reuse_descriptor: bool,
 ) -> None:
     source_root = tmp_path / "source"
     source_root.mkdir()
     output = tmp_path / "fixtures"
     _isolated_lock_path(tmp_path, monkeypatch, output)
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
     open_lock_descriptor = generator._open_lock_descriptor
     descriptors: list[int] = []
     fdopen_error = OSError("sensitive fdopen failure")
+    real_close = generator.os.close
+    owners = _install_tracking_owned_descriptors(monkeypatch)
+    lock_owner: Any = None
 
     def _record_lock_descriptor(lock_root: Path, lock_name: str) -> int:
         descriptor = open_lock_descriptor(lock_root, lock_name)
@@ -2622,8 +2714,17 @@ def test_publication_lock_fdopen_failure_closes_descriptor(
         return descriptor
 
     def _fail_fdopen(_descriptor: int, *_args: Any, **_kwargs: Any) -> Any:
+        nonlocal lock_owner
+        lock_owner = _active_descriptor_owner(owners, _descriptor)
         raise fdopen_error
 
+    def _close_with_reuse(descriptor: int) -> None:
+        if reuse_descriptor and descriptor in descriptors:
+            descriptor_reuse.reuse(descriptor)
+        else:
+            real_close(descriptor)
+
+    monkeypatch.setattr(generator.os, "close", _close_with_reuse)
     monkeypatch.setattr(generator, "_open_lock_descriptor", _record_lock_descriptor)
     monkeypatch.setattr(generator.os, "fdopen", _fail_fdopen)
 
@@ -2634,15 +2735,23 @@ def test_publication_lock_fdopen_failure_closes_descriptor(
 
         assert exc_info.value is fdopen_error
         assert len(descriptors) == 1
-        with pytest.raises(OSError) as closed_descriptor:
-            os.fstat(descriptors[0])
-        assert closed_descriptor.value.errno == errno.EBADF
+        if reuse_descriptor:
+            assert lock_owner.close_calls == lock_owner.detach_calls == 1
+            with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
+                lock_owner.fileno()
+        else:
+            with pytest.raises(OSError) as closed_descriptor:
+                os.fstat(descriptors[0])
+            assert closed_descriptor.value.errno == errno.EBADF
     finally:
-        for descriptor in descriptors:
+        for owner in owners:
             try:
-                os.close(descriptor)
-            except OSError:
-                pass
+                owner.fileno()
+            except RuntimeError:
+                continue
+            owner.close_quietly()
+    if reuse_descriptor:
+        descriptor_reuse.assert_preserved()
 
 
 def test_same_output_processes_serialize_without_crossed_fixture_sets(tmp_path: Path) -> None:
@@ -3891,9 +4000,12 @@ def test_recovery_record_rejects_unvalidated_recorded_output_name(
     assert not backup.exists()
 
 
+@pytest.mark.parametrize("reuse_descriptor", [False, True], ids=["native-close", "reuse-before-cleanup"])
 def test_recovery_write_preserves_body_baseexception_over_close_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    descriptor_reuse: Any,
+    reuse_descriptor: bool,
 ) -> None:
     class PrimaryWriteFailure(BaseException):
         pass
@@ -3906,6 +4018,8 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
     staged_snapshot = generator._capture_fixture_set_snapshot(staging, "snapshot failed")
     parent_identity = generator._path_identity(tmp_path, "parent changed")
     recovery_path = tmp_path / ".fixtures.publication-recovery.json"
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
+    owners = _install_tracking_owned_descriptors(monkeypatch)
     real_open = generator.os.open
     real_close = generator.os.close
     real_write = generator.os.write
@@ -3925,7 +4039,10 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
 
     def _fail_close(descriptor: int) -> None:
         if descriptor in descriptors:
-            real_close(descriptor)
+            if reuse_descriptor:
+                descriptor_reuse.reuse(descriptor)
+            else:
+                real_close(descriptor)
             raise OSError("secondary close failure")
         real_close(descriptor)
 
@@ -3943,13 +4060,16 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
             )
         assert exc_info.value is primary
     finally:
-        for descriptor in descriptors:
+        for owner in owners:
             try:
-                real_close(descriptor)
-            except OSError:
-                pass
+                owner.fileno()
+            except RuntimeError:
+                continue
+            owner.close_quietly()
     assert not recovery_path.exists()
     assert not list(tmp_path.glob(f"{recovery_path.name}.tmp-*"))
+    if reuse_descriptor:
+        descriptor_reuse.assert_preserved()
 
 
 def test_recovery_read_preserves_body_baseexception_over_close_failure(
