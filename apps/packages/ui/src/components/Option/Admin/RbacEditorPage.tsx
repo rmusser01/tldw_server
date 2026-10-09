@@ -142,6 +142,42 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
     [permissions, selectedCategory]
   )
 
+  // matrix shape: { roles: [{id, name}], permissions: [{id, name, category}], grid: {[permId]: {[roleId]: bool}} }
+  const roles: Array<{ id: number; name: string }> = matrix?.roles ?? []
+  const grid: Record<number, Record<number, boolean>> = matrix?.grid ?? {}
+
+  // Latest-value ref for the per-key "toggling" state: the memoized role
+  // columns below must not rebuild while a checkbox toggle is in flight, but
+  // their render closures still need to read the current disabled state
+  // (admin perf C-S4 / F16 — deps stay [roles, grid, t] without staleness).
+  const togglingRef = useRef<string | null>(null)
+  togglingRef.current = toggling
+
+  // Rebuild the role-column array only when the matrix data or the translator
+  // changes (admin perf C-S4 / F16); re-renders (e.g. category filter or
+  // pagination flips) reuse the memoized array.
+  const roleColumns = React.useMemo(
+    () =>
+      roles.map(role => ({
+        title: role.name,
+        key: `role-${role.id}`,
+        width: 120,
+        align: "center" as const,
+        render: (_: any, record: Permission) => {
+          const val = grid[record.id]?.[role.id] ?? false
+          const key = `${role.id}-${record.id}`
+          return (
+            <Checkbox
+              checked={val}
+              disabled={togglingRef.current === key}
+              onChange={() => handleToggle(role.id, record.id, val)}
+            />
+          )
+        }
+      })),
+    [roles, grid, t]
+  )
+
   if (!matrix) {
     if (matrixError && !loading) {
       return (
@@ -158,10 +194,6 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
     return <Card loading={loading}><div style={{ minHeight: 200 }} /></Card>
   }
 
-  // matrix shape: { roles: [{id, name}], permissions: [{id, name, category}], grid: {[permId]: {[roleId]: bool}} }
-  const roles: Array<{ id: number; name: string }> = matrix.roles ?? []
-  const grid: Record<number, Record<number, boolean>> = matrix.grid ?? {}
-
   const columns = [
     {
       title: t("settings:adminRbac.colPermission", "Permission"),
@@ -176,23 +208,7 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
         </span>
       )
     },
-    ...roles.map(role => ({
-      title: role.name,
-      key: `role-${role.id}`,
-      width: 120,
-      align: "center" as const,
-      render: (_: any, record: Permission) => {
-        const val = grid[record.id]?.[role.id] ?? false
-        const key = `${role.id}-${record.id}`
-        return (
-          <Checkbox
-            checked={val}
-            disabled={toggling === key}
-            onChange={() => handleToggle(role.id, record.id, val)}
-          />
-        )
-      }
-    }))
+    ...roleColumns
   ]
 
   return (
@@ -230,7 +246,11 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
           columns={columns}
           rowKey="id"
           loading={loading}
-          pagination={false}
+          // Bound the mounted checkbox grid to one page of permissions
+          // (admin perf C-S4 / F16). The matrix fetch already returns the
+          // complete permissions catalog (the server pages only roles), so
+          // client-side paging covers every permission.
+          pagination={{ pageSize: 50 }}
           scroll={{ x: 260 + roles.length * 120 }}
           size="small"
           locale={{
