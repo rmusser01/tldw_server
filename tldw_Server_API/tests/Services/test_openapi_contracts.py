@@ -1152,6 +1152,15 @@ def test_connector_provider_webhook_openapi_documents_validation_token_response(
     app.include_router(connectors_router, prefix="/api/v1")
     paths = app.openapi()["paths"]
 
+    webhook_operations = paths[CONNECTOR_PROVIDER_WEBHOOK_PATH]
+    assert webhook_operations["get"]["operationId"] != webhook_operations["post"]["operationId"]
+    callbacks = {
+        route.endpoint
+        for route in connectors_router.routes
+        if getattr(route, "path", None) == "/connectors/providers/{provider}/webhook"
+    }
+    assert len(callbacks) == 1
+
     for method in ("get", "post"):
         operation = paths[CONNECTOR_PROVIDER_WEBHOOK_PATH][method]
         content = operation["responses"]["200"].get("content", {})

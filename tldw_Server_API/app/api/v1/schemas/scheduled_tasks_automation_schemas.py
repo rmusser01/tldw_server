@@ -23,7 +23,20 @@ ScheduledTaskDefinitionHealth = Literal[
 ]
 ScheduledTaskDefinitionDisabledLockKind = Literal["none", "admin", "security", "system"]
 ScheduledTaskDefinitionResolutionState = Literal["open", "solved"]
-ScheduledTaskRunStatus = Literal["queued", "running", "completed", "failed", "skipped", "cancelled"]
+ScheduledTaskRunStatus = Literal[
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "skipped",
+    "cancelled",
+    # Written by the automation consumer since TASK-13039-era work but
+    # missing here (latent drift: a timed_out row would fail response
+    # validation) -- and ADR-184 2A's new terminal outcome for
+    # tool-requesting definitions.
+    "timed_out",
+    "approval_required",
+]
 ScheduledTaskRunOutcome = Literal["finding", "no_match", "partial", "degraded", "none"]
 ScheduledTaskReviewState = Literal["unread", "read", "dismissed"]
 

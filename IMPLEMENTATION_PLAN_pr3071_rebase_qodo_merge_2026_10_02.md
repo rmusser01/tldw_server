@@ -2598,3 +2598,345 @@ probe, speculative production patch, deadline change or hosted retry. Stage26
 still requires actual successor all7+owning hosted/native applicable acceptance
 before NORMALmerge/safecleanup. No new native/browser/model/protected-service
 operation or artifact serving is established or authorized.
+
+2026-10-09 publication readback: current c2fc557860cfc20e8e5798f7b7168b4a58aa50ae,
+tree f0609c3da7242ff113d2769cf65aac595c14fc56, normal parent94bb11b4c04721cc7733f9ba57788f0a098f3fb7.
+Explicit GitHub fresh94bb-leased fast-forward, normal LFS hook, existing
+precommit absent; normal981-file explicit preflight PASS, all27109 inputs exact.
+Actual dev97ea9cd5fa7e3a61ee4e7c56f3d9643b7311d511 remains integrated,
+queueUNSET/auto_merge null. All17454 committed source inputs and live body
+f3869b3c326ae5ab4f3ded29ca5ce7770acf787508a443bcc5b90c602f40ccb0 exact;
+human740-byte suffix unchanged. Recovery94bb branch retained, inherited gc
+warning ignored without cleanup. Readback02:32:30; current hosted02:32:38 has
+35SUCCESS/29SKIP/39IN_PROGRESS/9QUEUED/1NEUTRAL/1nonrequiredCANCELLED,
+no actualfailure,15historicalthreads resolved. Only actual required license
+SUCCESS; others missing/queued, not qualified. MainCI37875002371 initial11jobs,
+frontend37875002385, E2ECritical37875002469 and NotesUX37875002408 active.
+Prior94bb failed attempts remain failed, not retried or relabeled. All successor
+all7+owning/FullSuite/workflow/native acceptance still pending; no PRmerge or
+cleanup. Postpublication plan/task receipts intentionally uncommitted.
+
+## Stage 30: Explicitly Authorized Bounded Native UAT
+**Goal**: Exercise current published c2fc desktop/mobile Stop and recovery using
+only the original Chrome19239 profile and isolated current-build services.
+**Success Criteria**: At most two fresh local-model inputs; actual UI Stop,
+partial-output/recovery/reload evidence recorded separately for both viewports.
+No old-input replay, fourth Character-root, protected-data/shared-service change,
+foreign/replacement profile, injected state or fabricated full-UAT claim.
+**Tests**: Zero-send readiness/footer/draft/reload checks at1440x900 and390x844
+DPR1; one new desktop input and one new mobile input only; actual owning logs,
+canonical input bindings and screenshots; restore original viewport.
+**Status**: In Progress
+
+2026-10-09 direct human reply approved/auhtorized grants only the bounded
+exception requested for original-profile reconnect/reopen, isolated services and
+two fresh local-model inputs. ADR required:no; existing recovery/runtime design
+and ADR059 tracking apply. Authorized original version probe exit7 refused.
+Historical launch record identifies the exact original chrome-cdp-profile under
+chat-workspace-real-uat-latest-dev-20260929. Remaining files were preserved before
+reopening that same path. Chrome now listens19239 but restores only New Tab;
+Local State/Preferences/Sessions were already absent. Original tab/draft
+preservation remains unverified, not relabeled. No native input has been sent.
+
+Existing source-bound production artifact rewrites to protected oldAPI18101 and
+cannot qualify isolated current-source UAT as-is. Fresh unchanged-source
+production build uses owning API18110/frontend18111/Redis18112 and unchanged
+production bundler/tokens/budgets. Initial archive collector ENOBUFS failed before
+unpacking/build; retain it, distinct streamed archive attempt avoids buffering
+the repository in memory. No application source, hosted checks or PR mutation.
+
+2026-10-09 17:40 UTC actual bounded UAT outcome: FAILED/incomplete acceptance,
+not a full-UAT pass. Distinct host production build/tokens/unchanged budgets
+passed0/0/0 with all7396 owning app inputs exact. Initial sandbox Turbopack
+port-binding EPERM remains failed; no bundler or policy substitution. Same
+original profile directory was reopened after an owned renderer stall; no
+replacement profile, protected-data verification or historical draft recovery.
+The original historical tab remains unrecovered. Native document visibility
+was hidden; no focus/visibility emulation. A normal target activation occurred
+during the initial stall investigation, did not cure it, and was not repeated.
+
+Exactly two fresh native Send attempts were used. Desktop first-Send failed
+before any chat-completions request: cold OpenAPI generation took11.822s and
+blocked the API while unchanged10s history/settings reads timed out. Reload
+preserved that draft and restored Ready without resubmission. Mobile produced
+actual local9099 output via one HTTP200 SSE request,856 data events, and exactly
+one canonical user plus one assistant row. Its stream completed with length
+finish reason at17:33:51.591 before Stop click17:33:55.689. Thus live Stop and
+provider shutdown latency are NOT qualified. Mobile response/reload/composer
+recovery and desktop/mobile footer/layout checks passed in the observed scope;
+there was no third Send, replay or automatic resend. The cold failure remains
+actionable and unfixed; warm-cache streaming does not repair or waive it.
+
+Original1200x953DPR2 viewport was restored before graceful termination of only
+owned Chrome22438 and recorder25693; both corresponding exec sessions exit0.
+Wheel collector timeout and controller CtrlC exit1 remain nonqualification
+artifacts. Isolated API71875/frontend96236/Redis65630 remain available for
+bounded owning investigation; shared services, data and profile files retained.
+Receipts: approved-uat-host-build-20261009.json, approved-uat-outcome-20261009.json,
+approved-uat-owned-messages-readback-20261009.json and
+approved-uat-owned-browser-close-20261009.json in the existing evidence root.
+No application source, hosted checks, body, commit/push, merge or cleanup edit.
+Stage30 remains InProgress; fullUatPassedfalse and two-input allowance consumed.
+
+## Stage 31: Cold OpenAPI Startup Readiness Correction
+**Goal**: Prevent the observed cold OpenAPI request from blocking the API event
+loop and causing the unchanged10s native history/settings deadline to expire.
+**Success Criteria**: Generate the existing schema off-loop before lifespan
+yields; reuse its cache; preserve disabled-docs behavior and owned shutdown on
+generation failure. Do not change client ownership checks, deadlines, health,
+schema semantics, provider behavior or the consumed native-input allowance.
+**Tests**: Provider-free finite lifespan red/green tests for warm-before-serving,
+off-loop generation, cache reuse/reentry, failure cleanup and disabled OpenAPI;
+connected lifecycle/OpenAPI contracts, security and independent manual review.
+**Status**: Complete
+
+ADR assessment: no new durable architecture decision. ADR021 lifecycle ownership
+and cleanup and ADR059 task tracking govern this bounded cache-readiness fix.
+Actual pinned FastAPI0.142.1 serves OpenAPI from an async handler that calls the
+synchronous schema builder. The native first-Send11.822s stall is retained as
+failure evidence, not a flaky/infrastructure label. Independent design review
+found no actionable P1/P2 blocker for an awaited asyncio.to_thread(app.openapi)
+inside the existing cleanup-protected try before yield. Startup adds the actual
+schema-build cost per worker; cancellation cannot terminate a running thread.
+New finite regression tests have been added; production is still unchanged at
+this entry. No new browser connection, native Send or model invocation is used.
+Final publication must batch then-current dev and source-bound qualification;
+finite test success cannot establish live Stop or full native acceptance.
+
+## Stage 32: Connected OpenAPI Webhook Metadata Contract
+**Goal**: Remove the verified inherited duplicate operationId that blocks full
+nonminimal schema contract qualification of the startup correction.
+**Success Criteria**: GET and POST retain the same existing webhook callback,
+dependencies, validationToken behavior, JSON/plaintext response metadata and
+runtime policy while exposing distinct operationIds through normal FastAPI
+single-method route registration. No provider/callback/native request is used.
+**Tests**: Existing global operationId uniqueness failed at current correction
+and independently at published c2fc baseline; extend the existing route-local
+schema contract for unique IDs/shared handler before implementation. Preserve
+all failed executions, then qualify connected lifecycle/OpenAPI/finite webhook
+tests, independent manual review, security and official fingerprint handling.
+**Status**: Complete
+
+ADR assessment: no new durable decision; existing FastAPI route/schema contracts
+and ADR021/059 govern. Stage31 owning4-file nonminimal source-exact execution is
+133PASS1FAIL/zeroERROR, not a whole-scope pass. The sole failed uniqueness
+contract also fails with unchanged published c2fc main: a GET+POST APIRoute
+shares one method-derived operationId. Official canonical OpenAPI--check0 with
+unchanged fingerprint is distinct proof that schema warming did not introduce
+contract drift. A narrow registration-only correction is necessary to finish
+the connected contract qualification; no assertions or deadlines are weakened.
+
+2026-10-09 local correction qualification: owning6-file Services execution
+cold-openapi-owning-v3 is315PASS/zeroFAIL/ERROR/SKIP/exit0, both working and actual
+isolated-runtime9612 inputs exact. Registration-only webhook correction retains
+the original handler signature/body exactly; route-local and global uniqueness
+contracts pass. Four-file quality-v3 has zero new lint/production Bandit or
+nonassert findings; inherited raw findings and whole-file formatting failures
+remain distinct. Completed Feynman and Raman independent manual reviews found
+no actionable P1/P2 in these corrected scopes; neither performed native UAT.
+Earlier red/setup/baseline failures remain failed. Source is not published.
+
+## Stage 33: Necessary Correction And Current Dev Qualification
+**Goal**: Batch the verified cold-schema correction and connected metadata fix
+with independently current dev, preserving normal published history and all
+incoming other-owner source/task ownership.
+**Success Criteria**: Exact current-head/dev/queue preflight; preserve dirty own
+corrections and receipts before normal no-commit integration. Resolve only the
+generated fingerprint through the official source-bound exporter. Qualify
+provider-free incoming ScheduledTasks/Notifications and connected chat ownership,
+relevant frontend/types/build with unchanged budgets, security/manual review and
+normal commit preflight before explicit-GitHub fresh-leased publication.
+**Tests**: Owning encrypted store owner/TTL/missing-message/failure, generation-only
+dispatch, approval terminal/idempotency/certification/cancellation contracts;
+connected lifecycle/OpenAPI tests; official fingerprint check; exact source
+composition and frontend/types/production build/budget checks. No real dispatch,
+browser/native Send, protected service/data mutation or health weakening.
+**Status**: In Progress
+
+ADR assessment: no new durable rule; existing ADR021/059 and ScheduledTasks
+decisions apply. Fresh explicit GitHub refs and separate dev branch API agree
+c2fc557860cfc20e8e5798f7b7168b4a58aa50ae and
+cd5160201cb32e05d254accdd8ac1377e1d164ad; queueunset/auto_mergeNULL. This is a
+necessary verified functional correction, not base chasing or evidence-only
+publication. Incoming TASK13264 remains other-owned and exact. Independent
+incoming review is read-only; native two-Send allowance stays consumed and
+fullUatPassedfalse/liveStop unproved. All successor actual hosted gates and
+applicable current-source acceptance remain required before NORMAL merge and
+safe cleanup. No integration, regeneration, staging or publication has occurred
+at this entry.
+
+2026-10-09 normal no-commit cd516 integration preserved all dirty owned inputs,
+with only the expected official fingerprint conflict. Official canonical export,
+installed frontend type generation and fresh exporter check passed0/0/0 on
+integrated source; only that generated fingerprint resolves the conflict.
+Actual owning12-file451PASS/zeroFAIL/ERROR/SKIP binds9612 working and isolated
+runtime inputs exactly. This is a predecessor: independent incoming review
+reported a connected unsupported definition-health state and a separate
+credential/quota/accounting concern requiring policy-aware assessment.
+No commit/publication/native acceptance is established. Other-owner TASK13264
+and all backup refs remain preserved.
+
+## Stage 34: Connected Scheduled Failure Readback
+**Goal**: Keep failed or timed-out scheduled definitions readable through the
+existing owner-scoped get/list response contracts.
+**Success Criteria**: Reproduce the verified unsupported degraded health value,
+then write the already supported needs_attention health state from the shared
+terminal producer. Preserve failure status/audit/notification/idempotency and
+owner boundaries; no protected data migration or new runtime dispatch.
+**Tests**: Finite executor failure and timeout to real owned SQLite definition
+get/list validation, existing consumer behavior, owning integrations, security
+and independent manual review. No live agent/model/provider/browser request.
+**Status**: Complete
+
+ADR assessment: no new durable rule; existing definition health schema and
+ScheduledTasks lifecycle decisions govern. Incoming Banach review is retained
+with both original P2 reports open until parent evaluates them. The credential
+prescription must be assessed against the existing server-credentials-only
+scheduled authoring bound and the owner-approved quota design's explicit
+non-goal of token gating outside /chat/completions. Accounting applicability
+remains separate; neither new BYOK policy nor fake review closure is permitted.
+
+2026-10-09 final local runtime qualification: actual unsupported-health RED
+is2FAIL/zeroERROR at real service get/list validation, preserved separately.
+Shared terminal producer now writes existing needs_attention for failed/timed_out.
+Focused GREEN3PASS and final formatted owning12-file453PASS/zeroFAIL/ERROR/SKIP
+bind9612 working and actual isolated runtime inputs exactly. Initial incoming451
+and preformatter453 are predecessors, not relabelled final executions. Final
+health quality-v2 has no new Ruff/nonassert Bandit and changed-range Black0;
+rawCleanfalse retains3 inherited test lint findings/76B101 vs72baseline and
+inherited whole-file formatting failures. Production health scope Bandit0.
+Independent Harvey connected review and formatter follow-up find no actionable
+P1/P2; historical persisted degraded rows remain unverified/not migrated and can
+still violate response validation. Failed initial formatting evidence remains.
+
+Independent Ampere policy-aware41-input review confirms scheduled authoring is
+server-credentials-only and owner-approved quota design excludes monthly token
+gating outside /chat/completions. Direct executor accounting omission is real,
+retained as a dormant enablement limitation because production stack-readyfalse
+refuses Agent before executor lookup. No unchanged enablement is approved, no
+counter-write policy waived, and the original Banach two-P2 report is untouched.
+Parent independently read admission and controlling policy before disposition.
+
+Final source-bound official integrated export/types/check pass0/0/0; actual
+schema/type/fingerprint bytes equal the frontend artifact inputs. Runtime
+composition retains10048 unchanged nonApp inputs per original binding and
+explicitly classifies ONLY nine new incoming/corrected runtime/test inputs as
+distinct453 owning qualification. GlobalOriginalSourceEquivalentfalse, no fresh
+global7884/AuthPG522 claim and no rewrite of original snapshots. Existing
+nonselected Chat regression remains separately qualified historical281.
+Frontend/UI/types/production build/budgets remain active at this entry. No
+commit/publication, native revalidation, model request, PR merge or cleanup.
+
+## Stage 35: Settings Fixture Qualification Investigation
+**Goal**: Identify the new unchanged settings-dialog qualification failure
+without weakening deadlines, assertions or native acceptance protections.
+**Success Criteria**: Retain actual failed full and focused executions, diagnose
+the failing boundary, and make only a verified necessary correction with
+independent review and source-bound owning qualification before publication.
+**Tests**: Full UI397 actual7765PASS4FAIL, focused30 actual26PASS4FAIL. One bounded
+artifact-only timing diagnostic and independent connected review; no repeated
+unchanged broad run or deadline/visibility/assertion change. Remaining frontend,
+types/build checks stay distinct from failed UI qualification.
+**Status**: Complete
+
+ADR assessment: no new durable rule; existing form/cache ownership contract and
+ADR059 apply. Failures are unchanged5000ms deadlines in cache-remount flows; one
+full-run duplicate Save follows a timeout. Cause unresolved, not labelled flaky
+or infrastructure. Original failed pipeline and both raw results remain retained.
+Publication, NORMAL merge and cleanup remain blocked. No browser/native/provider
+requests; the two approved native Send attempts remain consumed.
+
+2026-10-09 three-attempt reassessment retained the failed full397/focused30 and
+third artifact-only timing diagnostic separately. Timings identify full-DOM
+tab/Save fixture lookup cost, not a proven product semantic failure. Independent
+Faraday found expired asynchronous remount contamination after runner timeout.
+Only the finite settings test changes: unique exact labels narrow the parent
+before the same role/name/default-visibility query, and the original Vitest
+context signal guards awaited mount operations and remounts. All30 original
+semantic assertions, mock boundaries and5000ms deadlines remain. Two added
+expiration regressions failed RED, then the corrected focused32 passed with
+zeroFAIL/SKIP. Final formatted source990df6b7ec1f59f1ac10c41d3a52519f163eef0957b3a5beb9f216cb1004f2f9
+has actual ESLint0errors0warnings/baseline0/0 and AST assertion-retention check.
+Final independent Faraday review completed and closed with no actionableP1/P2
+in this scoped fixture; this is not global cancellation or native acceptance.
+Formal source-bound full397 execution remains ACTIVE at this entry.
+
+2026-10-09 final full UI execution actually7771PASS/397files, zeroFAIL/PENDING/
+TODO/exit0. Both the working checkout and executed artifact retain all7398
+owning app/UI/generated inputs exactly; no artifact was served. Actual remaining
+frontend439PASS/11files/types8GB0/build/tokens/UNCHANGEDbudgets0/0/0 remain
+source-composed with exactly one later nonowning TS fixture excluded, not a
+globally identical or newly rerun build claim. Fresh compiler input inventory
+7493 files explicitly excludes that fixture; the inventory is not a typecheck.
+Actual final current types execution39584 exited0 under the frozen UI binding.
+Final owning backend453PASS/12files/zeroFAIL/ERROR/SKIP retains9612 runtime inputs.
+Stages31/32/34/35 are complete only for their local finite corrected scopes;
+Stage30 native acceptance, Stage33 publication/latest integration, Stage36's
+seven incoming findings and NORMAL merge/cleanup remain incomplete. Normal
+full-union final preflight and local-only checkpoint are next, not publication.
+
+Distinct remaining frontend execution439PASS11files/types8GB0/production
+Turbopack build/tokens/UNCHANGEDbudgets0/0/0 retained7398 exact inputs at execution,
+shared556638<614400/heaviest853470<921600, artifactNOTSERVED. The subsequent
+nonowning settings test change is excluded explicitly from any composition,
+not globally relabelled as identical. Final current types8GB also exited0 while
+the full UI final prebinding remained frozen. Original failures stay failed.
+
+## Stage 36: Newly Advanced Dev Integration Review
+**Goal**: Preserve the verified cold-schema correction and account/data ownership
+when eventually integrating the actual newly advanced frontend/extension dev.
+**Success Criteria**: Connected review, resolution of real conflicts preserving
+both qualified feature unions, finite regressions for verified findings, official
+contract generation and source-bound owning qualification before publication.
+**Tests**: Then-current immutable incoming review, finite provider-free cache and
+model storage ownership regressions, relevant frontend/UI/types/production build,
+unchanged budgets/security/manual review/normal preflight and successor actual CI.
+**Status**: In Progress
+
+ADR required: no for investigation; ADR059 governs task editing. Any change to
+the durable persistence or ownership rule requires a fresh ADR assessment before
+implementation, rather than disguising it as a performance-only correction.
+
+Fresh explicit GitHub refs and separate branch API agree actual dev1ff1ae863a94823bfbfce53d8773d17d6f1aa0a0
+(PR3210), parentscd516+c6cfe8b06f21085f700a411189c847a6be847590,
+treee12d172b212042d4e7bdaacab435266770c6c814. Incoming56paths/3706insertions/
+692deletions materially change frontend and extension runtime. Fetched only
+qualification/dev-20261009-1939; current HEADc2fc/MERGE_HEADcd516/source/index
+remain untouched. Publishedc2fc+1ff immutable merge-tree has real KnowledgeQA
+and generated fingerprint conflicts; it excludes our dirty correction and is
+not a qualified integration. Other-owner plans/TASK13511/TASK13526 are preserved.
+
+Parent connected review found two actual incoming P2 regressions. The real
+ModelDb module executed against an in-memory Chrome-storage double: two warmed
+instances write sequentially, both records remain stored but a fresh reader
+returns only the second because the instance index overwrites the shared index.
+latest-model-index-finite-red-v1-20261009.json retains the failed assertion.
+The actual selected provider-cache/watch AST declarations similarly return
+first-server status after a second-server boundary event; public client delegates
+directly to that helper. latest-provider-cache-finite-red-v1-20261009.json
+explicitly records selected-AST, not whole-client execution. No actual storage,
+profile, network, provider/model, native input or protected data was touched.
+These incoming findings are OPEN, not fixed or silently waived. Independent
+chat/readiness/conflict and extension reviews remain active at this entry.
+
+Independent Godel extension and Hume chat/readiness reviews subsequently
+completed and closed. Parent read the connected incoming code and retains five
+additional OPEN P2 findings: iframe context-menu dispatch loses its originating
+frame; lazy Copilot import reads a later selection rather than the selection at
+message receipt; readiness state switches remount children and can lose drafts;
+queued Knowledge QA partial output is not fenced when cleared or superseded;
+research-action caching ignores linked-run policy and callback changes. The
+Knowledge QA current-request predicate alone does not check the abort signal,
+so a direct cancel needs its own timer/authority handling, not a blind predicate
+patch. The extension top-frame performance goal must preserve originating-frame
+and selection authority rather than waive the behavioral regression.
+
+Together with the two parent finite REDs, seven incoming P2 findings remain
+OPEN/unfixed. Raw independent reports are retained as
+cold-latest-extension-review-20261009.json and
+cold-latest-chat-readiness-review-20261009.json. These are bounded connected
+manual reviews, not whole56-file runtime/native qualification. No incoming1ff
+source was integrated, edited, executed against native storage or published.
+Current cold-schema/cd516 correction qualification remains distinct; the final
+full397 UI execution is still active. No third native Send or new model request
+is authorized, and full native UAT/live Stop remain unqualified.
