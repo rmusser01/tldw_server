@@ -221,6 +221,39 @@ export function HistorySelectionReview({
       ? `${selection.owner.kind}:${selection.owner.owner_key}:${selection.owner.conversation_id}`
       : null
   const previousReviewOwner = React.useRef(reviewOwner)
+  const [recoveryDisclosure, setRecoveryDisclosure] = React.useState<{
+    owner: string | null
+    open: boolean
+  }>({ owner: null, open: false })
+  const recoveries = (selection.recoveries ?? [])
+    .filter((entry) => !hideRecovery?.(entry))
+    .sort(
+      (a, b) =>
+        b.turn.created_at - a.turn.created_at ||
+        a.turn.operation_id.localeCompare(b.turn.operation_id)
+    )
+  // Retained timestamps alone cannot identify an operation from this writer and view.
+  const currentRecovery = recoveries.find((entry) => {
+    const origin = entry.turn.origin_view,
+      view = selection.view,
+      scope = selection.bookmarkScope
+    return (
+      origin &&
+      view &&
+      scope &&
+      entry.scope.profile_id === scope.profile_id &&
+      entry.scope.client_session_id === scope.client_session_id &&
+      origin.owner_key === view.owner_key &&
+      origin.conversation_id === view.conversation_id &&
+      origin.view_session_id === view.view_session_id &&
+      origin.selection_revision === view.selection_revision &&
+      JSON.stringify(origin.cursor) === JSON.stringify(view.cursor) &&
+      JSON.stringify(origin.interpretation) ===
+        JSON.stringify(view.interpretation)
+    )
+  })
+  const olderRecoveries = recoveries.filter((entry) => entry !== currentRecovery)
+
   const nodes = selection.capture?.snapshot.nodes || []
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
   const virtualizer = useVirtualizer({
@@ -238,6 +271,7 @@ export function HistorySelectionReview({
   React.useEffect(() => {
     if (previousReviewOwner.current === reviewOwner) return
     previousReviewOwner.current = reviewOwner
+    setRecoveryDisclosure({ owner: reviewOwner, open: false })
     setOpenRecoveryError(null)
     setExpanded(false)
     setIncluded([])
@@ -296,6 +330,169 @@ export function HistorySelectionReview({
       return next
     })
   }
+  const renderRecovery = (
+    entry: HistorySelectionController["recoveries"][number]
+  ) => (
+    <div
+      key={entry.turn.operation_id}
+      className="mb-3 rounded border p-3"
+      role="status">
+      {(entry.turn.action === "edit_resend" ||
+        entry.turn.action === "regenerate") &&
+      entry.turn.outcome === "complete" &&
+      entry.turn.settled_message_id ? (
+        <>
+          <p className="font-medium">
+            {entry.turn.action === "regenerate"
+              ? text("savedRegeneratedReplyTitle", "New reply saved")
+              : text("savedEditedReplyTitle", "Edited reply saved")}
+          </p>
+          <p>
+            {entry.turn.action === "regenerate"
+              ? text(
+                  "savedRegeneratedReplyMessage",
+                  "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready."
+                )
+              : text(
+                  "savedEditedReplyMessage",
+                  "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready."
+                )}
+          </p>
+        </>
+      ) : entry.turn.action === "regenerate" ? (
+        <>
+          <p className="font-medium">
+            {entry.turn.state === "refused"
+              ? text("regenerationRefusedTitle", "New reply refused")
+              : text("regenerationUnknownTitle", "New reply unconfirmed")}
+          </p>
+          <p>
+            {entry.turn.state === "refused"
+              ? text(
+                  "regenerationRefusedMessage",
+                  "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again."
+                )
+              : text(
+                  "regenerationUnknownMessage",
+                  "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
+                )}
+          </p>
+        </>
+      ) : entry.turn.outcome === "stopped" ||
+        entry.turn.outcome === "interrupted" ? (
+        <>
+          {/* A partial reply kept on this device only (CS-04, #3104). */}
+          <p className="font-medium">
+            {entry.turn.outcome === "stopped"
+              ? text("keptReplyStoppedTitle", "Reply stopped")
+              : text("keptReplyInterruptedTitle", "Reply interrupted")}
+          </p>
+          <p>
+            {text(
+              "keptReplyMessage",
+              "Your question is saved. The part of the reply that arrived is kept on this device only; it was not saved to your server."
+            )}
+          </p>
+        </>
+      ) : entry.turn.state === "refused" ? (
+        <>
+          <p className="font-medium">
+            {text("refusedTitle", "Message not added")}
+          </p>
+          <p>
+            {text(
+              "sendRefusedMessage",
+              "Your original input is kept here; copy it and review the conversation before trying again. It will not be sent again automatically."
+            )}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="font-medium">
+            {text("recoveryTitle", "Turn needs review")}
+          </p>
+          <p>
+            {text(
+              "recoveryMessage",
+              "The original send outcome is retained separately from history. It will not be sent again automatically."
+            )}
+          </p>
+          <p>
+            {entry.turn.persistence === "server" && entry.turn.admission
+              ? text(
+                  "recoveryState.accepted_response_unknown",
+                  "User input accepted; response outcome unknown"
+                )
+              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
+          </p>
+        </>
+      )}
+      <details>
+        <summary>
+          {text("inspectRecovery", "Inspect original input and result")}
+        </summary>
+        <pre className="whitespace-pre-wrap break-words">
+          {entry.turn.input_text}
+        </pre>
+        <pre className="whitespace-pre-wrap break-words">
+          {entry.turn.result_text}
+        </pre>
+        {entry.turn.input_images
+          ?.filter((image) =>
+            /^data:image\/(?:png|jpeg|gif|webp|bmp|x-icon);base64,[A-Za-z0-9+/]*={0,2}$/.test(
+              image
+            )
+          )
+          .map((image, index) => (
+            <a
+              key={index}
+              className="block text-primary underline"
+              href={image}
+              download={`recovered-image-${index + 1}`}
+              onClick={(event) => {
+                if (
+                  !mounted.current ||
+                  !renderedSource.isCurrent() ||
+                  !renderedSelectionIsCurrent()
+                )
+                  event.preventDefault()
+              }}>
+              {text("downloadRecoveredImage", "Download retained image")}
+            </a>
+          ))}
+      </details>
+      <Button
+        onClick={() => {
+          if (
+            mounted.current &&
+            renderedSource.isCurrent() &&
+            renderedSelectionIsCurrent()
+          )
+            void navigator.clipboard.writeText(
+              entry.turn.result_text || entry.turn.input_text
+            )
+        }}>
+        {text("copyRecovery", "Copy recovered text")}
+      </Button>
+      {(entry.turn.action === "edit_resend" ||
+        entry.turn.action === "regenerate") &&
+        entry.turn.outcome === "complete" &&
+        entry.turn.settled_message_id && (
+          <Button
+            disabled={openingRecovery !== null || selection.status !== "ready"}
+            loading={openingRecovery === entry.turn.operation_id}
+            onClick={() => void openSavedReply(entry)}>
+            {text("openSavedReply", "Open saved reply")}
+          </Button>
+        )}
+      <Button
+        disabled={openingRecovery !== null}
+        onClick={() => void selection.dismissRecovery(entry)}>
+        {text("dismissRecovery", "Dismiss recovery")}
+      </Button>
+    </div>
+  )
+
   if (selection.status === "idle") return null
   return (
     <section
@@ -361,147 +558,6 @@ export function HistorySelectionReview({
         </p>
       )}
       {openRecoveryError && <p role="alert">{openRecoveryError}</p>}
-      {selection.recoveries
-        ?.filter((entry) => !hideRecovery?.(entry))
-        .map((entry) => (
-          <div
-            key={entry.turn.operation_id}
-            className="mb-3 rounded border p-3"
-            role="status">
-            {(entry.turn.action === "edit_resend" || entry.turn.action === "regenerate") &&
-            entry.turn.outcome === "complete" &&
-            entry.turn.settled_message_id ? (
-              <>
-                <p className="font-medium">
-                  {entry.turn.action === "regenerate" ? text("savedRegeneratedReplyTitle", "New reply saved") : text("savedEditedReplyTitle", "Edited reply saved")}
-                </p>
-                <p>
-                  {entry.turn.action === "regenerate" ? text("savedRegeneratedReplyMessage",
-                    "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready.") : text(
-                    "savedEditedReplyMessage",
-                    "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready."
-                  )}
-                </p>
-              </>
-            ) : entry.turn.action === "regenerate" ? (
-              <>
-                <p className="font-medium">{entry.turn.state === "refused" ? text("regenerationRefusedTitle", "New reply refused") : text("regenerationUnknownTitle", "New reply unconfirmed")}</p>
-                <p>{entry.turn.state === "refused" ? text("regenerationRefusedMessage",
-                  "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.") : text("regenerationUnknownMessage",
-                  "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically.")}</p>
-              </>
-            ) : entry.turn.outcome === "stopped" ||
-            entry.turn.outcome === "interrupted" ? (
-              <>
-                {/* A partial reply kept on this device only (CS-04, #3104). */}
-                <p className="font-medium">
-                  {entry.turn.outcome === "stopped"
-                    ? text("keptReplyStoppedTitle", "Reply stopped")
-                    : text("keptReplyInterruptedTitle", "Reply interrupted")}
-                </p>
-                <p>
-                  {text(
-                    "keptReplyMessage",
-                    "Your question is saved. The part of the reply that arrived is kept on this device only; it was not saved to your server."
-                  )}
-                </p>
-              </>
-            ) : entry.turn.state === "refused" ? (
-              <>
-                <p className="font-medium">
-                  {text("refusedTitle", "Message not added")}
-                </p>
-                <p>
-                  {text(
-                    "sendRefusedMessage",
-                    "Your original input is kept here; copy it and review the conversation before trying again. It will not be sent again automatically."
-                  )}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium">
-                  {text("recoveryTitle", "Turn needs review")}
-                </p>
-                <p>
-                  {text(
-                    "recoveryMessage",
-                    "The original send outcome is retained separately from history. It will not be sent again automatically."
-                  )}
-                </p>
-                <p>
-                  {entry.turn.persistence === "server" && entry.turn.admission
-                    ? text(
-                        "recoveryState.accepted_response_unknown",
-                        "User input accepted; response outcome unknown"
-                      )
-                    : text(
-                        `recoveryState.${entry.turn.state}`,
-                        entry.turn.state
-                      )}
-                </p>
-              </>
-            )}
-            <details>
-              <summary>
-                {text("inspectRecovery", "Inspect original input and result")}
-              </summary>
-              <pre className="whitespace-pre-wrap break-words">
-                {entry.turn.input_text}
-              </pre>
-              <pre className="whitespace-pre-wrap break-words">
-                {entry.turn.result_text}
-              </pre>
-              {entry.turn.input_images
-                ?.filter((image) =>
-                  /^data:image\/(?:png|jpeg|gif|webp|bmp|x-icon);base64,[A-Za-z0-9+/]*={0,2}$/.test(
-                    image
-                  )
-                )
-                .map((image, index) => (
-                  <a
-                    key={index}
-                    className="block text-primary underline"
-                    href={image}
-                    download={`recovered-image-${index + 1}`}
-                    onClick={(event) => {
-                      if (
-                        !mounted.current ||
-                        !renderedSource.isCurrent() ||
-                        !renderedSelectionIsCurrent()
-                      )
-                        event.preventDefault()
-                    }}>
-                    {text("downloadRecoveredImage", "Download retained image")}
-                  </a>
-                ))}
-            </details>
-            <Button
-              onClick={() => {
-                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
-                  void navigator.clipboard.writeText(entry.turn.result_text || entry.turn.input_text)
-              }}>
-              {text("copyRecovery", "Copy recovered text")}
-            </Button>
-            {(entry.turn.action === "edit_resend" || entry.turn.action === "regenerate") &&
-              entry.turn.outcome === "complete" &&
-              entry.turn.settled_message_id && (
-                <Button
-                  disabled={
-                    openingRecovery !== null || selection.status !== "ready"
-                  }
-                  loading={openingRecovery === entry.turn.operation_id}
-                  onClick={() => void openSavedReply(entry)}>
-                  {text("openSavedReply", "Open saved reply")}
-                </Button>
-              )}
-            <Button
-              disabled={openingRecovery !== null}
-              onClick={() => void selection.dismissRecovery(entry)}>
-              {text("dismissRecovery", "Dismiss recovery")}
-            </Button>
-          </div>
-        ))}
       {selection.status === "loading" && (
         <StatePanel
           state="loading"
@@ -629,6 +685,29 @@ export function HistorySelectionReview({
               : undefined
           }
         />
+      )}
+      {currentRecovery && renderRecovery(currentRecovery)}
+      {olderRecoveries.length > 0 && (
+        <details
+          open={
+            recoveryDisclosure.owner === reviewOwner && recoveryDisclosure.open
+          }
+          onToggle={(event) => {
+            if (
+              mounted.current &&
+              renderedSource.isCurrent() &&
+              renderedSelectionIsCurrent()
+            )
+              setRecoveryDisclosure({
+                owner: reviewOwner,
+                open: event.currentTarget.open
+              })
+          }}>
+          <summary className="cursor-pointer py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            {`${text("retainedOutcomes", "Retained outcomes")} (${olderRecoveries.length})`}
+          </summary>
+          {olderRecoveries.map(renderRecovery)}
+        </details>
       )}
       <div className="flex flex-wrap items-center gap-2">
         {nodes.length > 0 && (

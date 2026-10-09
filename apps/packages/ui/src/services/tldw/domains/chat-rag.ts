@@ -34,6 +34,7 @@ import type {
 } from '../TldwApiClient'
 import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
 import { trackServerChatWrite } from '@/store/server-chat-save-status'
+import { isDefinitiveNativeBranchRejection } from "@/utils/history-selection"
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 
@@ -1417,18 +1418,49 @@ export const chatRagMethods = {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     const scopeFields = requestScopeFields(options?.requestScope)
-    const res = await trackServerChatWrite(cid, () =>
-      bgRequest<ServerChatMessage>({
-        path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...scopeFields.headers },
-        body: payload,
-        abortSignal: options?.signal,
-        ...(scopeFields.servicePromptConfig
-          ? { servicePromptConfig: scopeFields.servicePromptConfig }
-          : {})
-      })
+    const selection = payload.tldw_history_selection_v1
+    const submittedSelection =
+      options?.requestScope &&
+      payload.role === "user" &&
+      payload.tldw_history_branch === false &&
+      selection?.conversation_id === cid &&
+      Array.isArray(selection.messages) &&
+      Array.from(selection.messages).every(
+        (row: unknown) =>
+          row &&
+          typeof row === "object" &&
+          typeof (row as { id?: unknown }).id === "string" &&
+          (row as { id: string }).id.length > 0
+      )
+        ? {
+            conversation_id: cid,
+            messages: selection.messages.map((row: { id: string }) => ({
+              id: row.id
+            }))
+          }
+        : null
+    const res = await trackServerChatWrite(
+      cid,
+      () =>
+        bgRequest<ServerChatMessage>({
+          path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...scopeFields.headers },
+          body: payload,
+          abortSignal: options?.signal,
+          ...(scopeFields.servicePromptConfig
+            ? { servicePromptConfig: scopeFields.servicePromptConfig }
+            : {})
+        }),
+      {
+        isUnchangedError: (error) =>
+          Boolean(
+            submittedSelection &&
+              isDefinitiveNativeBranchRejection(error, submittedSelection)
+          )
+      }
     )
+
     this.invalidateChatMessagesCache(cid)
     return res
   },

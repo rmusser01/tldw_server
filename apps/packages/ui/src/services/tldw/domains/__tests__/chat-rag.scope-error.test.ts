@@ -136,3 +136,197 @@ it.each([
     ).rejects.toThrow("unsupported_history_version")
   }
 )
+
+
+describe("definite native no-admission observer", () => {
+  const selection = { conversation_id: "owned", messages: [{ id: "parent" }] }
+  const options = {
+    requestScope: {
+      config: {
+        serverUrl: "https://original.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    }
+  }
+  const client = {
+    invalidateChatMessagesCache: vi.fn()
+  } as unknown as TldwApiClientCore
+  it("a captured strict-false user POST preserves acknowledged history after its exact no-admission409", async () => {
+    const {
+      resetServerChatSaveStatus,
+      beginServerChatWrite,
+      getServerChatSaveStatus
+    } = await import("@/store/server-chat-save-status")
+    resetServerChatSaveStatus()
+    beginServerChatWrite("owned")("saved")
+    const refusal = Object.assign(new Error("history_branch_changed"), {
+      status: 409,
+      details: {
+        detail: {
+          status: "stale_selection",
+          code: "history_branch_changed",
+          conversation_id: "owned",
+          parent_message_id: "parent",
+          leaf_ids: ["new-tip"],
+          history_version: 4
+        }
+      }
+    })
+    mocks.bgRequest.mockRejectedValueOnce(refusal)
+    await expect(
+      chatRagMethods.addChatMessage.call(
+        client,
+        "owned",
+        {
+          role: "user",
+          content: "Exact input.  \nNext line.",
+          tldw_history_branch: false,
+          tldw_history_selection_v1: selection
+        },
+        options
+      )
+    ).rejects.toBe(refusal)
+    expect(getServerChatSaveStatus("owned")).toBe("saved")
+    expect(client.invalidateChatMessagesCache).not.toHaveBeenCalled()
+  })
+  const refusal = () =>
+    Object.assign(new Error("history_branch_changed"), {
+      status: 409,
+      details: {
+        detail: {
+          status: "stale_selection",
+          code: "history_branch_changed",
+          conversation_id: "owned",
+          parent_message_id: "parent",
+          leaf_ids: ["new-tip"],
+          history_version: 4
+        }
+      }
+    })
+  it.each([
+    { name: "explicit branch", payload: { tldw_history_branch: true } },
+    {
+      name: "missing strict flag",
+      payload: { tldw_history_branch: undefined }
+    },
+    { name: "null flag", payload: { tldw_history_branch: null } },
+    { name: "string flag", payload: { tldw_history_branch: "false" } },
+    { name: "assistant settlement", payload: { role: "assistant" } },
+    {
+      name: "foreign conversation",
+      payload: {
+        tldw_history_selection_v1: { ...selection, conversation_id: "foreign" }
+      }
+    },
+    { name: "no selection", payload: { tldw_history_selection_v1: undefined } },
+    {
+      name: "malformed messages",
+      payload: { tldw_history_selection_v1: { ...selection, messages: [null] } }
+    },
+    {
+      name: "sparse messages",
+      payload: {
+        tldw_history_selection_v1: { ...selection, messages: Array(1) }
+      },
+      error: {
+        ...refusal(),
+        details: {
+          detail: { ...refusal().details.detail, parent_message_id: null }
+        }
+      }
+    },
+    { name: "no captured request scope", unscoped: true },
+    { name: "transport error", error: new Error("connection lost") },
+    {
+      name: "unrelated409",
+      error: { status: 409, details: { detail: { code: "version_conflict" } } }
+    },
+    {
+      name: "foreign receipt",
+      error: {
+        ...refusal(),
+        details: {
+          detail: { ...refusal().details.detail, conversation_id: "foreign" }
+        }
+      }
+    },
+    {
+      name: "wrong parent receipt",
+      error: {
+        ...refusal(),
+        details: {
+          detail: {
+            ...refusal().details.detail,
+            parent_message_id: "other-parent"
+          }
+        }
+      }
+    },
+    {
+      name: "missing revision receipt",
+      error: {
+        ...refusal(),
+        details: {
+          detail: { ...refusal().details.detail, history_version: undefined }
+        }
+      }
+    }
+  ])(
+    "does not turn $name into an unchanged acknowledgement",
+    async (change) => {
+      const {
+        resetServerChatSaveStatus,
+        beginServerChatWrite,
+        getServerChatSaveStatus
+      } = await import("@/store/server-chat-save-status")
+      resetServerChatSaveStatus()
+      beginServerChatWrite("owned")("saved")
+      const error = change.error ?? refusal()
+      mocks.bgRequest.mockReset().mockRejectedValueOnce(error)
+      await expect(
+        chatRagMethods.addChatMessage.call(
+          client,
+          "owned",
+          {
+            role: "user",
+            content: "Input",
+            tldw_history_branch: false,
+            tldw_history_selection_v1: selection,
+            ...change.payload
+          },
+          change.unscoped ? undefined : options
+        )
+      ).rejects.toBe(error)
+      expect(getServerChatSaveStatus("owned")).toBe("failed")
+    }
+  )
+  it("a definite refusal keeps a newer overlapping failure rather than restoring a saved snapshot", async () => {
+    const {
+      resetServerChatSaveStatus,
+      beginServerChatWrite,
+      getServerChatSaveStatus
+    } = await import("@/store/server-chat-save-status")
+    resetServerChatSaveStatus()
+    beginServerChatWrite("owned")("saved")
+    const error = refusal()
+    mocks.bgRequest.mockReset().mockImplementationOnce(async () => {
+      beginServerChatWrite("owned")("failed")
+      throw error
+    })
+    await expect(
+      chatRagMethods.addChatMessage.call(
+        client,
+        "owned",
+        {
+          role: "user",
+          content: "Input",
+          tldw_history_branch: false,
+          tldw_history_selection_v1: selection
+        },
+        options
+      )
+    ).rejects.toBe(error)
+    expect(getServerChatSaveStatus("owned")).toBe("failed")
+  })
+})

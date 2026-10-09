@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const reviewButtons = vi.hoisted(() => ({ open: [] as Array<() => void> }))
 vi.mock("@/components/Common/Button", async (original) => {
@@ -226,6 +226,7 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
     dismissRecovery: vi.fn()
   } as unknown as HistorySelectionController
   render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   expect(screen.getByText("Message not added")).toBeVisible()
   expect(
     screen.getByText(/Your original input is kept here/)
@@ -307,6 +308,7 @@ it.each(["accepted_unsent", "generated_unsaved"] as const)(
       state === "generated_unsaved" ? "unacknowledged generated text" : ""
     )
     render(<HistorySelectionReview selection={selection} />)
+    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
     expect(
       screen.getByText("User input accepted; response outcome unknown")
     ).toBeVisible()
@@ -337,6 +339,7 @@ it.each([undefined, "client"] as const)(
         selection={recoveryController(persistence, "accepted_unsent")}
       />
     )
+    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
     expect(
       screen.getByText("User input accepted; response not saved")
     ).toBeVisible()
@@ -356,6 +359,7 @@ it("client-managed generated text retains its existing review label", () => {
       )}
     />
   )
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   expect(screen.getByText("Generated response needs review")).toBeVisible()
   expect(
     screen.queryByText("User input accepted; response outcome unknown")
@@ -828,3 +832,226 @@ it.each(["Load latest messages", "Branch here"])(
     }
   }
 )
+
+
+describe("bounded retained outcomes", () => {
+  const view = {
+    owner_key: "owner",
+    conversation_id: "chat",
+    view_session_id: "visible-view",
+    selection_revision: 3,
+    interpretation: { kind: "parent_graph_v1" as const },
+    cursor: { kind: "after_message" as const, message_id: "reply" }
+  }
+  const receipt = (id: string, current = false) => ({
+    scope: {
+      profile_id: "profile",
+      client_session_id: current ? "writer" : "older-writer"
+    },
+    turn: {
+      operation_id: id,
+      state: "refused" as const,
+      input_text: `Exact ${id}.  \nNext line.`,
+      result_text: "",
+      created_at: Number(id.slice(1)),
+      origin_view: { ...view }
+    }
+  })
+  const selectionWith = (recoveries: ReturnType<typeof receipt>[]) =>
+    ({
+      ...controller(),
+      owner: { kind: "native", owner_key: "owner", conversation_id: "chat" },
+      view,
+      bookmarkScope: { profile_id: "profile", client_session_id: "writer" },
+      status: "stale_selection",
+      sendConflict: true,
+      loadLatest: vi.fn(),
+      branchHere: vi.fn(),
+      fence: () => () => true,
+      recoveries,
+      dismissRecovery: vi.fn()
+    }) as unknown as HistorySelectionController
+  it("keeps current choices and only its qualified retained result ahead of five collapsed older records", () => {
+    const older = Array.from({ length: 5 }, (_, index) =>
+        receipt(`r${index + 1}`)
+      ),
+      current = receipt("r6", true)
+    const original = [
+      older[2],
+      current,
+      ...older.filter((entry) => entry !== older[2])
+    ]
+    const selection = selectionWith(original)
+    render(<HistorySelectionReview selection={selection} />)
+    const summary = screen.getByText(/Retained outcomes.*5/)
+    const copies = screen.getAllByRole("button", {
+      name: "Copy recovered text"
+    })
+    expect(copies[0]).toBeVisible()
+    copies.slice(1).forEach((button) => expect(button).not.toBeVisible())
+    expect(
+      screen
+        .getByRole("button", { name: "Load latest messages" })
+        .compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(summary.closest("details")).not.toHaveAttribute("open")
+    fireEvent.click(summary)
+    expect(
+      screen.getAllByRole("button", { name: "Copy recovered text" })
+    ).toHaveLength(6)
+    expect(selection.recoveries).toBe(original)
+    for (const entry of original)
+      expect(
+        screen.getByText(entry.turn.input_text, {
+          normalizer: (value) => value
+        })
+      ).toBeInTheDocument()
+  })
+  it("preserves an explicit expansion during same-owner refresh, but closes after leaving and returning", async () => {
+    const selection = selectionWith([receipt("r1")])
+    const mounted = render(<HistorySelectionReview selection={selection} />)
+    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Retained outcomes \(1\)/).closest("details")
+      ).toHaveAttribute("open")
+    )
+    mounted.rerender(
+      <HistorySelectionReview
+        selection={{
+          ...selection,
+          recoveries: [...selection.recoveries, receipt("r2")]
+        }}
+      />
+    )
+    expect(
+      screen.getByText(/Retained outcomes \(2\)/).closest("details")
+    ).toHaveAttribute("open")
+    mounted.rerender(
+      <HistorySelectionReview
+        selection={{
+          ...selection,
+          owner: {
+            kind: "native",
+            owner_key: "other-owner",
+            conversation_id: "other-chat"
+          },
+          recoveries: []
+        }}
+      />
+    )
+    expect(screen.queryByText(/Retained outcomes/)).toBeNull()
+    mounted.rerender(<HistorySelectionReview selection={selection} />)
+    expect(
+      screen.getByText(/Retained outcomes \(1\)/).closest("details")
+    ).not.toHaveAttribute("open")
+  })
+  it("keeps distinct operations with identical text and sorts their actions by recency without changing the journal", () => {
+    const first = receipt("r1"),
+      second = receipt("r2")
+    first.turn.input_text = second.turn.input_text =
+      "Identical input.  \nExact next line."
+    const entries = [first, second],
+      selection = selectionWith(entries)
+    render(<HistorySelectionReview selection={selection} />)
+    const summary = screen.getByText(/Retained outcomes \(2\)/)
+    fireEvent.click(summary)
+    const cards = [
+      ...summary
+        .closest("details")!
+        .querySelectorAll<HTMLElement>('[role="status"]')
+    ]
+    expect(cards).toHaveLength(2)
+    expect(
+      screen.getAllByText(first.turn.input_text, {
+        normalizer: (value) => value
+      })
+    ).toHaveLength(2)
+    cards.forEach((card) =>
+      fireEvent.click(
+        within(card).getByRole("button", { name: "Dismiss recovery" })
+      )
+    )
+    expect(vi.mocked(selection.dismissRecovery).mock.calls).toEqual([
+      [second],
+      [first]
+    ])
+    expect(selection.recoveries).toBe(entries)
+    expect(entries.map((entry) => entry.turn.operation_id)).toEqual([
+      "r1",
+      "r2"
+    ])
+  })
+  it("retains saved-result actions and an uncertain partial reply inside the disclosure", async () => {
+    const saved = completedEditedSelection().recoveries[0]
+    const partial = {
+      ...receipt("r3"),
+      turn: {
+        ...receipt("r3").turn,
+        state: "unknown" as const,
+        input_text: "Uncertain question",
+        result_text: "Retained partial reply"
+      }
+    }
+    const selection = {
+      ...selectionWith([]),
+      status: "ready" as const,
+      recoveries: [saved, partial],
+      openRecoveryResult: vi.fn(async () => true)
+    }
+    render(<HistorySelectionReview selection={selection} />)
+    const summary = screen.getByText(/Retained outcomes \(2\)/)
+    expect(
+      screen.getByRole("button", { name: "Open saved reply" })
+    ).not.toBeVisible()
+    expect(selection.openRecoveryResult).not.toHaveBeenCalled()
+    fireEvent.click(summary)
+    const partialCard = screen
+      .getByText("Retained partial reply")
+      .closest('[role="status"]')!
+    fireEvent.click(
+      within(partialCard as HTMLElement).getByText(
+        "Inspect original input and result"
+      )
+    )
+    expect(screen.getByText("Retained partial reply")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
+    await waitFor(() =>
+      expect(selection.openRecoveryResult).toHaveBeenCalledWith(
+        saved,
+        expect.any(Function)
+      )
+    )
+    expect(selection.dismissRecovery).not.toHaveBeenCalled()
+  })
+  it("counts only displayed retained records and never promotes a foreign writer into the current result", () => {
+    const entries = Array.from({ length: 5 }, (_, index) =>
+      receipt(`r${index + 1}`)
+    )
+    const selection = selectionWith(entries)
+    render(
+      <HistorySelectionReview
+        selection={selection}
+        hideRecovery={(entry) => entry.turn.operation_id === "r2"}
+      />
+    )
+    const summary = screen.getByText(/Retained outcomes.*4/)
+    screen
+      .getAllByRole("button", { name: "Copy recovered text" })
+      .forEach((button) => expect(button).not.toBeVisible())
+    fireEvent.click(summary)
+    expect(
+      screen.getAllByRole("button", { name: "Copy recovered text" })
+    ).toHaveLength(4)
+    expect(
+      screen.queryByText(entries[1].turn.input_text, {
+        normalizer: (value) => value
+      })
+    ).toBeNull()
+    const record = screen
+      .getByText(entries[0].turn.input_text, { normalizer: (value) => value })
+      .closest('[role="status"]')!
+    fireEvent.click(record.querySelectorAll("button")[1])
+    expect(selection.dismissRecovery).toHaveBeenCalledWith(entries[0])
+  })
+})

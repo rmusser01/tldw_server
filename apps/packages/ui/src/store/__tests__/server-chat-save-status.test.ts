@@ -62,6 +62,35 @@ describe("server chat save status", () => {
     expect(getServerChatSaveStatus("chat-1")).toBe("saved")
   })
 
+  it.each(["unknown", "saved", "failed"] as const)(
+    "a definite unchanged write preserves the previous %s outcome and original error",
+    async (previous) => {
+      if (previous !== "unknown") beginServerChatWrite("chat-1")(previous)
+      const refusal = new Error("input was not admitted")
+      await expect(
+        trackServerChatWrite("chat-1", () => Promise.reject(refusal), {
+          isUnchangedError: (error) => error === refusal
+        })
+      ).rejects.toBe(refusal)
+      expect(getServerChatSaveStatus("chat-1")).toBe(previous)
+    }
+  )
+
+  it.each(["isAcknowledgedError", "isUnchangedError"] as const)(
+    "a failed %s classifier ends saving as failed and preserves the original write error",
+    async (classifier) => {
+      const original = new Error("write failed")
+      await expect(
+        trackServerChatWrite("chat-1", () => Promise.reject(original), {
+          [classifier]: () => {
+            throw new Error("classification failed")
+          }
+        })
+      ).rejects.toBe(original)
+      expect(getServerChatSaveStatus("chat-1")).toBe("failed")
+    }
+  )
+
   it("stays saving until every overlapping write settles", () => {
     const endFirst = beginServerChatWrite("chat-1")
     const endSecond = beginServerChatWrite("chat-1")

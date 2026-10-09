@@ -86,10 +86,13 @@ export const beginServerChatWrite = (
  * Runs a server write for `chatId` and records whether the server acknowledged
  * it. The write's result or error is passed through unchanged.
  */
-export const trackServerChatWrite = async <T>(
+export const trackServerChatWrite = async <T,>(
   chatId: unknown,
   write: () => Promise<T>,
-  options?: { isAcknowledgedError?: (error: unknown) => boolean }
+  options?: {
+    isAcknowledgedError?: (error: unknown) => boolean
+    isUnchangedError?: (error: unknown) => boolean
+  }
 ): Promise<T> => {
   const endWrite = beginServerChatWrite(chatId)
   try {
@@ -97,7 +100,14 @@ export const trackServerChatWrite = async <T>(
     endWrite("saved")
     return result
   } catch (error) {
-    endWrite(options?.isAcknowledgedError?.(error) ? "saved" : "failed")
+    let outcome: ServerChatWriteOutcome = "failed"
+    try {
+      if (options?.isAcknowledgedError?.(error)) outcome = "saved"
+      else if (options?.isUnchangedError?.(error)) outcome = "unknown"
+    } catch {
+      // A failed classifier cannot supply acknowledgement or replace the write error.
+    }
+    endWrite(outcome)
     throw error
   }
 }

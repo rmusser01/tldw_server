@@ -223,3 +223,36 @@ export const resolveHistorySelection = (
     return { status: error.code === "missing_cursor" ? "stale_selection" : "invalid_history", code: error.code }
   }
 }
+
+/** Only this exact scoped leaf-check response proves that input was not admitted. */
+export const isDefinitiveNativeBranchRejection = (
+  error: unknown,
+  selection: { conversation_id: string; messages: readonly { id: string }[] }
+): boolean => {
+  const response = error as {
+    status?: unknown
+    details?: { detail?: unknown }
+  } | null
+  const value = response?.details?.detail
+  if (
+    response?.status !== 409 ||
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  )
+    return false
+  const detail = value as Record<string, unknown>
+  return (
+    detail.status === "stale_selection" &&
+    detail.code === "history_branch_changed" &&
+    detail.conversation_id === selection.conversation_id &&
+    detail.parent_message_id === (selection.messages.at(-1)?.id ?? null) &&
+    Array.isArray(detail.leaf_ids) &&
+    detail.leaf_ids.length > 0 &&
+    detail.leaf_ids.every((id) => typeof id === "string" && id.length > 0) &&
+    new Set(detail.leaf_ids).size === detail.leaf_ids.length &&
+    typeof detail.history_version === "number" &&
+    Number.isSafeInteger(detail.history_version) &&
+    detail.history_version >= 0
+  )
+}

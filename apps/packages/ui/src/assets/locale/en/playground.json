@@ -1290,6 +1290,7 @@
     "messageCount": "{{count}} messages"
   },
   "historySelection": {
+    "retainedOutcomes": "Retained outcomes",
     "region": "Conversation history selection",
     "loading": "Loading selected history",
     "pending": "History confirmation pending",

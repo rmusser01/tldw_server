@@ -4386,6 +4386,7 @@
     "message": "Could not open the saved reply. Your current view and saved reply are retained."
   },
   "historySelection": {
+    "retainedOutcomes": "Retained outcomes",
     "savedRegeneratedReplyTitle": "New reply saved",
     "savedRegeneratedReplyMessage": "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready.",
     "regenerationRefusedTitle": "New reply refused",
