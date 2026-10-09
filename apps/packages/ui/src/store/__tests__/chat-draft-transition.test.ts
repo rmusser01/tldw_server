@@ -8,7 +8,12 @@ vi.mock('@/services/chat-account-boundary', () => ({
   },
 }));
 import { useStoreMessageOption } from '../option';
-import { captureChatDraftLoad, captureChatDraftSource } from '@/hooks/chat/chat-draft-transition';
+import {
+  captureChatDraftLoad,
+  captureChatDraftSource,
+  chatDraftAddressForReceipt
+} from "@/hooks/chat/chat-draft-transition"
+
 import { usePlaygroundSessionStore } from '../playground-session';
 import type { HistoryLoadReceipt } from '@/hooks/chat/useHistorySelection';
 
@@ -54,6 +59,96 @@ describe('explicit conversation draft address transitions', () => {
       ownerKey: 'server-owner',
     });
   });
+
+  it.each(
+    (["bind", "switch"] as const).flatMap((kind) =>
+      (["native", "local"] as const).flatMap((ownerKind) =>
+        (["New", "destination ABA"] as const).map((boundary) => ({
+          kind,
+          ownerKind,
+          boundary
+        }))
+      )
+    )
+  )(
+    "rejects $kind into $ownerKind after $boundary during synchronous address publication",
+    ({ kind, ownerKind, boundary }) => {
+      const receipt: HistoryLoadReceipt =
+        ownerKind === "native"
+          ? native()
+          : {
+              ...native(),
+              owner: {
+                kind: "local",
+                conversation_id: "a",
+                profile_id: "profile-one",
+                owner_key: "local-owner",
+                validate_lease: () => true
+              },
+              view: { ...native().view, owner_key: "local-owner" }
+            }
+      const accept = captureChatDraftLoad(kind)
+      let replaced = false
+      const stop = useStoreMessageOption.subscribe((state) => {
+        const destination = state.chatDraftAddress
+        if (replaced || destination?.kind !== ownerKind || destination.id !== "a")
+          return
+        replaced = true
+        state.startNewChatDraft()
+        if (boundary === "destination ABA")
+          useStoreMessageOption.getState().setChatDraftAddress(destination)
+      })
+      try {
+        expect(accept(receipt)).toBe(false)
+        expect(replaced).toBe(true)
+        expect(accept.isCurrent()).toBe(false)
+        expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe(
+          boundary === "New" ? "fresh" : ownerKind
+        )
+      } finally {
+        stop()
+      }
+    }
+  )
+
+  it.each(["bind", "switch"] as const)(
+    "keeps a current same-key %s without inventing another address revision",
+    (kind) => {
+      const receipt = native()
+      const address = chatDraftAddressForReceipt(receipt)!
+      expect(useStoreMessageOption.getState().setChatDraftAddress(address)).toBe(
+        true
+      )
+      const revision = useStoreMessageOption.getState().chatDraftRevision
+      const accept = captureChatDraftLoad(kind)
+      expect(accept(receipt)).toBe(true)
+      expect(accept.isCurrent()).toBe(true)
+      expect(useStoreMessageOption.getState().chatDraftAddress).toBe(address)
+      expect(useStoreMessageOption.getState().chatDraftRevision).toBe(revision)
+    }
+  )
+
+  it.each(["bind", "switch"] as const)(
+    "keeps a current %s after an unrelated synchronous store publication",
+    (kind) => {
+      const accept = captureChatDraftLoad(kind)
+      let published = false
+      const stop = useStoreMessageOption.subscribe((state) => {
+        if (published || state.chatDraftAddress?.kind !== "native") return
+        published = true
+        state.setServerChatTitle("Unrelated current title")
+      })
+      try {
+        expect(accept(native())).toBe(true)
+        expect(accept.isCurrent()).toBe(true)
+        expect(useStoreMessageOption.getState().serverChatTitle).toBe(
+          "Unrelated current title"
+        )
+      } finally {
+        stop()
+      }
+    }
+  )
 
   it('rejects an obsolete receipt after New even before any ID exists', () => {
     const accept = captureChatDraftLoad('switch');

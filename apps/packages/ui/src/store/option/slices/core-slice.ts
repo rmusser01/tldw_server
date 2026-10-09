@@ -85,19 +85,56 @@ export const createCoreSlice: StoreSlice<
   },
   setChatDraftAddress: (address, options = {}) => {
     let accepted = false
+    let acceptedAddress = address
+    let acceptedRevision = -1
     set((state) => {
-      if (options.expectedRevision !== undefined && options.expectedRevision !== state.chatDraftRevision) return state
-      if (options.sourceAddress !== undefined && options.sourceAddress !== state.chatDraftAddress) return state
+      if (
+        options.expectedRevision !== undefined &&
+        options.expectedRevision !== state.chatDraftRevision
+      )
+        return state
+      if (
+        options.sourceAddress !== undefined &&
+        options.sourceAddress !== state.chatDraftAddress
+      )
+        return state
       accepted = true
+      acceptedRevision = state.chatDraftRevision
       const destinationKey = chatDraftAddressKey(address)
-      if (state.chatDraftAddress && chatDraftAddressKey(state.chatDraftAddress) === destinationKey) return state
+      if (
+        state.chatDraftAddress &&
+        chatDraftAddressKey(state.chatDraftAddress) === destinationKey
+      ) {
+        acceptedAddress = state.chatDraftAddress
+        return state
+      }
       const revision = state.chatDraftRevision + 1
-      return { chatDraftAddress: address, chatDraftRevision: revision,
-        ...(state.chatDraftAddress && options.kind !== "bind" ? { selectedQuickPrompt: null, quickPromptRevision: state.quickPromptRevision + 1 } : {}),
+      acceptedRevision = revision
+      return {
+        chatDraftAddress: address,
+        chatDraftRevision: revision,
+        ...(state.chatDraftAddress && options.kind !== "bind"
+          ? {
+              selectedQuickPrompt: null,
+              quickPromptRevision: state.quickPromptRevision + 1
+            }
+          : {}),
         temporaryChat: address.kind === "fresh" && address.temporary,
-        chatDraftTransition: { kind: options.kind ?? "switch", sourceAddress: state.chatDraftAddress, destinationKey, revision } }
+        chatDraftTransition: {
+          kind: options.kind ?? "switch",
+          sourceAddress: state.chatDraftAddress,
+          destinationKey,
+          revision
+        }
+      }
     })
-    return accepted
+    const current = get()
+    return (
+      accepted &&
+      current.chatDraftAddress === acceptedAddress &&
+      current.chatDraftRevision === acceptedRevision
+    )
+
   },
   messages: [],
   setMessages: (messagesOrUpdater) =>
