@@ -51,6 +51,7 @@ import { createKnowledgeQaClient } from "./knowledgeQaClient"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
+import { createStreamingUpdateScheduler } from "@/utils/streaming-update-scheduler"
 import { getKnowledgeQaHistoryStorageKey, getKnowledgeQaStorageScopeKey, persistKnowledgeQaHistory } from "./historyStorage"
 import { useKnowledgeQAAuthority } from "./hooks/useKnowledgeQAAuthority"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
@@ -2599,6 +2600,48 @@ function OwnedKnowledgeQAProvider({
           let terminalEvent: RagTerminalEvent | null = null
           let streamWhyPayload: unknown = null
           let streamSourceStatusPayload: unknown = null
+          // Streaming deltas are throttled (TASK-13511): citation parsing and
+          // trust normalization each scan the whole accumulated answer, so
+          // running them per token made long answers degrade quadratically.
+          // The scheduler flushes at most every 80ms with the latest state,
+          // mirroring the chat streaming cadence.
+          let streamEnded = false
+          const emitPartialAnswer = () => {
+            const partialAnswer = normalizeAnswerText(streamAnswer)
+            const partialCitations = partialAnswer
+              ? parseCitations(partialAnswer, streamResults)
+              : []
+            const partialTrust = normalizeKnowledgeAnswerTrust({
+              answer: partialAnswer,
+              results: streamResults,
+              citations: partialCitations,
+              hasRequiredMetadata: true,
+              syncFailed: isThreadSyncFailed(),
+              weakEvidence: hasWeakEvidence(
+                streamResults,
+                effectiveSettings.strip_min_relevance
+              ),
+            })
+            dispatch({
+              type: "SET_PARTIAL_RESULTS",
+              payload: {
+                query: trimmedQuery,
+                results: streamResults,
+                answer: partialAnswer,
+                citations: partialCitations,
+                answerTrustState: partialTrust.state,
+                answerTrustReasonCodes: partialTrust.reasonCodes,
+                answerEvidenceOrigin:
+                  partialTrust.evidenceOrigin === "unknown_origin"
+                    ? null
+                    : partialTrust.evidenceOrigin,
+              },
+            })
+          }
+          const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
+            shouldFlush: () => !streamEnded,
+            apply: () => emitPartialAnswer(),
+          })
 
           try {
             for await (const event of (tldwClient as {
@@ -2611,6 +2654,7 @@ function OwnedKnowledgeQAProvider({
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
+                streamingUpdateScheduler.cancel()
                 return
               }
               if (terminalEvent) {
@@ -2652,36 +2696,7 @@ function OwnedKnowledgeQAProvider({
                   type: "SET_SEARCH_DETAILS",
                   payload: resolvedSearchDetails,
                 })
-                const partialAnswer = normalizeAnswerText(streamAnswer)
-                const partialCitations = partialAnswer
-                  ? parseCitations(partialAnswer, streamResults)
-                  : []
-                const partialTrust = normalizeKnowledgeAnswerTrust({
-                  answer: partialAnswer,
-                  results: streamResults,
-                  citations: partialCitations,
-                  hasRequiredMetadata: true,
-                  syncFailed: isThreadSyncFailed(),
-                  weakEvidence: hasWeakEvidence(
-                    streamResults,
-                    effectiveSettings.strip_min_relevance
-                  ),
-                })
-                dispatch({
-                  type: "SET_PARTIAL_RESULTS",
-                  payload: {
-                    query: trimmedQuery,
-                    results: streamResults,
-                    answer: partialAnswer,
-                    citations: partialCitations,
-                    answerTrustState: partialTrust.state,
-                    answerTrustReasonCodes: partialTrust.reasonCodes,
-                    answerEvidenceOrigin:
-                      partialTrust.evidenceOrigin === "unknown_origin"
-                        ? null
-                        : partialTrust.evidenceOrigin,
-                  },
-                })
+                emitPartialAnswer()
                 continue
               }
 
@@ -2692,39 +2707,16 @@ function OwnedKnowledgeQAProvider({
                 if (!deltaText) continue
                 observedStreamOutput = true
                 streamAnswer += deltaText
-                const partialAnswer = normalizeAnswerText(streamAnswer)
-                const partialCitations = partialAnswer
-                  ? parseCitations(partialAnswer, streamResults)
-                  : []
-                const partialTrust = normalizeKnowledgeAnswerTrust({
-                  answer: partialAnswer,
-                  results: streamResults,
-                  citations: partialCitations,
-                  hasRequiredMetadata: true,
-                  syncFailed: isThreadSyncFailed(),
-                  weakEvidence: hasWeakEvidence(
-                    streamResults,
-                    effectiveSettings.strip_min_relevance
-                  ),
-                })
-                dispatch({
-                  type: "SET_PARTIAL_RESULTS",
-                  payload: {
-                    query: trimmedQuery,
-                    results: streamResults,
-                    answer: partialAnswer,
-                    citations: partialCitations,
-                    answerTrustState: partialTrust.state,
-                    answerTrustReasonCodes: partialTrust.reasonCodes,
-                    answerEvidenceOrigin:
-                      partialTrust.evidenceOrigin === "unknown_origin"
-                        ? null
-                        : partialTrust.evidenceOrigin,
-                  },
-                })
+                streamingUpdateScheduler.schedule(null)
                 continue
               }
             }
+
+            // Land the final buffered partial state before terminal handling
+            // so no streamed content is lost, then stop any trailing flush
+            // from racing the terminal/error dispatches.
+            streamingUpdateScheduler.flushNow()
+            streamEnded = true
 
             if (!terminalEvent) {
               throw new RagTerminalStreamError(
@@ -2748,6 +2740,8 @@ function OwnedKnowledgeQAProvider({
               effectiveSettings
             )
           } catch (streamError) {
+            streamEnded = true
+            streamingUpdateScheduler.cancel()
             const streamMessage =
               streamError instanceof Error
                 ? streamError.message

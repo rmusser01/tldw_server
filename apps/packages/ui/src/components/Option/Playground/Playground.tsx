@@ -481,14 +481,16 @@ const PlaygroundContent = () => {
     );
 
   const refreshCharacterChatModels = React.useCallback(
-    async (isCancelled?: () => boolean) => {
+    async (isCancelled?: () => boolean, options?: { forceRefresh?: boolean }) => {
       setCharacterChatAvailableModels(null);
       setChatProviderStatus(null);
       try {
         const [models, providerStatus] = await Promise.all([
           fetchChatModels({
             returnEmpty: true,
-            forceRefresh: true,
+            // Mount refreshes reuse the model cache; only the explicit
+            // readiness retry forces a provider round trip (TASK-13511).
+            forceRefresh: options?.forceRefresh === true,
           }),
           tldwClient
             .initialize()
@@ -3676,7 +3678,7 @@ const PlaygroundContent = () => {
         return;
       }
       if (action === "retry") {
-        void refreshCharacterChatModels();
+        void refreshCharacterChatModels(undefined, { forceRefresh: true });
       }
     },
     [
