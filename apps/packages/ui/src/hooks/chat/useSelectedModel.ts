@@ -25,17 +25,27 @@ let selectedModelWrites: Promise<void> = Promise.resolve();
 const persistSelectedModel = (
   value: string | null,
   revision: number,
-  write: (value: string | null) => Promise<void>,
-): Promise<void> => {
-  const pending = selectedModelWrites.then(() => {
-    const current = useStoreMessageOption.getState();
-    if (current.selectedModelRevision !== revision ||
-      normalizeSelectedModel(current.selectedModel) !== value) return;
-    return write(value);
-  });
-  selectedModelWrites = pending.catch(() => undefined);
-  return pending;
-};
+  write: (value: string | null) => Promise<void>
+): Promise<boolean> => {
+  const isCurrent = () => {
+    const current = useStoreMessageOption.getState()
+    return (
+      current.selectedModelRevision === revision &&
+      normalizeSelectedModel(current.selectedModel) === value
+    )
+  }
+  const pending = selectedModelWrites.then(async () => {
+    if (!isCurrent()) return false
+    await write(value)
+    return isCurrent()
+  })
+  // Keep the serial queue usable after failure without turning failure into ACK.
+  selectedModelWrites = pending.then(
+    () => undefined,
+    () => undefined
+  )
+  return pending
+}
 
 /**
  * Consolidated model selection hook.

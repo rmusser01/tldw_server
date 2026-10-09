@@ -44,7 +44,7 @@ export interface UsePromptTemplatesDeps {
   ragPinnedResults: any[];
   currentChatModelSettings: Record<string, any>;
   /** Setters for applying templates */
-  setSelectedModel: (model: string) => void;
+  setSelectedModel: (model: string) => Promise<boolean | void> | boolean | void;
   setSelectedSystemPrompt: (id: string | undefined) => void;
   setSelectedQuickPrompt: (prompt: string | null) => void;
   setSystemPrompt: (prompt: string) => void;
@@ -289,6 +289,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
 
   const applyStartupTemplateBundle = React.useCallback(
     async (template: StartupTemplateBundle, context?: RolePlayApplyContext) => {
+      const isCurrent = () => context?.isCurrent?.() !== false
+      if (!isCurrent()) return false
       const rolePlayIdentity = template.rolePlay?.identity
       const selection = template.rolePlay
         ? rolePlayIdentity?.kind === "persona"
@@ -340,27 +342,30 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         return false
 
       if (template.selectedModel) {
-        setSelectedModel(template.selectedModel)
+        if (
+          (await setSelectedModel(template.selectedModel)) === false ||
+          !isCurrent()
+        )
+          return false
         if (compareModeActive) {
           setCompareSelectedModels((prev: string[]) => {
+            if (!isCurrent()) return prev
             const updated = new Set(prev || [])
             updated.add(template.selectedModel!)
             return Array.from(updated)
           })
+          if (!isCurrent()) return false
         }
       }
 
-      if (resolvedPromptId) {
-        setSelectedSystemPrompt(resolvedPromptId)
-      } else {
-        setSelectedSystemPrompt(undefined)
-      }
+      setSelectedSystemPrompt(resolvedPromptId || undefined)
+      if (!isCurrent()) return false
       setSystemPrompt(resolvedPromptContent)
-
+      if (!isCurrent()) return false
       updateChatModelSettings(settings)
-
+      if (!isCurrent()) return false
       setRagPinnedResults(template.ragPinnedResults || [])
-      return true
+      return isCurrent()
     },
     [
       compareModeActive,

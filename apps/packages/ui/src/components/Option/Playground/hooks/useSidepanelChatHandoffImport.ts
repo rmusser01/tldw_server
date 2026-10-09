@@ -24,7 +24,9 @@ const literalOptionKeys = [
 type LiteralOptions = Partial<Pick<State, (typeof literalOptionKeys)[number]>>
 type LiteralOptionControls = {
   current: Pick<State, (typeof literalOptionKeys)[number]>
-  setSelectedModel: (model: string | null) => void | Promise<void>
+  setSelectedModel: (
+    model: string | null
+  ) => boolean | void | Promise<boolean | void>
   setChatMode: State["setChatMode"]
   setWebSearch: State["setWebSearch"]
   setToolChoice: State["setToolChoice"]
@@ -556,7 +558,7 @@ export function useSidepanelChatHandoffImport({
           cleanRouteHandoff(conflict.route)
           return
         }
-        let modelPersistence: Promise<void> | undefined
+        let modelPersistence: Promise<boolean | void> | undefined
         if (applyOptions && literalOptions) {
           const values = handoff.literalOptions!
           if (values.chatMode !== undefined)
@@ -593,7 +595,17 @@ export function useSidepanelChatHandoffImport({
         )
         if (modelPersistence) {
           try {
-            await modelPersistence
+            const acknowledged = await modelPersistence
+            if (acknowledged === false) {
+              if (
+                receipt &&
+                attempt.isOwned() &&
+                optionRevision.current === committedOptionRevision
+              ) {
+                setImportReceipt((current) => (current === receipt ? null : current))
+              }
+              return
+            }
             if (
               receipt &&
               attempt.isOwned() &&

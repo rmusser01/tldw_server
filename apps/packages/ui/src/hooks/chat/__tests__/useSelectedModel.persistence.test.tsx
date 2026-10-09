@@ -115,7 +115,7 @@ describe("explicit model persistence with multiple actual hook owners", () => {
     let attempts = 0;
     const { writes, error } = recordWrites(() => ++attempts === 1);
     let armed = true;
-    let newer!: Promise<void>;
+    let newer!: Promise<boolean>;
     const unsubscribe = useStoreMessageOption.subscribe(state => {
       if (armed && state.selectedModel === nextModel) {
         armed = false;
@@ -123,7 +123,7 @@ describe("explicit model persistence with multiple actual hook owners", () => {
       }
     });
     try {
-      let outcomes!: PromiseSettledResult<void>[];
+      let outcomes!: PromiseSettledResult<boolean>[];
       await act(async () => {
         const older = view.result.current.first.setSelectedModel(nextModel);
         outcomes = await Promise.allSettled([older, newer]);
@@ -143,8 +143,8 @@ describe("explicit model persistence with multiple actual hook owners", () => {
       if (key === "selectedModel" && ++reads === 1) return held.promise as Promise<never>;
       return originalGet.call(this, key) as Promise<never>;
     });
-    let first!: Promise<void>;
-    let newer!: Promise<void>;
+    let first!: Promise<boolean>;
+    let newer!: Promise<boolean>;
     act(() => { first = view.result.current.first.setSelectedModel(nextModel); });
     await waitFor(() => expect(reads).toBe(1));
     act(() => { newer = view.result.current.second.setSelectedModel("openai:latest-model"); });
@@ -175,7 +175,7 @@ describe("explicit model persistence with multiple actual hook owners", () => {
       }
       return originalGet.call(this, key) as Promise<never>;
     });
-    let completion!: Promise<void>;
+    let completion!: Promise<boolean>;
     act(() => {
       completion = view.result.current.first.setSelectedModel(nextModel);
     });
@@ -270,7 +270,7 @@ describe("explicit model persistence with multiple actual hook owners", () => {
         ? (held.promise as Promise<never>)
         : (originalGet.call(this, key) as Promise<never>);
     });
-    let completion!: Promise<void>;
+    let completion!: Promise<boolean>;
     act(() => {
       completion = view.result.current.first.setSelectedModel(null);
     });
@@ -312,4 +312,101 @@ describe("explicit model persistence with multiple actual hook owners", () => {
     expect(view.result.current.first.selectedModel).toBe(nextModel);
     expect(view.result.current.second.selectedModel).toBe(nextModel);
   });
+  it("returns an acknowledgement only for the exact current durable model selection", async () => {
+    const view = mount()
+    await ready(view)
+    let acknowledged: unknown
+    await act(async () => {
+      acknowledged = await view.result.current.first.setSelectedModel(nextModel)
+    })
+    expect({
+      acknowledged,
+      stored: window.localStorage.getItem("selectedModel")
+    }).toEqual({ acknowledged: true, stored: JSON.stringify(nextModel) })
+  })
+  it("does not acknowledge an older held write after a newer selection", async () => {
+    const view = mount()
+    await ready(view)
+    const held = deferred<string>()
+    const originalGet = Storage.prototype.get
+    let reads = 0
+    vi.spyOn(Storage.prototype, "get").mockImplementation(function (
+      this: Storage,
+      key: string
+    ) {
+      if (key === "selectedModel" && ++reads === 1)
+        return held.promise as Promise<never>
+      return originalGet.call(this, key) as Promise<never>
+    })
+    let first!: Promise<unknown>
+    let newer!: Promise<unknown>
+    let outcomes!: unknown[]
+    act(() => {
+      first = view.result.current.first.setSelectedModel(nextModel)
+    })
+    await waitFor(() => expect(reads).toBe(1))
+    act(() => {
+      newer = view.result.current.second.setSelectedModel("openai:latest-model")
+    })
+    await act(async () => {
+      held.resolve(oldModel)
+      outcomes = await Promise.all([first, newer])
+    })
+    expect({
+      outcomes,
+      stored: window.localStorage.getItem("selectedModel")
+    }).toEqual({
+      outcomes: [false, true],
+      stored: JSON.stringify("openai:latest-model")
+    })
+  })
+  it("does not acknowledge a retained old Retry after a newer model is durable", async () => {
+    const view = mount()
+    await ready(view)
+    const retainedRetry = view.result.current.first.retrySelectedModelSave
+    await act(async () => {
+      await view.result.current.second.setSelectedModel(nextModel)
+    })
+    const { writes } = recordWrites()
+    let acknowledged: unknown
+    await act(async () => {
+      acknowledged = await retainedRetry()
+    })
+    expect({
+      acknowledged,
+      writes,
+      stored: window.localStorage.getItem("selectedModel")
+    }).toEqual({
+      acknowledged: false,
+      writes: [],
+      stored: JSON.stringify(nextModel)
+    })
+  })
+  it("acknowledges deliberate device Retry without another selection revision", async () => {
+    const view = mount()
+    await ready(view)
+    let failed = true
+    const { writes } = recordWrites(() => failed)
+    await act(async () => {
+      await view.result.current.first
+        .setSelectedModel(nextModel)
+        .catch(() => undefined)
+    })
+    const revision = useStoreMessageOption.getState().selectedModelRevision
+    failed = false
+    let acknowledged: unknown
+    await act(async () => {
+      acknowledged = await view.result.current.first.retrySelectedModelSave()
+    })
+    expect({
+      acknowledged,
+      revision: useStoreMessageOption.getState().selectedModelRevision,
+      writes
+    }).toEqual({
+      acknowledged: true,
+      revision,
+      writes: [JSON.stringify(nextModel), JSON.stringify(nextModel)]
+    })
+  })
+
 });

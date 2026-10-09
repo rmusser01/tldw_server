@@ -111,28 +111,29 @@ const mount = (
   token = packet(),
   initialDraft = "Destination question",
   canApply?: () => boolean,
+  modelWriter?: ReturnType<typeof useSelectedModel>["setSelectedModel"]
 ) => {
-  const initialEntry = entryFor(token);
+  const initialEntry = entryFor(token)
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <MemoryRouter initialEntries={[initialEntry]}>{children}</MemoryRouter>
-  );
-  const warning = vi.fn();
+  )
+  const warning = vi.fn()
   const view = renderHook(
     () => {
-      const state = useStoreMessageOption((value) => value);
+      const state = useStoreMessageOption((value) => value)
       const form = useSimpleForm({
-        initialValues: { message: initialDraft, image: "" },
-      });
+        initialValues: { message: initialDraft, image: "" }
+      })
       const captureGuard = React.useCallback(() => {
-        const capturedOwner = owner;
-        return () => owner === capturedOwner;
-      }, []);
-      const { setFieldValue } = form;
+        const capturedOwner = owner
+        return () => owner === capturedOwner
+      }, [])
+      const { setFieldValue } = form
       const setMessageValue = React.useCallback(
         (value: string) => setFieldValue("message", value),
-        [setFieldValue],
-      );
-      const { setSelectedModel } = useSelectedModel();
+        [setFieldValue]
+      )
+      const { setSelectedModel } = useSelectedModel()
       const dependencies = {
         ready: true,
         destinationKey: "owned-destination-chat",
@@ -148,31 +149,31 @@ const mount = (
             chatMode: state.chatMode,
             webSearch: state.webSearch,
             toolChoice: state.toolChoice,
-            useOCR: state.useOCR,
+            useOCR: state.useOCR
           },
           canApply,
-          setSelectedModel,
+          setSelectedModel: modelWriter ?? setSelectedModel,
           setChatMode: state.setChatMode,
           setWebSearch: state.setWebSearch,
           setToolChoice: state.setToolChoice,
-          setUseOCR: state.setUseOCR,
-        },
-      };
+          setUseOCR: state.setUseOCR
+        }
+      }
       const handoff = useSidepanelChatHandoffImport(
-        dependencies,
-      ) as ImportResult;
+        dependencies
+      ) as ImportResult
       return {
         handoff,
         setSelectedModel,
         form,
         location: useLocation(),
-        navigate: useNavigate(),
-      };
+        navigate: useNavigate()
+      }
     },
-    { wrapper },
-  );
-  return { ...view, warning };
-};
+    { wrapper }
+  )
+  return { ...view, warning }
+}
 const reviewed = async (view: ReturnType<typeof mount>) => {
   await waitFor(() =>
     expect(view.result.current.handoff.conflict).not.toBeNull(),
@@ -439,39 +440,88 @@ describe("explicit passive options in an encoded WebUI handoff", () => {
     expect(io.persistModel).toHaveBeenCalledTimes(1);
   });
   it("does not let an old model persistence rejection replace a newer transfer receipt", async () => {
-    const oldWrite = deferred<void>();
-    io.persistModel.mockReturnValueOnce(oldWrite.promise);
-    const view = mount();
-    await reviewed(view);
-    consent(view);
-    act(() => {
-      void view.result.current.handoff.replaceWithHandoffDraft();
-    });
-    await waitFor(() =>
-      expect(view.result.current.handoff.conflict).toBeNull(),
-    );
-    act(() =>
-      view.result.current.navigate(
-        entryFor(packet({ draft: "New reviewed text" })),
-      ),
-    );
-    await reviewed(view);
-    expect(view.result.current.handoff.includeLiteralOptions).toBe(false);
-    consent(view);
+    const oldWrite = deferred<void>()
+    const newWrite = deferred<void>()
+    io.persistModel
+      .mockReturnValueOnce(oldWrite.promise)
+      .mockReturnValueOnce(newWrite.promise)
+    const view = mount()
+    let oldCompletion: Promise<unknown> | undefined
+    let newCompletion: Promise<unknown> | undefined
+    try {
+      await reviewed(view)
+      consent(view)
+      act(() => {
+        oldCompletion = view.result.current.handoff.replaceWithHandoffDraft()
+      })
+      await waitFor(() => expect(view.result.current.handoff.conflict).toBeNull())
+      act(() =>
+        view.result.current.navigate(
+          entryFor(packet({ draft: "New reviewed text" }))
+        )
+      )
+      await reviewed(view)
+      expect(view.result.current.handoff.includeLiteralOptions).toBe(false)
+      consent(view)
+      act(() => {
+        newCompletion = view.result.current.handoff.replaceWithHandoffDraft()
+      })
+      await waitFor(() => {
+        expect(view.result.current.handoff.conflict).toBeNull()
+        expect(view.result.current.handoff.importReceipt?.description).toMatch(
+          /saving/i
+        )
+      })
+      const newReceipt = view.result.current.handoff.importReceipt
+      expect(newReceipt).not.toBeNull()
+      await act(async () => {
+        oldWrite.reject(new Error("Old browser write failed"))
+        await oldCompletion
+      })
+      expect(view.result.current.handoff.importReceipt).toBe(newReceipt)
+      expect(view.result.current.form.getValues().message).toBe(
+        "New reviewed text"
+      )
+      expect(io.persistModel).toHaveBeenCalledTimes(2)
+      await act(async () => {
+        newWrite.resolve()
+        await newCompletion
+      })
+      expect(view.result.current.handoff.importReceipt?.description).toMatch(
+        /model.*saved|saved.*model/i
+      )
+      expect(view.result.current.form.getValues().message).toBe(
+        "New reviewed text"
+      )
+    } finally {
+      await act(async () => {
+        oldWrite.resolve()
+        newWrite.resolve()
+        await Promise.all([oldCompletion, newCompletion])
+      })
+    }
+  })
+  it("does not announce a model save when the declared writer refuses its acknowledgement", async () => {
+    // Receiver contract control only; actual storage ACK is covered by the model suite.
+    const modelWriter: ReturnType<typeof useSelectedModel>["setSelectedModel"] =
+      vi.fn((next) => {
+        const state = useStoreMessageOption.getState()
+        const value =
+          typeof next === "function" ? next(state.selectedModel) : next
+        state.setSelectedModel(value, { storageHandled: true })
+        return Promise.resolve(false)
+      })
+    const view = mount(packet(), "Destination question", undefined, modelWriter)
+    await reviewed(view)
+    consent(view)
     await act(async () => {
-      await view.result.current.handoff.replaceWithHandoffDraft();
-    });
-    const newReceipt = view.result.current.handoff.importReceipt;
-    expect(newReceipt).not.toBeNull();
-    await act(async () => {
-      oldWrite.reject(new Error("Old browser write failed"));
-    });
-    expect(view.result.current.handoff.importReceipt).toBe(newReceipt);
-    expect(view.result.current.form.getValues().message).toBe(
-      "New reviewed text",
-    );
-    expect(io.persistModel).toHaveBeenCalledTimes(2);
-  });
+      await view.result.current.handoff.replaceWithHandoffDraft()
+    })
+    expect(view.result.current.handoff.importReceipt).toBeNull()
+    expect(view.result.current.form.getValues().message).toBe(copiedDraft)
+    expect(currentOptions()).toEqual(copiedOptions)
+    expect(io.persistModel).not.toHaveBeenCalled()
+  })
   it("refuses a retained checked accept callback after the user unchecks consent", async () => {
     const view = mount();
     await reviewed(view);
@@ -563,32 +613,47 @@ describe("explicit passive options in an encoded WebUI handoff", () => {
     expect(io.catalog).toHaveBeenCalledTimes(1);
     expect(view.result.current.location.hash).toBe("#keep=fragment");
   });
-  it("retires a pending save notice when the same model is explicitly selected again", async () => {
-    const held = deferred<void>();
-    io.persistModel.mockReturnValueOnce(held.promise);
-    const view = mount();
-    await reviewed(view);
-    consent(view);
-    let completion!: Promise<unknown>;
-    act(() => {
-      completion = view.result.current.handoff.replaceWithHandoffDraft();
-    });
-    await waitFor(() =>
-      expect(view.result.current.handoff.importReceipt?.description).toMatch(
-        /saving/i,
-      ),
-    );
-    await act(async () => {
-      await view.result.current.setSelectedModel(copiedOptions.selectedModel);
-    });
-    expect(view.result.current.handoff.importReceipt).toBeNull();
-    await act(async () => {
-      held.reject(new Error("Old write failed"));
-      await completion;
-    });
-    expect(view.result.current.handoff.importReceipt).toBeNull();
-    expect(currentOptions()).toEqual(copiedOptions);
-    expect(io.persistModel).toHaveBeenCalledTimes(2);
-    expect(view.result.current.form.getValues().message).toBe(copiedDraft);
-  });
+  it.each(["accepted", "rejected"] as const)(
+    "retires a pending save notice when the same model is explicitly selected again and the older write is %s",
+    async (settlement) => {
+      const held = deferred<void>()
+      io.persistModel.mockReturnValueOnce(held.promise)
+      const view = mount()
+      let completion: Promise<unknown> | undefined
+      let newerCompletion: Promise<boolean> | undefined
+      try {
+        await reviewed(view)
+        consent(view)
+        act(() => {
+          completion = view.result.current.handoff.replaceWithHandoffDraft()
+        })
+        await waitFor(() =>
+          expect(view.result.current.handoff.importReceipt?.description).toMatch(
+            /saving/i
+          )
+        )
+        act(() => {
+          newerCompletion = view.result.current.setSelectedModel(
+            copiedOptions.selectedModel
+          )
+        })
+        expect(view.result.current.handoff.importReceipt).toBeNull()
+        await act(async () => {
+          if (settlement === "accepted") held.resolve()
+          else held.reject(new Error("Old write failed"))
+          await completion
+          expect(await newerCompletion).toBe(true)
+        })
+        expect(view.result.current.handoff.importReceipt).toBeNull()
+        expect(currentOptions()).toEqual(copiedOptions)
+        expect(io.persistModel).toHaveBeenCalledTimes(2)
+        expect(view.result.current.form.getValues().message).toBe(copiedDraft)
+      } finally {
+        await act(async () => {
+          held.resolve()
+          await Promise.all([completion, newerCompletion])
+        })
+      }
+    }
+  )
 });
