@@ -13,6 +13,7 @@ import { createDefaultActorSettings } from "@/types/actor";
 import { useActorStore } from "@/store/actor";
 import { RolePlaySetupDrawer, type RolePlayApplyContext, type RolePlaySetupApplyPayload } from "../RolePlaySetupDrawer";
 import type { RolePlayState } from "../role-play-state";
+import { createStartupTemplateBundle } from "../startup-template-bundles";
 
 const mocks = vi.hoisted(() => ({
   setSelectedAssistant: vi.fn(async () => undefined),
@@ -370,6 +371,235 @@ describe("conversation setup identity", () => {
     expect(onApply).toHaveBeenCalledTimes(2);
     expect(onApply).toHaveBeenLastCalledWith(expect.objectContaining({ clearIdentity: true }), expect.anything());
   });
+
+  it("reports a saved setup complete only after scene Retry is acknowledged", async () => {
+    const saved = createStartupTemplateBundle({
+      name: "Saved scene Retry",
+      source: "role-play-setup",
+      selectedModel: null,
+      systemPrompt: "",
+      rolePlay: {
+        source: "role-play-setup",
+        identity: null,
+        behavior: null,
+        scene: {
+          ...createDefaultActorSettings(),
+          isEnabled: true,
+          notes: "Saved exact scene"
+        },
+        generation: null,
+        context: null
+      }
+    })
+    const onApplySavedSetup = vi.fn(async () => true)
+    const onSavedSetupApplied = vi.fn()
+    const props = {
+      savedRolePlaySetups: [saved],
+      onApplySavedSetup,
+      onSavedSetupApplied,
+      onSaveRolePlaySetup: vi.fn(),
+      onSavedSetupDraftNameChange: vi.fn(),
+      onPreviewSavedSetup: vi.fn(),
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup: vi.fn()
+    }
+    mocks.saveScene.mockResolvedValueOnce(false)
+    const { onClose } = renderDrawer(props)
+    const user = userEvent.setup()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Apply {{name}}" })).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: "Apply {{name}}" }))
+    await screen.findByRole("alert")
+    expect(onSavedSetupApplied).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Apply {{name}}" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(onSavedSetupApplied).toHaveBeenCalledOnce()
+    expect(onApplySavedSetup).toHaveBeenCalledOnce()
+    expect(mocks.saveScene).toHaveBeenCalledTimes(2)
+    expect(useActorStore.getState().settings.notes).toBe("Saved exact scene")
+  })
+
+  it("keeps a saved application's exact ID and notified destination through model failure and delayed own-view publication", async () => {
+    const saved = createStartupTemplateBundle({
+      name: "Own destination Retry",
+      source: "role-play-setup",
+      selectedModel: null,
+      systemPrompt: "",
+      rolePlay: {
+        source: "role-play-setup",
+        identity: null,
+        behavior: null,
+        scene: null,
+        generation: null,
+        context: null
+      }
+    })
+    let reject!: (error: Error) => void
+    const held = new Promise<boolean>((_resolve, fail) => {
+      reject = fail
+    })
+    const applicationIds: unknown[] = []
+    const onApplySavedSetup = vi.fn((_setup, context?: RolePlayApplyContext) => {
+      applicationIds.push(
+        (context as RolePlayApplyContext & { applicationId?: object })
+          ?.applicationId
+      )
+      mocks.option.historyId = null
+      mocks.option.serverChatId = null
+      context?.onDestination?.({
+        historyId: null,
+        serverChatId: null,
+        isCurrent: () => true
+      })
+      return applicationIds.length === 1 ? held : Promise.resolve(true)
+    })
+    const onClose = vi.fn()
+    let publish!: () => void
+    const Harness = () => {
+      const [ids, setIds] = React.useState({
+        historyId: "history-1" as string | null,
+        serverChatId: "server-1" as string | null
+      })
+      React.useLayoutEffect(() => {
+        publish = () => setIds({ historyId: null, serverChatId: null })
+      }, [])
+      return (
+        <RolePlaySetupDrawer
+          open
+          beforeState={beforeState}
+          {...ids}
+          characterId="char-mira"
+          onClose={onClose}
+          onApply={vi.fn()}
+          savedRolePlaySetups={[saved]}
+          onApplySavedSetup={onApplySavedSetup}
+          onSaveRolePlaySetup={vi.fn()}
+          onSavedSetupDraftNameChange={vi.fn()}
+          onPreviewSavedSetup={vi.fn()}
+          onRenameSavedSetup={vi.fn()}
+          onDeleteSavedSetup={vi.fn()}
+        />
+      )
+    }
+    const view = render(<Harness />)
+    const user = userEvent.setup()
+    try {
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Apply {{name}}" })
+        ).toBeEnabled()
+      )
+      await user.click(screen.getByRole("button", { name: "Apply {{name}}" }))
+      await waitFor(() => expect(onApplySavedSetup).toHaveBeenCalledOnce())
+      await act(async () => {
+        reject(new Error("Model device write failed"))
+        await held.catch(() => undefined)
+      })
+      await screen.findByRole("alert")
+      act(() => publish())
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Apply {{name}}" })
+        ).toBeEnabled()
+      )
+      expect(mocks.loadScene).toHaveBeenCalledOnce()
+      await user.click(screen.getByRole("button", { name: "Apply {{name}}" }))
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+      expect(applicationIds[0]).toEqual(expect.any(Object))
+      expect(applicationIds[1]).toBe(applicationIds[0])
+      expect(mocks.saveScene).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ historyId: null, serverChatId: null })
+      )
+    } finally {
+      view.unmount()
+      reject(new Error("Test cleanup"))
+      await held.catch(() => undefined)
+    }
+  })
+
+  it.each(["Escape", "Close"])(
+    "admits dirty %s dismissal after the failed model operation is superseded",
+    async (action) => {
+      let modelRevision = 0
+      const onApply = vi.fn(
+        async (
+          _payload: RolePlaySetupApplyPayload,
+          context?: RolePlayApplyContext
+        ) => {
+          const captured = modelRevision
+          context?.onDestination?.({
+            historyId: "history-1",
+            serverChatId: "server-1",
+            isCurrent: () => modelRevision === captured
+          })
+          throw new Error("Model preference save failed")
+        }
+      )
+      const { onClose } = renderDrawer({ onApply })
+      const originalActor = useActorStore.getState().settings
+      const user = await choosePersona()
+      await user.type(
+        screen.getByRole("textbox", { name: "Scene notes" }),
+        " retained"
+      )
+      await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+      await screen.findByRole("alert")
+      modelRevision++
+      if (action === "Escape") await user.keyboard("{Escape}")
+      else
+        await user.click(
+          screen.getByRole("button", { name: "Close", exact: true })
+        )
+      await user.click(
+        await screen.findByRole("button", { name: "Discard", exact: true })
+      )
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+      expect(onApply).toHaveBeenCalledOnce()
+      expect(mocks.saveScene).not.toHaveBeenCalled()
+      expect(useActorStore.getState().settings).toEqual(originalActor)
+    }
+  )
+
+  it("does not close a saved setup after its completion callback replaces the selected chat", async () => {
+    const saved = createStartupTemplateBundle({
+      name: "Completion replacement",
+      source: "role-play-setup",
+      selectedModel: null,
+      systemPrompt: "",
+      rolePlay: {
+        source: "role-play-setup",
+        identity: null,
+        behavior: null,
+        scene: null,
+        generation: null,
+        context: null
+      }
+    })
+    const onSavedSetupApplied = vi.fn(() => {
+      mocks.option.serverChatId = "replacement-chat"
+    })
+    const props = {
+      savedRolePlaySetups: [saved],
+      onApplySavedSetup: vi.fn(async () => true),
+      onSavedSetupApplied,
+      onSaveRolePlaySetup: vi.fn(),
+      onSavedSetupDraftNameChange: vi.fn(),
+      onPreviewSavedSetup: vi.fn(),
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup: vi.fn()
+    }
+    const { onClose } = renderDrawer(props)
+    const user = userEvent.setup()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Apply {{name}}" })).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: "Apply {{name}}" }))
+    await waitFor(() => expect(mocks.saveScene).toHaveBeenCalledOnce())
+    expect(onClose).not.toHaveBeenCalled()
+    expect(onSavedSetupApplied).toHaveBeenCalledOnce()
+  })
 
   it("keeps the saved scene untouched when applying the other settings fails", async () => {
     const originalActor = useActorStore.getState().settings;

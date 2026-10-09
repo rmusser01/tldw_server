@@ -13,7 +13,9 @@ import { createStartupTemplateBundle } from "../startup-template-bundles"
 const actorSettingsMocks = vi.hoisted(() => ({
   getActorSettingsForChatWithCharacterFallback: vi.fn(),
   saveActorSettingsForChat: vi.fn(),
-  retries: [] as Array<() => void>
+  retries: [] as Array<() => void>,
+  closes: [] as Array<() => void>,
+  discards: [] as Array<() => unknown>
 }))
 
 vi.mock("@/services/actor-settings", () => ({
@@ -96,107 +98,135 @@ vi.mock("../playground-features", () => ({
     ) : null
 }))
 
-vi.mock("antd", async (importOriginal) => ({
-  Modal: (await importOriginal<typeof import("antd")>()).Modal,
-  Drawer: ({
-    open,
-    title,
-    children,
-    footer,
-    onClose
-  }: {
-    open?: boolean
-    title?: React.ReactNode
-    children: React.ReactNode
-    footer?: React.ReactNode
-    onClose?: () => void
-  }) =>
-    open ? (
-      <section role="dialog" aria-label={String(title || "Role-play setup")}
-        onKeyDown={(event) => { if (event.key === "Escape") onClose?.() }}>
-        <button type="button" onClick={onClose}>
-          Close drawer
-        </button>
-        {children}
-        {footer}
-      </section>
-    ) : null,
-  Button: React.forwardRef<HTMLButtonElement, {
-    children: React.ReactNode
-    onClick?: () => void
-    htmlType?: string
-    "aria-label"?: string
-  }>(({
-    children,
-    onClick,
-    htmlType,
-    "aria-label": ariaLabel
-  }, ref) => {
-    if (children === "Retry" && onClick) actorSettingsMocks.retries.push(onClick)
-    return (<button
-      ref={ref}
-      type={htmlType === "submit" ? "submit" : "button"}
-      aria-label={ariaLabel}
-      onClick={onClick}>
-      {children}
-    </button>)
-  }),
-  Checkbox: ({
-    checked,
-    onChange,
-    children
-  }: {
-    checked?: boolean
-    onChange?: (event: { target: { checked: boolean } }) => void
-    children?: React.ReactNode
-  }) => (
-    <label>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange?.({ target: { checked: event.target.checked } })}
-      />
-      {children}
-    </label>
-  ),
-  Input: Object.assign(
-    ({
-      value,
-      onChange,
-      "aria-label": ariaLabel
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>()
+  return {
+    Modal: {
+      useModal: () => {
+        const [modal, holder] = actual.Modal.useModal()
+        return [
+          {
+            ...modal,
+            confirm: (config: Parameters<typeof modal.confirm>[0]) => {
+              if (config.onOk) actorSettingsMocks.discards.push(config.onOk)
+              return modal.confirm(config)
+            }
+          },
+          holder
+        ]
+      }
+    },
+    Drawer: ({
+      open,
+      title,
+      children,
+      footer,
+      onClose
     }: {
-      value?: string
-      onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
-      "aria-label"?: string
-    }) => <input aria-label={ariaLabel} value={value} onChange={onChange} />,
-    {
-      TextArea: ({
+      open?: boolean
+      title?: React.ReactNode
+      children: React.ReactNode
+      footer?: React.ReactNode
+      onClose?: () => void
+    }) => {
+      if (open && onClose) actorSettingsMocks.closes.push(onClose)
+      return open ? (
+        <section
+          role="dialog"
+          aria-label={String(title || "Role-play setup")}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") onClose?.()
+          }}>
+          <button type="button" onClick={onClose}>
+            Close drawer
+          </button>
+          {children}
+          {footer}
+        </section>
+      ) : null
+    },
+    Button: React.forwardRef<
+      HTMLButtonElement,
+      {
+        children: React.ReactNode
+        onClick?: () => void
+        htmlType?: string
+        "aria-label"?: string
+      }
+    >(({ children, onClick, htmlType, "aria-label": ariaLabel }, ref) => {
+      if (children === "Retry" && onClick)
+        actorSettingsMocks.retries.push(onClick)
+      return (
+        <button
+          ref={ref}
+          type={htmlType === "submit" ? "submit" : "button"}
+          aria-label={ariaLabel}
+          onClick={onClick}>
+          {children}
+        </button>
+      )
+    }),
+    Checkbox: ({
+      checked,
+      onChange,
+      children
+    }: {
+      checked?: boolean
+      onChange?: (event: { target: { checked: boolean } }) => void
+      children?: React.ReactNode
+    }) => (
+      <label>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) =>
+            onChange?.({ target: { checked: event.target.checked } })
+          }
+        />
+        {children}
+      </label>
+    ),
+    Input: Object.assign(
+      ({
         value,
         onChange,
         "aria-label": ariaLabel
       }: {
         value?: string
-        onChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+        onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
         "aria-label"?: string
-      }) => <textarea aria-label={ariaLabel} value={value} onChange={onChange} />
-    }
-  ),
-  Skeleton: () => <div data-testid="scene-loading" />,
-  Switch: ({
-    checked,
-    onChange
-  }: {
-    checked?: boolean
-    onChange?: (checked: boolean) => void
-  }) => (
-    <input
-      aria-label="Scene enabled"
-      type="checkbox"
-      checked={checked}
-      onChange={(event) => onChange?.(event.target.checked)}
-    />
-  )
-}))
+      }) => <input aria-label={ariaLabel} value={value} onChange={onChange} />,
+      {
+        TextArea: ({
+          value,
+          onChange,
+          "aria-label": ariaLabel
+        }: {
+          value?: string
+          onChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+          "aria-label"?: string
+        }) => (
+          <textarea aria-label={ariaLabel} value={value} onChange={onChange} />
+        )
+      }
+    ),
+    Skeleton: () => <div data-testid="scene-loading" />,
+    Switch: ({
+      checked,
+      onChange
+    }: {
+      checked?: boolean
+      onChange?: (checked: boolean) => void
+    }) => (
+      <input
+        aria-label="Scene enabled"
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange?.(event.target.checked)}
+      />
+    )
+  }
+})
 
 const beforeState: RolePlayState = {
   active: true,
@@ -263,6 +293,8 @@ const renderDrawer = (
 
 describe("RolePlaySetupDrawer", () => {
   beforeEach(() => {
+    actorSettingsMocks.closes.length = 0
+    actorSettingsMocks.discards.length = 0
     useStoreMessageOption.setState({ serverChatId: "server-1", historyId: "history-1" })
     actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockResolvedValue(
       activeScene()
@@ -1057,5 +1089,135 @@ describe("RolePlaySetupDrawer", () => {
     fireEvent.click(discard)
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  it.each(["new draft", "same-ID H1", "owner"])(
+    "rejects retained dismissal before React commits a %s change",
+    async (change) => {
+      const selection = renderHook(() => useHistorySelection())
+      let ownerRevision = 0
+      const onClose = vi.fn()
+      render(
+        <HistorySelectionContext.Provider value={selection.result.current}>
+          <RolePlaySetupDrawer
+            open
+            beforeState={beforeState}
+            historyId="history-1"
+            serverChatId="server-1"
+            onClose={onClose}
+            onApply={async () => true}
+            captureApplyGuard={() => {
+              const originalOwner = ownerRevision
+              return () => originalOwner === ownerRevision
+            }}
+          />
+        </HistorySelectionContext.Provider>
+      )
+      await screen.findByText(/1 detail/)
+      fireEvent.change(screen.getByLabelText("Scene notes"), {
+        target: { value: "Keep this source's staged scene" }
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Close drawer" }))
+      await screen.findByRole("button", { name: "Discard", exact: true })
+      const discard = actorSettingsMocks.discards.at(-1)!
+      act(() => {
+        if (change === "new draft")
+          useStoreMessageOption.getState().startNewChatDraft()
+        else if (change === "same-ID H1") selection.result.current.reset()
+        else ownerRevision++
+        discard()
+      })
+      expect(onClose).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["new draft", "same-ID H1", "owner"])(
+    "rejects retained header close before React commits a %s change",
+    async (change) => {
+      const selection = renderHook(() => useHistorySelection())
+      let ownerRevision = 0
+      const onClose = vi.fn()
+      render(
+        <HistorySelectionContext.Provider value={selection.result.current}>
+          <RolePlaySetupDrawer
+            open
+            beforeState={beforeState}
+            historyId="history-1"
+            serverChatId="server-1"
+            onClose={onClose}
+            onApply={async () => true}
+            captureApplyGuard={() => {
+              const originalOwner = ownerRevision
+              return () => originalOwner === ownerRevision
+            }}
+          />
+        </HistorySelectionContext.Provider>
+      )
+      await screen.findByText(/1 detail/)
+      fireEvent.change(screen.getByLabelText("Scene notes"), {
+        target: { value: "Keep this source's staged scene" }
+      })
+      const close = actorSettingsMocks.closes.at(-1)!
+      act(() => {
+        if (change === "new draft")
+          useStoreMessageOption.getState().startNewChatDraft()
+        else if (change === "same-ID H1") selection.result.current.reset()
+        else ownerRevision++
+        close()
+      })
+      expect(actorSettingsMocks.discards).toHaveLength(0)
+      expect(onClose).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["Close", "Escape"])(
+    "allows %s on the current unavailable-owner error panel",
+    async (action) => {
+      const onClose = vi.fn()
+      renderDrawer({ captureApplyGuard: () => () => false, onClose })
+      await screen.findByRole("alert")
+      if (action === "Close")
+        fireEvent.click(screen.getByRole("button", { name: "Close drawer" }))
+      else
+        fireEvent.keyDown(
+          screen.getByRole("dialog", { name: "Role-play setup" }),
+          { key: "Escape" }
+        )
+      expect(onClose).toHaveBeenCalledOnce()
+      expect(
+        actorSettingsMocks.getActorSettingsForChatWithCharacterFallback
+      ).not.toHaveBeenCalled()
+      expect(actorSettingsMocks.saveActorSettingsForChat).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["new draft", "same-ID H1"])(
+    "refuses a retired unavailable-owner panel before %s renders",
+    async (change) => {
+      const selection = renderHook(() => useHistorySelection())
+      const onClose = vi.fn()
+      render(
+        <HistorySelectionContext.Provider value={selection.result.current}>
+          <RolePlaySetupDrawer
+            open
+            beforeState={beforeState}
+            historyId="history-1"
+            serverChatId="server-1"
+            onClose={onClose}
+            onApply={async () => true}
+            captureApplyGuard={() => () => false}
+          />
+        </HistorySelectionContext.Provider>
+      )
+      await screen.findByRole("alert")
+      const close = actorSettingsMocks.closes.at(-1)!
+      act(() => {
+        if (change === "new draft")
+          useStoreMessageOption.getState().startNewChatDraft()
+        else selection.result.current.reset()
+        close()
+      })
+      expect(onClose).not.toHaveBeenCalled()
+    }
+  )
 
 })

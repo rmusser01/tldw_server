@@ -1433,6 +1433,95 @@ describe("PlaygroundForm role-play starter", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Apply saved template" })).not.toBeInTheDocument())
   })
 
+  it.each([1, 2])(
+    "keeps the accepted startup identity while retrying %s failed model device writes",
+    async (failures) => {
+      const { source } = prepareNativeSource()
+      source.serverChatId = "partial-model-source"
+      const bundle = createStartupTemplateBundle({
+        name: "Partial model Retry",
+        selectedModel: "openai:proposal",
+        systemPrompt: "",
+        rolePlay: {
+          source: "role-play-setup",
+          identity: { kind: "persona", id: "guide", name: "Guide" },
+          behavior: null,
+          scene: null,
+          generation: null,
+          context: null
+        }
+      })
+      savedSetupFixture.raw = JSON.stringify([bundle])
+      let revision = -1
+      const retry = vi.fn(async () => true)
+      for (let i = 1; i < failures; i++)
+        retry.mockRejectedValueOnce(new Error("Device model retry failed"))
+      source.beginSelectedModelSave.mockImplementation((model) => {
+        source.setSelectedModel(model)
+        revision = source.selectedModelRevision
+        const completion = Promise.reject<boolean>(
+          new Error("Device model write failed")
+        )
+        void completion.catch(() => undefined)
+        return {
+          completion,
+          retry,
+          isCurrent: () =>
+            source.selectedModelRevision === revision &&
+            source.selectedModel === model
+        }
+      })
+      startupPreviewFixture.apply = null
+      const user = userEvent.setup()
+      const view = render(<PlaygroundForm droppedFiles={[]} />)
+      try {
+        await user.click(
+          screen.getByRole("button", { name: "Open role-play setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Preview saved setup" })
+        )
+        await user.click(
+          await screen.findByRole("button", { name: "Apply saved template" })
+        )
+        await waitFor(() =>
+          expect(nativeSetupFixture.error).toHaveBeenCalledOnce()
+        )
+        expect(saveActorSettingsMock).not.toHaveBeenCalled()
+        const originalRevision = revision
+        for (let i = 1; i < failures; i++) {
+          await act(async () => {
+            await startupPreviewFixture.apply!()
+          })
+          expect(retry).toHaveBeenCalledTimes(i)
+          expect(
+            screen.getByRole("button", { name: "Apply saved template" })
+          ).toBeInTheDocument()
+        }
+        await act(async () => {
+          await startupPreviewFixture.apply!()
+        })
+        expect(retry).toHaveBeenCalledTimes(failures)
+        expect({
+          identity: selectedAssistantMock.setSelectedAssistant.mock.calls.length,
+          modelOperations: source.beginSelectedModelSave.mock.calls.length,
+          revision: source.selectedModelRevision,
+          scenes: saveActorSettingsMock.mock.calls.length
+        }).toEqual({
+          identity: 1,
+          modelOperations: 1,
+          revision: originalRevision,
+          scenes: 1
+        })
+        expect(
+          screen.queryByRole("button", { name: "Apply saved template" })
+        ).not.toBeInTheDocument()
+      } finally {
+        view.unmount()
+      }
+    }
+  )
+
   it("retries only the failed scene save for the same startup preview", async () => {
     prepareNativeSource()
     savedSetupFixture.raw = JSON.stringify([

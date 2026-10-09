@@ -1947,6 +1947,7 @@ export const PlaygroundForm = ({
     promptSummaryLabel,
     handleSaveRolePlaySetup,
     handleApplySavedRolePlaySetup,
+    handleSavedRolePlaySetupApplied,
     handleRenameStartupTemplate,
   } = promptTemplates;
   React.useEffect(() => {
@@ -2705,6 +2706,7 @@ export const PlaygroundForm = ({
     try {
       if (!proposal.settingsAccepted) {
         const applied = await applyStartupTemplateBundle(proposal.template, {
+          applicationId: lease.id,
           isCurrent,
           onDestination: (next) => {
             proposal.destination = {
@@ -7309,6 +7311,7 @@ export const PlaygroundForm = ({
               onSaveRolePlaySetup={handleSaveRolePlaySetup}
               onPreviewSavedSetup={handleOpenStartupTemplatePreview}
               onApplySavedSetup={handleApplySavedRolePlaySetup}
+              onSavedSetupApplied={handleSavedRolePlaySetupApplied}
               onRenameSavedSetup={handleRenameStartupTemplate}
               onDeleteSavedSetup={handleDeleteStartupTemplate}
             />
