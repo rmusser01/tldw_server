@@ -21,10 +21,14 @@ chat entrypoint — this module adds no secret handling of its own.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.Automation_Message_Store_DB import (
+    AutomationMessageStore,
+)
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import register_executor
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
@@ -166,21 +170,82 @@ async def _execute_generation_only(
     return text
 
 
-def register_automation_executors() -> None:
-    """Register the production executor for the wired phase-1 family.
+async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]) -> str:
+    """Run one agent_task definition generation-only (ADR-184 phase 2).
 
-    ``recurring_question`` only: ``agent_task`` is deliberately unwired in
-    phase 1 (its message is redacted at rest; the consumer skips those runs
-    with an actionable reason). Idempotent: safe at every worker startup.
-    The seam stays test-overridable — tests replace entries in the
-    consumer's registry directly.
+    Ruling 1A read path: the raw message lives only in the owner's
+    encrypted store; resolve it here, in memory, at dispatch. An
+    unresolvable ref (purged TTL, store miss, undecryptable blob) is an
+    honest failed run via the raised LookupError -- never a silent skip.
+
+    Ruling 2A step 1: the consumer's tool gate terminates tool-requesting
+    definitions as ``approval_required`` before this executor runs; what
+    reaches here executes generation-only (no tool loop exists yet -- the
+    read-only envelope is the next slice and will route through this same
+    seam).
+    """
+    source = definition.input if isinstance(definition.input, dict) else {}
+    message_ref = str(source.get("message_ref") or "").strip()
+    if not message_ref:
+        raise LookupError(
+            "agent_task definition carries no message_ref (authored before "
+            "the ADR-184 message store, or metadata incomplete)"
+        )
+    # The store read is sqlite I/O (mkdir, connect, query) -- keep it off
+    # the event loop so one slow read cannot stall other jobs' dispatch.
+    store = AutomationMessageStore.for_user(definition.owner_id)
+    raw_message = await asyncio.to_thread(
+        store.resolve_message, definition.owner_id, message_ref
+    )
+    if raw_message is None:
+        raise LookupError(
+            f"agent_task message_ref {message_ref!r} is unresolvable "
+            "(purged TTL, store unavailable, or wrong owner)"
+        )
+    from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+
+    target = resolve_execution_target(definition)
+    call_kwargs: dict[str, Any] = {
+        "messages": [{"role": "user", "content": raw_message}],
+        "system_message": _definition_system_prompt(definition),
+        "max_tokens": target["max_tokens"],
+    }
+    if target["provider"]:
+        call_kwargs["api_provider"] = target["provider"]
+    if target["model"]:
+        call_kwargs["model"] = target["model"]
+
+    response = await perform_chat_api_call_async(**call_kwargs)
+    text = (extract_openai_content(response) or "").strip()
+    if not text:
+        raise RuntimeError("automation executor received an empty completion")
+    return text
+
+
+def register_automation_executors() -> None:
+    """Register the production executors for the wired families.
+
+    ``recurring_question`` (phase-1 generation-only) and ``agent_task``
+    (ADR-184 phase 2: generation-only with the message resolved from the
+    encrypted store at dispatch). agent_task dispatch additionally sits
+    behind the deployment certification gate, and tool-requesting runs
+    terminate ``approval_required`` before the executor runs. Idempotent:
+    safe at every worker startup. The seam stays test-overridable — tests
+    replace entries in the consumer's registry directly.
     """
     global _REGISTERED
     register_executor("recurring_question", _execute_generation_only)
+    # ADR-184 phase 2: agent_task executes generation-only with its message
+    # resolved from the encrypted store. Dispatch still sits behind the
+    # deployment certification gate (Phase 4D) and tool-requesting
+    # definitions terminate approval_required (ruling 2A) before this
+    # executor runs.
+    register_executor("agent_task", _execute_agent_task)
     _REGISTERED = True
     logger.info(
-        "Automation LLM executor registered (recurring_question, "
-        "phase-1 generation-only; agent_task unwired: message redacted at rest)"
+        "Automation LLM executors registered (recurring_question + "
+        "agent_task generation-only via the ADR-184 message store; "
+        "tool-requesting runs terminate approval_required)"
     )
 
 
