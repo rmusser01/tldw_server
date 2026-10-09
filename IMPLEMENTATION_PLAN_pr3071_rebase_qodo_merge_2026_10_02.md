@@ -2940,3 +2940,313 @@ source was integrated, edited, executed against native storage or published.
 Current cold-schema/cd516 correction qualification remains distinct; the final
 full397 UI execution is still active. No third native Send or new model request
 is authorized, and full native UAT/live Stop remain unqualified.
+
+2026-10-09 normal LOCAL-ONLY checkpoint42f7b57b135fe205fb7726d403b86b466c108c61
+has exact parentsc2fc557860cfc20e8e5798f7b7168b4a58aa50ae and
+cd5160201cb32e05d254accdd8ac1377e1d164ad, treefec09a95e5b1bb018f18c3ab80390a74093998de.
+All14 intended changed paths and all27109 committed source entries read back
+exact. Normal full991-file preflight actually passes/exit0/source unchanged;
+Ruff/Black hook no-files skips are not actual lint claims, and separately bound
+quality remains rawCleanfalse/zero new findings. Existing precommit hook absent,
+normal LFS prepush retained, no installation or bypass. Inherited GC warning is
+retained without gc.log removal/prune/recovery cleanup. No MERGE_HEAD remains.
+
+Fresh explicit GitHub refs and separate branch API agree publishedc2fc and actual
+dev4d6a85c4c693c4c83480d0f7c8046cfda0634c55. Its sole change after1ff is other-owner
+TASK13434 closure through PR3215; the complete paginated diff is read and all1ff
+runtime inputs are unchanged. This does not qualify the still-unintegrated1ff
+frontend/extension batch or close its seven P2 findings. Latest AGENTS/CLAUDE/
+CI_REQUIRED_GATES are exact checkout policy, queueunset/auto_mergeNULL. No task
+13434/source integration or publication/body/hosted/native mutation occurred.
+
+Receipts cold-qualified-local-checkpoint-prepare/commit-20261009.json retain
+source composition, actual453 backend and7771 UI counts, normal hooks and fresh
+refs. Frontend439/types/build/budgets are separately source-composed with the
+exact nonowning fixture exception; old failures and snapshots remain untouched.
+After this post-checkpoint entry only the two owned plan/task notes are dirty,
+intentionally unpublished, plus the existing UI dependency link. Final two-note
+preflight and current published-head hosted readback are recorded separately.
+Stage30/33/36 and NORMAL PR merge/safe cleanup remain incomplete; no third Send,
+new inference, profile reopen/probe or fourth Character-root authorization.
+
+## Stage 37: Verified Incoming Ownership Regressions
+**Goal**: Correct the seven independently verified incoming regressions in an
+isolated 42f plus actual 4d6 source candidate while preserving the qualified
+checkpoint, feature union, data, original failures and native input restrictions.
+**Success Criteria**: Finite RED/GREEN evidence for each finding; connected
+review and current-source owning qualification before normal integration and
+publication; no stale cache, lost selection/frame/draft, queued stale output or
+unreadable persisted model records.
+**Tests**: Account/server cached and held provider responses; originating frame
+and receipt-time selection across deferred imports; readiness child identity;
+linked-run policy and callback transitions; held KnowledgeQA generator clear,
+supersession and direct abort with timer cleanup; warmed/concurrent ModelDb
+instances and storage error/legacy compatibility. Then official contract,
+owning UI/frontend/types/build/unchanged budgets, security/manual/preflight.
+**Status**: In Progress
+
+Design: reuse existing account generations, request ownership, scoped result
+publisher, DOM selection validation, React reconciliation and catalog record
+semantics. No deadline/assertion/health weakening or blanket incoming file pick.
+Independent workers have private candidate copies and disjoint write scopes;
+parent handles provider status and KnowledgeQA conflict/queue authority.
+Readiness and research action caches must preserve both performance work and
+state/callback identity. Extension optimization must retain originating iframe
+and selection authority. ModelDb record visibility must not depend on a stale
+per-instance shared index; evaluate existing pre-incoming record authority and
+error/migration behavior before choosing the smallest nonlossy correction.
+
+ADR required: no for existing account/render/request/frame ownership repairs;
+ADR059 governs tracking. A fresh ModelDb persistence assessment is required
+before its implementation, with a new ADR only if a lasting rule changes. No new
+storage architecture is implicitly approved as a performance fix.
+
+The immutable preview tree aadb559ffb03fe2ab33f61b234a2637124a894ad has one actual
+KnowledgeQA conflict. Unlike the published-c2fc preview, 42f's officially
+regenerated fingerprint merges without a content conflict, but still requires
+fresh official source-bound verification. This private archive is not a Git
+checkout integration or runtime/hosted/native qualification. No new native
+input, actual extension storage/browser action, provider/model dispatch,
+service/profile mutation, publication or PR merge is authorized by this stage.
+
+Stage37 connected finite follow-ups retain the initial seven incoming findings
+and all raw predecessor failures. Provider status now has a real request-core
+singleflight boundary regression (not only a mocked module); interrupted stream
+errors preserve received scoped text; persisted original source indexes restore
+sparse citations. Independent export review found rejected ambiguous citations
+were reconstructed by Markdown/PDF/Notes: valid five-case RED then60PASS fixes
+only explicit-list authority and unique source mapping. Scoped final review
+finds no actionable P1/P2 in that export correction; native PDF is not tested.
+
+Extension selection now also validates receipt-time input value and selected
+contenteditable text after focus, before replacement. Final independent review
+and24+7 finite passes qualify only its six-file scope; guarded bytes are joined
+into the private parent candidate, not the checkout. ModelDb independently found
+occupied alias writes and obsolete-index deletion risks: finite40PASS17FAIL RED
+then57PASS, with minimal identity preflight and no unrelated-index cleanup.
+Final model review is pending; this is not CAS or a new locking/migration rule.
+
+Readiness/action follow-up fixes retained policy on refetch error, but final
+review finds invalid-lease permissive fallback and post-await attachment/prompt
+ownership gaps. Connected PlaygroundContent stays mounted across selections;
+finite dispatch/post-await fences are being qualified privately. Remaining
+incoming review finds idempotent ingest replay retains its original batch;
+batch-only polling hid completed jobs. Existing scoped fetchJob now reconciles
+only missing ids; healthy batching/error paths remain. Actual replay RED17PASS
+1FAIL then18PASS; prior never-fallback expectation is explicitly corrected to
+test missing404 persistence and relocated healthy-batch no-extra-fetch behavior.
+Neither this finite result nor raw lint/AST counts is whole-source acceptance.
+
+Official immutable runtime contract export/types/check all0 binds9536 runtime
+and helper inputs, with generated schema/types retained privately. Current
+candidate combined frontend/types/build and checkout integration/publication
+remain pending. No native input/model request, browser connection, shared service
+change, body edit, hosted reset, merge or cleanup has occurred in Stage37.
+
+Stage37 final scoped reviews are now completed and closed. Parent independently
+evaluated retained Kuhn export, Halley extension, Mendel model v3 and exact
+test-only typing follow-up, McClintock readiness/action v3, and Ramanujan ingest
+replay reports. No actionable P1/P2 remains in those corrected reviewed scopes;
+this is not whole-file/native/GitHub approval. Original OPEN reports, invalid
+fixtures and failed raw collectors remain retained, not relabelled.
+
+The private candidate freeze incoming-reviewed-candidate-freeze-v1-20261009.json
+checks all27122 immutable preview entries: exactly23 existing app source/test
+files differ and two new finite tests are present, totaling25 correction paths.
+All other preview entries, including other-owner plans/tasks, remain exact.
+Actual parent typed model tests57PASS preserve runtime/assertions/deadlines;
+eight new explicit-any warnings were corrected with only typed access/casts.
+Distinct59-file current semantic quality composition has0errors1003INHERITED
+warnings/ZEROnew, rawCleanfalse/rawCollectorPassedfalse; removed union-AST
+assertions have explicit model-authority and unchanged incoming batch-polling
+dispositions. No suppressions or policy changes were added.
+
+Actual incoming-final-frontend-v1 runs528PASS15files, full types8GBexit0,
+production Turbopack build/tokens/UNCHANGEDbudgets0/0/0, all7412 owning inputs
+exact. Shared557547<614400/heaviest856018<921600; artifactNOTSERVED. Actual
+incoming-extension-artifact-v2 Chrome production WXT/token buildexit0 binds
+all7412 unchanged inputs; it was not loaded in any browser. Its initial v1
+missing-tailwind dependency-layout build remainsFAILED. V2 links only pinned
+already-installed dependencies within a private COW artifact root; no install,
+shared dependency/cache mutation, source/config/budget/bundler substitution.
+
+Runtime453PASS12safe paths is explicitly SOURCE-COMPOSED with all9612 owning
+nonApp inputs exact, not a fresh backend/PG execution or global equivalence.
+Official contract export/types/check0/0/0 remains exact the candidate. Formal
+incoming-final-ui-v1 full405-file execution remainsACTIVE, not passed; the
+corrected original settings fixture32PASS and subsequent slower files are only
+partial results. No source integration, publication, native/browser/model,
+service/profile/actual storage action, NORMAL PR merge or cleanup occurred.
+
+Stage37 full incoming UI subsequently completed FAILED:7893PASS8FAIL405files,
+zeroPENDING/TODO/exit1. All eight failures are in the unchanged Character
+Manager.first-use fixture, all7412 parent and actual execution inputs freshly
+read back exact. Separate extension strict declared compile completedexit0 on
+TypeScript5.9.3/all7412 exact. The first reassessment collector confused936
+describe suites with405 actual files and failed before mutations; its helper is
+retained, and distinct corrected reassessment validates actual testResults.
+No current whole-UI qualification, source integration or publication is claimed.
+
+## Stage 38: Character Fixture Isolation Reassessment
+**Goal**: Resolve verified fixture isolation defects without weakening the
+existing real React/AntD, API-double, semantic or timing contracts.
+**Success Criteria**: Deterministic RED/GREEN for any correction, all original
+99 cases/assertions/role visibility/deadlines retained, scoped independent
+review/security/preflight and fresh full owning qualification before integration.
+**Tests**: Pending one-shot API replies across the actual shared fixture reset;
+then the complete Character file and full current owning UI selection.
+**Status**: In Progress
+
+Mandatory three-attempt reassessment is recorded in
+incoming-character-three-attempt-reassessment-20261009.json. Full owning failed;
+the unchanged density selection has raw1PASS98unselected but a failed collector
+and no recorded child code; the instrumentation-only third selection actually
+8PASS91unselected/exit0 with no expired or cross-owner events. This is not a
+fourth unchanged probe, owning qualification or causal repair. Expensive global
+role queries and real user actions are observed; a common root for all eight
+failures remains unproved, not classified as infrastructure or flaky.
+
+Compared patterns: existing settings fixture narrows a unique label then applies
+normal role/name/visibility and fences actions with its original runner signal;
+Notes completes actual CSS menu motion in finite jsdom before actionability;
+Character already scopes form queries after locating the submit button. No
+general wrapper, synthetic visibility/pointer bypass, deadline increase or
+production UI change is warranted by the observations.
+
+Pinned Vitest4 mockClear retains pending one-shot implementations, while the
+Character beforeEach only clears mock call history. Quick-chat tests configure
+one-shot session/reply values; an unconsumed reply can escape into a subsequent
+case. Add a finite direct regression for this actual reset boundary first and
+use the smallest reset correction only after RED. That distinct isolation
+defect does not itself prove the cause or repair of the eight full-run failures.
+ADR assessment: no durable architecture change; test-fixture isolation only,
+ADR059 governs tracking. Existing qualified candidate freeze and failed receipts
+stay immutable; any new candidate byte requires new source binding/review and
+owning qualification. All native/protected resource restrictions remain.
+
+Stage38 actual finite queue-reset RED2FAIL/GREEN2PASS is retained separately
+from its initial failed RED collector. The smallest shared reset correction
+preserves all99 original case bodies/assertions/visibility/deadlines exactly.
+The distinct complete Character owning execution101PASS/one file/exit0 binds
+all27124 inputs. Tesla's independent exact fixture review completed and closed
+with no actionable P1/P2 in that tiny scope; it is not proof of a common cause
+or repair of the original eight full-run failures, nor late-work cancellation.
+
+The new incoming-current-candidate-freeze-v2-20261009.json verifies24 existing
+plus two added correction paths, all other27122 preview entries exact. The
+original25-path freeze and failed405-file7893PASS8FAIL execution are unchanged.
+Current60-file quality composition has0errors1124INHERITEDwarnings/ZEROnew,
+rawCleanfalse. Prior frontend528PASS15files/types/build/tokens/unchanged budgets,
+extension Chrome artifact/strict compile, and retained safe runtime453PASS12
+paths are explicitly SOURCE-COMPOSED: exactly one later nonowning TS fixture
+difference for app executions and all9612 nonApp runtime inputs exact. Compiler
+inventories are not new compilation; artifacts remain not served/browser-loaded.
+
+The new full405-file UI-v2 run is INCOMPLETE/NOT QUALIFIED. Its wrapper exited1
+reading an absent result JSON after child exit; the actual child's code/signal
+were not recorded and must not be invented. Only seven completed files appear
+in the partial log, including Character101PASS; partial results cannot qualify
+the full selection. All7412 owning and27124 candidate inputs remain exact.
+The original helper/raw log/binding and independent incomplete inspection are
+retained. A reporting-only helper correction now saves future child metadata
+before reading JSON; syntax check0, no automatic retry or retrospective rewrite.
+Read-only exact snapshot worker inspection confirms the primary and all owned
+Node workers are gone; no process was signalled. Exit cause remains unproved,
+not labelled memory, infrastructure, flaky, or an assertion failure.
+
+Fresh read-only hosted collection22:46:38UTC independently confirms published
+c2fc and actualdev4d6 by explicit GitHub refs and separate branch API; queueUNSET,
+auto_mergeNULL, all seven actual required successes/29runs337jobs/no failed jobs,
+15 resolved threads/body and human suffix unchanged. This only qualifies c2fc.
+Local42f source/index remains preserved with nothing staged; no integration,
+publication, native/browser/model/service mutation, PR merge or cleanup occurred.
+Stages37/38/33/30/26 and TASK13421.1 remain In Progress. Next work must diagnose
+the incomplete runner through bounded evidence before any justified new run;
+never blindly execute either stale integration/publication helper or weaken
+selection/assertions/deadlines/health/budgets. FullUatPassedfalse/liveStopunproved,
+two native Sends consumed; no additional native input/probe is authorized.
+
+## Stage 39: Incomplete UI Runner Boundary Diagnosis
+**Goal**: Obtain actual child exit and uncaught-error provenance without altering
+the runner's error handling, selected tests, source, assertions or deadlines.
+**Success Criteria**: Owned observer finite self-check preserves normal/fatal/
+rejected/handled exits; one independently justified frozen full selection records
+actual code/signal and available error origin before result parsing. Missing
+results remain incomplete, never a pass or guessed infrastructure attribution.
+**Tests**: Actual Node children with expected uncaught/rejected/handled sentinels;
+then exact405-file candidate selection with observational-only error/exit logging.
+**Status**: Complete
+
+Read-only original-log inspection confirms only the Node version footer, no
+actual fatal/uncaught/worker/heap diagnostic; cause remains unproved. Pinned
+Vitest main and worker error handlers differ: adding an unhandledRejection or
+uncaughtException listener would alter their behavior, so neither is allowed.
+Use Node's separate uncaughtExceptionMonitor plus exit observation only; no
+signal handler, error capture callback, retry, timer, memory/deadline/budget
+increase, console suppression or source/config change. The unused-listener
+capture helper has only message-action callers and is not a proven cause of
+the interrupted run; do not edit it speculatively.
+
+Actual finite observer RED misses fatal provenance with unchanged child codes
+0/1/1/0; GREEN records all four exits and fatal/rejection/handled origins with
+the same codes and original stderr. This verifies observation, not causal
+repair or application qualification. A separate private COW frozen source run
+can now gather previously missing boundary evidence once, retaining original
+v1 failures and v2 incomplete records. No app source integration/publication,
+browser/native/provider/model/service action is part of this diagnosis.
+ADR assessment: no durable architecture change; evidence-only runner observer,
+ADR059 governs tracking. Existing native allowances and protections unchanged.
+
+Stage39 observational full selection completed7903PASS405files/zeroFAIL/PENDING/
+TODO/actualcode0/signalnull/all7412 parent+executed inputs exact. Monitor bytes
+unchanged,407 process events and no uncaught-error events; no added error handler,
+suppression or deadline change. Original v2 exit cause stays unproved and its
+missing-report record is retained, not relabelled. This is current finite UI
+qualification only, not native UAT or live Stop proof.
+
+Three integration preparation guards failed BEFORE any source/index mutation:
+array inventories compared as integer counts; five display-only conflict marker
+ref labels; missing backup ref queried without --quiet returns128, not1. Retained
+raw scripts/receipts are not test/hosted/merge failures. Mandatory reassessment
+incoming-integration-three-guard-reassessment-20261009.json confirms actual quiet
+missing/present controls1/0 and original missing128, independently proves only
+five marker labels differ between preview trees, and compares existing verified
+revision predicates. Different angle: fully read-only prepare before separate
+guarded normal integration, preserve all then-current source/head/dev/mode
+checks. No fourth unchanged Character/workflow probe, application repair guess,
+deadline/assertion/health weakening, or blind integration-helper retry.
+
+The reassessed read-only preparation passed with all27109 checkout inputs
+unchanged. A separate guarded normal merge of exact4d6 into42f then completed;
+only the expected KnowledgeQA conflict was resolved from the reviewed frozen
+candidate. All27124 candidate inputs match, except the two intentionally owned
+notes; 68 incoming/correction paths staged, no dependency path or unresolved
+conflict. Backup42f ref and exact dirty-note copies are retained. This is local
+source integration, not publication, hosted qualification, native acceptance,
+PR merge or cleanup. The three failed guards remain separate pre-mutation
+collector failures, not merge/test/hosted failures.
+
+ADR assessment for the bounded ModelDb correction: restore visibility from
+existing authoritative records instead of stale per-instance index state, with
+current-record precedence, legacy compatibility and explicit failure behavior.
+No new storage namespace, read migration, cleanup, locking, CAS, backend or
+durable persistence rule is introduced; no new ADR is required. ADR059 governs
+task tracking. Original source/caller review and finite RED/GREEN remain linked
+in TASK13421.1, not replaced by this summary.
+
+## Stage 40: Qualified Incoming Integration And Normal Publication
+**Goal**: Commit and publish the exact reviewed, qualified union with current
+dev without history rewrite, source changes under services or evidence-only CI
+resets; preserve human rationale and all protected data/resources.
+**Success Criteria**: Full actual union preflight; normal commit with parents
+42f and actual4d6; independently current refs/policies/queue and fresh exactc2fc
+lease; explicit GitHub publication and exact head/tree/parents/source/body
+readback. Fresh successor required and owning hosted gates remain separate.
+**Tests**: Frozen27124 candidate source, complete7903/405 UI, source-composed
+528/15 frontend/types/build/unchanged budgets and extension artifact/compile,
+453/12 safe runtime, official contract, scoped manual/security and preflight.
+**Status**: In Progress
+
+FullUatPassedfalse/liveStopunproved/two native Sends consumed. No third Send,
+replay, inference, browser probe/reopen, fourth native Character-root, protected
+service/data/profile mutation, PR merge or cleanup follows from local success.

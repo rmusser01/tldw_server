@@ -481,14 +481,16 @@ const PlaygroundContent = () => {
     );
 
   const refreshCharacterChatModels = React.useCallback(
-    async (isCancelled?: () => boolean) => {
+    async (isCancelled?: () => boolean, options?: { forceRefresh?: boolean }) => {
       setCharacterChatAvailableModels(null);
       setChatProviderStatus(null);
       try {
         const [models, providerStatus] = await Promise.all([
           fetchChatModels({
             returnEmpty: true,
-            forceRefresh: true,
+            // Mount refreshes reuse the model cache; only the explicit
+            // readiness retry forces a provider round trip (TASK-13511).
+            forceRefresh: options?.forceRefresh === true,
           }),
           tldwClient
             .initialize()
@@ -1592,10 +1594,27 @@ const PlaygroundContent = () => {
 
   const handlePrepareResearchFollowUp = React.useCallback(
     async (target: ResearchFollowUpTarget) => {
+      const selectionCurrent = historySelection.fence();
+      const selection = historySelection.getCurrent();
+      const owner = selection.owner;
+      const threadKey = `${serverChatId ?? ""}::${historyId ?? ""}`;
+      const isCurrent = () =>
+        selectionCurrent() &&
+        previousThreadRef.current === threadKey &&
+        selection.view === historySelection.view &&
+        owner === historySelection.owner &&
+        historySelection.getCurrent().view === selection.view &&
+        historySelection.getCurrent().owner === owner &&
+        owner?.kind !== "unavailable" &&
+        owner?.validate_lease?.() !== false &&
+        historySelection.settingsMode(serverChatId) !== "pending";
+      if (!isCurrent()) return;
       if (attachedResearchContext?.run_id !== target.run_id) {
         try {
           await tldwClient.initialize().catch(() => null);
+          if (!isCurrent()) return;
           const bundle = await tldwClient.getResearchBundle(target.run_id);
+          if (!isCurrent()) return;
           handleAttachResearchContext(
             deriveAttachedResearchContext(bundle, target.run_id, target.query),
           );
@@ -1604,12 +1623,16 @@ const PlaygroundContent = () => {
         }
       }
 
+      if (!isCurrent()) return;
       setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
     },
     [
       attachedResearchContext?.run_id,
       handleAttachResearchContext,
       setSelectedQuickPrompt,
+      historySelection,
+      serverChatId,
+      historyId,
     ],
   );
 
@@ -3676,7 +3699,7 @@ const PlaygroundContent = () => {
         return;
       }
       if (action === "retry") {
-        void refreshCharacterChatModels();
+        void refreshCharacterChatModels(undefined, { forceRefresh: true });
       }
     },
     [

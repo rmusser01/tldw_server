@@ -10,8 +10,11 @@ const maybeTest = typeof document === "undefined" ? test.skip : test
 describe("selection replace helpers", () => {
   test("replaces selection inside input target with stubs", () => {
     const element = {
+      tagName: "TEXTAREA",
       value: "Hello world",
       isConnected: true,
+      readOnly: false,
+      disabled: false,
       focus: () => {},
       setRangeText: (replacement: string, start: number, end: number) => {
         element.value =
@@ -24,6 +27,7 @@ describe("selection replace helpers", () => {
     const target = {
       kind: "input" as const,
       element,
+      originalValue: "Hello world",
       start: 6,
       end: 11
     }
@@ -37,7 +41,12 @@ describe("selection replace helpers", () => {
   test("replaces selection inside contenteditable with stubs", () => {
     const originalDocument = globalThis.document
     const insertState = { inserted: "", deleted: false, collapsed: false }
+    const textNode = {} as Node
     const range = {
+      startContainer: textNode,
+      endContainer: textNode,
+      collapsed: false,
+      toString: () => "world",
       deleteContents: () => {
         insertState.deleted = true
       },
@@ -51,6 +60,8 @@ describe("selection replace helpers", () => {
 
     const root = {
       isConnected: true,
+      isContentEditable: true,
+      contains: (node: Node) => node === textNode,
       focus: () => {}
     } as HTMLElement
 
@@ -61,17 +72,20 @@ describe("selection replace helpers", () => {
     const target = {
       kind: "contenteditable" as const,
       range,
-      root
+      root,
+      selectedText: "world"
     }
 
-    expect(isSelectionTargetValid(target)).toBe(true)
-    const ok = replaceSelectionTarget(target, "universe")
-    expect(ok).toBe(true)
-    expect(insertState.deleted).toBe(true)
-    expect(insertState.inserted).toBe("universe")
-    expect(insertState.collapsed).toBe(true)
-
-    ;(globalThis as any).document = originalDocument
+    try {
+      expect(isSelectionTargetValid(target)).toBe(true)
+      const ok = replaceSelectionTarget(target, "universe")
+      expect(ok).toBe(true)
+      expect(insertState.deleted).toBe(true)
+      expect(insertState.inserted).toBe("universe")
+      expect(insertState.collapsed).toBe(true)
+    } finally {
+      ;(globalThis as any).document = originalDocument
+    }
   })
 
   maybeTest("replaces selection inside textarea", () => {

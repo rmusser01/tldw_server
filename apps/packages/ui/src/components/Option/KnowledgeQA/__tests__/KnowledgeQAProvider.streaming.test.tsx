@@ -96,6 +96,7 @@ function ContextProbe() {
 describe("KnowledgeQAProvider streaming search", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ragSearchStreamMock.mockReset()
     localStorage.clear()
     sessionStorage.clear()
     latestContext = null
@@ -107,6 +108,93 @@ describe("KnowledgeQAProvider streaming search", () => {
       results: [{ id: "fallback-doc" }],
       answer: "Fallback answer",
     })
+  })
+
+  it("retains received scoped answer and citations when the iterator fails before its queued flush", async () => {
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-a", source_type: "notes", source_id: "note-a", excerpt: "A evidence." }] }
+      yield { type: "delta", text: "Received answer [1]" }
+      throw new Error("Synthetic stream parser failure")
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => { latestContext!.setQuery("retain received evidence") })
+    await act(async () => { await latestContext!.search() })
+    expect(latestContext!.answer).toBe("Received answer [1]")
+    expect(latestContext!.citations).toEqual([expect.objectContaining({ index: 1, documentId: "note-a" })])
+    expect(latestContext!.answerTrustState).toBe("failed_search")
+    expect(latestContext!.isSearching).toBe(false)
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["cancel", "clear", "supersede"] as const)("drops queued output before a held generator settles after %s", async action => {
+    let queued!: () => void
+    let finishOld!: () => void
+    let startedNew!: () => void
+    let finishNew!: () => void
+    const oldQueued = new Promise<void>(resolve => { queued = resolve })
+    const oldEnd = new Promise<void>(resolve => { finishOld = resolve })
+    const newStarted = new Promise<void>(resolve => { startedNew = resolve })
+    const newEnd = new Promise<void>(resolve => { finishNew = resolve })
+    let oldSignal!: AbortSignal
+    ragSearchStreamMock.mockImplementationOnce(async function* (_query: string, options: { signal: AbortSignal }) {
+      oldSignal = options.signal
+      yield { type: "contexts", contexts: [{ id: "note-a", source_type: "notes", source_id: "note-a", excerpt: "A evidence." }] }
+      yield { type: "delta", text: "Queued old answer [1]." }
+      queued()
+      await oldEnd
+      yield completeEvent(true)
+    }).mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-b", source_type: "notes", source_id: "note-b", excerpt: "B evidence." }] }
+      startedNew()
+      await newEnd
+      yield completeEvent(false)
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-held-stream-owner") })
+    act(() => {
+      latestContext!.setQuery("Old question")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-a", "note-b"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    vi.useFakeTimers()
+    let oldRequest!: Promise<void>
+    let newRequest: Promise<void> | undefined
+    try {
+      const baselineTimers = vi.getTimerCount()
+      await act(async () => { oldRequest = latestContext!.search(); await oldQueued })
+      expect(vi.getTimerCount()).toBe(baselineTimers + 1)
+      expect(latestContext!.answer).toBeNull()
+      if (action === "supersede") {
+        act(() => { latestContext!.setQuery("New question") })
+        await act(async () => { newRequest = latestContext!.search(); await newStarted })
+      } else {
+        act(() => {
+          if (action === "cancel") latestContext!.cancelSearch()
+          else latestContext!.clearResults()
+        })
+      }
+      expect(oldSignal.aborted).toBe(true)
+      const retained = {
+        answer: latestContext!.answer, results: latestContext!.results,
+        resultQuery: latestContext!.resultQuery, lastSearchScope: latestContext!.lastSearchScope,
+        citations: latestContext!.citations, isSearching: latestContext!.isSearching,
+        queryStage: latestContext!.queryStage,
+      }
+      expect(vi.getTimerCount()).toBe(baselineTimers)
+      await act(async () => { await vi.advanceTimersByTimeAsync(80) })
+      expect(latestContext).toMatchObject(retained)
+      expect(latestContext!.answer || "").not.toContain("Queued old answer")
+      expect(vi.getTimerCount()).toBe(baselineTimers)
+      expect(ragSearchMock).not.toHaveBeenCalled()
+    } finally {
+      finishOld()
+      finishNew()
+      await act(async () => { await oldRequest; await newRequest })
+      vi.useRealTimers()
+    }
   })
 
   it.each(["markdown", "pdf", "note", "handoff"])("keeps original citation [2] bound to B after excluding C in %s", async (destination) => {

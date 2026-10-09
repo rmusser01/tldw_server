@@ -83,6 +83,41 @@ describe("background proxy fallback safety", () => {
     mocks.storageRemove.mockResolvedValue(undefined)
   })
 
+  it("keeps provider-status singleflight isolated across a single-user credential change", async () => {
+    mocks.runtimeId = null
+    let config = { serverUrl: "https://server.test", authMode: "single-user", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "https://server.test", apiKey: "synthetic-key-a" }
+    mocks.storageGet.mockImplementation(async key => key === "tldwConfig" ? config : null)
+    const actual = await vi.importActual<typeof import("@/services/tldw/request-core")>("@/services/tldw/request-core")
+    mocks.tldwRequest.mockImplementation(actual.tldwRequest)
+    let resolveOld!: (response: Response) => void
+    const valueA = { providers: [{ name: "authority-a" }], any_configured: true }
+    const valueB = { providers: [{ name: "authority-b" }], any_configured: true }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValue(new Response(JSON.stringify(valueB), { headers: { "content-type": "application/json" } }))
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+      const client = new TldwApiClient()
+      const old = client.getProvidersStatus().catch(error => error)
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      config = { ...config, apiKey: "synthetic-key-b" }
+      window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+      const current = client.getProvidersStatus().catch(error => error)
+      // Wait until the second request has read the new credential, even if transport coalesces it.
+      await vi.waitFor(() => expect(mocks.storageGet.mock.calls.filter(([key]) => key === "tldwConfig").length).toBeGreaterThanOrEqual(2))
+      resolveOld(new Response(JSON.stringify(valueA), { headers: { "content-type": "application/json" } }))
+      expect(await old).toMatchObject({ status: 412 })
+      expect(await current).toEqual(valueB)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("X-API-KEY")).toBe("synthetic-key-b")
+      expect(await client.getProvidersStatus()).toEqual(valueB)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("keeps a size-limited preview failure from marking the backend unreachable", async () => {
     mocks.tldwRequest.mockResolvedValue({ ok: false, status: 0, code: "RESPONSE_TOO_LARGE", error: "Response exceeds the size limit." })
     const offline = vi.fn()

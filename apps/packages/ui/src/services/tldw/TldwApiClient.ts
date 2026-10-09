@@ -1699,6 +1699,57 @@ const stopWatchingDomainCacheAccount = watchChatAccountChanges(invalidated => {
 const domainCacheHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
 domainCacheHot?.dispose(stopWatchingDomainCacheAccount)
 
+type TldwProvidersStatus = {
+  providers: Array<{
+    name: string
+    configured: boolean
+    requires_api_key: boolean
+    key_hint?: string | null
+    key_source?: string | null
+  }>
+  any_configured: boolean
+}
+
+// getProvidersStatus is mounted-on by 12+ components independently; this
+// module-level TTL cache + in-flight dedup (mirroring the apiSend pattern)
+// collapses the resulting burst into one request per TTL window.
+const PROVIDERS_STATUS_CACHE_TTL_MS = 60_000
+let providersStatusCache: { at: number; revision: number; value: TldwProvidersStatus } | null = null
+let providersStatusInFlight: { revision: number; request: Promise<TldwProvidersStatus> } | null = null
+
+const getProvidersStatusCached = async (): Promise<TldwProvidersStatus> => {
+  const now = Date.now()
+  const revision = domainCacheAccountRevision
+  if (
+    providersStatusCache &&
+    providersStatusCache.revision === revision &&
+    now - providersStatusCache.at < PROVIDERS_STATUS_CACHE_TTL_MS
+  ) {
+    return providersStatusCache.value
+  }
+  if (providersStatusInFlight?.revision === revision) {
+    return providersStatusInFlight.request
+  }
+  const request = bgRequest<TldwProvidersStatus>({
+    path: '/api/v1/config/providers',
+    method: 'GET',
+    // This domain owns singleflight; generic GET sharing does not distinguish single-user credentials.
+    abortSignal: new AbortController().signal
+  }).then(value => {
+    if (revision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
+    }
+    providersStatusCache = { at: Date.now(), revision, value }
+    return value
+  }).finally(() => {
+    if (providersStatusInFlight?.request === request) {
+      providersStatusInFlight = null
+    }
+  })
+  providersStatusInFlight = { revision, request }
+  return request
+}
+
 export class TldwApiClientBase {
   private storage: Storage
   private sessionStorage: Storage
@@ -2915,6 +2966,8 @@ export class TldwApiClientBase {
   /**
    * Check which LLM providers are configured on the server.
    * Returns `{ providers: [...], any_configured: boolean }`.
+   * Served from a short module-level TTL cache with in-flight dedup, since
+   * a dozen-plus components request it independently on mount.
    */
   async getProvidersStatus(): Promise<{
     providers: Array<{
@@ -2926,7 +2979,12 @@ export class TldwApiClientBase {
     }>
     any_configured: boolean
   }> {
-    return await bgRequest<any>({ path: '/api/v1/config/providers', method: 'GET' })
+    const revision = domainCacheAccountRevision
+    const value = await getProvidersStatusCached()
+    if (revision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
+    }
+    return value
   }
 
   async getModelsMetadata(options?: {

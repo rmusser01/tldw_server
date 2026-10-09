@@ -352,9 +352,11 @@ const findEditSubmitButton = async (timeout = 15000) =>
     return candidate as HTMLElement
   }, { timeout })
 
+const resetFixtureMocks = () => vi.resetAllMocks()
+
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    resetFixtureMocks()
     editorLoad.pending = null
     editorLoad.attempted = false
     ensureLocalStorageApi().clear()
@@ -408,6 +410,22 @@ describe("CharactersManager first-use onboarding", () => {
         return makeUseQueryResult({ data: {} })
       }
       return makeUseQueryResult({})
+    })
+  })
+
+  it("discards an unused session response across fixture reset", async () => {
+    tldwClientMock.createChat.mockResolvedValueOnce({ id: "previous-fixture-session" })
+    resetFixtureMocks()
+    expect(await tldwClientMock.createChat()).toEqual({ id: "quick-chat-session-default" })
+  })
+
+  it("discards an unused reply response across fixture reset", async () => {
+    tldwClientMock.completeCharacterChatTurn.mockResolvedValueOnce({
+      assistant_content: "Previous fixture reply"
+    })
+    resetFixtureMocks()
+    expect(await tldwClientMock.completeCharacterChatTurn()).toEqual({
+      assistant_content: "Quick chat response"
     })
   })
 

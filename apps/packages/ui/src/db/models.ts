@@ -29,6 +29,40 @@ export const generateID = () => {
     return r.toString(16)
   })
 }
+
+/**
+ * Prefixed records and legacy unprefixed records remain authoritative. The old
+ * shared index is only metadata: concurrent contexts can overwrite its ids.
+ */
+const MODEL_KEY_PREFIX = "model:"
+
+const toStorageKey = (id: string) => `${MODEL_KEY_PREFIX}${id}`
+
+const isModelRecord = (key: string, value: unknown): value is Model => {
+  if (!value || typeof value !== "object") return false
+  const record = value as Partial<Model> & { id?: unknown }
+  return (
+    record.id === key &&
+    typeof record.model_id === "string" &&
+    typeof record.provider_id === "string"
+  )
+}
+
+const readStorage = (
+  db: chrome.storage.StorageArea,
+  keys: string[] | null
+): Promise<Record<string, unknown>> => {
+  return new Promise((resolve, reject) => {
+    db.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError)
+      } else {
+        resolve(result as Record<string, unknown>)
+      }
+    })
+  })
+}
+
 export class ModelDb {
   db: chrome.storage.StorageArea
 
@@ -37,21 +71,76 @@ export class ModelDb {
   }
 
   getAll = async (): Promise<Model[]> => {
-    return new Promise((resolve, reject) => {
-      this.db.get(null, (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          const data = Object.keys(result).map((key) => result[key])
-          resolve(data)
-        }
+    const getKeys = (this.db as chrome.storage.StorageArea & {
+      getKeys?: (callback: (keys: string[]) => void) => void
+    }).getKeys
+    let items: Record<string, unknown>
+    if (typeof getKeys === "function") {
+      const keys = await new Promise<string[]>((resolve, reject) => {
+        getKeys.call(this.db, (result) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError)
+          } else {
+            resolve(result)
+          }
+        })
       })
-    })
+      const currentKeys = keys.filter((key) => key.startsWith(MODEL_KEY_PREFIX))
+      // Legacy ids are unrestricted; inspect candidates without migrating them.
+      const legacyKeys = keys.filter(
+        (key) => !key.startsWith(MODEL_KEY_PREFIX)
+      )
+      items = {
+        ...(legacyKeys.length ? await readStorage(this.db, legacyKeys) : {}),
+        ...(currentKeys.length ? await readStorage(this.db, currentKeys) : {})
+      }
+    } else {
+      // Older browsers lack getKeys; retain the read-only full-read fallback.
+      items = await readStorage(this.db, null)
+    }
+
+    const byId = new Map<string, Model>()
+    for (const [key, value] of Object.entries(items)) {
+      if (isModelRecord(key, value)) byId.set(value.id, value)
+    }
+    // Current records win over legacy duplicates regardless of enumeration order.
+    for (const [key, value] of Object.entries(items)) {
+      if (key.startsWith(MODEL_KEY_PREFIX)) {
+        if (isModelRecord(key.slice(MODEL_KEY_PREFIX.length), value)) {
+          byId.set(value.id, value)
+        }
+      }
+    }
+    return Array.from(byId.values())
   }
 
   create = async (model: Model): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.set({ [model.id]: model }, () => {
+    await this.createMany([model])
+  }
+
+  /** Batched write: all records land in one set(), without shared index RMW. */
+  createMany = async (models: Model[]): Promise<void> => {
+    if (models.length === 0) return
+    const writes = Object.fromEntries(
+      models.map((record) => [toStorageKey(record.id), record])
+    )
+    const keys = Object.keys(writes)
+    let items = await readStorage(this.db, keys)
+    // Keyed web-shim reads use null for absence; distinguish stored null.
+    if (keys.some((key) => items[key] === null)) {
+      items = await readStorage(this.db, null)
+    }
+    for (const model of models) {
+      const key = toStorageKey(model.id)
+      if (
+        Object.prototype.hasOwnProperty.call(items, key) &&
+        !isModelRecord(model.id, items[key])
+      ) {
+        throw new Error(`Cannot overwrite occupied model storage key: ${key}`)
+      }
+    }
+    await new Promise<void>((resolve, reject) => {
+      this.db.set(writes, () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError)
         } else {
@@ -61,45 +150,44 @@ export class ModelDb {
     })
   }
 
-  getById = async (id: string): Promise<Model> => {
-    return new Promise((resolve, reject) => {
-      this.db.get(id, (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve(result[id])
-        }
-      })
-    })
+  getById = async (id: string): Promise<Model | undefined> => {
+    const items = await readStorage(this.db, [toStorageKey(id), id])
+    const current = items[toStorageKey(id)]
+    if (isModelRecord(id, current)) return current
+    const legacy = items[id]
+    return isModelRecord(id, legacy) ? legacy : undefined
   }
 
   update = async (model: Model): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.set({ [model.id]: model }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
+    await this.createMany([model])
   }
 
   delete = async (id: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.remove(id, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
+    await this.deleteMany([id])
+  }
+
+  /** Batched delete: one remove() for current and legacy aliases. */
+  deleteMany = async (ids: string[]): Promise<void> => {
+    if (ids.length === 0) return
+    await this.removeRecords(ids)
   }
 
   deleteAll = async (): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      this.db.clear(() => {
+    const ids = (await this.getAll()).map((model) => model.id)
+    await this.removeRecords(ids)
+  }
+
+  private removeRecords = async (ids: string[]): Promise<void> => {
+    const items = ids.length
+      ? await readStorage(this.db, ids.flatMap((id) => [toStorageKey(id), id]))
+      : {}
+    // An alias may hold unrelated data or another model with a prefix-shaped id.
+    const keys = ids.flatMap((id) =>
+      [toStorageKey(id), id].filter((key) => isModelRecord(id, items[key]))
+    )
+    if (keys.length === 0) return
+    await new Promise<void>((resolve, reject) => {
+      this.db.remove(keys, () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError)
         } else {
@@ -130,15 +218,13 @@ export const createManyModels = async (
     }
   })
 
-  for (const model of models) {
-    const isExist = await isLookupExist(model.lookup)
-
-    if (isExist) {
-      continue
-    }
-
-    await db.create(model)
-  }
+  const existing = await db.getAll()
+  const existingLookups = new Set(
+    existing.map((entry) => entry?.lookup).filter(Boolean)
+  )
+  const missing = models.filter((model) => !existingLookups.has(model.lookup))
+  if (missing.length === 0) return
+  await db.createMany(missing)
 }
 
 export const createModelFB = async (model: Model): Promise<boolean> => {
@@ -263,24 +349,18 @@ export const deleteAllModelsByProviderId = async (provider_id: string) => {
   const modelsToDelete = models.filter(
     (model) => model.provider_id === provider_id
   )
-  for (const model of modelsToDelete) {
-    await db.delete(model.id)
-  }
+  await db.deleteMany(modelsToDelete.map((model) => model.id))
 }
 
 export const bulkAddModelsFB = async (models: Model[]) => {
-  // delete all exist models
   const db = new ModelDb()
+  // delete all exist models
   const modelsToDelete = (await db.getAll()).filter(
     (model) => model?.db_type === "openai_model"
   )
-  for (const model of modelsToDelete) {
-    await db.delete(model.id)
-  }
+  await db.deleteMany(modelsToDelete.map((model) => model.id))
   // add new models
-  for (const model of models) {
-    await db.create(model)
-  }
+  await db.createMany(models)
 }
 
 export const isLookupExist = async (lookup: string) => {

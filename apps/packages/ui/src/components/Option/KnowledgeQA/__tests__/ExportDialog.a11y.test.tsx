@@ -40,7 +40,7 @@ const state = {
   messages: [] as Array<{ role: string; content: string }>,
   currentThreadId: "thread-1" as string | null,
   results: [] as RagResult[],
-  citations: [] as Array<{ index: number; documentId?: CitationRef["documentId"] }>,
+  citations: [] as Array<{ index: number; documentId?: CitationRef["documentId"] }> | undefined,
   answer: "Test answer" as string | null,
   answerTrustState: "cited_answer" as
     | "cited_answer"
@@ -175,6 +175,21 @@ describe("ExportDialog accessibility", () => {
     const preview = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
     expect(preview).toContain(present ? "- [2] B maps to Source 1." : "- [2] Source unavailable in exported results.")
     expect(preview).not.toContain("- [2] D maps")
+  })
+
+  it.each([undefined, [{ index: 2 }]])("does not choose an arbitrary duplicate source for a legacy citation list: %j", async (citations) => {
+    state.answer = "Ambiguous claim [2]."
+    state.citations = citations
+    state.results = [
+      { id: "note-b", metadata: { title: "B", original_result_index: 1 } },
+      { id: "note-d", metadata: { title: "D", original_result_index: 1 } },
+    ] as RagResult[]
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+    await screen.findByText("Preview")
+    const preview = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
+    expect(preview).toContain("- [2] Source unavailable in exported results.")
+    expect(preview).not.toContain("maps to Source")
   })
 
   it.each(["markdown", "pdf"])("binds %s Settings Used and the saved receipt to the displayed result scope", async (format) => {

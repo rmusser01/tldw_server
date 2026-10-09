@@ -51,6 +51,7 @@ import { createKnowledgeQaClient } from "./knowledgeQaClient"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
+import { createStreamingUpdateScheduler } from "@/utils/streaming-update-scheduler"
 import { getKnowledgeQaHistoryStorageKey, getKnowledgeQaStorageScopeKey, persistKnowledgeQaHistory } from "./historyStorage"
 import { useKnowledgeQAAuthority } from "./hooks/useKnowledgeQAAuthority"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
@@ -507,18 +508,21 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
 const KnowledgeQAContext = createContext<KnowledgeQAContextValue | null>(null)
 
 // Parse citation indices from generated answer [1], [2], etc.
-function parseCitations(answer: string, results: RagResult[]): CitationRef[] {
+function parseCitations(answer: string, results: RagResult[], useOriginalIndexes = false): CitationRef[] {
   const citationMatches = answer.match(/\[(\d+)\]/g) || []
   const indices = citationMatches
     .map((m) => parseInt(m.replace(/[\[\]]/g, ""), 10))
-    .filter((i) => i >= 1 && i <= results.length)
+    .filter((i) => i >= 1)
 
   const uniqueIndices = [...new Set(indices)]
-  return uniqueIndices.map((index) => ({
-    index,
-    documentId: results[index - 1]?.id || `doc_${index}`,
-    excerpt: results[index - 1]?.content || results[index - 1]?.text,
-  }))
+  return uniqueIndices.flatMap((index) => {
+    const matches = useOriginalIndexes
+      ? results.filter((result, position) => getOriginalResultIndex(result, position) + 1 === index)
+      : results.slice(index - 1, index)
+    if (matches.length !== 1) return []
+    const [result] = matches
+    return [{ index, documentId: result.id || `doc_${index}`, excerpt: result.content || result.text }]
+  })
 }
 
 function normalizeAnswerText(value: unknown): string | null {
@@ -733,7 +737,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   const answer =
     normalizeAnswerText(ragContext?.generated_answer) ??
     normalizeAnswerText(latestAssistantMessage.content)
-  const citations = answer ? parseCitations(answer, results) : []
+  const citations = answer ? parseCitations(answer, results, true) : []
   const storedTrustState = isKnowledgeAnswerTrustState(ragContext?.trust_state)
     ? ragContext.trust_state
     : null
@@ -2380,7 +2384,7 @@ function OwnedKnowledgeQAProvider({
       search_query: question,
       search_mode: settings.search_mode,
       settings_snapshot: createRestorableSettingsSnapshot(settings),
-      retrieved_documents: results.map((r) => ({
+      retrieved_documents: results.map((r, index) => ({
         id: r.id,
         source_id: getResultSourceId(r) ?? undefined,
         source_type: r.sourceType || r.metadata?.source_type,
@@ -2394,6 +2398,7 @@ function OwnedKnowledgeQAProvider({
         unavailable_reason: getResultUnavailableReason(r) ?? undefined,
         url: r.metadata?.url,
         page_number: r.metadata?.page_number,
+        metadata: { original_result_index: getOriginalResultIndex(r, index) },
       })),
       generated_answer: answer || undefined,
       trust_state: answerTrustState,
@@ -2594,6 +2599,7 @@ function OwnedKnowledgeQAProvider({
           let terminalEvent: RagTerminalEvent | null = null
           let streamWhyPayload: unknown = null
           let streamSourceStatusPayload: unknown = null
+          let streamEnded = false
           const publishPartialResults = () => {
             const scopeValidation = validateResultsForScope(streamResults)
             const partialResults = scopeValidation.acceptedResults
@@ -2637,6 +2643,11 @@ function OwnedKnowledgeQAProvider({
               },
             })
           }
+          const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
+            shouldFlush: () => !streamEnded && !isStaleSearchRequest(),
+            apply: () => publishPartialResults(),
+          })
+          abortController.signal.addEventListener("abort", streamingUpdateScheduler.cancel, { once: true })
 
           try {
             for await (const event of (tldwClient as {
@@ -2649,6 +2660,7 @@ function OwnedKnowledgeQAProvider({
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
+                streamingUpdateScheduler.cancel()
                 return
               }
               if (terminalEvent) {
@@ -2701,10 +2713,16 @@ function OwnedKnowledgeQAProvider({
                 if (!deltaText) continue
                 observedStreamOutput = true
                 streamAnswer += deltaText
-                publishPartialResults()
+                streamingUpdateScheduler.schedule(null)
                 continue
               }
             }
+
+            // Land the final buffered partial state before terminal handling
+            // so no streamed content is lost, then stop any trailing flush
+            // from racing the terminal/error dispatches.
+            streamingUpdateScheduler.flushNow()
+            streamEnded = true
 
             if (!terminalEvent) {
               throw new RagTerminalStreamError(
@@ -2739,6 +2757,8 @@ function OwnedKnowledgeQAProvider({
             if (isStreamAbort) {
               throw streamError
             }
+            streamingUpdateScheduler.flushNow()
+            streamEnded = true
             if (
               streamError instanceof RagTerminalStreamError &&
               streamError.event &&
@@ -2750,6 +2770,10 @@ function OwnedKnowledgeQAProvider({
             } else {
               throw streamError
             }
+          } finally {
+            streamEnded = true
+            streamingUpdateScheduler.cancel()
+            abortController.signal.removeEventListener("abort", streamingUpdateScheduler.cancel)
           }
         }
 

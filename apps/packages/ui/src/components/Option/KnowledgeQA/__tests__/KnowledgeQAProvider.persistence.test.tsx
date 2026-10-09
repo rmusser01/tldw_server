@@ -1,8 +1,11 @@
 import { TEST_HISTORY_STORAGE_KEY } from "./knowledgeQaAuthorityFixture"
 import React from "react"
-import { act, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { KnowledgeQAProvider, useKnowledgeQA } from "../KnowledgeQAProvider"
+import { ExportDialog } from "../ExportDialog"
+import type { RagContextData } from "../types"
 
 const ragSearchMock = vi.fn()
 const addChatMessageMock = vi.fn()
@@ -13,6 +16,7 @@ const messageOpenMock = vi.fn()
 const searchCharactersMock = vi.fn()
 const listCharactersMock = vi.fn()
 const trackMetricMock = vi.fn()
+const createNoteMock = vi.fn()
 let storedPresetValue: unknown = undefined
 let storedSettingsValue: unknown = undefined
 let storedStreamingFlagValue: unknown = undefined
@@ -44,6 +48,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     addChatMessage: (...args: unknown[]) => addChatMessageMock(...args),
     createChat: (...args: unknown[]) => createChatMock(...args),
     deleteChat: (...args: unknown[]) => deleteChatMock(...args),
+    createNote: (...args: unknown[]) => createNoteMock(...args),
     searchCharacters: (...args: unknown[]) => searchCharactersMock(...args),
     listCharacters: (...args: unknown[]) => listCharactersMock(...args),
     getChat: vi.fn().mockResolvedValue({ version: 1 }),
@@ -74,6 +79,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     createChatMock.mockResolvedValue({ id: "thread-1", version: 1 })
     addChatMessageMock.mockResolvedValue({ id: "msg-1" })
     deleteChatMock.mockResolvedValue(undefined)
+    createNoteMock.mockResolvedValue({ id: "finite-saved-note" })
     searchCharactersMock.mockResolvedValue([])
     listCharactersMock.mockResolvedValue([])
     fetchWithAuthMock.mockImplementation(async (path: string) => {
@@ -413,6 +419,102 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
       score: 0.91,
     })
     expect(document).not.toHaveProperty("unavailable_reason")
+  })
+
+  it("preserves surviving citation positions through scoped persistence and thread hydration", async () => {
+    let savedContext: { rag_context: RagContextData } | null = null
+    searchCharactersMock.mockResolvedValue([{ id: 7, name: "Helpful AI Assistant" }])
+    addChatMessageMock.mockResolvedValueOnce({ id: "msg-user" }).mockResolvedValueOnce({ id: "msg-assistant" })
+    const answer = "Excluded [1], retained B [2], retained D [3]."
+    ragSearchMock.mockResolvedValue({
+      results: [
+        { id: "excluded-c", content: "C", metadata: { source_type: "notes", source_id: "note-c" } },
+        { id: "retained-b", content: "B", metadata: { source_type: "notes", source_id: "note-b" } },
+        { id: "retained-d", content: "D", metadata: { source_type: "notes", source_id: "note-d" } },
+      ],
+      answer,
+      metadata: {},
+    })
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.includes("/rag-context")) {
+        savedContext = JSON.parse(String(init?.body || "{}"))
+        return { ok: true, status: 200, json: async () => ({ success: true }), text: async () => "" }
+      }
+      if (path.includes("/messages-with-context")) {
+        return { ok: true, status: 200, json: async () => savedContext ? [
+          { id: "msg-user", role: "user", content: "scoped evidence" },
+          { id: "msg-assistant", role: "assistant", content: answer, rag_context: savedContext.rag_context },
+        ] : [], text: async () => "" }
+      }
+      return { ok: false, status: 404, json: async () => [], text: async () => "" }
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-b", "note-d"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+      latestContext!.setQuery("scoped evidence")
+    })
+    await act(async () => { await latestContext!.search() })
+    const citations = [{ index: 2, documentId: "retained-b" }, { index: 3, documentId: "retained-d" }]
+    expect(latestContext!.citations).toEqual(citations.map(citation => expect.objectContaining(citation)))
+    expect(savedContext).not.toBeNull()
+    expect(savedContext!.rag_context.retrieved_documents.map(doc => [doc.id, doc.metadata?.original_result_index])).toEqual([["retained-b", 1], ["retained-d", 2]])
+    await act(async () => { await latestContext!.selectThread("thread-1") })
+    expect(latestContext!.results.map(result => result.id)).toEqual(["retained-b", "retained-d"])
+    expect(latestContext!.citations).toEqual(citations.map(citation => expect.objectContaining(citation)))
+    expect(latestContext!.answer).toBe(answer)
+    expect(ragSearchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["markdown", "pdf", "notes"])("does not resurrect a rejected ambiguous restored citation in %s", async (format) => {
+    const answer = "Ambiguous claim [2]."
+    fetchWithAuthMock.mockImplementation(async (path: string) => ({
+      ok: true, status: 200, text: async () => "",
+      json: async () => path.includes("/messages-with-context") ? [
+        { id: "restored-user", role: "user", content: "restored question" },
+        { id: "restored-answer", role: "assistant", content: answer, rag_context: {
+          search_query: "restored question",
+          retrieved_documents: [
+            { id: "note-b", title: "B", content: "B", metadata: { original_result_index: 1 } },
+            { id: "note-d", title: "D", content: "D", metadata: { original_result_index: 1 } },
+          ],
+        } },
+      ] : [],
+    }))
+    const print = vi.spyOn(window, "print").mockImplementation(() => undefined)
+    const view = render(<MemoryRouter><KnowledgeQAProvider>
+      <ContextProbe /><ExportDialog open onClose={vi.fn()} />
+    </KnowledgeQAProvider></MemoryRouter>)
+    try {
+      await waitFor(() => expect(latestContext).not.toBeNull())
+      await act(async () => { await latestContext!.selectThread("restored-thread") })
+      expect(latestContext!.results.map(result => result.id)).toEqual(["note-b", "note-d"])
+      expect(latestContext!.citations).toEqual([])
+      expect(latestContext!.answer).toBe(answer)
+      expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+      if (format === "pdf") fireEvent.click(screen.getByRole("button", { name: /PDF/i }))
+      fireEvent.click(screen.getByRole("checkbox", { name: /I understand this unsupported draft/i }))
+      let output: string
+      if (format === "notes") {
+        fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+        await screen.findByRole("link", { name: "Open saved note" })
+        output = createNoteMock.mock.calls[0][0]
+        expect(createNoteMock).toHaveBeenCalledTimes(1)
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Export" }))
+        await screen.findByText("Preview")
+        output = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
+      }
+      expect(output).toContain(answer)
+      expect(output).not.toContain("## Citations")
+      expect(output).not.toContain("maps to Source")
+      expect(ragSearchMock).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+      print.mockRestore()
+    }
   })
 
   it("starts a fresh topic with cleared visible state", async () => {

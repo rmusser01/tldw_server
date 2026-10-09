@@ -1130,7 +1130,7 @@ function collectCitationIndexes(
 
   citations?.forEach((citation) => pushIndex(citation.index))
 
-  if (indexes.length === 0 && answer) {
+  if (citations === undefined && answer) {
     for (const match of answer.matchAll(/\[(\d+)\]/g)) {
       pushIndex(Number(match[1]))
     }
@@ -1268,15 +1268,18 @@ function generateMarkdown(
     lines.push("")
     citationIndexes.forEach((citationIndex) => {
       const citation = context?.citations?.find(candidate => candidate.index === citationIndex)
-      let sourceIndex = results.findIndex((result, index) =>
+      let sourceIndexes = results.flatMap((result, index) =>
         getOriginalResultIndex(result, index) + 1 === citationIndex &&
         (!citation?.documentId || result.id === citation.documentId)
+          ? [index] : []
       )
-      if (sourceIndex === -1 && citation?.documentId) {
-        sourceIndex = results.findIndex(result =>
+      if (sourceIndexes.length === 0 && citation?.documentId) {
+        sourceIndexes = results.flatMap((result, index) =>
           result.id === citation.documentId && getOriginalResultIndex(result, -1) === -1
+            ? [index] : []
         )
       }
+      const sourceIndex = sourceIndexes.length === 1 ? sourceIndexes[0] : -1
       const result = results[sourceIndex]
 
       if (!result) {

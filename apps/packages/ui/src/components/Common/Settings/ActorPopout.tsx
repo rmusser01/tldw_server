@@ -1,7 +1,7 @@
 import React from "react"
 import { Button, Drawer, Form, Segmented, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
-import { useMessageOption } from "@/hooks/useMessageOption"
+import { useStoreMessageOption } from "@/store/option"
 import type { ActorEditorMode, ActorSettings, ActorTarget } from "@/types/actor"
 import { createDefaultActorSettings } from "@/types/actor"
 import {
@@ -25,7 +25,15 @@ const loadActorSettings = () => import("@/services/actor-settings")
 
 export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const { t } = useTranslation(["playground", "common"])
-  const { historyId, serverChatId, serverChatAssistantKind } = useMessageOption()
+  const { historyId, serverChatId, serverChatAssistantKind } =
+    useStoreMessageOption(
+      (state) => ({
+        historyId: state.historyId,
+        serverChatId: state.serverChatId,
+        serverChatAssistantKind: state.serverChatAssistantKind
+      }),
+      shallow
+    )
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
   const [form] = Form.useForm()

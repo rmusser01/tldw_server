@@ -562,7 +562,11 @@ describe("native Quick Ingest worker ownership", () => {
     // The UI is already gone: only the worker's runtime handler remains.
     uploaded.resolve(json({ batch_id: "owned-batch", jobs: [{ id: 7 }] }))
     await vi.waitFor(() => expect(harness.sent).toContainEqual(expect.objectContaining({ type: "tldw:quick-ingest/completed", payload: expect.objectContaining({ sessionId: ack.sessionId }) })))
-    expect(fetcher.mock.calls.map(call => call[0])).toEqual(["https://api.example.test/base/api/v1/media/ingest/jobs", "https://api.example.test/base/api/v1/media/ingest/jobs/7"])
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual([
+      "https://api.example.test/base/api/v1/media/ingest/jobs",
+      // One batched status GET per poll cycle (not one request per job).
+      "https://api.example.test/base/api/v1/media/ingest/jobs?batch_id=owned-batch&limit=100&offset=0"
+    ])
   })
 
   it("rejects a legacy unowned start and a foreign colliding cancellation before dispatch", async () => {
@@ -592,7 +596,7 @@ describe("native Quick Ingest worker ownership", () => {
     } else {
       await vi.waitFor(() => expect(harness.sent).toContainEqual(expect.objectContaining({ type: "tldw:quick-ingest/completed", payload: expect.objectContaining({ sessionId: "qi-restored" }) })))
       expect(fetcher).toHaveBeenCalledTimes(1)
-      expect(fetcher.mock.calls[0][0]).toBe("https://api.example.test/base/api/v1/media/ingest/jobs/7")
+      expect(fetcher.mock.calls[0][0]).toBe("https://api.example.test/base/api/v1/media/ingest/jobs?batch_id=saved-batch&limit=100&offset=0")
     }
   })
 
