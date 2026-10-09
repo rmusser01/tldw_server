@@ -650,21 +650,22 @@ describe("shared native send-conflict choices", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Updated in another window or tab"
     )
-    fireEvent.click(
-      screen.getByRole("button", { name: "Load latest messages" })
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Load latest messages" }))
     fireEvent.click(screen.getByRole("button", { name: "Branch here" }))
     expect(selection.loadLatest).toHaveBeenCalledWith(
       selection.view,
+      expect.any(Function),
       expect.any(Function)
     )
     expect(selection.branchHere).toHaveBeenCalledWith(
       selection.view,
+      expect.any(Function),
       expect.any(Function)
     )
     expect(selection.choose).not.toHaveBeenCalled()
     expect(selection.refresh).not.toHaveBeenCalled()
   })
+
   it("refused input never falsely diagnoses unsupported context", () => {
     const selection = {
       ...controller(),

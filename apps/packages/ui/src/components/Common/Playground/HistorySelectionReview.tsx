@@ -1,4 +1,5 @@
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { focusComposer } from "@/hooks/useComposerFocus"
 import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -62,14 +63,82 @@ export function HistorySelectionReview({
     view: HistorySelectionController["view"]
     sourceIsCurrent: () => boolean
   } | null>(null)
+  const latestAction = React.useRef<HTMLButtonElement>(null)
+  const branchAction = React.useRef<HTMLButtonElement>(null)
+  const recoveryFocus = React.useRef<(() => void) | null>(null)
   const mounted = React.useRef(true)
   React.useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
+      recoveryFocus.current?.()
     }
   }, [])
-  const editorOpen = () => !!document.querySelector("form[data-chat-message-editor]")
+  const editorOpen = () =>
+    !!document.querySelector("form[data-chat-message-editor]")
+  const recoverSendChoice = async (choice: "latest" | "branch") => {
+    const origin = selection.view
+    if (
+      !mounted.current ||
+      !origin ||
+      !renderedSource.isCurrent() ||
+      !renderedSelectionIsCurrent()
+    )
+      return
+    if (editorOpen()) {
+      setOpenRecoveryError(
+        text(
+          "finishEditBeforeOpening",
+          "Finish or cancel your current message edit before opening the saved reply."
+        )
+      )
+      return
+    }
+    setOpenRecoveryError(null)
+    recoveryFocus.current?.()
+    const initiator =
+      choice === "latest" ? latestAction.current : branchAction.current
+    let focusOwned = Boolean(initiator && document.activeElement === initiator)
+    let frame: number | null = null
+    const leaveFocus = (event: Event) => {
+      if (event.target !== initiator) focusOwned = false
+    }
+    const cancel = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      document.removeEventListener("focusin", leaveFocus)
+      document.removeEventListener("pointerdown", leaveFocus)
+      if (recoveryFocus.current === cancel) recoveryFocus.current = null
+    }
+    recoveryFocus.current = cancel
+    document.addEventListener("focusin", leaveFocus)
+    document.addEventListener("pointerdown", leaveFocus)
+    const onAccepted = (isCurrent: () => boolean) => {
+      if (recoveryFocus.current !== cancel) return
+      frame = requestAnimationFrame(() => {
+        const owned =
+          recoveryFocus.current === cancel &&
+          mounted.current &&
+          renderedSource.isCurrent() &&
+          isCurrent() &&
+          !editorOpen() &&
+          document.visibilityState === "visible" &&
+          focusOwned &&
+          initiator &&
+          (document.activeElement === initiator ||
+            (!initiator.isConnected && document.activeElement === document.body))
+        cancel()
+        if (owned) focusComposer()
+      })
+    }
+    try {
+      if (choice === "latest")
+        await selection.loadLatest(origin, renderedSource.isCurrent, onAccepted)
+      else selection.branchHere(origin, renderedSource.isCurrent, onAccepted)
+    } finally {
+      if (frame === null) cancel()
+    }
+  }
+
   const openSavedReply = async (
     entry: HistorySelectionController["recoveries"][number]
   ) => {
@@ -502,56 +571,14 @@ export function HistorySelectionReview({
             }
             primaryAction={{
               label: text("loadLatest", "Load latest messages"),
-              onClick: () => {
-                if (
-                  mounted.current &&
-                  selection.view &&
-                  renderedSource.isCurrent() &&
-                  renderedSelectionIsCurrent()
-                ) {
-                  if (editorOpen())
-                    setOpenRecoveryError(
-                      text(
-                        "finishEditBeforeOpening",
-                        "Finish or cancel your current message edit before opening the saved reply."
-                      )
-                    )
-                  else {
-                    setOpenRecoveryError(null)
-                    void selection.loadLatest(
-                      selection.view,
-                      renderedSource.isCurrent
-                    )
-                  }
-                }
-              }
+              ref: latestAction,
+              onClick: () => { void recoverSendChoice("latest") }
             }}
             secondaryActions={[
               {
                 label: text("branchHere", "Branch here"),
-                onClick: () => {
-                  if (
-                    mounted.current &&
-                    selection.view &&
-                    renderedSource.isCurrent() &&
-                    renderedSelectionIsCurrent()
-                  ) {
-                    if (editorOpen())
-                      setOpenRecoveryError(
-                        text(
-                          "finishEditBeforeOpening",
-                          "Finish or cancel your current message edit before opening the saved reply."
-                        )
-                      )
-                    else {
-                      setOpenRecoveryError(null)
-                      selection.branchHere(
-                        selection.view,
-                        renderedSource.isCurrent
-                      )
-                    }
-                  }
-                }
+                ref: branchAction,
+                onClick: () => { void recoverSendChoice("branch") }
               }
             ]}
           />

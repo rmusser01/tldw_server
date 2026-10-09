@@ -1766,6 +1766,326 @@ describe("owned native stale-send choices", () => {
     })
     return hook
   }
+  it.each(["latest", "branch"] as const)(
+    "an accepted %s choice supplies a live lease after retiring its entry fence",
+    async (choice) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.view!
+      const entryFence = hook.result.current.fence()
+      const accepted = vi.fn<(isCurrent: () => boolean) => void>()
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => true)
+      })
+      await act(async () => {
+        const result =
+          choice === "latest"
+            ? await hook.result.current.loadLatest(origin, () => true, accepted)
+            : hook.result.current.branchHere(origin, () => true, accepted)
+        expect(result).toBe(true)
+      })
+      expect(accepted).toHaveBeenCalledOnce()
+      expect(entryFence()).toBe(false)
+      expect(accepted.mock.calls[0][0]()).toBe(true)
+      act(() => {
+        hook.result.current.beginLoad()
+      })
+      expect(accepted.mock.calls[0][0]()).toBe(false)
+      hook.unmount()
+    }
+  )
+
+  const mountedRecoveryComposer = async () => {
+    const { HistorySelectionReview } = await import(
+      "@/components/Common/Playground/HistorySelectionReview"
+    )
+    const { useComposerEvents } = await import("@/hooks/useComposerEvents")
+    const { useStoreMessageOption } = await import("@/store/option")
+    useStoreMessageOption.getState().startNewChatDraft()
+    useStoreMessageOption.setState({
+      streaming: false,
+      isLoading: false,
+      isProcessing: false,
+      historyId: null,
+      serverChatId: null,
+      history: [],
+      messages: []
+    })
+    let selection!: HistorySelectionController
+    const focusRequests = vi.fn()
+    function Composer() {
+      const controller = useHistorySelection()
+      React.useLayoutEffect(() => {
+        selection = controller
+      }, [controller])
+      const input = React.useRef<HTMLTextAreaElement>(null)
+      const onFocusComposer = React.useCallback(() => {
+        focusRequests()
+        input.current?.focus()
+      }, [])
+      useComposerEvents({ onFocusComposer })
+      return (
+        <>
+          <textarea
+            aria-label="Recovery composer"
+            ref={input}
+            defaultValue={"Exact input.  \nSecond line."}
+          />
+          <button>Other control</button>
+          <HistorySelectionReview selection={controller} />
+        </>
+      )
+    }
+    const mounted = render(<Composer />)
+    await act(async () => {
+      await selection.open(nativeOwner)
+      await selection.choose({ kind: "after_message", message_id: "a" })
+      selection.holdStaleSend(selection.getCurrent().view!, () => true)
+    })
+    return { mounted, controller: () => selection, focusRequests }
+  }
+
+  it.each(["Load latest messages", "Branch here"])(
+    "%s returns focus to the exact-input composer once after actual H1 acceptance",
+    async (label) => {
+      const probe = await mountedRecoveryComposer()
+      const button = screen.getByRole("button", { name: label })
+      button.focus()
+      fireEvent.click(button)
+      const input = screen.getByRole("textbox", { name: "Recovery composer" })
+      await waitFor(() => {
+        expect(input).toHaveFocus()
+      })
+      expect(probe.focusRequests).toHaveBeenCalledOnce()
+      expect(input).toHaveValue("Exact input.  \nSecond line.")
+      expect(probe.controller().status).toBe("ready")
+      expect(screen.queryByRole("button", { name: label })).toBeNull()
+      probe.mounted.unmount()
+    }
+  )
+
+  it.each(["latest", "branch"] as const)(
+    "a failed local %s acceptance callback cannot undo the installed choice",
+    async (choice) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.view!
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => true)
+      })
+      const failedFocus = () => {
+        throw new Error("local focus unavailable")
+      }
+      await act(async () => {
+        expect(
+          choice === "latest"
+            ? await hook.result.current.loadLatest(
+                origin,
+                () => true,
+                failedFocus
+              )
+            : hook.result.current.branchHere(origin, () => true, failedFocus)
+        ).toBe(true)
+      })
+      expect(hook.result.current.status).toBe("ready")
+      expect(hook.result.current.sendConflict).toBe(false)
+      expect(hook.result.current.view?.cursor).toEqual({
+        kind: "after_message",
+        message_id: choice === "latest" ? "b" : "a"
+      })
+      hook.unmount()
+    }
+  )
+
+  it.each(
+    ["Load latest messages", "Branch here"].flatMap((label) =>
+      [
+        "source",
+        "H1",
+        "New",
+        "account",
+        "busy",
+        "editor",
+        "unmount",
+        "focus ABA",
+        "pointer",
+        "hidden"
+      ].map((boundary) => [label, boundary])
+    )
+  )(
+    "%s does not steal focus after %s changes before its accepted frame",
+    async (label, boundary) => {
+      const frames: FrameRequestCallback[] = []
+      const raf = vi
+        .spyOn(globalThis, "requestAnimationFrame")
+        .mockImplementation((callback) => frames.push(callback))
+      const cancel = vi
+        .spyOn(globalThis, "cancelAnimationFrame")
+        .mockImplementation(() => {})
+      const probe = await mountedRecoveryComposer()
+      const { useStoreMessageOption } = await import("@/store/option")
+      const button = screen.getByRole("button", { name: label })
+      const other = screen.getByRole("button", { name: "Other control" })
+      const editor = document.createElement("form")
+      let lease: ReturnType<typeof vi.spyOn> | undefined
+      let visibility: ReturnType<typeof vi.spyOn> | undefined
+      try {
+        button.focus()
+        fireEvent.click(button)
+        await waitFor(() => {
+          expect(probe.controller().status).toBe("ready")
+        })
+        expect(frames).toHaveLength(1)
+        act(() => {
+          if (boundary === "source")
+            useStoreMessageOption.getState().startNewChatDraft()
+          if (boundary === "H1") probe.controller().beginLoad()
+          if (boundary === "New") probe.controller().reset()
+          if (boundary === "account")
+            lease = vi.spyOn(nativeOwner, "validate_lease").mockReturnValue(false)
+          if (boundary === "busy")
+            useStoreMessageOption.setState({ isProcessing: true })
+          if (boundary === "editor") {
+            editor.dataset.chatMessageEditor = ""
+            document.body.append(editor)
+          }
+          if (boundary === "unmount") probe.mounted.unmount()
+          if (boundary === "focus ABA") {
+            other.focus()
+            other.blur()
+          }
+          if (boundary === "pointer") fireEvent.pointerDown(other)
+          if (boundary === "hidden")
+            visibility = vi
+              .spyOn(document, "visibilityState", "get")
+              .mockReturnValue("hidden")
+          frames[0](performance.now())
+        })
+        expect(probe.focusRequests).not.toHaveBeenCalled()
+        if (boundary !== "unmount")
+          expect(
+            screen.getByRole("textbox", { name: "Recovery composer" })
+          ).toHaveValue("Exact input.  \nSecond line.")
+      } finally {
+        editor.remove()
+        lease?.mockRestore()
+        visibility?.mockRestore()
+        useStoreMessageOption.setState({ isProcessing: false })
+        probe.mounted.unmount()
+        raf.mockRestore()
+        cancel.mockRestore()
+      }
+    }
+  )
+
+  it("a held Latest never takes focus after the user moves away and back to BODY", async () => {
+    const frames: FrameRequestCallback[] = []
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((callback) => frames.push(callback))
+    const cancel = vi
+      .spyOn(globalThis, "cancelAnimationFrame")
+      .mockImplementation(() => {})
+    const probe = await mountedRecoveryComposer()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const capture = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return capture(...args)
+    })
+    try {
+      const button = screen.getByRole("button", { name: "Load latest messages" })
+      button.focus()
+      fireEvent.click(button)
+      const other = screen.getByRole("button", { name: "Other control" })
+      other.focus()
+      other.blur()
+      expect(document.activeElement).toBe(document.body)
+      await act(async () => {
+        release()
+      })
+      await waitFor(() => {
+        expect(probe.controller().status).toBe("ready")
+      })
+      expect(frames).toHaveLength(1)
+      act(() => {
+        frames[0](performance.now())
+      })
+      expect(probe.focusRequests).not.toHaveBeenCalled()
+    } finally {
+      release()
+      probe.mounted.unmount()
+      raf.mockRestore()
+      cancel.mockRestore()
+    }
+  })
+
+  it("a refused Latest capture leaves focus quiet and retains exact composer input", async () => {
+    const probe = await mountedRecoveryComposer()
+    mocks.capture.mockRejectedValueOnce(new Error("capture unavailable"))
+    const button = screen.getByRole("button", { name: "Load latest messages" })
+    button.focus()
+    fireEvent.click(button)
+    await waitFor(() => {
+      expect(probe.controller().error).toBe("capture unavailable")
+    })
+    expect(probe.controller().status).toBe("stale_selection")
+    expect(probe.focusRequests).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("textbox", { name: "Recovery composer" })
+    ).toHaveValue("Exact input.  \nSecond line.")
+    probe.mounted.unmount()
+  })
+
+  it("an accepted branch focus lease never adopts a newer branch at the same view", async () => {
+    const hook = await mountedAtEarlierAnswer()
+    const origin = hook.result.current.view!
+    const accepted = vi.fn<(isCurrent: () => boolean) => void>()
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+      hook.result.current.branchHere(origin, () => true, accepted)
+    })
+    const firstLease = accepted.mock.calls[0][0]
+    expect(firstLease()).toBe(true)
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+      hook.result.current.branchHere(origin, () => true)
+    })
+    expect(hook.result.current.branchPending).toBe(true)
+    expect(firstLease()).toBe(false)
+    hook.unmount()
+  })
+
+  it("an old accepted Branch frame stays quiet after a newer branch at the same view", async () => {
+    const frames: FrameRequestCallback[] = []
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((callback) => frames.push(callback))
+    const cancel = vi
+      .spyOn(globalThis, "cancelAnimationFrame")
+      .mockImplementation(() => {})
+    const probe = await mountedRecoveryComposer()
+    try {
+      const button = screen.getByRole("button", { name: "Branch here" })
+      const origin = probe.controller().view!
+      button.focus()
+      fireEvent.click(button)
+      expect(frames).toHaveLength(1)
+      act(() => {
+        probe.controller().holdStaleSend(origin, () => true)
+        probe.controller().branchHere(origin, () => true)
+        frames[0](performance.now())
+      })
+      expect(probe.controller().branchPending).toBe(true)
+      expect(probe.focusRequests).not.toHaveBeenCalled()
+    } finally {
+      probe.mounted.unmount()
+      raf.mockRestore()
+      cancel.mockRestore()
+    }
+  })
+
   it("holds the current graph without capture and grants exactly one explicit branch", async () => {
     const hook = await mountedAtEarlierAnswer()
     const origin = hook.result.current.getCurrent().view!

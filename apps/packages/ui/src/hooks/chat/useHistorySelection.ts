@@ -1613,7 +1613,11 @@ export function useHistorySelection(
     [publish, sendChoiceIsCurrent]
   )
   const branchHere = useCallback(
-    (origin: HistoryViewSelectionV1, isCurrent: () => boolean) => {
+    (
+      origin: HistoryViewSelectionV1,
+      isCurrent: () => boolean,
+      onAccepted?: (isCurrent: () => boolean) => void
+    ) => {
       if (
         sendChoice.current?.kind !== "conflict" ||
         !sendChoiceIsCurrent() ||
@@ -1633,10 +1637,26 @@ export function useHistorySelection(
         isCurrent: () => draft.isCurrent() && isCurrent()
       }
       publish({ ...current, status: "ready", error: null })
-      return sendChoiceIsCurrent()
+      const accepted = () =>
+        operation.epoch === epoch.current &&
+        sendChoice.current?.kind === "branch" &&
+        sendChoiceIsCurrent() &&
+        live.current.owner === current.owner &&
+        live.current.view === origin &&
+        live.current.capture === current.capture &&
+        live.current.status === "ready" &&
+        historyRecoveryAvailable()
+      if (!accepted()) return false
+      try {
+        onAccepted?.(accepted)
+      } catch {
+        /* Focus failure must not undo an accepted choice. */
+      }
+      return true
     },
     [invalidate, publish, sendChoiceIsCurrent]
   )
+
   const takeBranchIntent = useCallback(
     (origin: HistoryViewSelectionV1) => {
       const allowed =
@@ -1651,7 +1671,11 @@ export function useHistorySelection(
     [publish, sendChoiceIsCurrent]
   )
   const loadLatest = useCallback(
-    async (origin: HistoryViewSelectionV1, isCurrent: () => boolean) => {
+    async (
+      origin: HistoryViewSelectionV1,
+      isCurrent: () => boolean,
+      onAccepted?: (isCurrent: () => boolean) => void
+    ) => {
       if (
         sendChoice.current?.kind !== "conflict" ||
         !sendChoiceIsCurrent() ||
@@ -1673,6 +1697,7 @@ export function useHistorySelection(
         draft.isCurrent() &&
         isCurrent()
       const owned = () => sourceOwned() && historyRecoveryAvailable()
+      let accepted: (() => boolean) | undefined
       publish({ ...current, status: "loading", error: null })
       try {
         const manifest = await captureHistorySnapshot(
@@ -1699,14 +1724,21 @@ export function useHistorySelection(
         )
         if (!owned()) return false
         if (result.status !== "captured") throw new Error(result.code)
-        return await install(
-          result,
-          current.owner,
-          current.bookmarkScope,
-          operation.epoch,
-          current.pending,
-          owned
+        if (
+          await install(
+            result,
+            current.owner,
+            current.bookmarkScope,
+            operation.epoch,
+            current.pending,
+            owned
+          )
         )
+          accepted = () =>
+            owned() &&
+            live.current.view === result.view &&
+            live.current.capture === result &&
+            live.current.status === "ready"
       } catch (error) {
         if (owned()) {
           sendChoice.current = {
@@ -1743,6 +1775,13 @@ export function useHistorySelection(
           } else retireCancelledLoad(operation.epoch, current.owner, origin)
         }
       }
+      if (!accepted?.()) return false
+      try {
+        onAccepted?.(accepted)
+      } catch {
+        /* Focus failure must not undo an accepted choice. */
+      }
+      return true
     },
     [install, invalidate, publish, retireCancelledLoad, sendChoiceIsCurrent]
   )
