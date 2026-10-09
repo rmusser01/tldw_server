@@ -54,9 +54,9 @@ export const getDataFromCurrentTab = async () => {
             console.error("error", e)
             // this is a weird method but it works
             if (isFirefoxTarget) {
-              // all I need is to get the pdf url but somehow 
+              // all I need is to get the pdf url but somehow
               // firefox won't allow extensions to run content scripts on pdf https://bugzilla.mozilla.org/show_bug.cgi?id=1454760
-              // so I set up a weird method to fix this issue by asking tab to give the url 
+              // so I set up a weird method to fix this issue by asking tab to give the url
               // and then I can get the pdf url
               const result: TabSnapshot = {
                 url: tab.url,

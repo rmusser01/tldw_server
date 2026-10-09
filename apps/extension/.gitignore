@@ -45,7 +45,7 @@ keys.json
 # WXT
 .wxt
 # WebStorm
-.idea 
+.idea
 
 /docs/.vitepress/cache/
 package-lock.json
