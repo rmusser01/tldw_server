@@ -322,12 +322,13 @@ export class TldwModelsService {
     const serverUrl = String(config.serverUrl || "").trim()
     if (!serverUrl) return false
 
+    if (isActiveCookieSessionConfig(config)) return true
+
     if (config.authMode === "multi-user") {
       return Boolean(String(config.accessToken || "").trim())
     }
 
     return (
-      isActiveCookieSessionConfig(config) ||
       hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) ||
       hasUsableApiKey(config.apiKey)
     )
