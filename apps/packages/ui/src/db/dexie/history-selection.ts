@@ -1130,13 +1130,30 @@ export const loadHistoryTurnRecoveries = async (
   })
 
 export const dismissHistoryTurnRecovery = async (
-  scope: HistoryBookmarkScope, owner: {owner_key: string; conversation_id: string}, operationId: string, outcome: "completed" | "dismissed" = "dismissed"
-): Promise<void> =>
-  db.transaction("rw", [db.userSettings, db.historySelections], async () => {
+  scope: HistoryBookmarkScope,
+  owner: { owner_key: string; conversation_id: string },
+  operationId: string,
+  outcome: "completed" | "dismissed" = "dismissed",
+  options?: HistoryOperationOptions
+): Promise<boolean> =>
+  transaction("rw", options, async () => {
+    assertLease(options)
     await assertBookmarkProfile(scope)
+    assertLease(options)
     const prior = await db.historySelections.get(bookmarkKey(scope, owner))
-    if (!prior?.pending_turns?.[operationId]) return
-    const turns = {...prior.pending_turns}
+    assertLease(options)
+    if (!prior?.pending_turns?.[operationId]) return false
+    const turns = { ...prior.pending_turns }
     delete turns[operationId]
-    await db.historySelections.put({...prior, pending_turns: turns, history_turn_outcomes: {...prior.history_turn_outcomes, [operationId]: outcome}})
+    await db.historySelections.put({
+      ...prior,
+      pending_turns: turns,
+      history_turn_outcomes: {
+        ...prior.history_turn_outcomes,
+        [operationId]: outcome
+      }
+    })
+    // Retirement after the write must abort the transaction, not commit a false receipt.
+    assertLease(options)
+    return true
   })

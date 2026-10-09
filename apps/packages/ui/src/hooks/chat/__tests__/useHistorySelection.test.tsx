@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
   localOwner: vi.fn(),
   link: vi.fn(),
   recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
-  dismissRecovery: vi.fn<(...args: any[]) => Promise<void>>(async () => {})
+  dismissRecovery: vi.fn<(...args: any[]) => Promise<boolean>>(async () => true)
 }))
 vi.mock("@/components/Common/Button", async (original) => {
   const { Button } =
@@ -187,7 +187,7 @@ beforeEach(() => {
   mocks.updateForkSettings.mockReset().mockResolvedValue(null)
   mocks.confirm.mockClear()
   mocks.recoveries.mockReset().mockResolvedValue([])
-  mocks.dismissRecovery.mockReset().mockResolvedValue(undefined)
+  mocks.dismissRecovery.mockReset().mockResolvedValue(true)
   mocks.configChanged = null
   controllers = {}
   mocks.bookmarks.clear()
@@ -893,7 +893,7 @@ it("restores scoped pending operations from older views without making them sele
   expect(mocks.dismissRecovery).toHaveBeenCalledWith(
     entry.scope,
     expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
-    "op"
+    "op", "dismissed", expect.objectContaining({ validate_lease: expect.any(Function) })
   )
   expect(result.current.recoveries).toEqual([])
 })
@@ -1165,7 +1165,7 @@ it.each(["published", "held-success", "held-error"])(
     expect(mocks.dismissRecovery).toHaveBeenCalledExactlyOnceWith(
       entry.scope,
       expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
-      "retained-turn"
+      "retained-turn", "dismissed", expect.objectContaining({ validate_lease: expect.any(Function) })
     )
   }
 )
@@ -2706,6 +2706,139 @@ describe("shared proactive native freshness", () => {
       document.dispatchEvent(new Event("visibilitychange"))
     })
     expect(mocks.historyVersion).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+})
+
+
+describe("acknowledged recovery controller", () => {
+  const mountRecovery = async () => {
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(owner)
+    })
+    const entry: Parameters<HistorySelectionController["dismissRecovery"]>[0] =
+      {
+        scope: { profile_id: "profile", client_session_id: "old-view" },
+        turn: {
+          operation_id: "dismiss-ack",
+          owner_key: "owner",
+          conversation_id: "chat",
+          origin_view: hook.result.current.view!,
+          input_id: "input",
+          created_at: 1,
+          input_text: "  exact input\n  ",
+          input_images: [],
+          result_text: "  exact reply\n  ",
+          state: "generated_unsaved",
+          selection_digest: "selected",
+          request_context_digest: "prepared"
+        }
+      }
+    mocks.recoveries.mockResolvedValue([entry])
+    await act(async () => {
+      await hook.result.current.refreshRecovery()
+    })
+    return { hook, entry }
+  }
+
+  it.each(["refused", "failed"])(
+    "retains recovery text and reports no acknowledgement when dismissal is %s",
+    async (mode) => {
+      const { hook, entry } = await mountRecovery()
+      if (mode === "failed")
+        mocks.dismissRecovery.mockRejectedValueOnce(
+          new Error("journal unavailable")
+        )
+      else mocks.dismissRecovery.mockResolvedValueOnce(false)
+      let receipt: unknown
+      await act(async () => {
+        receipt = await hook.result.current.dismissRecovery(entry)
+      })
+      expect(receipt).toBe(false)
+      expect(hook.result.current.recoveries).toEqual([entry])
+      expect(hook.result.current.recoveryError).toBe(
+        mode === "failed"
+          ? "journal unavailable"
+          : "recovery_dismissal_not_committed"
+      )
+      hook.unmount()
+    }
+  )
+
+  it.each(["caller", "same-ID reset", "owner lease", "unmount"])(
+    "cannot acknowledge or remove an old recovery after %s during storage",
+    async (boundary) => {
+      const { hook, entry } = await mountRecovery()
+      let callerCurrent = true
+      let leaseCurrent = true
+      let finish!: () => void
+      let entered!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const leasedOwner = { ...owner, validate_lease: () => leaseCurrent }
+      await act(async () => {
+        await hook.result.current.open(leasedOwner)
+        await hook.result.current.refreshRecovery()
+      })
+      const durable = [entry]
+      mocks.dismissRecovery.mockImplementationOnce(
+        async (_scope, _view, _id, _outcome, options) => {
+          entered()
+          await new Promise<void>((resolve) => {
+            finish = resolve
+          })
+          if (options?.signal?.aborted || options?.validate_lease?.() === false)
+            return false
+          durable.splice(0)
+          return true
+        }
+      )
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = hook.result.current.dismissRecovery(
+          entry,
+          () => callerCurrent
+        )
+      })
+      await ready
+      if (boundary === "caller") callerCurrent = false
+      else if (boundary === "owner lease") leaseCurrent = false
+      else if (boundary === "unmount") hook.unmount()
+      else
+        await act(async () => {
+          hook.result.current.beginLoad()
+          await hook.result.current.open(leasedOwner)
+          await hook.result.current.refreshRecovery()
+        })
+      let receipt: unknown
+      await act(async () => {
+        finish()
+        receipt = await pending
+      })
+      expect(receipt).toBe(false)
+      expect(durable).toEqual([entry])
+      if (boundary === "same-ID reset") {
+        expect(hook.result.current.recoveries).toEqual([entry])
+        expect(hook.result.current.recoveryError).toBeNull()
+      }
+      hook.unmount()
+    }
+  )
+
+  it("refuses an old rendered caller before it can adopt a replacement same-ID epoch", async () => {
+    const { hook, entry } = await mountRecovery()
+    const old = hook.result.current.dismissRecovery
+    const source = hook.result.current.fence()
+    await act(async () => {
+      hook.result.current.beginLoad()
+      await hook.result.current.open(owner)
+    })
+    await act(async () => {
+      expect(await old(entry, source)).toBe(false)
+    })
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
     hook.unmount()
   })
 })

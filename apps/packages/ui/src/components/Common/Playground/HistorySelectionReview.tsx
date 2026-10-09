@@ -1,5 +1,6 @@
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { focusComposer } from "@/hooks/useComposerFocus"
+import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -63,6 +64,18 @@ export function HistorySelectionReview({
     view: HistorySelectionController["view"]
     sourceIsCurrent: () => boolean
   } | null>(null)
+  const [recoveryAction, setRecoveryAction] = React.useState<{
+    operationId: string
+    action: "copy" | "dismiss"
+    pending: boolean
+    feedback?: string
+    failed?: boolean
+  } | null>(null)
+  const recoveryActionRef = React.useRef<{
+    pending: boolean
+    isCurrent: () => boolean
+    cancel: () => void
+  } | null>(null)
   const latestAction = React.useRef<HTMLButtonElement>(null)
   const branchAction = React.useRef<HTMLButtonElement>(null)
   const recoveryFocus = React.useRef<(() => void) | null>(null)
@@ -72,10 +85,134 @@ export function HistorySelectionReview({
     return () => {
       mounted.current = false
       recoveryFocus.current?.()
+      recoveryActionRef.current?.cancel()
     }
   }, [])
   const editorOpen = () =>
     !!document.querySelector("form[data-chat-message-editor]")
+  const acknowledgeRecovery = async (
+    action: "copy" | "dismiss",
+    entry: HistorySelectionController["recoveries"][number],
+    initiator: HTMLButtonElement
+  ) => {
+    const owner = selection.owner,
+      view = selection.view
+    const sourceIsCurrent = () => {
+      const current = selection.getCurrent?.()
+      return (
+        mounted.current &&
+        renderedSource.isCurrent() &&
+        renderedSelectionIsCurrent() &&
+        owner?.kind !== "unavailable" &&
+        owner?.validate_lease?.() !== false &&
+        (!current || (current.owner === owner && current.view === view))
+      )
+    }
+    if (!sourceIsCurrent()) return
+    const previous = recoveryActionRef.current
+    if (previous?.pending && previous.isCurrent()) return
+    previous?.cancel()
+    let focusOwned = document.activeElement === initiator
+    let frame: number | null = null
+    const leaveFocus = (event: Event) => {
+      if (event.type === "input" || event.target !== initiator) focusOwned = false
+    }
+    const cleanup = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      document.removeEventListener("focusin", leaveFocus)
+      document.removeEventListener("pointerdown", leaveFocus)
+      document.removeEventListener("input", leaveFocus)
+    }
+    const attempt = {
+      pending: true,
+      isCurrent: () => recoveryActionRef.current === attempt && sourceIsCurrent(),
+      cancel: () => {
+        cleanup()
+        if (recoveryActionRef.current === attempt)
+          recoveryActionRef.current = null
+      }
+    }
+    recoveryActionRef.current = attempt
+    setRecoveryAction({
+      operationId: entry.turn.operation_id,
+      action,
+      pending: true
+    })
+    if (action === "dismiss") {
+      document.addEventListener("focusin", leaveFocus)
+      document.addEventListener("pointerdown", leaveFocus)
+      document.addEventListener("input", leaveFocus)
+    }
+    const failed = () =>
+      text(
+        action === "copy" ? "copyRecoveryFailed" : "dismissRecoveryFailed",
+        action === "copy"
+          ? "Could not copy recovered text. Select it in the details or try Copy again."
+          : "The recovery could not be dismissed. Your text is still available; try again."
+      )
+    try {
+      if (action === "copy")
+        await navigator.clipboard.writeText(
+          entry.turn.result_text || entry.turn.input_text
+        )
+      else if (!(await selection.dismissRecovery(entry, attempt.isCurrent)))
+        throw new Error("recovery_dismissal_not_committed")
+      if (!attempt.isCurrent()) return
+      attempt.pending = false
+      setRecoveryAction({
+        operationId: entry.turn.operation_id,
+        action,
+        pending: false,
+        feedback: text(
+          action === "copy"
+            ? "copyRecoverySucceeded"
+            : "dismissRecoverySucceeded",
+          action === "copy" ? "Recovered text copied." : "Recovery dismissed."
+        )
+      })
+      if (action === "dismiss")
+        frame = requestAnimationFrame(() => {
+          const owned =
+            attempt.isCurrent() &&
+            focusOwned &&
+            !initiator.isConnected &&
+            document.activeElement === document.body &&
+            document.visibilityState === "visible" &&
+            !editorOpen() &&
+            !Array.from(
+              document.querySelectorAll<HTMLElement>(
+                '[role="dialog"], [aria-modal="true"]'
+              )
+            ).some((dialog) => !isHiddenBySelfOrAncestor(dialog))
+          cleanup()
+          if (owned) focusComposer()
+        })
+    } catch {
+      if (attempt.isCurrent()) {
+        attempt.pending = false
+        setRecoveryAction({
+          operationId: entry.turn.operation_id,
+          action,
+          pending: false,
+          feedback: failed(),
+          failed: true
+        })
+      }
+    } finally {
+      if (frame === null) cleanup()
+      if (recoveryActionRef.current === attempt && !attempt.isCurrent()) {
+        attempt.cancel()
+        if (mounted.current) setRecoveryAction(null)
+      }
+    }
+  }
+  React.useEffect(() => {
+    const attempt = recoveryActionRef.current
+    if (attempt && !attempt.isCurrent()) {
+      attempt.cancel()
+      setRecoveryAction(null)
+    }
+  }, [selection, renderedSource])
   const recoverSendChoice = async (choice: "latest" | "branch") => {
     const origin = selection.view
     if (
@@ -462,16 +599,9 @@ export function HistorySelectionReview({
           ))}
       </details>
       <Button
-        onClick={() => {
-          if (
-            mounted.current &&
-            renderedSource.isCurrent() &&
-            renderedSelectionIsCurrent()
-          )
-            void navigator.clipboard.writeText(
-              entry.turn.result_text || entry.turn.input_text
-            )
-        }}>
+        disabled={recoveryAction?.pending || openingRecovery !== null}
+        loading={recoveryAction?.pending && recoveryAction.action === "copy" && recoveryAction.operationId === entry.turn.operation_id}
+        onClick={(event) => void acknowledgeRecovery("copy", entry, event.currentTarget)}>
         {text("copyRecovery", "Copy recovered text")}
       </Button>
       {(entry.turn.action === "edit_resend" ||
@@ -479,15 +609,16 @@ export function HistorySelectionReview({
         entry.turn.outcome === "complete" &&
         entry.turn.settled_message_id && (
           <Button
-            disabled={openingRecovery !== null || selection.status !== "ready"}
+            disabled={openingRecovery !== null || recoveryAction?.pending || selection.status !== "ready"}
             loading={openingRecovery === entry.turn.operation_id}
             onClick={() => void openSavedReply(entry)}>
             {text("openSavedReply", "Open saved reply")}
           </Button>
         )}
       <Button
-        disabled={openingRecovery !== null}
-        onClick={() => void selection.dismissRecovery(entry)}>
+        disabled={openingRecovery !== null || recoveryAction?.pending}
+        loading={recoveryAction?.pending && recoveryAction.action === "dismiss" && recoveryAction.operationId === entry.turn.operation_id}
+        onClick={(event) => void acknowledgeRecovery("dismiss", entry, event.currentTarget)}>
         {text("dismissRecovery", "Dismiss recovery")}
       </Button>
     </div>
@@ -558,6 +689,7 @@ export function HistorySelectionReview({
         </p>
       )}
       {openRecoveryError && <p role="alert">{openRecoveryError}</p>}
+      {recoveryAction?.feedback && <p role={recoveryAction.failed ? "alert" : "status"}>{recoveryAction.feedback}</p>}
       {selection.status === "loading" && (
         <StatePanel
           state="loading"

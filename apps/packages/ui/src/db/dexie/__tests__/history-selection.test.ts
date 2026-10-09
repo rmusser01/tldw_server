@@ -1604,3 +1604,178 @@ it("a refused client-managed native attempt keeps candidate IDs and exact input 
     })
   ).rejects.toThrow("history_operation_conflict")
 })
+
+
+describe("acknowledged recovery dismissal", () => {
+  const retained = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const turn = {
+      operation_id: "dismiss-ack",
+      owner_key: owner.owner_key,
+      conversation_id: "chat",
+      input_id: "input",
+      assistant_id: "result",
+      persistence: "client" as const,
+      created_at: 1,
+      input_text: "  exact input\n  ",
+      input_images: [],
+      result_text: "<think>raw reasoning</think>  exact reply\n  ",
+      state: "generated_unsaved" as const,
+      origin_view: origin,
+      selection_digest: "selected",
+      request_context_digest: "prepared"
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, turn)
+    return { owner, turn }
+  }
+
+  it("acknowledges only a committed removal, not an already missing record", async () => {
+    const { owner } = await retained()
+    expect(
+      await history.dismissHistoryTurnRecovery(bookmark, owner, "dismiss-ack")
+    ).toBe(true)
+    expect(
+      await history.dismissHistoryTurnRecovery(bookmark, owner, "dismiss-ack")
+    ).toBe(false)
+    expect(
+      (await history.loadHistoryBookmark(bookmark, owner))
+        ?.history_turn_outcomes
+    ).toEqual({ "dismiss-ack": "dismissed" })
+  })
+
+  it.each(["entry", "profile", "read", "write"])(
+    "rolls back dismissal after its lease retires at %s",
+    async (boundary) => {
+      const { owner, turn } = await retained()
+      let current = boundary !== "entry"
+      const table =
+        boundary === "profile" ? memory.userSettings : memory.historySelections
+      const method = boundary === "write" ? "put" : "get"
+      const original = table[method].bind(table)
+      const spy =
+        boundary === "entry"
+          ? null
+          : vi
+              .spyOn(table, method)
+              .mockImplementationOnce(async (...args: unknown[]) => {
+                const result = await original(...args)
+                current = false
+                return result
+              })
+      try {
+        await expect(
+          history.dismissHistoryTurnRecovery(
+            bookmark,
+            owner,
+            "dismiss-ack",
+            "dismissed",
+            { validate_lease: () => current }
+          )
+        ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+      } finally {
+        spy?.mockRestore()
+      }
+      expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+        { scope: bookmark, turn }
+      ])
+      expect(
+        (await history.loadHistoryBookmark(bookmark, owner))
+          ?.history_turn_outcomes
+      ).toBeUndefined()
+    }
+  )
+
+  it("aborts a dismissal retired after its write while the transaction receipt is still pending", async () => {
+    const { owner, turn } = await retained()
+    const original = new Map(memory.historySelections.rows)
+    let finish!: () => void
+    let entered!: () => void
+    const written = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    memory.transaction.mockImplementationOnce(
+      async (
+        _mode: unknown,
+        _tables: unknown,
+        operation: (tx: { abort: () => void }) => Promise<boolean>
+      ) => {
+        let aborted = false
+        const receipt = await operation({
+          abort() {
+            aborted = true
+          }
+        })
+        entered()
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+        if (aborted) {
+          memory.historySelections.rows.clear()
+          original.forEach((value, key) =>
+            memory.historySelections.rows.set(key, value)
+          )
+          throw new Error("transaction aborted before commit")
+        }
+        return receipt
+      }
+    )
+    const controller = new AbortController()
+    const pending = history.dismissHistoryTurnRecovery(
+      bookmark,
+      owner,
+      "dismiss-ack",
+      "dismissed",
+      { signal: controller.signal }
+    )
+    await written
+    controller.abort()
+    finish()
+    await expect(pending).rejects.toThrow("transaction aborted before commit")
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+      { scope: bookmark, turn }
+    ])
+  })
+
+  it("retains the exact journal when storage rejects its removal", async () => {
+    const { owner, turn } = await retained()
+    const spy = vi
+      .spyOn(memory.historySelections, "put")
+      .mockRejectedValueOnce(new Error("journal unavailable"))
+    try {
+      await expect(
+        history.dismissHistoryTurnRecovery(bookmark, owner, "dismiss-ack")
+      ).rejects.toThrow("journal unavailable")
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+      { scope: bookmark, turn }
+    ])
+  })
+
+  it("refuses an aborted or foreign-profile dismissal without losing the journal", async () => {
+    const { owner, turn } = await retained()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      history.dismissHistoryTurnRecovery(
+        bookmark,
+        owner,
+        "dismiss-ack",
+        "dismissed",
+        { signal: controller.signal }
+      )
+    ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+    await expect(
+      history.dismissHistoryTurnRecovery(
+        { ...bookmark, profile_id: "foreign" },
+        owner,
+        "dismiss-ack"
+      )
+    ).rejects.toMatchObject({ code: "bookmark_owner_mismatch" })
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+      { scope: bookmark, turn }
+    ])
+  })
+})

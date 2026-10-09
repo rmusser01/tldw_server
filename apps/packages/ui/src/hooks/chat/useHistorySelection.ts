@@ -1451,31 +1451,57 @@ export function useHistorySelection(
     refreshRecovery
   ])
   const dismissRecovery = useCallback(
-    async (entry: {
-      scope: HistoryBookmarkScope
-      turn: HistoryTurnRecovery
-    }) => {
+    async (
+      entry: { scope: HistoryBookmarkScope; turn: HistoryTurnRecovery },
+      isCurrent: () => boolean = () => true
+    ): Promise<boolean> => {
       const current = live.current
       const owner = current.owner
       if (
         !mounted.current ||
+        !isCurrent() ||
         !current.view ||
         !current.bookmarkScope ||
         !owner ||
         owner.kind === "unavailable" ||
-        (owner.kind === "native" &&
-          (!current.settingsQualified || !owner.validate_lease())) ||
+        !ownerLeaseValid(owner) ||
+        (owner.kind === "native" && !current.settingsQualified) ||
         current.bookmarkScope.profile_id !== entry.scope.profile_id ||
         current.view.owner_key !== entry.turn.owner_key ||
         current.view.conversation_id !== entry.turn.conversation_id
       )
-        return
-      await dismissHistoryTurnRecovery(
-        entry.scope,
-        current.view,
-        entry.turn.operation_id
-      )
-      await refreshRecovery()
+        return false
+      const view = current.view
+      const scope = current.bookmarkScope
+      const token = epoch.current
+      const stillCurrent = () =>
+        mounted.current &&
+        isCurrent() &&
+        token === epoch.current &&
+        sameView(live.current.view, view) &&
+        live.current.owner === owner &&
+        live.current.bookmarkScope === scope &&
+        ownerLeaseValid(owner) &&
+        (owner.kind !== "native" || live.current.settingsQualified)
+      try {
+        const committed = await dismissHistoryTurnRecovery(
+          entry.scope,
+          view,
+          entry.turn.operation_id,
+          "dismissed",
+          { signal: request.current?.signal, validate_lease: stillCurrent }
+        )
+        if (!stillCurrent()) return false
+        if (!committed) {
+          setRecoveryError("recovery_dismissal_not_committed")
+          return false
+        }
+        await refreshRecovery()
+        return stillCurrent()
+      } catch (error) {
+        if (stillCurrent()) setRecoveryError(errorCode(error))
+        return false
+      }
     },
     [refreshRecovery]
   )

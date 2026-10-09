@@ -186,7 +186,7 @@ it("shows recoverable text separately with copy and dismiss but no replay action
         }
       }
     ],
-    dismissRecovery: vi.fn()
+    dismissRecovery: vi.fn(async () => true)
   } as any
   render(<HistorySelectionReview selection={selection} />)
   expect(screen.getByText("recover this answer")).toBeTruthy()
@@ -195,7 +195,7 @@ it("shows recoverable text separately with copy and dismiss but no replay action
   ).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery" }))
   expect(selection.dismissRecovery).toHaveBeenCalledWith(
-    selection.recoveries[0]
+    selection.recoveries[0], expect.any(Function)
   )
   expect(
     screen.queryByRole("button", { name: /resend|retry|settle/i })
@@ -223,7 +223,7 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
         }
       }
     ],
-    dismissRecovery: vi.fn()
+    dismissRecovery: vi.fn(async () => true)
   } as unknown as HistorySelectionController
   render(<HistorySelectionReview selection={selection} />)
   fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
@@ -234,11 +234,11 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
   expect(screen.queryByText(/unknown|Turn needs review/i)).toBeNull()
   fireEvent.click(screen.getByText("Inspect original input and result"))
   expect(screen.getByText("original refused question")).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" })) })
   expect(copy).toHaveBeenCalledWith("  original refused question  ")
   fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery" }))
   expect(selection.dismissRecovery).toHaveBeenCalledWith(
-    selection.recoveries[0]
+    selection.recoveries[0], expect.any(Function)
   )
   expect(
     screen.queryByRole("button", { name: /resend|retry|settle/i })
@@ -295,7 +295,7 @@ const recoveryController = (
         }
       }
     ],
-    dismissRecovery: vi.fn()
+    dismissRecovery: vi.fn(async () => true)
   } as unknown as HistorySelectionController
 }
 
@@ -325,7 +325,7 @@ it.each(["accepted_unsent", "generated_unsaved"] as const)(
     ).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery" }))
     expect(selection.dismissRecovery).toHaveBeenCalledWith(
-      selection.recoveries[0]
+      selection.recoveries[0], expect.any(Function)
     )
     expect(selection.recoveries[0].scope.profile_id).toBe("original-profile")
   }
@@ -435,7 +435,7 @@ describe("available history-path actions (TASK-13550)", () => {
           }
         }
       ],
-      dismissRecovery: vi.fn()
+      dismissRecovery: vi.fn(async () => true)
     } as unknown as HistorySelectionController
     const onExpand = vi.fn()
     render(<HistorySelectionReview selection={selection} onExpand={onExpand} />)
@@ -492,7 +492,7 @@ const completedEditedSelection = () =>
       }
     ],
     openRecoveryResult: vi.fn(async () => true),
-    dismissRecovery: vi.fn()
+    dismissRecovery: vi.fn(async () => true)
   }) as unknown as HistorySelectionController
 
 it("a saved edited reply has truthful copy and opens only on an explicit action", async () => {
@@ -869,7 +869,7 @@ describe("bounded retained outcomes", () => {
       branchHere: vi.fn(),
       fence: () => () => true,
       recoveries,
-      dismissRecovery: vi.fn()
+      dismissRecovery: vi.fn(async () => true)
     }) as unknown as HistorySelectionController
   it("keeps current choices and only its qualified retained result ahead of five collapsed older records", () => {
     const older = Array.from({ length: 5 }, (_, index) =>
@@ -946,7 +946,7 @@ describe("bounded retained outcomes", () => {
       screen.getByText(/Retained outcomes \(1\)/).closest("details")
     ).not.toHaveAttribute("open")
   })
-  it("keeps distinct operations with identical text and sorts their actions by recency without changing the journal", () => {
+  it("keeps distinct operations with identical text and sorts their actions by recency without changing the journal", async () => {
     const first = receipt("r1"),
       second = receipt("r2")
     first.turn.input_text = second.turn.input_text =
@@ -967,14 +967,12 @@ describe("bounded retained outcomes", () => {
         normalizer: (value) => value
       })
     ).toHaveLength(2)
-    cards.forEach((card) =>
-      fireEvent.click(
-        within(card).getByRole("button", { name: "Dismiss recovery" })
-      )
-    )
+    for (const card of cards) {
+      await act(async () => { fireEvent.click(within(card).getByRole("button", { name: "Dismiss recovery" })) })
+    }
     expect(vi.mocked(selection.dismissRecovery).mock.calls).toEqual([
-      [second],
-      [first]
+      [second, expect.any(Function)],
+      [first, expect.any(Function)]
     ])
     expect(selection.recoveries).toBe(entries)
     expect(entries.map((entry) => entry.turn.operation_id)).toEqual([
@@ -1052,6 +1050,343 @@ describe("bounded retained outcomes", () => {
       .getByText(entries[0].turn.input_text, { normalizer: (value) => value })
       .closest('[role="status"]')!
     fireEvent.click(record.querySelectorAll("button")[1])
-    expect(selection.dismissRecovery).toHaveBeenCalledWith(entries[0])
+    expect(selection.dismissRecovery).toHaveBeenCalledWith(entries[0], expect.any(Function))
   })
+})
+
+
+describe("acknowledged recovery actions", () => {
+  const mountAcknowledgement = async () => {
+    const { useStoreMessageOption } = await import("@/store/option")
+    const { useComposerEvents } = await import("@/hooks/useComposerEvents")
+    useStoreMessageOption.getState().startNewChatDraft()
+    const view = {
+      owner_key: "owner",
+      conversation_id: "chat",
+      view_session_id: "writer",
+      selection_revision: 1,
+      interpretation: { kind: "parent_graph_v1" as const },
+      cursor: { kind: "empty" as const }
+    }
+    const entry = {
+      scope: { profile_id: "profile", client_session_id: "writer" },
+      turn: {
+        operation_id: "ack-op",
+        origin_view: view,
+        created_at: 1,
+        owner_key: "owner",
+        conversation_id: "chat",
+        state: "generated_unsaved" as const,
+        input_text: "  exact original input\n  ",
+        result_text: "<think>raw reasoning</think>  exact result\n  "
+      }
+    }
+    let epoch = 1
+    let ownerCurrent = true
+    const selection = {
+      ...controller(),
+      status: "ready",
+      view,
+      recoveries: [entry],
+      owner: {
+        kind: "local",
+        profile_id: "profile",
+        owner_key: "owner",
+        conversation_id: "chat",
+        validate_lease: () => ownerCurrent
+      },
+      bookmarkScope: entry.scope,
+      fence: () => {
+        const token = epoch
+        return () => epoch === token
+      },
+      dismissRecovery: vi.fn(async () => true)
+    } as unknown as HistorySelectionController
+    const focusRequests = vi.fn()
+    function Composer() {
+      const input = React.useRef<HTMLTextAreaElement>(null)
+      const onFocusComposer = React.useCallback(() => {
+        focusRequests()
+        input.current?.focus()
+      }, [])
+      useComposerEvents({ onFocusComposer })
+      return (
+        <>
+          <textarea
+            ref={input}
+            aria-label="ACK composer"
+            defaultValue={"Exact draft.  \nKeep this line."}
+          />
+          <button>Other editor control</button>
+          <HistorySelectionReview selection={selection} />
+        </>
+      )
+    }
+    const mounted = render(<Composer />)
+    return {
+      mounted,
+      selection,
+      entry,
+      focusRequests,
+      retire: () => {
+        epoch += 1
+      },
+      expireOwner: () => {
+        ownerCurrent = false
+      },
+      newDraft: () => useStoreMessageOption.getState().startNewChatDraft(),
+      rerender: () => mounted.rerender(<Composer />)
+    }
+  }
+
+  it("refuses clipboard access from an expired rendered owner before any React commit", async () => {
+    const probe = await mountAcknowledgement()
+    const copy = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: copy }
+    })
+    probe.expireOwner()
+    fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
+    expect(copy).not.toHaveBeenCalled()
+    expect(screen.queryByText("Recovered text copied.")).toBeNull()
+  })
+
+  it("copies exact raw bytes and announces success only after the clipboard acknowledges", async () => {
+    const probe = await mountAcknowledgement()
+    let finish!: () => void
+    const copy = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: copy }
+    })
+    const button = screen.getByRole("button", { name: "Copy recovered text" })
+    fireEvent.click(button)
+    expect(copy).toHaveBeenCalledExactlyOnceWith(probe.entry.turn.result_text)
+    expect(button).toBeDisabled()
+    expect(screen.queryByText("Recovered text copied.")).toBeNull()
+    await act(async () => {
+      finish()
+    })
+    expect(screen.getByText("Recovered text copied.")).toHaveAttribute(
+      "role",
+      "status"
+    )
+    expect(probe.selection.recoveries).toEqual([probe.entry])
+    expect(probe.focusRequests).not.toHaveBeenCalled()
+  })
+
+  it("retains the text and offers a usable retry after a clipboard rejection", async () => {
+    const probe = await mountAcknowledgement()
+    const copy = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("clipboard denied"))
+      .mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: copy }
+    })
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy recovered text" })
+      )
+    })
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not copy recovered text. Select it in the details or try Copy again."
+    )
+    expect(
+      screen.getByText(probe.entry.turn.result_text, {
+        normalizer: (value) => value
+      })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Recovered text copied.")).toBeNull()
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy recovered text" })
+      )
+    })
+    expect(screen.getByText("Recovered text copied.")).toBeInTheDocument()
+    expect(copy).toHaveBeenNthCalledWith(2, probe.entry.turn.result_text)
+  })
+
+  it("an old clipboard completion cannot publish into or clear a newer attempt", async () => {
+    const probe = await mountAcknowledgement()
+    let oldFinish!: () => void
+    let newFinish!: () => void
+    const copy = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            oldFinish = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            newFinish = resolve
+          })
+      )
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: copy }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
+    act(() => {
+      probe.newDraft()
+      probe.rerender()
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
+    await act(async () => {
+      oldFinish()
+    })
+    expect(screen.queryByText("Recovered text copied.")).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Copy recovered text" })
+    ).toBeDisabled()
+    await act(async () => {
+      newFinish()
+    })
+    expect(screen.getByText("Recovered text copied.")).toBeInTheDocument()
+    expect(copy).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(["refused", "failed"])(
+    "does not announce or remove a recovery after %s dismissal",
+    async (mode) => {
+      const probe = await mountAcknowledgement()
+      const dismiss = vi.mocked(probe.selection.dismissRecovery)
+      if (mode === "failed")
+        dismiss.mockRejectedValueOnce(new Error("journal unavailable"))
+      else dismiss.mockResolvedValueOnce(false)
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Dismiss recovery" })
+        )
+      })
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "The recovery could not be dismissed. Your text is still available; try again."
+      )
+      expect(screen.queryByText("Recovery dismissed.")).toBeNull()
+      expect(
+        screen.getByText(probe.entry.turn.result_text, {
+          normalizer: (value) => value
+        })
+      ).toBeInTheDocument()
+      expect(probe.selection.recoveries).toEqual([probe.entry])
+      expect(probe.focusRequests).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["Copy recovered text", "Dismiss recovery"])(
+    "an old rendered %s cannot adopt a new same-ID H1 epoch",
+    async (label) => {
+      const probe = await mountAcknowledgement()
+      const copy = vi.fn(async () => undefined)
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: copy }
+      })
+      probe.retire()
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      expect(copy).not.toHaveBeenCalled()
+      expect(probe.selection.dismissRecovery).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    "current",
+    "focus ABA",
+    "pointer",
+    "new input",
+    "New",
+    "H1",
+    "editor",
+    "dialog",
+    "hidden",
+    "unmount"
+  ])(
+    "acknowledged Dismiss returns only its owned removed-control focus (%s)",
+    async (boundary) => {
+      const probe = await mountAcknowledgement()
+      const frames = new Map<number, FrameRequestCallback>()
+      let id = 0
+      const raf = vi
+        .spyOn(globalThis, "requestAnimationFrame")
+        .mockImplementation((callback) => {
+          frames.set(++id, callback)
+          return id
+        })
+      const cancel = vi
+        .spyOn(globalThis, "cancelAnimationFrame")
+        .mockImplementation((key) => {
+          frames.delete(key)
+        })
+      const visibility = vi
+        .spyOn(document, "visibilityState", "get")
+        .mockReturnValue("visible")
+      const dismiss = screen.getByRole("button", { name: "Dismiss recovery" })
+      const input = screen.getByRole("textbox", { name: "ACK composer" })
+      const other = screen.getByRole("button", { name: "Other editor control" })
+      let extra: HTMLElement | undefined
+      try {
+        dismiss.focus()
+        await act(async () => {
+          fireEvent.click(dismiss)
+        })
+        expect(probe.selection.dismissRecovery).toHaveBeenCalledWith(
+          probe.entry,
+          expect.any(Function)
+        )
+        if (boundary === "focus ABA") {
+          other.focus()
+          dismiss.focus()
+        } else if (boundary === "pointer") fireEvent.pointerDown(other)
+        else if (boundary === "new input")
+          fireEvent.input(input, { target: { value: "Newer exact input.  " } })
+        else if (boundary === "New") probe.newDraft()
+        else if (boundary === "H1") probe.retire()
+        else if (boundary === "editor") {
+          extra = document.createElement("form")
+          extra.dataset.chatMessageEditor = ""
+          document.body.append(extra)
+        } else if (boundary === "dialog") {
+          extra = document.createElement("div")
+          extra.setAttribute("role", "dialog")
+          document.body.append(extra)
+        } else if (boundary === "hidden") visibility.mockReturnValue("hidden")
+        else if (boundary === "unmount") probe.mounted.unmount()
+        if (boundary !== "unmount") {
+          probe.selection.recoveries = []
+          act(() => probe.rerender())
+        }
+        const pending = [...frames.values()]
+        await act(async () => {
+          pending.forEach((callback) => callback(0))
+        })
+        expect(probe.focusRequests).toHaveBeenCalledTimes(
+          boundary === "current" ? 1 : 0
+        )
+        if (boundary === "current") {
+          expect(input).toHaveFocus()
+          expect(input).toHaveValue("Exact draft.  \nKeep this line.")
+          expect(screen.getByText("Recovery dismissed.")).toHaveAttribute(
+            "role",
+            "status"
+          )
+        }
+      } finally {
+        extra?.remove()
+        visibility.mockRestore()
+        cancel.mockRestore()
+        raf.mockRestore()
+        probe.mounted.unmount()
+      }
+    }
+  )
 })

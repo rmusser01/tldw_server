@@ -5085,7 +5085,33 @@ export const useChatActions = ({
         if (!retryFence() || !sameSource()) return retired()
         dispatch?.controller?.signal.throwIfAborted()
         dispatch?.assertCurrent?.()
-        await selection.dismissRecovery(entry)
+        const dismissed = await selection.dismissRecovery(entry, () => {
+          if (
+            !retryFence() ||
+            !sameSource() ||
+            dispatch?.controller?.signal.aborted
+          )
+            return false
+          try {
+            dispatch?.assertCurrent?.()
+            return true
+          } catch {
+            return false
+          }
+        })
+        dispatch?.controller?.signal.throwIfAborted()
+        dispatch?.assertCurrent?.()
+        if (!retryFence() || !sameSource()) return retired()
+        if (!dismissed) {
+          notification.error({
+            message: t("error", { defaultValue: "Error" }),
+            description: t(
+              "playground:errorRecovery.dismissFailed",
+              "The saved recovery could not be dismissed. Your text is still available; try again."
+            )
+          })
+          return chatSubmitFailed("recovery_dismissal_not_committed")
+        }
       }
       if (!retryFence() || !sameSource()) return retired()
       dispatch?.controller?.signal.throwIfAborted()

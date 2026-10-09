@@ -546,7 +546,7 @@ beforeEach(async () => {
   nativeChatId = "tracked-chat-1"
   h1.connected = false
   h1.recover.mockReset()
-  h1.dismiss.mockReset()
+  h1.dismiss.mockReset().mockResolvedValue(true)
   h1.lookupRecoveries.mockReset()
   h1.lookupAdmission.mockReset()
   vi.clearAllMocks()
@@ -3728,13 +3728,39 @@ it.each(["view", "new", "account"])("interrupted retry cannot replace a later %s
   expect(mounted.options.notification.error).not.toHaveBeenCalled()
 })
 
+it.each(["refused", "failed"])(
+  "interrupted retry retains recovery and sends nothing after %s dismissal",
+  async (mode) => {
+    const mounted = await mountInterruptedRetry()
+    if (mode === "failed")
+      h1.dismiss.mockRejectedValueOnce(new Error("journal unavailable"))
+    else h1.dismiss.mockResolvedValueOnce(false)
+    let outcome: unknown
+    await act(async () => {
+      outcome = await mounted.hook.result.current.regenerateLastMessage()
+    })
+    expect(outcome).toMatchObject({
+      status: "failed",
+      errorMessage: "recovery_dismissal_not_committed"
+    })
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    await expect(
+      h1.lookupRecoveries.mock.results.at(-1)?.value
+    ).resolves.toEqual([mounted.entry])
+    expect(mounted.options.notification.error).toHaveBeenCalledOnce()
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+  }
+)
+
 it("current interrupted retry reuses its existing admission and submits once", async () => {
   const mounted = await mountInterruptedRetry()
   let outcome: unknown
   await act(async () => { outcome = await mounted.hook.result.current.regenerateLastMessage() })
   expect(outcome).toMatchObject({ status: "submitted" })
   expect(mounted.choose).toHaveBeenCalledExactlyOnceWith({ kind: "before_message", message_id: "u-old" })
-  expect(mounted.dismiss).toHaveBeenCalledExactlyOnceWith(mounted.entry)
+  expect(mounted.dismiss).toHaveBeenCalledExactlyOnceWith(mounted.entry, expect.any(Function))
   expect(normalChatModeMock).toHaveBeenCalledOnce()
   expect(normalChatModeMock.mock.calls[0][6].historySelection.retryAdmission).toEqual(mounted.admission)
 })
