@@ -175,7 +175,10 @@ export const QuickChatGuidesPanel: React.FC<Props> = ({
                       {t(tutorial.descriptionKey, tutorial.descriptionFallback)}
                     </p>
                     <p className="mt-1 text-[11px] text-text-subtle">
-                      {t("tutorials:steps", { count: tutorial.steps.length })}
+                      {t("tutorials:steps", {
+                        count: tutorial.steps.length,
+                        defaultValue: "{count, plural, one {# step} other {# steps}}"
+                      })}
                     </p>
                   </div>
                   <Button

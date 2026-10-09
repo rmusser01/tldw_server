@@ -69,10 +69,7 @@ const CurrentChatModelSettings = lazy(() =>
 )
 
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
-import { useHelpModal } from "@/store/tutorials"
-import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { DemoModeProvider, useDemoMode } from "@/context/demo-mode"
-import { isEditableTarget } from "@/utils/editable-target"
 
 type OptionLayoutProps = {
   children: React.ReactNode
@@ -271,40 +268,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   useSidebarShortcuts(toggleSidebar, true)
   useQuickChatShortcuts(toggleQuickChat, true)
   useModeNavigationShortcuts(navigate, !hideHeader)
-
-  // Help modal (tutorials + shortcuts)
-  const { toggle: toggleHelpModal } = useHelpModal()
-
-  // ? key to open help modal
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input
-      const isInputField = isEditableTarget(e.target)
-
-      // ? key to open help modal (without Ctrl/Cmd to avoid double-fire)
-      if (
-        e.key === "?" &&
-        !isInputField &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey
-      ) {
-        e.preventDefault()
-        toggleHelpModal()
-        return
-      }
-
-      // Also support the legacy Ctrl/Cmd + Shift + ? shortcut
-      const modPressed = isMac ? e.metaKey : e.ctrlKey
-      if (e.key === "?" && e.shiftKey && modPressed && !isInputField) {
-        e.preventDefault()
-        toggleHelpModal()
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [toggleHelpModal])
 
   React.useEffect(() => {
     if (!shortcutLoading) return
@@ -604,14 +567,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
 
           {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
-          <PageHelpModalHost />
+          <PageHelpModalHost modeNavigationEnabled={!hideHeader} />
 
           {/* Tutorial Runner - executes active tutorials */}
-          {!hideHeader && (
-            <Suspense fallback={null}>
-              <TutorialRunner />
-            </Suspense>
-          )}
+          <Suspense fallback={null}>
+            <TutorialRunner />
+          </Suspense>
 
           {/* Tutorial Prompt - shows first-visit notification */}
           {!hideHeader && (

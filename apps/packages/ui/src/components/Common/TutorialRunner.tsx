@@ -14,17 +14,18 @@ import Joyride, {
 import { useTranslation } from "react-i18next"
 import { useActiveTutorial } from "@/store/tutorials"
 import { getTutorialById, type TutorialDefinition } from "@/tutorials"
+import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 
 const TARGET_RETRY_DELAY_MS = 350
 const MAX_TARGET_RETRY_ATTEMPTS = 4
 
-const resolveTargetElement = (
-  target: Step["target"]
-): HTMLElement | null => {
-  if (!target) return null
+const resolveTargetElement = (target: Step["target"]): HTMLElement | null => {
+  if (!target || typeof document === "undefined") return null
 
   if (typeof target !== "string") {
-    return target instanceof HTMLElement ? target : null
+    return target instanceof HTMLElement && isElementVisible(target)
+      ? target
+      : null
   }
 
   const selectors = target
@@ -33,9 +34,10 @@ const resolveTargetElement = (
     .filter((selector) => selector.length > 0)
 
   for (const selector of selectors) {
-    const element = document.querySelector(selector)
-    if (element instanceof HTMLElement) {
-      return element
+    for (const element of document.querySelectorAll(selector)) {
+      if (element instanceof HTMLElement && isElementVisible(element)) {
+        return element
+      }
     }
   }
 
@@ -44,23 +46,12 @@ const resolveTargetElement = (
 
 const isElementVisible = (element: HTMLElement): boolean => {
   const style = window.getComputedStyle(element)
-  if (
-    style.display === "none" ||
-    style.visibility === "hidden" ||
-    Number(style.opacity || "1") === 0
-  ) {
+  if (isHiddenBySelfOrAncestor(element) || Number(style.opacity || "1") === 0) {
     return false
   }
 
   const rect = element.getBoundingClientRect()
   return rect.width > 0 && rect.height > 0
-}
-
-const isStepTargetReady = (step: Step | undefined): boolean => {
-  if (!step) return false
-  const element = resolveTargetElement(step.target)
-  if (!element) return false
-  return isElementVisible(element)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,19 +156,15 @@ export const TutorialRunner: React.FC = () => {
   /**
    * Convert tutorial steps to Joyride format with i18n
    */
-  const joyrideSteps: Step[] = React.useMemo(() => {
-    if (!tutorial) return []
-
-    return tutorial.steps.map((step) => ({
-      target: step.target,
-      title: t(step.titleKey, step.titleFallback),
-      content: t(step.contentKey, step.contentFallback),
-      placement: step.placement || "auto",
-      disableBeacon: step.disableBeacon ?? false,
-      spotlightClicks: step.spotlightClicks ?? false,
-      isFixed: step.isFixed ?? false
-    }))
-  }, [tutorial, t])
+  const joyrideSteps: Step[] = (tutorial?.steps ?? []).map((step) => ({
+    target: resolveTargetElement(step.target) ?? step.target,
+    title: t(step.titleKey, step.titleFallback),
+    content: t(step.contentKey, step.contentFallback),
+    placement: step.placement || "auto",
+    disableBeacon: step.disableBeacon ?? false,
+    spotlightClicks: step.spotlightClicks ?? false,
+    isFixed: step.isFixed ?? false
+  }))
 
   /**
    * Joyride locale strings
@@ -200,6 +187,12 @@ export const TutorialRunner: React.FC = () => {
   const handleCallback = React.useCallback(
     (data: CallBackProps) => {
       const { status, index, type, action } = data
+
+      if (action === ACTIONS.CLOSE) {
+        clearRetryState()
+        endTutorial()
+        return
+      }
 
       // Tutorial finished or skipped
       if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
@@ -232,7 +225,7 @@ export const TutorialRunner: React.FC = () => {
       if (type === EVENTS.TARGET_NOT_FOUND) {
         const retryKey = `${activeTutorialId ?? "unknown"}:${index}`
         const currentAttempts = retryAttemptsRef.current.get(retryKey) ?? 0
-        const currentStep = joyrideSteps[index]
+        const currentStep = tutorial?.steps[index]
 
         if (currentStep && currentAttempts < MAX_TARGET_RETRY_ATTEMPTS) {
           retryAttemptsRef.current.set(retryKey, currentAttempts + 1)
@@ -258,7 +251,7 @@ export const TutorialRunner: React.FC = () => {
               })
             }
 
-            if (isStepTargetReady(currentStep)) {
+            if (refreshedTarget) {
               retryAttemptsRef.current.delete(retryKey)
             }
 
@@ -297,7 +290,8 @@ export const TutorialRunner: React.FC = () => {
       endTutorial,
       markComplete,
       setStepIndex,
-      joyrideSteps
+      tutorial,
+      joyrideSteps.length
     ]
   )
 

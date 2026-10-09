@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
+import { PlaygroundEmpty } from "@/components/Option/Playground/PlaygroundEmpty"
+import { useTutorialStore } from "@/store/tutorials"
 import { MemoryRouter, useNavigate } from "react-router-dom"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -104,13 +106,9 @@ vi.mock("@/components/Timeline", () => ({
   TimelineModal: () => null
 }))
 
-vi.mock("@/components/Common/PageHelpModal", () => ({
-  PageHelpModal: () => null
-}))
 
-vi.mock("@/components/Common/TutorialRunner", () => ({
-  TutorialRunner: () => null
-}))
+
+
 
 vi.mock("@/components/Common/TutorialPrompt", () => ({
   TutorialPrompt: () => null
@@ -543,4 +541,49 @@ it("the actual outer shell capture cannot republish old messages after synchrono
   } finally {
     unsubscribe()
   }
+})
+
+it("starts the real shared tutorial runner from Tour while the full extension header is hidden", async () => {
+  useTutorialStore.getState().resetProgress()
+  render(
+    <MemoryRouter initialEntries={["/chat"]}>
+      <OptionLayout hideHeader>
+        <PlaygroundEmpty />
+        <button data-testid="model-selector">Select a model</button>
+        <textarea data-testid="chat-input" aria-label="Test composer" />
+      </OptionLayout>
+    </MemoryRouter>
+  )
+  const target = screen.getByRole("button", { name: "Select a model" })
+  // jsdom does not calculate layout; the native runner gate measures real targets.
+  vi.spyOn(target, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(10, 10, 120, 44)
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Take a quick tour" }))
+  const help = await screen.findByRole("dialog", { name: "Page Help" })
+  fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }))
+  expect(help).not.toBeInTheDocument()
+  const tour = await screen.findByRole("alertdialog", {
+    name: "Choose a Model"
+  })
+  expect(tour).toBeVisible()
+  const next = screen.getByRole("button", { name: "Next (Step 1 of 5)" })
+  next.focus()
+  fireEvent.keyDown(next, { key: "?", shiftKey: true })
+  expect(
+    screen.queryByRole("dialog", { name: "Page Help" })
+  ).not.toBeInTheDocument()
+  expect(tour).toBeVisible()
+  fireEvent.click(
+    tour.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!
+  )
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("alertdialog", { name: "Choose a Model" })
+    ).not.toBeInTheDocument()
+  )
+  expect(useTutorialStore.getState().completedTutorials).not.toContain(
+    "playground-basics"
+  )
+  act(() => useTutorialStore.getState().resetProgress())
 })

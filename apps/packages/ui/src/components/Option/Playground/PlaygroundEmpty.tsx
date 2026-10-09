@@ -245,7 +245,7 @@ export const PlaygroundEmpty = () => {
               <button
                 type="button"
                 onClick={openHelpModal}
-                className={`inline-flex items-center gap-1.5 text-xs font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
+                className={`inline-flex min-h-[44px] items-center gap-1.5 px-3 py-2 text-xs font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
               >
                 <HelpCircle className="h-3.5 w-3.5" />
                 {t("playground:empty.takeTour", "Take a quick tour")}

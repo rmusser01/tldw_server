@@ -6412,5 +6412,14 @@
   },
   "promptInsert_preview": {
     "message": "Prompt preview"
+  },
+  "header_showPages": {
+    "message": "Show pages"
+  },
+  "header_hidePages": {
+    "message": "Hide pages"
+  },
+  "header_pageNavigator": {
+    "message": "Pages"
   }
 }

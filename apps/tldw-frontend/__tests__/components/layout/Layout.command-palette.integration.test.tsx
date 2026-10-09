@@ -92,7 +92,6 @@ vi.mock("@web/components/notifications/NotificationToastBridge", () => ({ Notifi
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Common/TutorialRunner", () => ({ TutorialRunner: () => null }))
 vi.mock("@/components/Common/TutorialPrompt", () => ({ TutorialPrompt: () => null }))
-vi.mock("@/components/Common/KeyboardShortcutsModal", () => ({ KeyboardShortcutsModal: () => null }))
 vi.mock("@/components/Common/PageHelpModal", () => ({
   PageHelpModal: () => <div role="dialog" aria-label="Page help">Help</div>
 }))
@@ -148,12 +147,12 @@ for (const { name, Layout } of layouts) {
       expect(screen.getByRole("textbox", { name: "Search commands" })).toBe(input)
       expect(input).toHaveValue("go to settings")
       expect(input).toHaveFocus()
-      expect(screen.getAllByRole("dialog", { name: "Command Palette" })).toHaveLength(1)
+      expect(screen.getAllByRole("dialog", { name: "Search commands" })).toHaveLength(1)
       expect(addListener.mock.calls.filter(([event]) => event === "tldw:open-command-palette")).toHaveLength(1)
       expect(removeListener.mock.calls.filter(([event]) => event === "tldw:open-command-palette")).toHaveLength(0)
 
       fireEvent.keyDown(input, { key: "Escape" })
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command Palette" })).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Search commands" })).not.toBeInTheDocument())
       await waitFor(() => expect(trigger).toHaveFocus())
     })
 
@@ -162,12 +161,8 @@ for (const { name, Layout } of layouts) {
       view.rerender(tree(hidden))
       await waitFor(() => expect(Boolean(screen.queryByTestId("shell-header"))).toBe(!hidden))
       act(() => window.dispatchEvent(new CustomEvent("tldw:open-help-modal")))
-      if (name === "SharedLayout" || hidden) {
-        expect(await screen.findByRole("dialog", { name: "Page help" })).toBeInTheDocument()
-        expect(screen.getAllByRole("dialog", { name: "Page help" })).toHaveLength(1)
-      } else {
-        expect(screen.queryByRole("dialog", { name: "Page help" })).not.toBeInTheDocument()
-      }
+      expect(await screen.findByRole("dialog", { name: "Page help" })).toBeInTheDocument()
+      expect(screen.getAllByRole("dialog", { name: "Page help" })).toHaveLength(1)
     })
   })
 }

@@ -8,7 +8,7 @@ const isFocusableElement = (element: HTMLElement): boolean => {
   return true;
 };
 
-const isHiddenBySelfOrAncestor = (element: HTMLElement): boolean => {
+export const isHiddenBySelfOrAncestor = (element: HTMLElement): boolean => {
   let current: HTMLElement | null = element;
   while (current) {
     if (current.hidden || current.getAttribute("aria-hidden") === "true") {

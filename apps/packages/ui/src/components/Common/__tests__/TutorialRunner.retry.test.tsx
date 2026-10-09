@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { TutorialRunner } from "../TutorialRunner"
 
@@ -63,7 +63,8 @@ vi.mock("react-joyride", () => {
     },
     ACTIONS: {
       NEXT: "next",
-      PREV: "prev"
+      PREV: "prev",
+      CLOSE: "close"
     }
   }
 })
@@ -91,6 +92,95 @@ describe("TutorialRunner retry behavior", () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each([false, true])(
+    "uses the first visible target alternative rather than DOM order (primary hidden=%s)",
+    (hidden) => {
+      tutorialRegistry["test-tutorial"].steps[0].target =
+        '[data-testid="primary-model"], [data-testid="fallback-input"]'
+      // jsdom has no layout; both are measurable, but a hidden primary stays hidden.
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(10, 10, 120, 44)
+      )
+      const view = render(
+        <>
+          <textarea data-testid="fallback-input" />
+          <button
+            data-testid="primary-model"
+            style={{ display: hidden ? "none" : "block" }}>
+            Model
+          </button>
+        </>
+      )
+      render(<TutorialRunner />)
+      const expected = view.getByTestId(
+        hidden ? "fallback-input" : "primary-model"
+      )
+      expect(latestJoyrideProps.steps[0].target).toBe(expected)
+    }
+  )
+
+  it("re-resolves the original alternatives when a previously mounted target is removed", () => {
+    tutorialRegistry["test-tutorial"].steps[0].target =
+      '[data-testid="primary-model"], [data-testid="fallback-input"]'
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(10, 10, 120, 44)
+    )
+    const targets = render(
+      <>
+        <textarea data-testid="fallback-input" />
+        <button data-testid="primary-model">Model</button>
+      </>
+    )
+    const fallback = targets.getByTestId("fallback-input")
+    const scroll = vi.fn()
+    fallback.scrollIntoView = scroll
+    render(<TutorialRunner />)
+    targets.rerender(
+      <>
+        <textarea data-testid="fallback-input" />
+      </>
+    )
+    act(() => {
+      latestJoyrideProps.callback({
+        status: "running",
+        index: 0,
+        type: "target:not_found",
+        action: "next"
+      })
+      vi.advanceTimersByTime(350)
+    })
+    expect(scroll).toHaveBeenCalled()
+    expect(latestJoyrideProps.steps[0].target).toBe(fallback)
+  })
+
+  it.each(["running", "finished"])(
+    "closes an explicit tour Close without granting completion (status=%s)",
+    (status) => {
+      render(<TutorialRunner />)
+      latestJoyrideProps.callback({
+        status,
+        index: 0,
+        type: "step:after",
+        action: "close"
+      })
+      expect(tutorialState.endTutorial).toHaveBeenCalledTimes(1)
+      expect(tutorialState.setStepIndex).not.toHaveBeenCalled()
+      expect(tutorialState.markComplete).not.toHaveBeenCalled()
+    }
+  )
+
+  it("records completion after the explicit Finish action", () => {
+    render(<TutorialRunner />)
+    latestJoyrideProps.callback({
+      status: "finished",
+      index: 1,
+      type: "step:after",
+      action: "next"
+    })
+    expect(tutorialState.markComplete).toHaveBeenCalledWith("test-tutorial")
+    expect(tutorialState.endTutorial).toHaveBeenCalledTimes(1)
   })
 
   it("retries missing targets before skipping to next step", () => {

@@ -235,7 +235,10 @@
     "quickIngestQueuedAria": "{{label}} — {{count}} items queued — click to review and process",
     "writingPlayground": "Writing Playground",
     "documentWorkspace": "Document Workspace",
-    "modeRepo2txt": "Repo2Txt"
+    "modeRepo2txt": "Repo2Txt",
+    "showPages": "Show pages",
+    "hidePages": "Hide pages",
+    "pageNavigator": "Pages"
   },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",

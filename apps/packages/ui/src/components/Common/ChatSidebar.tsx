@@ -651,10 +651,10 @@ export function ChatSidebar({
             "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
             focusRingClasses
           )}
-          title={t("common:chatSidebar.shortcuts", "Shortcuts")}
+          title={t("common:chatSidebar.navigation", "Navigation")}
         >
           <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            {t("common:chatSidebar.shortcuts", "Shortcuts")}
+            {t("common:chatSidebar.navigation", "Navigation")}
           </span>
           <ChevronDown
             className={cn(

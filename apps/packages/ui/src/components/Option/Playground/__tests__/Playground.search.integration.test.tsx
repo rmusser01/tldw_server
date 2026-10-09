@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useSimpleForm } from "@/hooks/useSimpleForm"
@@ -12,6 +12,8 @@ import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scop
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import { Playground } from "../Playground"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
+import { useTutorialStore } from "@/store/tutorials"
 import {
   encodeSidepanelChatWebUiHandoff,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
@@ -27,18 +29,58 @@ const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promis
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
 const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null, blockAutomaticLoad: false, storedReferenceInvalid: false, opened: [] as unknown[]}))
-vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
-  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
-  return {...actual, useHistorySelectionContext: () => {
-    const controller = actual.useHistorySelectionContext()
-    if (forkPresentation.blockAutomaticLoad) return {
-      ...controller,
-      canAutomaticallyLoad: () => false,
-      ...(forkPresentation.storedReferenceInvalid ? {getStoredReference: () => { throw new Error("invalid_history_reference") }} : {}),
-      open: (...args: Parameters<typeof controller.open>) => { forkPresentation.opened.push(args[0]); return controller.open(...args) },
+vi.mock("@/hooks/chat/useHistorySelection", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {
+    ...actual,
+    useHistorySelectionContext: () => {
+      const controller = actual.useHistorySelectionContext()
+      const {
+        blockAutomaticLoad,
+        storedReferenceInvalid,
+        controller: override,
+        mode,
+        settings
+      } = forkPresentation
+      // A real context keeps its provider value through child-only state updates.
+      return React.useMemo(() => {
+        if (blockAutomaticLoad)
+          return {
+            ...controller,
+            canAutomaticallyLoad: () => false,
+            ...(storedReferenceInvalid
+              ? {
+                  getStoredReference: () => {
+                    throw new Error("invalid_history_reference")
+                  }
+                }
+              : {}),
+            open: (...args: Parameters<typeof controller.open>) => {
+              forkPresentation.opened.push(args[0])
+              return controller.open(...args)
+            }
+          }
+        return (
+          override ??
+          (mode
+            ? {
+                ...controller,
+                settingsMode: () => mode,
+                forkSettings: settings
+              }
+            : controller)
+        )
+      }, [
+        controller,
+        blockAutomaticLoad,
+        storedReferenceInvalid,
+        override,
+        mode,
+        settings
+      ])
     }
-    return forkPresentation.controller ?? (forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller)
-  }}
+  }
 })
 
 const messageOptionState = vi.hoisted(() => ({
@@ -321,6 +363,7 @@ vi.mock("@/store/option", async (importOriginal) => {
   const useStoreMessageOption = (selector: any = (state: any) => state) => h1.enabled ? actual.useStoreMessageOption(selector) : selector(storeOptionState.value)
   useStoreMessageOption.getState = () => h1.enabled ? actual.useStoreMessageOption.getState() : storeOptionState.value
   useStoreMessageOption.setState = actual.useStoreMessageOption.setState
+  useStoreMessageOption.subscribe = actual.useStoreMessageOption.subscribe
   return { useStoreMessageOption }
 })
 
@@ -355,7 +398,8 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => desktopViewportState.value
 }))
 
-vi.mock("@/services/chat-settings", () => ({
+vi.mock("@/services/chat-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(),
   syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
   applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
@@ -463,13 +507,13 @@ describe("Playground thread search integration", () => {
     await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalled())
   })
 
-  it("restores ordinary attachments through a real owner-qualified legacy controller without accepting ancestry", async () => {
+  it("keeps ordinary attachment lookup owner-fenced through a legacy review controller without accepting ancestry", async () => {
     h1.legacyNative = true
     const actual = renderHook(() => useHistorySelection())
-    await act(async () => {await actual.result.current.open({kind: "native", owner_key: "local-owner", conversation_id: "chat-1", validate_lease: () => true} as any)})
+    await act(async () => {await actual.result.current.open({kind: "native", owner_key: "local-owner", conversation_id: "chat-1", request_scope: verifiedOwner, scope: {type: "global"}, validate_lease: () => true} as any)})
     forkPresentation.controller = actual.result.current
     render(<Playground />)
-    await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: "history-1", serverChatId: "chat-1"}))
+    await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith(expect.objectContaining({historyId: "history-1", serverChatId: "chat-1", requestScope: verifiedOwner, validate_lease: expect.any(Function)})))
     expect(actual.result.current.status).toBe("legacy_review_required")
     expect(h1.confirm).not.toHaveBeenCalled()
   })
@@ -579,29 +623,45 @@ describe("Playground thread search integration", () => {
     })
   })
 
-  it("opens shortcut help from the header and closes with Escape", () => {
-    render(<Playground />)
-
-    fireEvent.click(screen.getByTestId("playground-shortcuts-help-trigger"))
-    expect(
-      screen.getByTestId("playground-shortcuts-help-panel")
-    ).toBeInTheDocument()
-
-    fireEvent.keyDown(window, { key: "Escape" })
+  it("opens the single shortcut reference from the chat header and closes back to its trigger", async () => {
+    useTutorialStore.getState().closeHelpModal()
+    render(
+      <>
+        <Playground />
+        <PageHelpModalHost />
+      </>
+    )
+    const trigger = screen.getByTestId("playground-shortcuts-help-trigger")
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole("dialog", { name: "Page Help" })
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
     expect(
       screen.queryByTestId("playground-shortcuts-help-panel")
     ).not.toBeInTheDocument()
+    expect(within(dialog).getByText("Search this conversation")).toBeVisible()
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
   })
 
-  it("opens shortcut help when a global open-shortcuts event is dispatched", async () => {
-    render(<Playground />)
-
-    window.dispatchEvent(new CustomEvent("tldw:open-playground-shortcuts"))
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("playground-shortcuts-help-panel")
-      ).toBeInTheDocument()
-    })
+  it("preserves the legacy chat help command through the one shared host", async () => {
+    useTutorialStore.getState().closeHelpModal()
+    render(
+      <>
+        <Playground />
+        <PageHelpModalHost />
+      </>
+    )
+    act(() =>
+      window.dispatchEvent(new CustomEvent("tldw:open-playground-shortcuts"))
+    )
+    const dialog = await screen.findByRole("dialog", { name: "Page Help" })
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(
+      within(dialog).getByText("Fork from the focused message")
+    ).toBeVisible()
+    fireEvent.keyDown(dialog, { key: "Escape" })
   })
 
   it("does not render the deprecated chat workflows header action", () => {

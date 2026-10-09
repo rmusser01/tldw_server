@@ -1641,5 +1641,8 @@
     "snapshotVersion": "Source snapshot: Media version {{version}}",
     "snapshotChanged": "Snapshot changed outside refresh",
     "textUnchanged": "Text unchanged"
+  },
+  "shortcuts": {
+    "openKeyboardHelp": "Open keyboard shortcuts (?)"
   }
 }

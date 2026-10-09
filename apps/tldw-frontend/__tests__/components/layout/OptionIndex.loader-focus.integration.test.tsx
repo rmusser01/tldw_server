@@ -130,7 +130,6 @@ vi.mock("@web/components/notifications/NotificationToastBridge", () => ({ Notifi
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Common/TutorialRunner", () => ({ TutorialRunner: () => null }))
 vi.mock("@/components/Common/TutorialPrompt", () => ({ TutorialPrompt: () => null }))
-vi.mock("@/components/Common/KeyboardShortcutsModal", () => ({ KeyboardShortcutsModal: () => null }))
 vi.mock("@/components/Common/PageHelpModal", () => ({
   PageHelpModal: () => <div role="dialog" aria-label="Page help">Help</div>
 }))

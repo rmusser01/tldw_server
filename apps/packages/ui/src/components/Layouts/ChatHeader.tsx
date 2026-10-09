@@ -121,8 +121,8 @@ export function ChatHeader({
     ? toText(t("common:chatSidebar.expand", "Expand sidebar"))
     : toText(t("common:chatSidebar.collapse", "Collapse sidebar"))
   const shortcutsToggleLabel = shortcutsExpanded
-    ? toText(t("option:header.hideShortcuts", "Hide shortcuts"))
-    : toText(t("option:header.showShortcuts", "Show shortcuts"))
+    ? toText(t("option:header.hidePages", "Hide pages"))
+    : toText(t("option:header.showPages", "Show pages"))
   const companionHomeLabel = toText(
     t("option:header.companionHome", "Companion Home")
   )

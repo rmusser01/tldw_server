@@ -5,11 +5,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useOptionLayoutShellOverrides } from '@/components/Layouts/Layout';
 import OptionLayout from '../../../components/layout/WebLayout';
+import { PlaygroundEmpty } from '@/components/Option/Playground/PlaygroundEmpty';
+import { useTutorialStore } from '@/store/tutorials';
 
 const testModulePath = import.meta.url.startsWith('file:')
   ? fileURLToPath(import.meta.url)
@@ -327,7 +329,8 @@ vi.mock('@/components/Common/Workflow', () => ({
   WorkflowIntegrationHost: () => null,
 }));
 
-vi.mock('@/routes/route-paths', () => ({
+vi.mock('@/routes/route-paths', async (original) => ({
+  ...(await original<typeof import('@/routes/route-paths')>()),
   VIEWPORT_CONSTRAINED_PATHS: ['/chat'],
 }));
 
@@ -395,10 +398,6 @@ vi.mock('@/components/Common/CommandPaletteHost', () => ({
 
 vi.mock('@/components/Common/TutorialRunner', () => ({
   TutorialRunner: () => <div data-testid="tutorial-runner" />,
-}));
-
-vi.mock('@/components/Common/KeyboardShortcutsModal', () => ({
-  KeyboardShortcutsModal: () => null,
 }));
 
 vi.mock('@/components/Timeline', () => ({
@@ -1159,4 +1158,182 @@ it('the actual outer shell capture cannot republish old messages after synchrono
   } finally {
     unsubscribe();
   }
+});
+
+
+describe('WebLayout chat tour rendered outcome', () => {
+  beforeEach(() => {
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+    routerState.location = { pathname: '/chat', search: '', hash: '' };
+    featureFlagState.showChatSidebar = false;
+    mediaQueryState.isDesktop = false;
+    mediaQueryState.isMobile = false;
+    optionStoreState.value = { historyId: null, serverChatId: null };
+    useTutorialStore.getState().resetProgress();
+  });
+  afterEach(() => {
+    cleanup();
+    useTutorialStore.getState().resetProgress();
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+  });
+  it.each([false, true])(
+    'visible Tour opens one real help modal with hideHeader=%s and closes back to its trigger',
+    async (hideHeader) => {
+      render(
+        <OptionLayout hideHeader={hideHeader}>
+          <PlaygroundEmpty />
+          <textarea aria-label="Retained draft" defaultValue={'Exact draft.  \nSecond line.'} />
+        </OptionLayout>
+      );
+      const tour = screen.getByRole('button', { name: 'Take a quick tour' });
+      expect(screen.queryByRole('dialog', { name: 'Page Help' })).not.toBeInTheDocument();
+      tour.focus();
+      fireEvent.click(tour);
+      const dialog = await screen.findByRole('dialog', { name: 'Page Help' });
+      expect(dialog).toBeVisible();
+      expect(screen.getAllByRole('dialog', { name: 'Page Help' })).toHaveLength(1);
+      for (const name of ['Chat Basics', 'Tools & Attachments', 'Voice Chat'])
+        expect(within(dialog).getByRole('heading', { name })).toBeVisible();
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      expect(screen.queryByRole('dialog', { name: 'Page Help' })).not.toBeInTheDocument();
+      expect(tour).toHaveFocus();
+      expect(screen.getByRole('textbox', { name: 'Retained draft' })).toHaveValue(
+        'Exact draft.  \nSecond line.'
+      );
+    }
+  );
+  it.each(['tldw:open-shortcuts-modal', 'tldw:open-playground-shortcuts'])(
+    'opens one shortcut reference through %s before and after the help chunk is loaded',
+    async (eventName) => {
+      render(
+        <OptionLayout>
+          <PlaygroundEmpty />
+          <button type="button">Help initiator</button>
+          <textarea aria-label="Retained draft" defaultValue={'Exact draft.  \nSecond line.'} />
+        </OptionLayout>
+      );
+      const initiator = screen.getByRole('button', { name: 'Help initiator' });
+      for (const _attempt of [0, 1]) {
+        initiator.focus();
+        act(() => window.dispatchEvent(new CustomEvent(eventName)));
+        const dialog = await screen.findByRole('dialog', { name: 'Page Help' });
+        await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1));
+        expect(within(dialog).getByText('Show keyboard shortcuts')).toBeVisible();
+        expect(within(dialog).getByText('Chat', { exact: true })).toBeVisible();
+        expect(
+          within(dialog).queryByRole('heading', { name: 'Chat Basics' })
+        ).not.toBeInTheDocument();
+        fireEvent.keyDown(dialog, { key: 'Escape' });
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(initiator).toHaveFocus();
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Take a quick tour' }));
+      const tourDialog = await screen.findByRole('dialog', { name: 'Page Help' });
+      expect(within(tourDialog).getByRole('heading', { name: 'Chat Basics' })).toBeVisible();
+      expect(screen.getByRole('textbox', { name: 'Retained draft' })).toHaveValue(
+        'Exact draft.  \nSecond line.'
+      );
+    }
+  );
+  it('opens the shortcut reference on ? while preserving question marks and modifier keys in editable fields', async () => {
+    render(
+      <OptionLayout>
+        <PlaygroundEmpty />
+        <button type="button">Help initiator</button>
+        <textarea aria-label="Retained draft" defaultValue="Exact question?" />
+      </OptionLayout>
+    );
+    const field = screen.getByRole('textbox', { name: 'Retained draft' });
+    field.focus();
+    fireEvent.keyDown(field, { key: '?', shiftKey: true });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const initiator = screen.getByRole('button', { name: 'Help initiator' });
+    initiator.focus();
+    fireEvent.keyDown(initiator, { key: '?', ctrlKey: true, shiftKey: true });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.keyDown(initiator, { key: '?', shiftKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Page Help' });
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(within(dialog).getByText('Show keyboard shortcuts')).toBeVisible();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(initiator).toHaveFocus();
+    expect(field).toHaveValue('Exact question?');
+  });
+  it('leaves a page-local help owner alone after the persistent shell mounts its route', async () => {
+    // Reproduce Flashcards' window-bubble listener in a declared route fixture.
+    function LocalHelpPage() {
+      const [open, setOpen] = React.useState(false);
+      React.useEffect(() => {
+        const onQuestion = (event: KeyboardEvent) => {
+          if (event.key === '?' || (event.shiftKey && event.key === '/')) {
+            event.preventDefault();
+            setOpen(true);
+          }
+        };
+        window.addEventListener('keydown', onQuestion);
+        return () => window.removeEventListener('keydown', onQuestion);
+      }, []);
+      return (
+        <>
+          <button>Local help initiator</button>
+          {open && (
+            <div role="dialog" aria-modal="true" aria-label="Flashcards help">
+              Local reference
+            </div>
+          )}
+        </>
+      );
+    }
+    routerState.location.pathname = '/media';
+    const view = render(
+      <OptionLayout>
+        <button>Chat help initiator</button>
+      </OptionLayout>
+    );
+    await act(async () => undefined);
+    routerState.location.pathname = '/flashcards';
+    view.rerender(
+      <OptionLayout>
+        <LocalHelpPage />
+      </OptionLayout>
+    );
+    const localTrigger = screen.getByRole('button', { name: 'Local help initiator' });
+    localTrigger.focus();
+    fireEvent.keyDown(localTrigger, { key: '?', shiftKey: true });
+    expect(useTutorialStore.getState().isHelpModalOpen).toBe(false);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Flashcards help' })).toBeVisible();
+
+    view.rerender(
+      <OptionLayout>
+        <button>Local help initiator</button>
+      </OptionLayout>
+    );
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-help-modal')));
+    const explicitHelp = await screen.findByRole('dialog', { name: 'Page Help' });
+    fireEvent.keyDown(explicitHelp, { key: 'Escape' });
+    routerState.location.pathname = '/chat';
+    view.rerender(
+      <OptionLayout>
+        <button>Chat help initiator</button>
+      </OptionLayout>
+    );
+    const chatTrigger = screen.getByRole('button', { name: 'Chat help initiator' });
+    chatTrigger.focus();
+    fireEvent.keyDown(chatTrigger, { key: '?', shiftKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Page Help' })).toBeVisible();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+  it('starts the registered chat tutorial from its actual help control', async () => {
+    render(
+      <OptionLayout>
+        <PlaygroundEmpty />
+      </OptionLayout>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Take a quick tour' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Page Help' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Start', exact: true }));
+    expect(useTutorialStore.getState().activeTutorialId).toBe('playground-basics');
+    expect(screen.queryByRole('dialog', { name: 'Page Help' })).not.toBeInTheDocument();
+  });
 });

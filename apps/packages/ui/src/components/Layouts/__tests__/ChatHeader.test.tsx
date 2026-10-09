@@ -74,11 +74,11 @@ describe("ChatHeader shortcut toggle", () => {
     vi.clearAllMocks()
   })
 
-  it("shows signpost button with 'Show shortcuts' when collapsed and requests expand", () => {
+  it("shows signpost button with 'Show pages' when collapsed and requests expand", () => {
     const props = createProps({ shortcutsExpanded: false })
     render(<ChatHeader {...props} />)
 
-    const toggleButton = screen.getByRole("button", { name: "Show shortcuts" })
+    const toggleButton = screen.getByRole("button", { name: "Show pages" })
     expect(toggleButton).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(toggleButton)
 
@@ -89,11 +89,11 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
-  it("shows signpost button with 'Hide shortcuts' when expanded and requests collapse", () => {
+  it("shows signpost button with 'Hide pages' when expanded and requests collapse", () => {
     const props = createProps({ shortcutsExpanded: true })
     render(<ChatHeader {...props} />)
 
-    const toggleButton = screen.getByRole("button", { name: "Hide shortcuts" })
+    const toggleButton = screen.getByRole("button", { name: "Hide pages" })
     expect(toggleButton).toHaveAttribute("aria-expanded", "true")
     fireEvent.click(toggleButton)
 
@@ -109,7 +109,7 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     const homeButton = screen.getByRole("button", { name: "Companion Home" })
-    const signpostButton = screen.getByRole("button", { name: "Show shortcuts" })
+    const signpostButton = screen.getByRole("button", { name: "Show pages" })
     const headerBrand = homeButton.closest(".flex.items-center.gap-2.text-text")
     const headerButtons: HTMLElement[] = Array.from(
       headerBrand?.querySelectorAll("button") ?? []
@@ -133,7 +133,7 @@ describe("ChatHeader shortcut toggle", () => {
     const controls = [
       screen.getByRole("button", { name: "Collapse sidebar" }),
       screen.getByRole("button", { name: "Companion Home" }),
-      screen.getByRole("button", { name: "Show shortcuts" }),
+      screen.getByRole("button", { name: "Show pages" }),
       screen.getByRole("button", { name: "Search commands - Open command palette" }),
       screen.getByRole("button", { name: "New saved chat" }),
       screen.getByRole("button", { name: "Temporary chat (on this device)" }),

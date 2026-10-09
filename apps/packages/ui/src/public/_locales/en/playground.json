@@ -4411,5 +4411,8 @@
   },
   "errorRecovery_missingFinalSummary": {
     "message": "No final answer was generated."
+  },
+  "shortcuts_openKeyboardHelp": {
+    "message": "Open keyboard shortcuts (?)"
   }
 }

@@ -618,7 +618,8 @@
     "folderTitlesPartial": "Some conversation details are unavailable. Folder links remain visible.",
     "foldersEmpty": "No folders yet. Create a folder to organize your chats.",
     "folderCreated": "Folder created successfully",
-    "deletedDeviceCopyRetained": "Removed from server history. A cached copy remains on this device because it could not be removed."
+    "deletedDeviceCopyRetained": "Removed from server history. A cached copy remains on this device because it could not be removed.",
+    "navigation": "Navigation"
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"
@@ -702,7 +703,8 @@
     "groups": {
       "general": "General",
       "chat": "Chat",
-      "navigation": "Navigation"
+      "navigation": "Navigation",
+      "messageCards": "Message cards"
     },
     "openCommandPalette": "Open command palette",
     "showKeyboardShortcuts": "Show keyboard shortcuts",
@@ -719,7 +721,19 @@
     "goToPrompts": "Go to Prompts",
     "goToFlashcards": "Go to Flashcards",
     "customizeHint": "Shortcuts can be customized in Settings",
-    "forCommands": "for commands"
+    "forCommands": "for commands",
+    "goToChat": "Go to Chat",
+    "goToWorldBooks": "Go to World Books",
+    "goToDictionaries": "Go to Dictionaries",
+    "goToCharacters": "Go to Characters",
+    "toggleChatModeRag": "Switch normal / RAG chat mode",
+    "searchThread": "Search this conversation",
+    "toggleArtifacts": "Toggle artifacts panel (when available)",
+    "toggleCompare": "Toggle compare mode (when enabled)",
+    "toggleModes": "Open mode launcher",
+    "variantSwitch": "Previous / next response variant (focus a reply)",
+    "branchMessage": "Fork from the focused message",
+    "regenerateLast": "Regenerate the last reply (focus a reply)"
   },
   "promptAssist": {
     "trigger": "Improve prompt",

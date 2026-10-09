@@ -109,7 +109,6 @@ import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hook
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import {
   resolvePlaygroundShortcutAction,
-  shouldOpenShortcutsHelp,
 } from "./playground-shortcuts";
 import {
   EDIT_MESSAGE_EVENT,
@@ -393,8 +392,6 @@ const PlaygroundContent = () => {
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
   const pendingArtifactsPanelFocusRef = React.useRef(false);
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
-  const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null);
   const { ref: composerDockRef, height: composerDockHeight } =
     useComposerDockHeight()
 
@@ -691,7 +688,6 @@ const PlaygroundContent = () => {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("");
   const [threadSearchActiveIndex, setThreadSearchActiveIndex] =
     React.useState(0);
-  const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false);
   const [dropFeedback, setDropFeedback] = React.useState<{
     type: "info" | "error" | "warning";
     message: string;
@@ -2356,9 +2352,6 @@ const PlaygroundContent = () => {
     if (typeof window === "undefined") return;
 
     const handleShortcut = (event: KeyboardEvent) => {
-      // A bare "?" is ordinary typed input, so the shortcut must never fire
-      // while the caret is in the composer or any other editable target.
-      // Modifier chords (Cmd/Ctrl+F) are unreachable by typing and stay active.
       const editableTarget = isEditableTarget(event.target);
       if (
         (event.metaKey || event.ctrlKey) &&
@@ -2371,19 +2364,6 @@ const PlaygroundContent = () => {
         requestAnimationFrame(() => {
           threadSearchInputRef.current?.focus();
           threadSearchInputRef.current?.select();
-        });
-        return;
-      }
-      if (shouldOpenShortcutsHelp(event)) {
-        event.preventDefault();
-        setShortcutsHelpOpen(true);
-        return;
-      }
-      if (shortcutsHelpOpen && event.key === "Escape") {
-        event.preventDefault();
-        setShortcutsHelpOpen(false);
-        requestAnimationFrame(() => {
-          shortcutsTriggerRef.current?.focus();
         });
         return;
       }
@@ -2429,7 +2409,6 @@ const PlaygroundContent = () => {
     closeArtifacts,
     markArtifactsRead,
     setArtifactsOpen,
-    shortcutsHelpOpen,
     threadSearchOpen,
   ]);
 
@@ -2453,56 +2432,6 @@ const PlaygroundContent = () => {
       );
     };
   }, []);
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleOpenShortcutHelp = () => {
-      setShortcutsHelpOpen(true);
-    };
-    window.addEventListener(
-      "tldw:open-playground-shortcuts",
-      handleOpenShortcutHelp,
-    );
-    return () => {
-      window.removeEventListener(
-        "tldw:open-playground-shortcuts",
-        handleOpenShortcutHelp,
-      );
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (!shortcutsHelpOpen) return;
-    requestAnimationFrame(() => {
-      shortcutsCloseRef.current?.focus();
-    });
-  }, [shortcutsHelpOpen]);
-
-  // Dismiss the shortcuts help panel on Escape. A global capture-phase listener
-  // elsewhere calls stopPropagation() on Escape, which prevents the window
-  // bubble-phase shortcut handler above from ever seeing it. Listening in the
-  // capture phase (a sibling listener that stopPropagation does not block) keeps
-  // Escape working regardless of registration order.
-  React.useEffect(() => {
-    if (!shortcutsHelpOpen) return;
-    if (typeof window === "undefined") return;
-    const handleEscapeCapture = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      // Closing the shortcuts panel is the intended action for Escape while it is
-      // open; stop propagation so the same keypress does not also dismiss a parent
-      // overlay/dialog.
-      event.preventDefault();
-      event.stopPropagation();
-      setShortcutsHelpOpen(false);
-      requestAnimationFrame(() => {
-        shortcutsTriggerRef.current?.focus();
-      });
-    };
-    window.addEventListener("keydown", handleEscapeCapture, true);
-    return () => {
-      window.removeEventListener("keydown", handleEscapeCapture, true);
-    };
-  }, [shortcutsHelpOpen]);
 
   React.useEffect(() => {
     if (!threadSearchOpen) return;
@@ -3844,16 +3773,14 @@ const PlaygroundContent = () => {
                     </span>
                   </button>
                   <button
-                    ref={shortcutsTriggerRef}
                     type="button"
                     data-testid="playground-shortcuts-help-trigger"
-                    onClick={() =>
-                      setShortcutsHelpOpen((previous) => !previous)
-                    }
+                    onClick={() => window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))}
+                    aria-label={t("common:shortcuts.showKeyboardShortcuts", "Show keyboard shortcuts")}
                     title={
                       t(
-                        "playground:shortcuts.openHelp",
-                        "Open keyboard shortcuts (Shift+/)",
+                        "playground:shortcuts.openKeyboardHelp",
+                        "Open keyboard shortcuts (?)",
                       ) as string
                     }
                     className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
@@ -3942,97 +3869,6 @@ const PlaygroundContent = () => {
                   </button>
                 </div>
               </div>
-              {shortcutsHelpOpen && (
-                <div
-                  data-testid="playground-shortcuts-help-panel"
-                  role="dialog"
-                  aria-modal="false"
-                  aria-label={t("playground:shortcuts.title", "Shortcuts")}
-                  className={`mx-auto mt-1 w-full ${chatContentWidthClassName} rounded-md border border-border bg-surface2 px-2 py-1.5 text-[11px] text-text`}
-                >
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="font-semibold">
-                      {t("playground:shortcuts.title", "Shortcuts")}
-                    </span>
-                    <button
-                      ref={shortcutsCloseRef}
-                      type="button"
-                      data-testid="playground-shortcuts-help-close"
-                      onClick={() => {
-                        setShortcutsHelpOpen(false);
-                        requestAnimationFrame(() => {
-                          shortcutsTriggerRef.current?.focus();
-                        });
-                      }}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
-                    >
-                      {t("common:close", "Close")}
-                    </button>
-                  </div>
-                  <div className="grid gap-1 sm:grid-cols-2">
-                    <p>
-                      <span className="font-medium">Shift+Esc</span>{" "}
-                      {t(
-                        "playground:shortcuts.focusComposer",
-                        "Focus composer",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">
-                        {t("playground:shortcuts.findCombo", "Cmd/Ctrl+F")}
-                      </span>{" "}
-                      {t(
-                        "playground:shortcuts.searchThread",
-                        "Search this thread",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">
-                        {t("playground:shortcuts.helpCombo", "Shift+/")}
-                      </span>{" "}
-                      {t(
-                        "playground:shortcuts.openHelp",
-                        "Open keyboard shortcuts (Shift+/)",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+A</span>{" "}
-                      {t(
-                        "playground:shortcuts.toggleArtifacts",
-                        "Toggle artifacts panel",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+C</span>{" "}
-                      {t(
-                        "playground:shortcuts.toggleCompare",
-                        "Toggle compare mode",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+M</span>{" "}
-                      {t(
-                        "playground:shortcuts.toggleModes",
-                        "Open mode launcher",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+← / →</span>{" "}
-                      {t(
-                        "playground:shortcuts.variantSwitch",
-                        "Switch response variant",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+B / R</span>{" "}
-                      {t(
-                        "playground:shortcuts.branchRegenerate",
-                        "Fork branch / regenerate",
-                      )}
-                    </p>
-                  </div>
-                </div>
-              )}
               {threadSearchOpen && (
                 <div
                   className={`mx-auto mt-1 flex w-full ${chatContentWidthClassName} flex-wrap items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1`}

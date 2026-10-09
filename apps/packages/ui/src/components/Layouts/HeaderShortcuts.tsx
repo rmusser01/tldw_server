@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { useShortcut } from "@/hooks/useKeyboardShortcuts"
 import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { useSetting } from "@/hooks/useSetting"
 import {
@@ -221,19 +220,6 @@ export function HeaderShortcuts({
     setSelectedIndex(0)
   }, [query, activeCategory])
 
-  /* ---------- toggle shortcut (Shift+?) ---------- */
-  const handleToggle = useCallback(() => {
-    setOpen(!open)
-  }, [open, setOpen])
-
-  useShortcut({
-    key: "?",
-    modifiers: ["shift"],
-    action: handleToggle,
-    description: "Toggle keyboard shortcuts",
-    allowInInput: false,
-  })
-
   /* ---------- close on route change ---------- */
   useEffect(() => {
     if (previousPathRef.current !== location.pathname) {
@@ -373,7 +359,7 @@ export function HeaderShortcuts({
         style={{ maxWidth: "var(--content-max-width)", maxHeight: "80vh" }}
         role="dialog"
         aria-modal="true"
-        aria-label={t("option:header.showShortcuts", "Shortcuts")}
+        aria-label={t("option:header.pageNavigator", "Pages")}
         onKeyDown={handleKeyDown}
       >
         {/* Search bar */}

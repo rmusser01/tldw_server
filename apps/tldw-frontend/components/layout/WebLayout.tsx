@@ -73,12 +73,6 @@ const TimelineModal = lazy(() =>
   import('@/components/Timeline').then((m) => ({ default: m.TimelineModal }))
 );
 
-const KeyboardShortcutsModal = lazy(() =>
-  import('@/components/Common/KeyboardShortcutsModal').then((m) => ({
-    default: m.KeyboardShortcutsModal,
-  }))
-);
-
 const TutorialRunner = lazy(() =>
   import('@/components/Common/TutorialRunner').then((m) => ({
     default: m.TutorialRunner,
@@ -695,13 +689,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             <TutorialRunner />
           </Suspense>
 
-          {/* Keyboard Shortcuts Help Modal - triggered by ? */}
-          {!hideHeader && (
-            <Suspense fallback={null}>
-              <KeyboardShortcutsModal />
-            </Suspense>
-          )}
-
           {/* Quick Ingest Modal Host - listens for global open events */}
           <QuickIngestModalHost />
 
@@ -710,8 +697,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           <BuddyShellHost root="web" />
 
-          {/* Keep help events available when the header is hidden */}
-          {hideHeader && <PageHelpModalHost />}
+          {/* Keep page help available in every shell with its existing demand loading. */}
+          <PageHelpModalHost modeNavigationEnabled={!hideHeader} />
 
           {/* Workflow landing modal + active workflow overlay */}
           <WorkflowIntegrationHost autoShowPaths={['/']} />
