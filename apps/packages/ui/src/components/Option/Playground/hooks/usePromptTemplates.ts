@@ -220,66 +220,50 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
 
   const handleSaveRolePlaySetup = React.useCallback(
     (input: SaveRolePlaySetupInput) => {
-      const trimmedSystemPrompt = String(systemPrompt || "").trim();
       const rolePlaySystemPrompt =
-        input.rolePlay.behavior?.systemPrompt?.trim() || trimmedSystemPrompt;
-      const promptSource =
-        input.rolePlay.behavior?.source === "template" ||
-        input.rolePlay.behavior?.source === "modified-template"
-          ? "system-template"
-          : inferStartupTemplatePromptSource(
-              selectedSystemPromptRecord,
-              rolePlaySystemPrompt.length > 0,
-            );
+        input.rolePlay.behavior?.systemPrompt.trim() ?? ""
+      const promptSource = input.rolePlay.behavior ? "system-template" : "none"
       const templateName = sanitizeStartupTemplateName(
         input.name,
-        startupTemplateNameFallback,
-      );
+        startupTemplateNameFallback
+      )
       const rolePlayCharacter =
         input.rolePlay.identity?.kind === "character"
           ? ({
-              ...(selectedCharacter || {}),
+              ...(String(selectedCharacter?.id) ===
+              String(input.rolePlay.identity.id)
+                ? selectedCharacter
+                : {}),
               id: String(input.rolePlay.identity.id),
-              name: input.rolePlay.identity.name,
+              name: input.rolePlay.identity.name
             } as Character)
-          : selectedCharacter || null;
+          : null
       const nextTemplate = createStartupTemplateBundle({
         name: templateName,
         source: "role-play-setup",
         selectedModel,
         systemPrompt: rolePlaySystemPrompt,
-        selectedSystemPromptId:
-          rolePlaySystemPrompt === trimmedSystemPrompt
-            ? selectedSystemPrompt || null
-            : null,
-        promptStudioPromptId:
-          rolePlaySystemPrompt === trimmedSystemPrompt
-            ? (selectedSystemPromptRecord?.studioPromptId ??
-              selectedSystemPromptRecord?.serverId ??
-              null)
-            : null,
-        promptTitle:
-          rolePlaySystemPrompt === trimmedSystemPrompt
-            ? selectedSystemPromptRecord?.title || null
-            : input.rolePlay.behavior?.templateTitle || null,
+        selectedSystemPromptId: null,
+        promptStudioPromptId: null,
+        promptTitle: input.rolePlay.behavior?.templateTitle || null,
         promptSource,
         presetKey: input.rolePlay.generation?.presetKey ?? currentPresetKey,
         character: rolePlayCharacter,
         ragPinnedResults,
-        rolePlay: input.rolePlay,
-      });
+        rolePlay: input.rolePlay
+      })
       const nextTemplates = upsertStartupTemplateBundle(
         startupTemplates,
-        nextTemplate,
-      );
-      persistStartupTemplates(nextTemplates);
-      setStartupTemplateDraftName(templateName);
+        nextTemplate
+      )
+      persistStartupTemplates(nextTemplates)
+      setStartupTemplateDraftName(templateName)
       setModeAnnouncement(
         t(
           "playground:composer.rolePlaySetupSavedNotice",
-          "Role-play setup saved.",
-        ),
-      );
+          "Role-play setup saved."
+        )
+      )
     },
     [
       currentPresetKey,
@@ -287,15 +271,12 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       ragPinnedResults,
       selectedCharacter,
       selectedModel,
-      selectedSystemPrompt,
-      selectedSystemPromptRecord,
       setModeAnnouncement,
       startupTemplateNameFallback,
       startupTemplates,
-      systemPrompt,
-      t,
-    ],
-  );
+      t
+    ]
+  )
 
   const handleOpenStartupTemplatePreview = React.useCallback(
     (templateId: string) => {
@@ -308,36 +289,41 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
 
   const applyStartupTemplateBundle = React.useCallback(
     async (template: StartupTemplateBundle, context?: RolePlayApplyContext) => {
-      const rolePlayIdentity = template.rolePlay?.identity;
-      const selection =
-        rolePlayIdentity?.kind === "persona"
+      const rolePlayIdentity = template.rolePlay?.identity
+      const selection = template.rolePlay
+        ? rolePlayIdentity?.kind === "persona"
           ? personaToAssistantSelection({
               id: String(rolePlayIdentity.id),
-              name: rolePlayIdentity.name,
+              name: rolePlayIdentity.name
             })
           : characterToAssistantSelection(
-              template.character ||
-                (rolePlayIdentity?.kind === "character"
-                  ? ({
-                      id: String(rolePlayIdentity.id),
-                      name: rolePlayIdentity.name,
-                    } as Character)
-                  : null),
-            );
+              rolePlayIdentity?.kind === "character"
+                ? ({
+                    ...(String(template.character?.id) ===
+                    String(rolePlayIdentity.id)
+                      ? template.character
+                      : {}),
+                    id: String(rolePlayIdentity.id),
+                    name: rolePlayIdentity.name
+                  } as Character)
+                : null
+            )
+        : characterToAssistantSelection(template.character)
       const promptResolution = resolveStartupTemplatePrompt(
         template,
-        promptLibrary,
-      );
-      const resolvedPromptContent =
-        promptResolution.prompt?.content ?? template.systemPrompt;
-      const resolvedPromptId = promptResolution.prompt?.id || null;
-      const preset = getPresetByKey(template.presetKey);
+        promptLibrary
+      )
+      const resolvedPromptContent = template.rolePlay
+        ? template.rolePlay.behavior?.systemPrompt ?? ""
+        : promptResolution.prompt?.content ?? template.systemPrompt
+      const resolvedPromptId = promptResolution.prompt?.id || null
+      const preset = getPresetByKey(template.presetKey)
       const settings = {
         ...(preset && preset.key !== "custom" ? preset.settings : {}),
         systemPrompt: resolvedPromptContent,
         systemPromptTemplateId:
-          template.rolePlay?.behavior?.templateId?.trim() || undefined,
-      };
+          template.rolePlay?.behavior?.templateId?.trim() || undefined
+      }
       if (
         (await applyAssistantSelection(selection, {
           ...context,
@@ -345,36 +331,36 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
           settings,
           selectedSystemPrompt: resolvedPromptId,
           sceneSettings: template.rolePlay
-            ? (template.rolePlay.scene ?? createDefaultActorSettings())
+            ? template.rolePlay.scene ?? createDefaultActorSettings()
             : undefined,
-          hasExplicitContext: Boolean(template.ragPinnedResults?.length),
+          hasExplicitContext: Boolean(template.ragPinnedResults?.length)
         })) === false ||
         context?.isCurrent?.() === false
       )
-        return false;
+        return false
 
       if (template.selectedModel) {
-        setSelectedModel(template.selectedModel);
+        setSelectedModel(template.selectedModel)
         if (compareModeActive) {
           setCompareSelectedModels((prev: string[]) => {
-            const updated = new Set(prev || []);
-            updated.add(template.selectedModel!);
-            return Array.from(updated);
-          });
+            const updated = new Set(prev || [])
+            updated.add(template.selectedModel!)
+            return Array.from(updated)
+          })
         }
       }
 
       if (resolvedPromptId) {
-        setSelectedSystemPrompt(resolvedPromptId);
+        setSelectedSystemPrompt(resolvedPromptId)
       } else {
-        setSelectedSystemPrompt(undefined);
+        setSelectedSystemPrompt(undefined)
       }
-      setSystemPrompt(resolvedPromptContent);
+      setSystemPrompt(resolvedPromptContent)
 
-      updateChatModelSettings(settings);
+      updateChatModelSettings(settings)
 
-      setRagPinnedResults(template.ragPinnedResults || []);
-      return true;
+      setRagPinnedResults(template.ragPinnedResults || [])
+      return true
     },
     [
       compareModeActive,
@@ -386,9 +372,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       setSelectedModel,
       setSelectedSystemPrompt,
       setSystemPrompt,
-      updateChatModelSettings,
-    ],
-  );
+      updateChatModelSettings
+    ]
+  )
 
   const handleApplyStartupTemplate = React.useCallback(async () => {
     if (!startupTemplatePreview) return;
