@@ -35,3 +35,29 @@ Historical extension after7775: exact unchanged-line/message plus AST-context ma
 Historical repair candidate: all82 assigned instances removed; expanded645→522/0introduced and original22 projection501→391 are distinct nonadditive scopes. Current522 diagnostics remain red and individually retained (510exact pre-workstream/2moved historical signatures/10other-history). Final400connected before Notes-only changes and168finalNotes afterward pass with overlapping scope,9new RED/GREEN cases, scopedRuff0/seven-pathBandit0; four existing whole-file format failures and warnings remain qualified. Root29source/config+68receipt verification has0mismatches. Stage3 awaits its single scoped independent review; Stage4 awaits normal commit/publication, fresh dev/exactheadCI/human summary/merge.
 
 Historical-unit review atc6c48b7dbb SpecCompliant/QualityApproved,0Critical/0Important/1Minor warning visibility retained; source/receipt/review binding independently verified. Root publication ratchet29exact exits0; no baseline edit. Configured canonical hooks explicitly passed (local Git pre-commit entrypoint absent); normal commit/no bypass. Stage3Complete. Stage4 remains InProgress for newhead publication/rebase/CI/human summary/merge; previous7775seven statuses allSUCCESS are historical.
+
+
+## Task 5: Correct newly completed broader CI failures
+
+**Goal**: fix demonstrated test ownership/configuration defects and the existing installer's missed active mirror-list file before publication. This is a new CI unit after the previously approved historical repair; the earlier product/client reviews remain source-bound and are not repeated.
+
+**Spec**: Docs/Design/2026-10-08-knowledge-mechanism-correction.md. Associated TASK-13534 already records these failures and supplied human summary. ADR assessment: no new durable rule; existing egress, inventory and bounded installer mechanisms remain authoritative.
+
+**Frozen BASE**: 3ebe3d82b699cfa8ceba1cd6f3865d5ad01f085e, actual clean rebase onto dev cd5160201cb32e05d254accdd8ac1377e1d164ad. All25 earlier patches range-match exactly;29 earlier reviewed source/config hashes unchanged.
+
+**Observed failures**:
+- integrations:6failed/3362passed/46skipped. Five new public HTTP tests use public.example while the actual workflow WORKFLOWS_EGRESS_ALLOWLIST admits93.184.216.34,does-not-resolve.invalid,example.com. Real policy rejects that fixture before send. The sixth failure is the canonical WebScraping import inventory: three WebSearch_APIs import line positions moved by eight after this workstream changed the owning source.
+- media-ingestion-modification: apt update succeeds but FFmpeg/PortAudio install times out within the existing600-second deadline after three attempts. No Python/test execution. Existing actions normalize classic sources but miss the runner's active /etc/apt/apt-mirrors.txt. Original logs, bounds and skipped-test facts retained.
+
+**Global Constraints**:
+- Reuse existing monkeypatch/egress test configuration and canonical inventory generator. No production egress change, policy bypass, private-network allowance, relaxed host guard, or mocked policy success in place of real transport assertions.
+- Regenerate only the owning canonical JSON/Markdown import artifacts with the existing helper. Compare precise record differences; retain the test and its assertions.
+- Extend the existing Azure-to-archive normalization in both setup-ffmpeg and wait-for-postgres to the active apt-mirrors.txt file. Keep current classic-source/Microsoft handling, archive target, install packages, return/failure semantics, apt-bounded helper and every existing timeout/deadline/retry. No replacement installer, new helper abstraction, new config option, dependency or workflow/matrix/gate change.
+- Add a bounded temporary-file regression in the existing CI test home that executes the actual owning action preflight against mirror-list and classic-source fixtures, with absent-file behavior and both callers. No writes to host /etc, actual apt installs or network in the unit test.
+- Preserve all original failed receipts. Verify narrow RED/GREEN first, then finite owning tests and workflow contracts once. No broad client/browser/build replay: affected product inputs are unchanged. Run scoped lint/format/security applicability and existing hooks before committing; no bypass flags.
+- Never modify the separate primary checkout, its rebase/conflict, shared services or shared venv.
+- Implementer does not dispatch agents, stage, commit, rebase, push, publish or merge. Root owns tracking, commit and landing; report exact files, commands, outcomes, risks and SHA256 receipt bindings.
+
+**Tests**: controlled exact-CI allowlist RED then GREEN for new public transport tests (keep body limit, pinning, credential clearance and response cleanup assertions); canonical import-artifact test RED then generated GREEN; actual action mirror-list RED/GREEN; owning transport/inventory and CI helper/workflow-contract scopes; shell syntax and lint/format applicability. Do not label hosted full-suite green until exact-head CI reaches pytest and completes.
+
+**Status**: In Progress; minimal correction and final canonical owning166passed/0skips complete; scoped independent review pending. Single task-scoped independent review after the minimal correction; earlier broad/final product review is not repeated. Stage4 remains InProgress for correction, publication and actual exact-head latest-dev landing.
