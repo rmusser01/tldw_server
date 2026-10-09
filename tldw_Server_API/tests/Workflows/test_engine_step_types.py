@@ -146,7 +146,16 @@ def test_log_only_outputs_shape(client_with_wf: TestClient):
     data = _wait_for_terminal(client, run_id)
     assert data["status"] == "succeeded"
     out = data.get("outputs") or {}
-    assert out.get("logged") is True
+    db = app.dependency_overrides[wf_mod._get_db]()
+    assert out.get("logged") is True, str(
+        {
+            "response": data,
+            "persisted_run": db.get_run(run_id),
+            "step_runs": db.list_step_runs(run_id=run_id),
+            "attempts": db.list_step_attempts(run_id=run_id, step_id="l1"),
+            "events": db.get_events(run_id),
+        }
+    )
     assert out.get("level") == "debug"
     assert out.get("message", "").endswith("Bob")
 
