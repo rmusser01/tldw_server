@@ -1,12 +1,11 @@
 import pytest
 
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     _build_source_status,
     _normalize_pipeline_sources,
     _sources_to_data_sources,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
-
 
 pytestmark = pytest.mark.unit
 
@@ -88,4 +87,42 @@ def test_post_query_source_status_keeps_search_result_semantics() -> None:
         "status": "unavailable",
         "count": 0,
         "reason": "no_retriever_configured",
+    }
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_source_status_attributes_only_measured_security_exclusions(retained: bool) -> None:
+    """Keep unrelated empties and retrieval failures distinct from security exclusion."""
+
+    class Retriever:
+        retrievers = {
+            DataSource.MEDIA_DB: object(),
+            DataSource.NOTES: object(),
+            DataSource.CHAT_HISTORY: object(),
+            DataSource.CHARACTER_CARDS: object(),
+        }
+
+    status = _build_source_status(
+        ["notes", "media_db", "chats", "characters", "prompts"],
+        retriever=Retriever(),
+        documents=[Document(id="allowed", content="allowed", metadata={}, source=DataSource.NOTES)] if retained else [],
+        filtered_counts={"notes": 2, "media_db": 1},
+        security_excluded_counts={"notes": 1, "characters": 1, "prompts": 1},
+        source_failures={DataSource.CHARACTER_CARDS, DataSource.PROMPTS},
+    )
+    assert status == {
+        "notes": (
+            {"status": "searched", "count": 1, "filtered_artifact_count": 2}
+            if retained
+            else {
+                "status": "empty",
+                "count": 0,
+                "reason": "security_filtered",
+                "filtered_artifact_count": 2,
+            }
+        ),
+        "media_db": {"status": "empty", "count": 0, "reason": "no_matching_entries", "filtered_artifact_count": 1},
+        "chats": {"status": "empty", "count": 0, "reason": "no_matching_entries"},
+        "characters": {"status": "error", "count": 0, "reason": "retrieval_failed"},
+        "prompts": {"status": "unavailable", "count": 0, "reason": "no_retriever_configured"},
     }
