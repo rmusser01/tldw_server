@@ -182,7 +182,8 @@ async def handle_agent_task_job(
     ``run_id`` is ``None`` when no run exists and the owner-scoped definition
     is unavailable; that skip also includes ``reason="definition_missing"``.
     """
-    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+    raw_payload = job.get("payload")
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
     definition_id = str(payload.get("definition_id") or "").strip()
     if not definition_id:
         raise BadRequestError("missing definition_id")
