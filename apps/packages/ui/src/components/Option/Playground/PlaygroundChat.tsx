@@ -1369,7 +1369,7 @@ export const PlaygroundChat = ({
                   )
                 }}
                 onDeleteMessage={() => {
-                  deleteMessage(block.index)
+                  return deleteMessage(block.index)
                 }}
                 onTogglePinned={() => {
                   void toggleMessagePinned(block.index)

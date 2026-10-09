@@ -93,7 +93,11 @@ vi.mock("@/components/Sidepanel/Chat/ToolCallBlock", () => ({
 }))
 
 vi.mock("../MessageActionsBar", () => ({
-  MessageActionsBar: () => <div data-testid="message-actions" />
+  MessageActionsBar: ({ onDelete }: { onDelete?: () => void }) => (
+    <div data-testid="message-actions">
+      {onDelete && <button onClick={onDelete}>Delete message</button>}
+    </div>
+  )
 }))
 
 vi.mock("../ReasoningBlock", () => ({
@@ -1598,4 +1602,58 @@ it("a newly installed edited reply can run automatic actions once", async () => 
     expect(automaticActions.speak).toHaveBeenCalledOnce()
     expect(automaticActions.skill).toHaveBeenCalledOnce()
   })
+})
+
+
+it.each([true, false, undefined])(
+  "awaited Delete confirmation publishes success only for an accepted outcome (%s)",
+  async (outcome) => {
+    vi.clearAllMocks()
+    const { Modal } = await import("antd")
+    let release!: (value: boolean | undefined) => void
+    const remove = vi.fn(
+      () =>
+        new Promise<boolean | undefined>((resolve) => {
+          release = resolve
+        })
+    )
+    render(<PlaygroundMessage {...baseProps} onDeleteMessage={remove} />)
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }))
+    const confirmation = vi.mocked(Modal.confirm).mock.calls.at(-1)![0]
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = confirmation.onOk!() as Promise<unknown>
+    })
+    expect(remove).toHaveBeenCalledOnce()
+    expect(antdMessageApi.success).not.toHaveBeenCalled()
+    await act(async () => {
+      release(outcome)
+      await pending
+    })
+    expect(antdMessageApi.success).toHaveBeenCalledTimes(
+      outcome === false ? 0 : 1
+    )
+  }
+)
+
+it("Delete failure uses recovery copy and never announces success", async () => {
+  vi.clearAllMocks()
+  const { Modal } = await import("antd")
+  render(
+    <PlaygroundMessage
+      {...baseProps}
+      onDeleteMessage={async () => {
+        throw new Error("message_has_descendants")
+      }}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Delete message" }))
+  const confirmation = vi.mocked(Modal.confirm).mock.calls.at(-1)![0]
+  await act(async () => {
+    await confirmation.onOk!()
+  })
+  expect(antdMessageApi.success).not.toHaveBeenCalled()
+  expect(antdMessageApi.error).toHaveBeenCalledWith(
+    expect.stringMatching(/replies.*first/i)
+  )
 })

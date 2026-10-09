@@ -110,7 +110,25 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
-  if (/^\/api\/v1\/messages\/[^/]+$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
+  if (/^\/api\/v1\/messages\/[^/]+$/.test(pathname)) {
+    if (["GET", "PUT"].includes(requestMethod)) return true
+    if (requestMethod !== "DELETE" || String(path).includes("#")) return false
+    const query = new URLSearchParams(String(path).split("?")[1] || "")
+    const versions = query.getAll("expected_version")
+    const leaves = query.getAll("require_leaf")
+    const revisions = query.getAll("expected_revision")
+    return (
+      versions.length === 1 &&
+      /^[1-9][0-9]*$/.test(versions[0]) &&
+      Number.isSafeInteger(Number(versions[0])) &&
+      Number(versions[0]) < Number.MAX_SAFE_INTEGER &&
+      leaves.length === 1 &&
+      leaves[0] === "true" &&
+      revisions.length === 1 &&
+      revisions[0].length > 0 &&
+      revisions[0].length <= 128
+    )
+  }
   if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
   if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))

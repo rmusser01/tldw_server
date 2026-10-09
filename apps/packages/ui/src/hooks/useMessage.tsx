@@ -1,7 +1,7 @@
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import type { GreetingSeed } from "@/utils/character-greetings";
-import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
+import { createEditMessage, createNativeDeleteMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
 import {
   captureLocalMutationOwner,
   chatSubmitFailed,
@@ -3269,62 +3269,91 @@ export const useMessage = () => {
     },
   });
 
+  const nativeDeleteOrigin =
+    historySelection?.getCurrent().owner?.kind === "native"
+  const nativeDeleteMessage = createNativeDeleteMessage({
+    messages,
+    getMessages: () => useStoreMessageOption.getState().messages,
+    historySelection,
+    historyId,
+    serverChatId,
+    notification,
+    invalidateServerChatHistory,
+    captureSourceFence: () =>
+      captureChatDraftSource(() => actionsMountedRef.current).isCurrent
+  })
   const deleteMessage = React.useCallback(
     async (index: number) => {
-      const target = messages[index];
-      if (!target?.id) throw new Error("missing_message");
-      const origin = historySelection?.getCurrent();
-      const current = historySelection?.fence() ?? (() => true);
+      const target = messages[index]
+      if (!target?.id) throw new Error("missing_message")
+      if (nativeDeleteOrigin) return nativeDeleteMessage(index)
+      const origin = historySelection?.getCurrent()
+      const current = historySelection?.fence() ?? (() => true)
       try {
         if (serverChatId && origin?.capture?.status !== "captured") {
-          if (!target.serverMessageId) throw new Error("Missing server message ID");
-          await tldwClient.initialize().catch(() => null);
-          const serverMessage = target.serverMessageVersion === null || target.serverMessageVersion === undefined
-            ? await tldwClient.getMessage(target.serverMessageId)
-            : null;
-          const version = target.serverMessageVersion ?? serverMessage?.version;
-          if (version === null || version === undefined) throw new Error("Missing server message version");
-          await tldwClient.deleteMessage(target.serverMessageId, Number(version), serverChatId);
-          if (historyId) await removeAcknowledgedServerMirrorMessage({
-            historyId, chatId: serverChatId,
-            localMessageId: target.id, serverMessageId: target.serverMessageId,
-          });
-          if (!current()) return;
-          if (replyTarget?.id === target.id || replyTarget?.id === target.serverMessageId) clearReplyTarget();
-          const remaining = messages.filter((row) => row.id !== target.id);
-          setMessages(remaining);
-          setHistory(historyFromVisibleMessages(remaining));
-          invalidateServerChatHistory();
-          return;
+          if (!target.serverMessageId)
+            throw new Error("Missing server message ID")
+          await tldwClient.initialize().catch(() => null)
+          const serverMessage =
+            target.serverMessageVersion === null ||
+            target.serverMessageVersion === undefined
+              ? await tldwClient.getMessage(target.serverMessageId)
+              : null
+          const version = target.serverMessageVersion ?? serverMessage?.version
+          if (version === null || version === undefined)
+            throw new Error("Missing server message version")
+          await tldwClient.deleteMessage(
+            target.serverMessageId,
+            Number(version),
+            serverChatId
+          )
+          if (historyId)
+            await removeAcknowledgedServerMirrorMessage({
+              historyId,
+              chatId: serverChatId,
+              localMessageId: target.id,
+              serverMessageId: target.serverMessageId
+            })
+          if (!current()) return
+          if (
+            replyTarget?.id === target.id ||
+            replyTarget?.id === target.serverMessageId
+          )
+            clearReplyTarget()
+          const remaining = messages.filter((row) => row.id !== target.id)
+          setMessages(remaining)
+          setHistory(historyFromVisibleMessages(remaining))
+          invalidateServerChatHistory()
+          return
         }
         if (ordinaryLocalMutation) {
           if (historyId && historyId !== "temp")
-            await removeMessageById(historyId, target.id);
+            await removeMessageById(historyId, target.id)
           else if (!temporaryChat)
-            throw new Error("history_selection_unavailable");
-          if (!current()) return;
-          if (replyTarget?.id === target.id) clearReplyTarget();
-          const remaining = messages.filter((row) => row.id !== target.id);
-          setMessages(remaining);
-          setHistory(historyFromVisibleMessages(remaining));
-          return;
+            throw new Error("history_selection_unavailable")
+          if (!current()) return
+          if (replyTarget?.id === target.id) clearReplyTarget()
+          const remaining = messages.filter((row) => row.id !== target.id)
+          setMessages(remaining)
+          setHistory(historyFromVisibleMessages(remaining))
+          return
         }
         const owner = captureLocalMutationOwner(
           historySelection,
           historyId,
           serverChatId
-        );
+        )
         const removed = await removeMessageById(
           owner.conversation_id,
           target.id,
           owner
-        );
-        if (!current()) return;
-        if (replyTarget?.id === target.id) clearReplyTarget();
-        const remaining = messages.filter((row) => row.id !== target.id);
-        setMessages(remaining);
-        setHistory(historyFromVisibleMessages(remaining));
-        const view = origin?.view;
+        )
+        if (!current()) return
+        if (replyTarget?.id === target.id) clearReplyTarget()
+        const remaining = messages.filter((row) => row.id !== target.id)
+        setMessages(remaining)
+        setHistory(historyFromVisibleMessages(remaining))
+        const view = origin?.view
         if (
           removed &&
           view?.interpretation.kind === "parent_graph_v1" &&
@@ -3334,19 +3363,21 @@ export const useMessage = () => {
           await historySelection?.choose(
             removed.parent_message_id
               ? { kind: "after_message", message_id: removed.parent_message_id }
-              : { kind: "empty" },
-          );
+              : { kind: "empty" }
+          )
         }
       } catch (error) {
         notification.error({
           message: "Message deletion failed",
           description:
-            error instanceof Error ? error.message : "message_delete_failed",
-        });
-        throw error;
+            error instanceof Error ? error.message : "message_delete_failed"
+        })
+        throw error
       }
     },
     [
+      nativeDeleteMessage,
+      nativeDeleteOrigin,
       historyId,
       serverChatId,
       messages,
@@ -3358,9 +3389,9 @@ export const useMessage = () => {
       setMessages,
       setHistory,
       notification,
-      invalidateServerChatHistory,
-    ],
-  );
+      invalidateServerChatHistory
+    ]
+  )
 
   const branchHandler = createBranchMessage({
     historySelection,

@@ -291,22 +291,62 @@ export const reconcileServerChatMirror = async ({
 
 /** Apply a successful canonical delete to only its already-acknowledged local mirror. */
 export const removeAcknowledgedServerMirrorMessage = async ({
-  historyId, chatId, localMessageId, serverMessageId
+  historyId,
+  chatId,
+  localMessageId,
+  serverMessageId,
+  ownerKey,
+  scope,
+  signal,
+  validate_lease
 }: {
-  historyId: string; chatId: string; localMessageId: string; serverMessageId: string
-}): Promise<void> => runChatPersistenceTransaction(undefined, async () => {
-  const history = await db.chatHistories.get(historyId)
-  if (history?.server_chat_id !== chatId || !history.server_scope_key)
-    throw createServicePromptScopeChangedError()
-  const row = await db.messages.get(localMessageId)
-  if (!row) return
-  if (row.history_id !== historyId || row.serverMessageId !== serverMessageId)
-    throw createServicePromptScopeChangedError()
-  const rows = await db.messages.where("history_id").equals(historyId).toArray()
-  if (rows.filter(candidate => candidate.serverMessageId === serverMessageId).length !== 1)
-    throw createServicePromptScopeChangedError()
-  await db.messages.delete(localMessageId)
-})
+  historyId: string
+  chatId: string
+  localMessageId?: string
+  serverMessageId: string
+  ownerKey?: string
+  scope?: ChatScope
+} & HistoryOperationOptions): Promise<void> =>
+  runChatPersistenceTransaction(
+    signal,
+    async () => {
+      const history = await db.chatHistories.get(historyId)
+      if (
+        history?.server_chat_id !== chatId ||
+        !history.server_scope_key ||
+        (ownerKey !== undefined && history.server_scope_key !== ownerKey) ||
+        (scope?.type === "workspace"
+          ? history.server_scope_type !== "workspace" ||
+            history.server_workspace_id !== scope.workspaceId
+          : scope &&
+            ((history.server_scope_type &&
+              history.server_scope_type !== "global") ||
+              history.server_workspace_id))
+      )
+        throw createServicePromptScopeChangedError()
+      const rows = await db.messages
+        .where("history_id")
+        .equals(historyId)
+        .toArray()
+      const matches = rows.filter(
+        (candidate) => candidate.serverMessageId === serverMessageId
+      )
+      if (!matches.length && !localMessageId) return
+      const row = localMessageId
+        ? await db.messages.get(localMessageId)
+        : matches[0]
+      if (!row) return
+      if (
+        row.history_id !== historyId ||
+        row.serverMessageId !== serverMessageId ||
+        matches.length !== 1
+      )
+        throw createServicePromptScopeChangedError()
+      await db.messages.delete(row.id)
+    },
+    undefined,
+    validate_lease
+  )
 
 /** H1 translates a clicked local mirror ID before native capture. No text/position inference. */
 export const resolveServerMirrorCursor = async ({

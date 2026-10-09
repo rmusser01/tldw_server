@@ -89,6 +89,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 }))
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
+  createNativeDeleteMessage: vi.fn(() => vi.fn(async () => false)),
   createRegenerateLastMessage: vi.fn(() => vi.fn()),
   createEditMessage: vi.fn(() => vi.fn()),
   createStopStreamingRequest: vi.fn(() => vi.fn()),

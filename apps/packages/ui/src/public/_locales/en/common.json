@@ -140,6 +140,33 @@
   "deleteFailed": {
     "message": "Delete failed"
   },
+  "deleteMessage_failed": {
+    "message": "We could not confirm deletion. Reload this conversation to check the saved message before trying again."
+  },
+  "deleteMessage_descendants": {
+    "message": "This message has replies. Delete those replies first, including any other branches, then try again."
+  },
+  "deleteMessage_changed": {
+    "message": "The saved message has changed. Reload this conversation and review the latest message before deleting it."
+  },
+  "deleteMessage_busy": {
+    "message": "A reply is still in progress. Wait for it to finish before deleting a saved message."
+  },
+  "deleteMessage_scope": {
+    "message": "The server or signed-in account changed. Return to the intended server and account, then reload this conversation."
+  },
+  "deleteMessage_unsupported": {
+    "message": "This conversation does not support deleting saved messages from this view yet."
+  },
+  "deleteMessage_sync": {
+    "message": "Your sync setup does not support deleting saved messages from this view yet."
+  },
+  "deleteMessage_unavailable": {
+    "message": "This saved message is unavailable. Reload the conversation to review its current messages."
+  },
+  "deleteMessage_refreshFailed": {
+    "message": "The message was deleted, but this view or its saved copy could not be refreshed. Reload the conversation before continuing."
+  },
   "continue": {
     "message": "Continue Response"
   },

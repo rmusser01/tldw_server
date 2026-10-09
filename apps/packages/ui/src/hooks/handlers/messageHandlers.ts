@@ -1,3 +1,5 @@
+import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
+import { removeAcknowledgedServerMirrorMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { nativeRegenerationFeedback } from "@/hooks/chat/native-character-preflight"
 import i18n from "i18next"
 import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
@@ -24,6 +26,7 @@ import {
   nativeHistoryMessagePayload,
   nativeRegenerateView,
   saveNativeHistoryMessage,
+  deleteNativeHistoryMessage,
   assertHistoryConversationTarget,
   commitNativeFork,
   prepareNativeFork
@@ -244,6 +247,119 @@ export const createRegenerateLastMessage = ({
       ...submitExtras,
       assertCurrent: dispatch?.assertCurrent
     })
+  }
+}
+
+/** A retained confirmation belongs to its rendered H1 and draft source. */
+export const createNativeDeleteMessage = (options: {
+  messages: Message[]
+  getMessages: () => Message[]
+  historySelection?: HistorySelectionController | null
+  historyId: string | null
+  serverChatId?: string | null
+  captureSourceFence: () => () => boolean
+  notification: NotificationInstance
+  invalidateServerChatHistory: () => void
+}) => {
+  const selection = options.historySelection
+  const origin = selection?.getCurrent()
+  const viewCurrent = selection?.fence() ?? (() => false)
+  const sourceCurrent = options.captureSourceFence()
+  const canMutate = () => {
+    const state = useStoreMessageOption.getState()
+    return !state.streaming && !state.isProcessing
+  }
+  return async (index: number): Promise<boolean> => {
+    if (!viewCurrent() || !sourceCurrent()) return false
+    if (
+      !selection ||
+      origin?.status !== "ready" ||
+      origin.owner?.kind !== "native" ||
+      origin.capture?.status !== "captured"
+    )
+      throw new Error("native_history_mutation_unavailable")
+    if (!canMutate()) throw new Error("response_in_progress")
+    const target = options.messages[index]
+    if (!target?.id) throw new Error("missing_message")
+    const currentTargets = options
+      .getMessages()
+      .filter((row) => row.id === target.id)
+    if (
+      currentTargets.length !== 1 ||
+      currentTargets[0].message !== target.message
+    )
+      throw new Error("message_changed")
+    const current = () => sourceCurrent() && canMutate()
+    let acknowledged = false
+    try {
+      await assertHistoryConversationTarget(origin.owner, {
+        historyId: options.historyId,
+        serverChatId: options.serverChatId
+      })
+      const receipt = await deleteNativeHistoryMessage(
+        origin.owner,
+        origin.capture,
+        {
+          ...target,
+          id: target.serverMessageId ?? target.id
+        },
+        {
+          signal: selection.getSignal(),
+          validate_lease: () => viewCurrent() && current()
+        }
+      )
+      acknowledged = true
+      if (!current() || !viewCurrent()) return false
+      options.invalidateServerChatHistory()
+      let mirrorFailed = false
+      if (options.historyId) {
+        try {
+          await removeAcknowledgedServerMirrorMessage({
+            historyId: options.historyId,
+            chatId: origin.owner.conversation_id,
+            serverMessageId: receipt.message_id,
+            ownerKey: serverChatMirrorOwnerKey({
+              requestScope: origin.owner.request_scope
+            }),
+            scope: origin.owner.scope ?? { type: "global" },
+            signal: selection.getSignal(),
+            validate_lease: () =>
+              viewCurrent() &&
+              current() &&
+              origin.owner!.kind === "native" &&
+              origin.owner.validate_lease()
+          })
+        } catch {
+          mirrorFailed = true
+        }
+      }
+      if (!viewCurrent() || !current()) return false
+      const refreshed = await selection.refreshDeletedMessage(
+        origin.capture,
+        receipt,
+        current
+      )
+      if (!refreshed?.isCurrent()) return false
+      if (refreshed.installed && !mirrorFailed) {
+        const reply = useStoreMessageOption.getState().replyTarget
+        if (reply?.id === target.id || reply?.id === receipt.message_id)
+          useStoreMessageOption.getState().clearReplyTarget()
+        return refreshed.isCurrent()
+      }
+      const copy = getMessageDeleteFeedback("message_delete_refresh_failed")
+      options.notification.warning({
+        message: i18n.t("common:deleted", "Deleted"),
+        description: i18n.t(`common:${copy.key}`, copy.fallback)
+      })
+      return false
+    } catch (error) {
+      if (!sourceCurrent() || !viewCurrent()) return false
+      const copy = getMessageDeleteFeedback(
+        acknowledged ? "message_delete_refresh_failed" : error
+      )
+      const description = i18n.t(`common:${copy.key}`, copy.fallback)
+      throw Object.assign(new Error(description), { cause: error })
+    }
   }
 }
 

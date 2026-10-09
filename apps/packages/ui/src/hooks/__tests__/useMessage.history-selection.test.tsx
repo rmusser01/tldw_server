@@ -112,7 +112,7 @@ const mocks = vi.hoisted(() => {
     setStreaming,
     isFirstMessage: false,
     setIsFirstMessage: vi.fn(),
-    historyId: "history-1",
+    historyId: "history-1" as string | null,
     setHistoryId: vi.fn(),
     isLoading: false,
     setIsLoading,
@@ -410,6 +410,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getConfig: async () => null,
     getMessage: h1.read,
     editMessage: h1.write,
+    deleteMessage: vi.fn(async () => undefined),
     addMedia: (...args: unknown[]) => mocks.addMedia(...args),
     ragSearch: (...args: unknown[]) => mocks.ragSearch(...args)
   }
@@ -1724,6 +1725,7 @@ it("late leaf deletion retains its storage result without moving a new view", as
   expect(options.setMessages).not.toHaveBeenCalled()
 })
 it("unqualified native edits and unsupported deletes cannot mutate or change the display", async () => {
+  h1.controller.getCurrent().status = "unsupported_history_capability"
   const helpers = await import("@/db/dexie/helpers")
   const visible = [
     {
@@ -3315,3 +3317,322 @@ it.each(["marker", "busy"])("compact a synchronous replacement during %s publica
   } finally { spy.mockRestore(); mocks.chatBaseState.streaming = false; mocks.chatBaseState.isProcessing = false; hook.unmount()
     mocks.setStreaming.mockReset(); mocks.setIsProcessing.mockReset(); mocks.useRealPageAssist = false }
 })
+
+
+const mountNativeLeafDelete = async (character = false, mirror = false) => {
+  // The native selector clears historyId unless an owned device mirror is linked.
+  if (!mirror) mocks.chatBaseState.historyId = null
+  const mounted = await mountNativePlainSave("assistant", character)
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  let deleted = false
+  const capture = h1.capture.getMockImplementation()!
+  h1.capture.mockImplementation(async (...args) => {
+    const result = (await capture(...args)) as ReturnType<typeof captureFor>
+    if (deleted) {
+      result.snapshot.nodes = result.snapshot.nodes.filter(
+        (row) => row.id !== "a1"
+      )
+      result.rows = result.rows.filter((row) => row.id !== "a1")
+      result.selected_content = result.selected_content.filter(
+        (row) => row.id !== "a1"
+      )
+    }
+    return result
+  })
+  const remove = vi.mocked(api.deleteMessage)
+  remove.mockReset().mockImplementation(async () => {
+    deleted = true
+  })
+  if (mounted.owner.kind !== "native")
+    throw new Error("Expected native fixture ownership")
+  return {
+    ...mounted,
+    owner: mounted.owner,
+    remove,
+    markDeleted: () => {
+      deleted = true
+    }
+  }
+}
+
+it.each([false, true])(
+  "native leaf Delete recaptures its parent and keeps the other branch character=%s",
+  async (character) => {
+    const mounted = await mountNativeLeafDelete(character)
+    try {
+      let result: unknown
+      await act(async () => {
+        result = await mounted.hook.result.current.deleteMessage(mounted.index)
+      })
+      expect(result).toBe(true)
+      expect(mounted.remove).toHaveBeenCalledExactlyOnceWith(
+        "a1",
+        1,
+        nativeChatId,
+        expect.objectContaining({
+          requireLeaf: true,
+          expectedRevision: "opaque-target-1",
+          requestScope: mounted.owner.request_scope,
+          signal: expect.any(AbortSignal)
+        })
+      )
+      expect(mounted.selection.result.current.view?.cursor).toEqual({
+        kind: "after_message",
+        message_id: "u-old"
+      })
+      expect(mounted.publish).toHaveBeenCalledOnce()
+      expect(
+        mounted.selection.result.current
+          .getCurrent()
+          .capture?.snapshot.nodes.map((row) => row.id)
+      ).toEqual(["u-old", "a2"])
+      expect(
+        mounted.draftStore.getState().messages.map((row) => row.id)
+      ).toEqual(["u-old"])
+      expect(mounted.write).not.toHaveBeenCalled()
+    } finally {
+      mounted.cleanup()
+    }
+  }
+)
+
+it("native Delete never removes the mounted reply before acknowledgement", async () => {
+  const mounted = await mountNativeLeafDelete()
+  try {
+    let release!: () => void
+    mounted.remove.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => {
+            mounted.markDeleted()
+            resolve()
+          }
+        })
+    )
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = mounted.hook.result.current.deleteMessage(mounted.index)
+    })
+    await vi.waitFor(() => expect(mounted.remove).toHaveBeenCalledOnce())
+    expect(mounted.publish).not.toHaveBeenCalled()
+    expect(mounted.draftStore.getState().messages.map((row) => row.id)).toEqual(
+      ["u-old", "a1"]
+    )
+    await act(async () => {
+      release()
+      expect(await pending).toBe(true)
+    })
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+it("a retained Delete confirmation refuses a same-ID H1 replacement before reading the target", async () => {
+  const mounted = await mountNativeLeafDelete()
+  try {
+    const retained = mounted.hook.result.current.deleteMessage
+    await act(async () => {
+      expect(await mounted.selection.result.current.refresh()).toBe(true)
+    })
+    mounted.read.mockClear()
+    await act(async () => {
+      expect(await retained(mounted.index)).toBe(false)
+    })
+    expect(mounted.read).not.toHaveBeenCalled()
+    expect(mounted.remove).not.toHaveBeenCalled()
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+it("a late acknowledged Delete preserves a newer draft and publishes no old capture", async () => {
+  const mounted = await mountNativeLeafDelete()
+  try {
+    let release!: () => void
+    mounted.remove.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => {
+            mounted.markDeleted()
+            resolve()
+          }
+        })
+    )
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = mounted.hook.result.current.deleteMessage(mounted.index)
+    })
+    await vi.waitFor(() => expect(mounted.remove).toHaveBeenCalledOnce())
+    const address = {
+      kind: "fresh" as const,
+      id: "newer-draft",
+      scope: { type: "global" as const },
+      temporary: false
+    }
+    expect(mounted.draftStore.getState().setChatDraftAddress(address)).toBe(
+      true
+    )
+    mounted.draftStore.setState({
+      messages: [
+        {
+          id: "newer",
+          message: "Keep my newer draft",
+          isBot: false,
+          sources: []
+        }
+      ]
+    })
+    await act(async () => {
+      release()
+      expect(await pending).toBe(false)
+    })
+    expect(mounted.publish).not.toHaveBeenCalled()
+    expect(mounted.draftStore.getState().messages[0].message).toBe(
+      "Keep my newer draft"
+    )
+    expect(mounted.remove).toHaveBeenCalledOnce()
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+it("an acknowledged Delete with a failed refresh remains recoverable without false success", async () => {
+  const mounted = await mountNativeLeafDelete()
+  try {
+    const capture = h1.capture.getMockImplementation()!
+    mounted.remove.mockImplementationOnce(async () => {
+      mounted.markDeleted()
+      h1.capture.mockRejectedValueOnce(new Error("response lost"))
+    })
+    await act(async () => {
+      expect(
+        await mounted.hook.result.current.deleteMessage(mounted.index)
+      ).toBe(false)
+    })
+    expect(mounted.publish).not.toHaveBeenCalled()
+    expect(mounted.selection.result.current.status).toBe("stale_selection")
+    expect(mounted.selection.result.current.view?.cursor).toEqual({
+      kind: "after_message",
+      message_id: "u-old"
+    })
+    h1.capture.mockImplementation(capture)
+    await act(async () => {
+      expect(await mounted.selection.result.current.refresh()).toBe(true)
+    })
+    expect(mounted.publish).toHaveBeenCalledOnce()
+    expect(mounted.remove).toHaveBeenCalledOnce()
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+it("a retained native Delete cannot downgrade to legacy after New resets H1", async () => {
+  const mounted = await mountNativeLeafDelete()
+  try {
+    const retained = mounted.hook.result.current.deleteMessage
+    act(() => mounted.selection.result.current.reset())
+    mounted.read.mockClear()
+    await act(async () => {
+      expect(await retained(mounted.index)).toBe(false)
+    })
+    expect(mounted.read).not.toHaveBeenCalled()
+    expect(mounted.remove).not.toHaveBeenCalled()
+    expect(mounted.publish).not.toHaveBeenCalled()
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+it.each(["choose", "follow"])(
+  "native Delete reserves the writer revision before %s",
+  async (action) => {
+    const mounted = await mountNativeLeafDelete()
+    try {
+      await act(async () => {
+        expect(
+          await mounted.hook.result.current.deleteMessage(mounted.index)
+        ).toBe(true)
+      })
+      const deletedView = mounted.selection.result.current.getCurrent().view!
+      await act(async () => {
+        const accepted =
+          action === "choose"
+            ? await mounted.selection.result.current.choose({ kind: "empty" })
+            : await mounted.selection.result.current.followResult(
+                deletedView,
+                "a2",
+                () => true
+              )
+        expect(accepted).toBe(true)
+      })
+      expect(
+        mounted.selection.result.current.view!.selection_revision
+      ).toBeGreaterThan(deletedView.selection_revision)
+    } finally {
+      mounted.cleanup()
+    }
+  }
+)
+
+it.each(["mirror", "refresh"])(
+  "Delete publishes no obsolete feedback after H1 retires during %s",
+  async (stage) => {
+    const mounted = await mountNativeLeafDelete(false, true)
+    const mirror = await import("@/db/dexie/server-chat-mirror")
+    const cleanupMirror = vi.spyOn(
+      mirror,
+      "removeAcknowledgedServerMirrorMessage"
+    )
+    let release!: () => void,
+      reached = false
+    const originalCapture = h1.capture.getMockImplementation()!
+    try {
+      if (stage === "mirror")
+        cleanupMirror.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              reached = true
+              release = resolve
+            })
+        )
+      else {
+        cleanupMirror.mockResolvedValue(undefined)
+        mounted.remove.mockImplementationOnce(async () => {
+          mounted.markDeleted()
+          h1.capture.mockImplementationOnce(async (...args) => {
+            reached = true
+            await new Promise<void>((resolve) => {
+              release = resolve
+            })
+            return originalCapture(...args)
+          })
+        })
+      }
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = mounted.hook.result.current.deleteMessage(mounted.index)
+      })
+      await vi.waitFor(() => expect(reached).toBe(true))
+      await act(async () => {
+        expect(
+          await mounted.selection.result.current.choose({
+            kind: "after_message",
+            message_id: "u-old"
+          })
+        ).toBe(true)
+      })
+      mounted.publish.mockClear()
+      mocks.notification.warning.mockClear()
+      await act(async () => {
+        release()
+        expect(await pending).toBe(false)
+      })
+      expect(mocks.notification.warning).not.toHaveBeenCalled()
+      expect(mounted.publish).not.toHaveBeenCalled()
+      expect(mounted.remove).toHaveBeenCalledOnce()
+    } finally {
+      cleanupMirror.mockRestore()
+      mounted.cleanup()
+    }
+  }
+)

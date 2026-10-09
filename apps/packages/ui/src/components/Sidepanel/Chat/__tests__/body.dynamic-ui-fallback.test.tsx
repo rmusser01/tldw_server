@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidePanelBody } from "../body"
 
+const deleteCallbacks = vi.hoisted(() => new Map<string, () => unknown>())
+
 const sidepanelMessageState = vi.hoisted(() => ({
   value: {
     messages: [] as any[],
@@ -32,7 +34,9 @@ vi.mock("~/components/Common/Playground/Message", () => ({
     dynamicUISurface?: string
     metadataExtra?: Record<string, any>
     message: string
+    onDeleteMessage?: () => unknown
   }) => {
+    if (props.onDeleteMessage) deleteCallbacks.set(props.message, props.onDeleteMessage)
     const envelope = props.metadataExtra?.dynamic_ui
     return (
       <article data-testid="sidepanel-message">
@@ -132,3 +136,41 @@ describe("SidePanelBody Dynamic UI fallback", () => {
     expect(screen.queryByTestId("openui-runtime")).not.toBeInTheDocument()
   })
 })
+
+
+it.each(["accepted", "refused", "rejected"])(
+  "SidePanelBody returns the pending Delete %s outcome",
+  async (outcome) => {
+    deleteCallbacks.clear()
+    sidepanelMessageState.value.messages = [
+      {
+        id: "saved",
+        isBot: true,
+        role: "assistant",
+        name: "Assistant",
+        message: "Saved reply"
+      }
+    ]
+    let resolve!: (value: boolean) => void, reject!: (error: Error) => void
+    sidepanelMessageState.value.deleteMessage.mockImplementation(
+      () =>
+        new Promise<boolean>((yes, no) => {
+          resolve = yes
+          reject = no
+        })
+    )
+    render(<SidePanelBody />)
+    const pending = deleteCallbacks.get("Saved reply")!()
+    expect(pending).toBeInstanceOf(Promise)
+    if (outcome === "rejected") {
+      const assertion = expect(pending).rejects.toThrow(
+        "message_has_descendants"
+      )
+      reject(new Error("message_has_descendants"))
+      await assertion
+    } else {
+      resolve(outcome === "accepted")
+      await expect(pending).resolves.toBe(outcome === "accepted")
+    }
+  }
+)

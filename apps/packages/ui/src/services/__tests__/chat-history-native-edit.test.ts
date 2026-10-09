@@ -3,13 +3,15 @@ import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 const io = vi.hoisted(() => ({
   capture: vi.fn(),
   read: vi.fn(),
-  write: vi.fn()
+  write: vi.fn(),
+  remove: vi.fn()
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     captureHistorySelection: io.capture,
     getMessage: io.read,
-    editMessage: io.write
+    editMessage: io.write,
+    deleteMessage: io.remove
   }
 }))
 import * as service from "../chat-history-selection"
@@ -412,3 +414,216 @@ it.each(["blank", "image", "unsettled", "system"])(
     expect(io.write).not.toHaveBeenCalled()
   }
 )
+
+
+describe("native leaf Delete authority", () => {
+  const target = {
+    id: "a",
+    message: "Answer",
+    isBot: true,
+    images: [] as string[]
+  }
+  const leafRow = (patch = {}) => ({
+    id: "a",
+    conversation_id: "chat",
+    sender: "assistant",
+    content: "Answer",
+    parent_message_id: "u",
+    has_image: false,
+    version: 7,
+    ...patch
+  })
+  const setup = async () => {
+    const native = owner()
+    const source = (await service.captureHistorySnapshot(
+      native,
+      capture().view,
+      "send"
+    )) as HistorySelectionCaptureV1
+    io.capture.mockClear()
+    io.read.mockResolvedValue(leafRow())
+    io.remove.mockResolvedValue(undefined)
+    return { native, source }
+  }
+  it("uses distinct numeric and opaque CAS with the original scope and signal", async () => {
+    const { native, source } = await setup()
+    const signal = new AbortController().signal
+    expect(
+      await service.deleteNativeHistoryMessage(native, source, target, {
+        signal
+      })
+    ).toEqual({ message_id: "a", parent_message_id: "u" })
+    expect(io.remove).toHaveBeenCalledExactlyOnceWith("a", 7, "chat", {
+      requestScope: native.request_scope,
+      scope: native.scope,
+      signal,
+      requireLeaf: true,
+      expectedRevision: "1"
+    })
+    expect(io.write).not.toHaveBeenCalled()
+  })
+  it.each([
+    { version: "7" },
+    { version: 0 },
+    { version: Number.MAX_SAFE_INTEGER },
+    { content: "Other" },
+    { parent_message_id: null },
+    { sender: "user" },
+    { has_image: true },
+    { conversation_id: "other" }
+  ])("rejects raw target mismatch before deletion %j", async (patch) => {
+    const { native, source } = await setup()
+    io.read.mockResolvedValue(leafRow(patch))
+    await expect(
+      service.deleteNativeHistoryMessage(native, source, target)
+    ).rejects.toThrow("message_changed")
+    expect(io.remove).not.toHaveBeenCalled()
+  })
+  it("rejects a hidden descendant before a destructive request", async () => {
+    const { native, source } = await setup()
+    const changed = structuredClone(source)
+    changed.snapshot.nodes.push({
+      id: "hidden",
+      revision: "hidden",
+      parent_id: "a",
+      role: "user",
+      settled: true
+    })
+    await expect(
+      service.deleteNativeHistoryMessage(native, changed, target)
+    ).rejects.toThrow("message_has_descendants")
+    expect(io.read).not.toHaveBeenCalled()
+    expect(io.remove).not.toHaveBeenCalled()
+  })
+  it("does not adopt same-text replacement authority from a fresh capture", async () => {
+    const { native, source } = await setup()
+    const changed = capture()
+    changed.rows[1].revision =
+      changed.snapshot.nodes[1].revision =
+      changed.selected_content[1].revision =
+        "changed"
+    io.capture.mockResolvedValue(changed)
+    await expect(
+      service.deleteNativeHistoryMessage(native, source, target)
+    ).rejects.toThrow("message_changed")
+    expect(io.remove).not.toHaveBeenCalled()
+  })
+  it("supports exact ordered image-only leaf payloads", async () => {
+    const native = owner(),
+      initial = capture()
+    initial.selected_content[1].message = ""
+    initial.selected_content[1].images = [
+      "data:image/png;base64,YQ==",
+      "data:image/png;base64,Yg=="
+    ]
+    io.capture.mockResolvedValue(initial)
+    const source = (await service.captureHistorySnapshot(
+      native,
+      initial.view,
+      "send"
+    )) as HistorySelectionCaptureV1
+    io.read.mockResolvedValue(leafRow({ content: "", has_image: true }))
+    io.remove.mockResolvedValue(undefined)
+    await expect(
+      service.deleteNativeHistoryMessage(native, source, {
+        ...target,
+        message: "",
+        images: initial.selected_content[1].images
+      })
+    ).resolves.toMatchObject({ message_id: "a" })
+    expect(io.remove).toHaveBeenCalledOnce()
+  })
+  it.each(["read", "capture", "remove"])(
+    "retirement after held %s prevents success and replay",
+    async (stage) => {
+      const { native, source } = await setup()
+      let current = true
+      const boundary =
+        stage === "read"
+          ? io.read
+          : stage === "capture"
+            ? io.capture
+            : io.remove
+      boundary.mockImplementationOnce(async () => {
+        current = false
+        return stage === "read"
+          ? leafRow()
+          : stage === "capture"
+            ? capture()
+            : undefined
+      })
+      await expect(
+        service.deleteNativeHistoryMessage(native, source, target, {
+          validate_lease: () => current
+        })
+      ).rejects.toThrow()
+      expect(io.remove).toHaveBeenCalledTimes(stage === "remove" ? 1 : 0)
+    }
+  )
+  it("preserves a refusal without dispatching another Delete", async () => {
+    const { native, source } = await setup(),
+      conflict = Object.assign(new Error("message_has_descendants"), {
+        status: 409
+      })
+    io.remove.mockRejectedValue(conflict)
+    await expect(
+      service.deleteNativeHistoryMessage(native, source, target)
+    ).rejects.toBe(conflict)
+    expect(io.remove).toHaveBeenCalledOnce()
+  })
+  const refreshed = (source: HistorySelectionCaptureV1) => {
+    const result = structuredClone(source)
+    result.view = {
+      ...source.view,
+      cursor: { kind: "after_message", message_id: "u" },
+      selection_revision: 2
+    }
+    result.snapshot.nodes = result.snapshot.nodes.filter(
+      (row) => row.id !== "a"
+    )
+    result.rows = result.rows.filter((row) => row.id !== "a")
+    result.selected_content = result.selected_content.filter(
+      (row) => row.id !== "a"
+    )
+    return result
+  }
+  it("qualifies the selected parent and preserves the original view and other branch", () => {
+    const source = capture(),
+      result = refreshed(source),
+      receipt = { message_id: "a", parent_message_id: "u" }
+    expect(() =>
+      service.qualifyNativeMessageDeleteCapture(source, result, receipt)
+    ).not.toThrow()
+    expect(source.view.cursor).toEqual({
+      kind: "after_message",
+      message_id: "a"
+    })
+    expect(result.snapshot.nodes.map((row) => row.id)).toEqual(["u", "sibling"])
+  })
+  it.each([
+    "not deleted",
+    "parent changed",
+    "wrong cursor",
+    "settings changed",
+    "other row missing"
+  ])("rejects a falsely qualified post-Delete %s", (change) => {
+    const source = capture(),
+      result = refreshed(source)
+    if (change === "not deleted")
+      result.snapshot.nodes.push(source.snapshot.nodes[1])
+    if (change === "parent changed") result.rows[0].revision = "changed"
+    if (change === "wrong cursor") result.view = source.view
+    if (change === "settings changed")
+      result.snapshot.storage_context_digest = "changed"
+    if (change === "other row missing")
+      result.snapshot.nodes = result.snapshot.nodes.filter(
+        (row) => row.id !== "sibling"
+      )
+    expect(() =>
+      service.qualifyNativeMessageDeleteCapture(source, result, {
+        message_id: "a",
+        parent_message_id: "u"
+      })
+    ).toThrow()
+  })
+})

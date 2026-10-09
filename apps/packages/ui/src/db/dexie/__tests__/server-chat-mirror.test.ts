@@ -501,3 +501,117 @@ describe("acknowledged server mirror removal boundaries", () => {
     expect([...state.histories.keys()]).toEqual(["first", "pending"])
   })
 })
+
+
+describe("native acknowledged leaf Delete mirror effects", () => {
+  beforeEach(() => {
+    state.histories.clear()
+    state.messages.clear()
+    state.compareStates.clear()
+    state.beforeRead = null
+    state.afterDelete = null
+  })
+  it("resolves the canonical receipt to its unique device UUID under exact owner and workspace", async () => {
+    state.histories.set("alice", {
+      ...history("alice", "A"),
+      server_scope_type: "workspace",
+      server_workspace_id: "W"
+    })
+    state.histories.set("bob", {
+      ...history("bob", "B"),
+      server_scope_type: "workspace",
+      server_workspace_id: "W"
+    })
+    state.messages.set(
+      "local-uuid",
+      row("local-uuid", "alice", "Exact {{char}}", "server-leaf")
+    )
+    state.messages.set(
+      "sibling",
+      row("sibling", "alice", "Exact {{char}}", "server-other")
+    )
+    state.messages.set(
+      "bob-uuid",
+      row("bob-uuid", "bob", "Exact {{char}}", "server-leaf")
+    )
+    await removeAcknowledgedServerMirrorMessage({
+      historyId: "alice",
+      chatId: "chat-1",
+      serverMessageId: "server-leaf",
+      ownerKey: "A",
+      scope: { type: "workspace", workspaceId: "W" },
+      validate_lease: () => true
+    })
+    expect([...state.messages.keys()]).toEqual(["sibling", "bob-uuid"])
+    expect([...state.histories.keys()]).toEqual(["alice", "bob"])
+  })
+  it.each(["owner", "workspace", "global", "duplicate"])(
+    "keeps the device rows for a %s mismatch",
+    async (kind) => {
+      state.histories.set("alice", {
+        ...history("alice", "A"),
+        server_scope_type: "workspace",
+        server_workspace_id: "W"
+      })
+      state.messages.set(
+        "local-uuid",
+        row("local-uuid", "alice", "Keep", "server-leaf")
+      )
+      if (kind === "duplicate")
+        state.messages.set(
+          "duplicate",
+          row("duplicate", "alice", "Keep", "server-leaf")
+        )
+      const before = structuredClone([...state.messages])
+      await expect(
+        removeAcknowledgedServerMirrorMessage({
+          historyId: "alice",
+          chatId: "chat-1",
+          serverMessageId: "server-leaf",
+          ownerKey: kind === "owner" ? "B" : "A",
+          scope:
+            kind === "global"
+              ? { type: "global" }
+              : {
+                  type: "workspace",
+                  workspaceId: kind === "workspace" ? "Other" : "W"
+                }
+        })
+      ).rejects.toThrow()
+      expect([...state.messages]).toEqual(before)
+    }
+  )
+  it.each(["entry", "read", "delete", "signal"])(
+    "refuses or rolls back a retired native source at %s",
+    async (stage) => {
+      state.histories.set("alice", history("alice", "A"))
+      state.messages.set(
+        "local-uuid",
+        row("local-uuid", "alice", "Keep", "server-leaf")
+      )
+      let current = stage !== "entry"
+      const abort = new AbortController()
+      if (stage === "read")
+        state.beforeRead = () => {
+          current = false
+        }
+      if (stage === "delete")
+        state.afterDelete = () => {
+          current = false
+        }
+      if (stage === "signal") abort.abort()
+      await expect(
+        removeAcknowledgedServerMirrorMessage({
+          historyId: "alice",
+          chatId: "chat-1",
+          serverMessageId: "server-leaf",
+          ownerKey: "A",
+          scope: { type: "global" },
+          validate_lease: () => current,
+          signal: abort.signal
+        })
+      ).rejects.toThrow()
+      expect([...state.messages.keys()]).toEqual(["local-uuid"])
+    }
+  )
+})

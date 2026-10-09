@@ -1518,12 +1518,23 @@ def remove_message_from_conversation(
     db: CharactersRAGDB,
     message_id: str,
     expected_version: int,
+    *,
+    require_leaf: bool = False,
+    expected_revision: str | None = None,
 ) -> bool:
     """Soft-delete a message from a conversation."""
 
     try:
+        if require_leaf or expected_revision is not None:
+            return bool(
+                db.soft_delete_message(
+                    message_id, expected_version, require_leaf=require_leaf, expected_revision=expected_revision
+                )
+            )
         return bool(db.soft_delete_message(message_id, expected_version))
-    except (CharactersRAGDBError, ConflictError) as exc:
+    except ConflictError:
+        raise
+    except CharactersRAGDBError as exc:
         logger.error("Failed to remove message ID {}: {}", message_id, exc)
         return False
     except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as exc:

@@ -77,7 +77,7 @@ type PlaygroundCompareClusterProps = {
     isCurrent?: () => boolean,
     isOriginCurrent?: () => boolean
   ) => unknown
-  deleteMessage: (index: number) => void
+  deleteMessage: (index: number) => void | boolean | Promise<void | boolean>
   toggleMessagePinned: (index: number) => Promise<void> | void
   createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}, onOpened?: (childId: string) => void) => Promise<ForkResultV1>
   stopStreamingRequest: (...args: any[]) => void
@@ -448,7 +448,7 @@ export const PlaygroundCompareCluster = ({
           )
         }}
         onDeleteMessage={() => {
-          deleteMessage(block.userIndex)
+          return deleteMessage(block.userIndex)
         }}
         onTogglePinned={() => {
           void toggleMessagePinned(block.userIndex)
@@ -998,7 +998,7 @@ export const PlaygroundCompareCluster = ({
                   )
                 }}
                 onDeleteMessage={() => {
-                  deleteMessage(index)
+                  return deleteMessage(index)
                 }}
                 onTogglePinned={() => {
                   void toggleMessagePinned(index)

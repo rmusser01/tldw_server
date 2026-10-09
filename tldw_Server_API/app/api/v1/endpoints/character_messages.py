@@ -1109,15 +1109,15 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
-            db.lock_message_for_edit(message_id, conn=conn)
-            if metadata_updated:
-                db.lock_message_metadata_for_edit(message_id, conn=conn)
             resume_state = db.get_roleplay_resume_state(
                 message["conversation_id"],
                 conn=conn,
                 lock_for_update=True,
                 owner_client_id=str(current_user.id),
             )
+            db.lock_message_for_edit(message_id, conn=conn)
+            if metadata_updated:
+                db.lock_message_metadata_for_edit(message_id, conn=conn)
             conversation = resume_state.get("conversation")
             if not isinstance(conversation, Mapping):
                 raise InputError("Conversation resume state is incomplete")
@@ -1266,10 +1266,14 @@ async def edit_message(
 async def delete_message(
     message_id: str = Path(..., description="Message ID"),
     expected_version: int = Query(..., description="Expected version for optimistic locking"),
+    require_leaf: bool = Query(False, description="Refuse deletion of a message with live replies"),
+    expected_revision: str | None = Query(
+        None, min_length=1, max_length=128, description="Expected opaque saved-history message revision"
+    ),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user)
+    current_user: User = Depends(get_request_user),
 ) -> Response:
     """
     Soft delete a message from a conversation.
@@ -1301,7 +1305,13 @@ async def delete_message(
 
         def delete_directly() -> None:
             # Soft delete the message
-            success = remove_message_from_conversation(db, message_id, expected_version)
+            success = (
+                remove_message_from_conversation(
+                    db, message_id, expected_version, require_leaf=require_leaf, expected_revision=expected_revision
+                )
+                if require_leaf or expected_revision is not None
+                else remove_message_from_conversation(db, message_id, expected_version)
+            )
 
             if not success:
                 raise HTTPException(
@@ -1310,6 +1320,11 @@ async def delete_message(
                 )
 
         sync_service = _active_message_sync_service(current_user, scope)
+        if (require_leaf or expected_revision is not None) and sync_service is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="unsupported_native_sync_delete",
+            )
         if sync_service is not None:
             try:
                 # A message Sync never saw (it predates the profile, or was saved by a path

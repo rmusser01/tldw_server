@@ -39,6 +39,9 @@ import {
   qualifyNativeMessageEditCapture,
   verifyNativeMessageEditReceipt,
   type NativeMessageEditReceipt,
+  nativeMessageDeleteView,
+  qualifyNativeMessageDeleteCapture,
+  type NativeMessageDeleteReceipt,
   confirmLegacyHistoryProjection,
   type HistoryOwnerV1
 } from "@/services/chat-history-selection"
@@ -619,6 +622,82 @@ export function useHistorySelection(
     },
     [install, invalidate, publish]
   )
+  const refreshDeletedMessage = useCallback(
+    async (
+      origin: import("@/types/history-selection").HistorySelectionCaptureV1,
+      receipt: NativeMessageDeleteReceipt,
+      isCurrent: () => boolean
+    ) => {
+      const current = live.current
+      if (
+        current.status !== "ready" ||
+        current.owner?.kind !== "native" ||
+        current.capture !== origin ||
+        current.view !== origin.view ||
+        !current.bookmarkScope ||
+        !ownerLeaseValid(current.owner) ||
+        !isCurrent()
+      )
+        return null
+      const nextView = nativeMessageDeleteView(origin, receipt)
+      identity.current!.revision = Math.max(
+        identity.current!.revision,
+        nextView.selection_revision
+      )
+      const operation = invalidate()
+      let result: HistoryCaptureResultV1 | undefined
+      const ownsTransition = () =>
+        mounted.current &&
+        operation.epoch === epoch.current &&
+        ownerLeaseValid(current.owner!) &&
+        isCurrent() &&
+        live.current.owner === current.owner &&
+        ((live.current.capture === origin && live.current.view === origin.view) ||
+          (result !== undefined &&
+            live.current.capture === result &&
+            live.current.view === result.view) ||
+          (live.current.capture === origin &&
+            live.current.view === nextView &&
+            live.current.status === "stale_selection"))
+      publish({ ...current })
+      try {
+        result = await captureHistorySnapshot(
+          current.owner,
+          nextView,
+          "send",
+          operation.signal
+        )
+        if (result.status !== "captured") throw new Error(result.code)
+        qualifyNativeMessageDeleteCapture(origin, result, receipt)
+        const installed = await install(
+          result,
+          current.owner,
+          current.bookmarkScope,
+          operation.epoch,
+          current.pending,
+          ownsTransition
+        )
+        return { installed, isCurrent: ownsTransition }
+      } catch (error) {
+        if (
+          !ownsTransition() ||
+          live.current.capture !== origin ||
+          live.current.view !== origin.view
+        )
+          return null
+        publish({
+          ...live.current,
+          settingsQualified: false,
+          view: nextView,
+          status: "stale_selection",
+          error: errorCode(error)
+        })
+        return { installed: false, isCurrent: ownsTransition }
+      }
+    },
+    [install, invalidate, publish]
+  )
+
   const confirm = useCallback(
     async (orderedPathIds: readonly string[], cursor: HistoryCursorV1) => {
       const current = live.current
@@ -1494,6 +1573,7 @@ export function useHistorySelection(
     choose,
     refresh,
     refreshEditedMessage,
+    refreshDeletedMessage,
     confirm,
     followResult,
     reset,

@@ -300,7 +300,7 @@ export const SidePanelBody = ({
                     )
                   }}
                   onDeleteMessage={() => {
-                    void handleDeleteMessage(index)
+                    return handleDeleteMessage(index)
                   }}
                   onNewBranch={() => {
                     void handleNewBranch(index)

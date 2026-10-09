@@ -1,3 +1,4 @@
+import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import React, { useEffect, useState, useRef } from "react"
 import { App, Tag, Image, Tooltip, Collapse, Avatar, Modal } from "antd"
@@ -298,7 +299,7 @@ type Props = {
   discoSkillComment?: DiscoSkillComment | null
   historyId?: string
   conversationInstanceId: string
-  onDeleteMessage?: () => void
+  onDeleteMessage?: () => void | boolean | Promise<void | boolean>
   suppressDeleteSuccessToast?: boolean
   onSaveToWorkspaceNotes?: (payload: {
     message: string
@@ -1490,15 +1491,14 @@ export const PlaygroundMessage = (props: Props) => {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await props.onDeleteMessage?.()
-          if (!props.suppressDeleteSuccessToast) {
+          const accepted = await props.onDeleteMessage?.()
+          if (accepted !== false && !props.suppressDeleteSuccessToast) {
             messageApi.success(t("common:deleted", "Deleted"))
           }
         } catch (err) {
           console.error("Failed to delete message:", err)
-          const fallback = t("common:deleteFailed", "Delete failed")
-          const errorMessage = err instanceof Error ? err.message : ""
-          messageApi.error(errorMessage || fallback)
+          const copy = getMessageDeleteFeedback(err instanceof Error && err.cause ? err.cause : err)
+          messageApi.error(t(`common:${copy.key}`, copy.fallback))
         }
       }
     })

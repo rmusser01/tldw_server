@@ -95,6 +95,17 @@
   "delete": "Delete",
   "deleteMessageConfirm": "Delete this message?",
   "deleteFailed": "Delete failed",
+  "deleteMessage": {
+    "failed": "We could not confirm deletion. Reload this conversation to check the saved message before trying again.",
+    "descendants": "This message has replies. Delete those replies first, including any other branches, then try again.",
+    "changed": "The saved message has changed. Reload this conversation and review the latest message before deleting it.",
+    "busy": "A reply is still in progress. Wait for it to finish before deleting a saved message.",
+    "scope": "The server or signed-in account changed. Return to the intended server and account, then reload this conversation.",
+    "unsupported": "This conversation does not support deleting saved messages from this view yet.",
+    "sync": "Your sync setup does not support deleting saved messages from this view yet.",
+    "unavailable": "This saved message is unavailable. Reload the conversation to review its current messages.",
+    "refreshFailed": "The message was deleted, but this view or its saved copy could not be refreshed. Reload the conversation before continuing."
+  },
   "continue": "Continue Response",
   "saveAndSubmit": "Save & Send",
   "editMessage": {

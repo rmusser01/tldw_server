@@ -1620,20 +1620,57 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     message_id: string | number,
     expectedVersion: number,
-    chatId?: string | number
+    chatId?: string | number,
+    options?: {
+      scope?: ChatScope
+      requireLeaf?: boolean
+      expectedRevision?: string
+    } & ScopedRequestOptions
   ): Promise<void> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    await trackServerChatWrite(chatId, () =>
-      bgRequest<void>({
-        path: `/api/v1/messages/${mid}${qp}`,
-        method: 'DELETE'
+    const scoped = requestScopeFields(options?.requestScope)
+    options?.signal?.throwIfAborted()
+    const query = buildQuery({
+      expected_version: expectedVersion,
+      ...toChatScopeParams(options?.scope),
+      ...(options?.requireLeaf ? { require_leaf: true } : {}),
+      ...(options?.expectedRevision
+        ? { expected_revision: options.expectedRevision }
+        : {})
+    })
+    await trackServerChatWrite(chatId, async () => {
+      const response = await bgRequest<{
+        ok: boolean
+        status: number
+        data?: unknown
+        error?: string
+      }>({
+        ...scoped,
+        path: appendPathQuery(
+          `/api/v1/messages/${encodeURIComponent(String(message_id))}`,
+          query
+        ),
+        method: "DELETE",
+        abortSignal: options?.signal,
+        returnResponse: options?.requireLeaf
       })
-    )
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
+      if (
+        options?.requireLeaf &&
+        (response?.ok !== true || response.status !== 204)
+      ) {
+        throw Object.assign(
+          new Error(response?.error || "message_delete_unconfirmed"),
+          {
+            status: response?.status,
+            details: response?.data,
+            detail: (response?.data as { detail?: unknown } | undefined)?.detail
+          }
+        )
+      }
+    })
+    options?.signal?.throwIfAborted()
+    if (chatId != null) this.invalidateChatMessagesCache(chatId)
   },
+
 
   async saveChatKnowledge(this: TldwApiClientCore, payload: {
     conversation_id: string | number

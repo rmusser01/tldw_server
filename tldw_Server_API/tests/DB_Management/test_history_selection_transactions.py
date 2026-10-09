@@ -225,21 +225,26 @@ def test_statement_snapshot_remains_coherent_when_other_connection_commits_edit(
 
 
 @pytest.mark.parametrize("mutation", ["message", "metadata"])
-def test_confirm_serializes_with_row_first_edit_without_lock_inversion(history_db, monkeypatch, mutation):
+def test_confirm_serializes_after_conversation_first_message_and_metadata_edits(history_db, monkeypatch, mutation):
     db, cid = history_db
     mid = add(db, cid, "before")
     body = confirm_body(snapshot(db, cid))
-    row_locked, release_edit = threading.Event(), threading.Event()
-    is_postgres = db.backend_type == BackendType.POSTGRESQL
-
+    writing, release_edit, confirming = threading.Event(), threading.Event(), threading.Event()
     advance = db.message_store._advance_history_version
+    lock = db.message_store._lock_history_owner
+    confirming_thread = None
+
+    def observe_lock(*args, **kwargs):
+        if threading.get_ident() == confirming_thread:
+            confirming.set()
+        return lock(*args, **kwargs)
 
     def pause_before_fence(conn, conversation_id):
-        # The real edit has already changed/locked its message or metadata row.
-        row_locked.set()
+        writing.set()
         assert release_edit.wait(10)
         advance(conn, conversation_id)
 
+    monkeypatch.setattr(db.message_store, "_lock_history_owner", observe_lock)
     monkeypatch.setattr(db.message_store, "_advance_history_version", pause_before_fence)
 
     def edit():
@@ -247,28 +252,43 @@ def test_confirm_serializes_with_row_first_edit_without_lock_inversion(history_d
             if mutation == "message":
                 db.update_message(mid, {"content": "after"}, expected_version=1)
             else:
-                db.set_message_metadata_extra(mid, {"changed": True})
+                assert db.set_message_metadata_extra(mid, {"changed": True})
+        finally:
+            db.close_connection()
+
+    def accept():
+        nonlocal confirming_thread
+        confirming_thread = threading.get_ident()
+        if db.backend_type == BackendType.SQLITE:
+            confirming.set()
+        try:
+            return confirm(db, cid, body)
         finally:
             db.close_connection()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         editing = pool.submit(edit)
-        assert row_locked.wait(10)
-        if is_postgres:
-            # Uncommitted row edits are invisible; confirmation may accept the old
-            # coherent snapshot without waiting for that row while holding its fence.
-            accepted = confirm(db, cid, body)
+        assert writing.wait(10)
+        accepting = pool.submit(accept)
+        try:
+            assert confirming.wait(10)
+            assert not accepting.done()
+        finally:
             release_edit.set()
-            editing.result(timeout=15)
-            assert confirm(db, cid, body) == accepted
-            with pytest.raises(HistorySelectionError, match="stale_projection"):
-                snapshot(db, cid, projection_id="first")
-        else:
-            # SQLite's write transaction serializes the entire edit before CAS.
-            release_edit.set()
-            editing.result(timeout=15)
-            with pytest.raises(HistorySelectionError, match="stale_source"):
-                confirm(db, cid, body)
+        editing.result(timeout=15)
+        with pytest.raises(HistorySelectionError, match="stale_source"):
+            accepting.result(timeout=15)
+
+
+def test_confirmation_first_accepts_current_source_then_edit_invalidates_its_projection(history_db):
+    db, cid = history_db
+    mid = add(db, cid, "before")
+    body = confirm_body(snapshot(db, cid))
+    accepted = confirm(db, cid, body)
+    db.update_message(mid, {"content": "after"}, 1)
+    assert confirm(db, cid, body) == accepted
+    with pytest.raises(HistorySelectionError, match="stale_projection"):
+        snapshot(db, cid, projection_id="first")
 
 
 def test_accepted_projection_exposes_only_protected_descendant_base(history_db):

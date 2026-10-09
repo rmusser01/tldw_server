@@ -6481,17 +6481,10 @@ export class TldwApiClientBase {
   async deleteMessage(
     message_id: string | number,
     expectedVersion: number,
-    chatId?: string | number
+    chatId?: string | number,
+    options?: { scope?: ChatScope; requireLeaf?: boolean; expectedRevision?: string } & ScopedRequestOptions
   ): Promise<void> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    await bgRequest<void>({
-      path: `/api/v1/messages/${mid}${qp}`,
-      method: 'DELETE'
-    })
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
+    return chatRagMethods.deleteMessage.call(this as unknown as TldwApiClientCore, message_id, expectedVersion, chatId, options)
   }
 
   async saveChatKnowledge(payload: {

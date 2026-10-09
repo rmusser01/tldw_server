@@ -2875,7 +2875,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         (_entry, index) => index !== messageIndex
       )
 
-      await deleteMessage(messageIndex)
+      const accepted = await deleteMessage(messageIndex)
+      if (accepted === false) return false
+      // A canonical server tombstone cannot be undone by restoring browser rows.
+      if (previousServerChatId) return true
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {

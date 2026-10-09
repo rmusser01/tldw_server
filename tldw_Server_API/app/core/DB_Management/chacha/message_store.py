@@ -65,19 +65,43 @@ class MessageStore:
             raise HistorySelectionError("invalid_owner_key")
         return owner_key if owner_key is not None else f"native-client:{owner_client_id}"
 
-    def _lock_history_owner(self, conn: Any, conversation_id: str, owner_client_id: str) -> None:
-        """Lock only the conversation fence, never existing messages or metadata."""
-        query = (
-            "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE FOR UPDATE"
-            if self._db.backend_type == BackendType.POSTGRESQL
-            else "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE"
-        )
-        row = conn.execute(
-            query,
-            (conversation_id, owner_client_id),
-        ).fetchone()
-        if row is None:
+    def _lock_history_owner(
+        self, conn: Any, conversation_id: str, owner_client_id: str | None = None, *, include_deleted: bool = False
+    ) -> None:
+        """Serialize the conversation before locking message rows or metadata."""
+        query = "SELECT id FROM conversations WHERE id = ?"
+        if not include_deleted:
+            query += " AND deleted = FALSE"
+        params = (conversation_id,)
+        if owner_client_id is not None:
+            query += " AND client_id = ?"
+            params += (owner_client_id,)
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        if conn.execute(query, params).fetchone() is None:
             raise NotFoundError("Conversation not found.")
+
+    def _lock_message_conversation(self, conn: Any, message_id: str) -> str | None:
+        """Keep legacy deleted-row access while acquiring the shared fence first."""
+        row = conn.execute("SELECT conversation_id FROM messages WHERE id = ?", (message_id,)).fetchone()
+        if row is None:
+            return None
+        conversation_id = str(self._row_value(row, "conversation_id"))
+        self._lock_history_owner(conn, conversation_id, include_deleted=True)
+        return conversation_id
+
+    @staticmethod
+    def _validate_live_message_parent(conn: Any, conversation_id: str, parent_id: str | None) -> None:
+        """A parent must remain live in the same serialized conversation."""
+        if (
+            parent_id is not None
+            and conn.execute(
+                "SELECT id FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+                (parent_id, conversation_id),
+            ).fetchone()
+            is None
+        ):
+            raise InputError("parent_message_unavailable")
 
     def _read_history_snapshot(
         self,
@@ -1165,7 +1189,7 @@ class MessageStore:
             )
 
     def lock_message_for_edit(self, message_id: str, *, conn: Any) -> None:
-        """Lock a live PostgreSQL message before its conversation is locked."""
+        """Lock a live PostgreSQL message after its conversation fence."""
         if self._db.backend_type != BackendType.POSTGRESQL:
             return
         row = conn.execute(
@@ -1182,7 +1206,7 @@ class MessageStore:
             )
 
     def lock_message_metadata_for_edit(self, message_id: str, *, conn: Any) -> None:
-        """Ensure and lock message metadata before the conversation row."""
+        """Ensure and lock metadata after its conversation and message."""
         if self._db.backend_type != BackendType.POSTGRESQL:
             return
         conn.execute(
@@ -1327,14 +1351,15 @@ class MessageStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
-                conv_cursor = transaction_conn.execute(
-                    "SELECT 1 FROM conversations WHERE id = ? AND deleted = FALSE",
-                    (msg_data['conversation_id'],),
-                )
-                if not conv_cursor.fetchone():
+                try:
+                    self._lock_history_owner(transaction_conn, msg_data["conversation_id"])
+                except NotFoundError as exc:
                     raise InputError(  # noqa: TRY003, TRY301
                         f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted."
-                    )
+                    ) from exc
+                self._validate_live_message_parent(
+                    transaction_conn, msg_data["conversation_id"], msg_data.get("parent_message_id")
+                )
                 transaction_conn.execute(query, params)
                 if normalized_images:
                     self._insert_message_images(msg_id, normalized_images, conn=transaction_conn)
@@ -1438,6 +1463,7 @@ class MessageStore:
                     return self._db.execute_query(query, params)
                 return transaction_conn.execute(query, params)
 
+            self._lock_message_conversation(transaction_conn, message_id)
             message_cursor = _execute(
                 "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE",
                 (message_id,),
@@ -1972,6 +1998,8 @@ class MessageStore:
             if not bool(version["deleted"])
         }
         with self._db.transaction() as conn:
+            for conversation_id in sorted({str(version["conversation_id"]) for version in existing_versions}):
+                self._lock_history_owner(conn, conversation_id, include_deleted=True)
             for version in existing_versions:
                 if bool(version["deleted"]):
                     continue
@@ -2468,7 +2496,6 @@ class MessageStore:
         except (sqlite3.Error, BackendDatabaseError) as exc:
             raise CharactersRAGDBError("Failed to persist retry instruction block.") from exc  # noqa: TRY003
 
-
     def get_retry_message_context(self, conversation_id: str) -> tuple[list[str], list[dict[str, Any]]]:
         """Read the non-system tail and latest instruction block without attachment blobs.
 
@@ -2650,6 +2677,11 @@ class MessageStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                conversation_id = self._lock_message_conversation(transaction_conn, message_id)
+                if conversation_id is not None and "parent_message_id" in update_data:
+                    self._validate_live_message_parent(
+                        transaction_conn, conversation_id, update_data["parent_message_id"]
+                    )
                 current_db_version = self._db._get_current_db_version(
                     transaction_conn,
                     "messages",
@@ -2663,10 +2695,6 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                conversation_row = transaction_conn.execute(
-                    "SELECT conversation_id FROM messages WHERE id = ?",
-                    (message_id,),
-                ).fetchone()
                 cursor = transaction_conn.execute(query, final_params_for_execute)
 
                 if cursor.rowcount == 0:
@@ -2686,7 +2714,7 @@ class MessageStore:
 
                 self._advance_history_version(
                     transaction_conn,
-                    str(self._row_value(conversation_row, "conversation_id")),
+                    conversation_id,
                 )
                 logger.info(
                     f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
@@ -2713,6 +2741,8 @@ class MessageStore:
         message_id: str,
         expected_version: int,
         *,
+        require_leaf: bool = False,
+        expected_revision: str | None = None,
         conn: Any | None = None,
     ) -> bool | None:
         """
@@ -2727,6 +2757,8 @@ class MessageStore:
         Args:
             message_id: The UUID of the message to soft-delete.
             expected_version: The client's expected version of the record.
+            require_leaf: Refuse deletion while a live message references this parent.
+            expected_revision: Require the exact H1 content, metadata and asset state.
 
         Returns:
             True if the soft-delete was successful or if the message was already soft-deleted.
@@ -2744,6 +2776,7 @@ class MessageStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                conversation_id = self._lock_message_conversation(transaction_conn, message_id)
                 try:
                     current_db_version = self._db._get_current_db_version(
                         transaction_conn,
@@ -2768,10 +2801,29 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                conversation_row = transaction_conn.execute(
-                    "SELECT conversation_id FROM messages WHERE id = ?",
-                    (message_id,),
-                ).fetchone()
+                if expected_revision is not None:
+                    owner = transaction_conn.execute(
+                        "SELECT client_id FROM conversations WHERE id = ?", (conversation_id,)
+                    ).fetchone()
+                    current, _ = self._read_history_snapshot(
+                        conversation_id,
+                        owner_client_id=str(self._row_value(owner, "client_id")),
+                        owner_key="native-delete-cas",
+                        projection_id=None,
+                        conn=transaction_conn,
+                    )
+                    target = next((node for node in current.nodes if node["id"] == message_id), None)
+                    if target is None or target["revision"] != expected_revision:
+                        raise ConflictError("message_changed", entity="messages", entity_id=message_id)
+                if (
+                    require_leaf
+                    and transaction_conn.execute(
+                        "SELECT id FROM messages WHERE parent_message_id = ? AND deleted = FALSE LIMIT 1",
+                        (message_id,),
+                    ).fetchone()
+                    is not None
+                ):
+                    raise ConflictError("message_has_descendants", entity="messages", entity_id=message_id)
                 cursor = transaction_conn.execute(query, params)
 
                 if cursor.rowcount == 0:
@@ -2794,7 +2846,7 @@ class MessageStore:
 
                 self._advance_history_version(
                     transaction_conn,
-                    str(self._row_value(conversation_row, "conversation_id")),
+                    conversation_id,
                 )
                 logger.info(
                     f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
@@ -2976,6 +3028,8 @@ class MessageStore:
             self._db._ensure_message_metadata_table()
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                if self._lock_message_conversation(transaction_conn, message_id) is None:
+                    return False
                 return self._add_message_metadata_with_conn(
                     message_id,
                     tool_calls,
@@ -3132,6 +3186,8 @@ class MessageStore:
             self._db._ensure_message_metadata_table()
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                if self._lock_message_conversation(transaction_conn, message_id) is None:
+                    return False
                 current = self._get_message_metadata_for_merge(message_id, transaction_conn)
                 if current is None:
                     return False

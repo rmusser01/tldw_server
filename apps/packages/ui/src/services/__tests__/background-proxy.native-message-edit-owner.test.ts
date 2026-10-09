@@ -200,3 +200,120 @@ it("a retired principal cannot send a native edit to the replacement account", a
   await expect(save()).rejects.toMatchObject({ status: 412 })
   expect(boundary.fetch).not.toHaveBeenCalled()
 })
+
+
+describe("native leaf Delete through the actual SDK and proxy", () => {
+  const remove = (signal?: AbortSignal, id = "message") =>
+    new TldwApiClient().deleteMessage(id, 2, "chat", {
+      ...options(signal),
+      requireLeaf: true,
+      expectedRevision: "opaque-original"
+    })
+
+  it("dispatches one scoped numeric CAS and accepts only204", async () => {
+    boundary.fetch.mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(remove()).resolves.toBeUndefined()
+    const [url, init] = boundary.fetch.mock.calls[0]
+    expect(String(url)).toBe(
+      "https://messages.example/api/v1/messages/message?expected_version=2&scope_type=workspace&workspace_id=original&require_leaf=true&expected_revision=opaque-original"
+    )
+    expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
+    expect(init.method).toBe("DELETE")
+    expect(init.body).toBeUndefined()
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+  it("keeps the same account and leaf precondition through the extension", async () => {
+    boundary.runtimeId = "extension-fixture"
+    boundary.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 204,
+      data: null
+    })
+    await expect(remove()).resolves.toBeUndefined()
+    expect(boundary.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          method: "DELETE",
+          path: "/api/v1/messages/message?expected_version=2&scope_type=workspace&workspace_id=original&require_leaf=true&expected_revision=opaque-original",
+          servicePromptConfig: { ...requestScope.config, expectedUserId: 7 }
+        })
+      })
+    )
+    expect(boundary.fetch).not.toHaveBeenCalled()
+  })
+  it("refuses a replacement account before deletion", async () => {
+    boundary.get.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? config(8) : null
+    )
+    await expect(remove()).rejects.toMatchObject({ status: 412 })
+    expect(boundary.fetch).not.toHaveBeenCalled()
+  })
+  it("encodes a literal identifier instead of changing the request path", async () => {
+    boundary.fetch.mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(
+      remove(undefined, "message?other=value")
+    ).resolves.toBeUndefined()
+    expect(String(boundary.fetch.mock.calls[0][0])).toContain(
+      "/messages/message%3Fother%3Dvalue?expected_version=2&"
+    )
+  })
+  it("rejects an unexpected200 without replay", async () => {
+    await expect(remove()).rejects.toThrow("message_delete_unconfirmed")
+    expect(boundary.fetch).toHaveBeenCalledOnce()
+  })
+  it.each([["false"], ["true"], [1], [{}], [[]], [undefined]])(
+    "refuses nonboolean runtime acknowledgement %j",
+    async (ok) => {
+      boundary.runtimeId = "extension-fixture"
+      boundary.sendMessage.mockResolvedValue({ ok, status: 204, data: null })
+      const api = new TldwApiClient()
+      const invalidate = vi.spyOn(api, "invalidateChatMessagesCache")
+      await expect(
+        api.deleteMessage("message", 2, "chat", {
+          ...options(),
+          requireLeaf: true,
+          expectedRevision: "opaque-original"
+        })
+      ).rejects.toThrow("message_delete_unconfirmed")
+      expect(boundary.sendMessage).toHaveBeenCalledOnce()
+      expect(boundary.fetch).not.toHaveBeenCalled()
+      expect(invalidate).not.toHaveBeenCalled()
+    }
+  )
+  it("preserves a server409 from the serialized response", async () => {
+    boundary.runtimeId = "extension-fixture"
+    boundary.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 409,
+      data: { detail: "message_has_descendants" },
+      error: "Conflict"
+    })
+    await expect(remove()).rejects.toMatchObject({ status: 409 })
+    expect(boundary.sendMessage).toHaveBeenCalledOnce()
+  })
+  it("preserves cancellation before dispatch", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(remove(controller.signal)).rejects.toMatchObject({
+      name: "AbortError"
+    })
+    expect(boundary.fetch).not.toHaveBeenCalled()
+  })
+  it.each([
+    "?expected_version=2",
+    "?require_leaf=true",
+    "?expected_version=opaque&require_leaf=true",
+    "?expected_version=2&require_leaf=false",
+    "?expected_version=2&expected_version=3&require_leaf=true",
+    "?expected_version=2&require_leaf=true&require_leaf=false"
+  ])("refuses an unqualified native DELETE%s", async (query) => {
+    await expect(
+      bgRequest({
+        ...requestScopeFields(requestScope),
+        path: `/api/v1/messages/message${query}` as never,
+        method: "DELETE"
+      })
+    ).rejects.toThrow(/Service Prompt config/)
+    expect(boundary.fetch).not.toHaveBeenCalled()
+  })
+})

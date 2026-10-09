@@ -312,7 +312,7 @@ export const DocumentChat: React.FC = () => {
                       )
                     }}
                     onDeleteMessage={() => {
-                      deleteMessage(index)
+                      return deleteMessage(index)
                     }}
                     isTTSEnabled={ttsEnabled}
                     generationInfo={message?.generationInfo}

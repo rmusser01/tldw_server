@@ -232,7 +232,7 @@ export const ModelPlaygroundChat: React.FC = () => {
                 )
               }}
               onDeleteMessage={() => {
-                void deleteMessage(block.index)
+                return deleteMessage(block.index)
               }}
               isTTSEnabled={ttsEnabled}
               generationInfo={msg?.generationInfo}
@@ -292,7 +292,7 @@ export const ModelPlaygroundChat: React.FC = () => {
                 )
               }}
               onDeleteMessage={() => {
-                void deleteMessage(block.userIndex)
+                return deleteMessage(block.userIndex)
               }}
               isTTSEnabled={ttsEnabled}
               generationInfo={userMessage?.generationInfo}
@@ -357,7 +357,7 @@ export const ModelPlaygroundChat: React.FC = () => {
                         )
                       }}
                       onDeleteMessage={() => {
-                        void deleteMessage(index)
+                        return deleteMessage(index)
                       }}
                       isTTSEnabled={ttsEnabled}
                       generationInfo={replyMsg?.generationInfo}

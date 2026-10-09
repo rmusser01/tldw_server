@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import { MemoryRouter } from "react-router-dom"
@@ -1103,7 +1103,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     })
   })
 
-  it("routes message deletion through undo-managed restore flow", async () => {
+  it("retains the local conversation Undo restore flow", async () => {
     messageOptionState.messages = [
       {
         id: "m1",
@@ -1125,7 +1125,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       { role: "assistant", content: "Second" }
     ]
     messageOptionState.historyId = "history-a"
-    messageOptionState.serverChatId = "server-chat-a"
+    messageOptionState.serverChatId = null
     mockDeleteMessage.mockResolvedValue(undefined)
 
     renderChatPane()
@@ -1146,7 +1146,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         ],
         history: [{ role: "assistant", content: "Second" }],
         historyId: "history-a",
-        serverChatId: "server-chat-a"
+        serverChatId: null
       })
     })
 
@@ -1179,7 +1179,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockSetHistoryId).toHaveBeenLastCalledWith("history-a", {
       preserveServerChatId: true
     })
-    expect(mockSetServerChatId).toHaveBeenLastCalledWith("server-chat-a")
+    expect(mockSetServerChatId).toHaveBeenLastCalledWith(null)
   })
 
   it("shows connection banner and retries connection check", () => {
@@ -1494,4 +1494,40 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(parsed.searchParams.get("focus")).toBe(LOREBOOK_DEBUG_FOCUS)
     expect(parsed.searchParams.get("from")).toBe("research-workspace")
   })
+
+  it.each([true, false])(
+    "server message Delete does not offer a browser-only Undo after accepted=%s",
+    async (accepted) => {
+      messageOptionState.messages = [
+        {
+          id: "m1",
+          isBot: true,
+          name: "Assistant",
+          message: "Saved reply",
+          sources: []
+        }
+      ]
+      messageOptionState.history = [{ role: "assistant", content: "Saved reply" }]
+      messageOptionState.historyId = "owned-mirror"
+      messageOptionState.serverChatId = "saved-chat"
+      let release!: (value: boolean) => void
+      mockDeleteMessage.mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            release = resolve
+          })
+      )
+      renderChatPane()
+      fireEvent.click(screen.getByRole("button", { name: "delete-message-0" }))
+      await waitFor(() => expect(mockDeleteMessage).toHaveBeenCalledWith(0))
+      expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
+      await act(async () => {
+        release(accepted)
+      })
+      expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
+      expect(mockSaveWorkspaceChatSession).not.toHaveBeenCalled()
+    }
+  )
+
+
 })

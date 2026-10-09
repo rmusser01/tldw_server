@@ -1,9 +1,14 @@
 """Authenticated native history capture, admission and settlement routes."""
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests.DB_Management.test_history_selection_transactions import history_db as history_db
 
 
 @pytest.fixture
@@ -983,3 +988,201 @@ def test_message_routes_accept_current_expected_account(history_api, expected_ac
     assert saved.status_code == 200, saved.text
     assert saved.json()["version"] == read.json()["version"] + 1
     assert db.get_message_by_id(mid)["content"] == "Exact saved edit  \n"
+
+
+def test_native_leaf_delete_refuses_descendants_through_real_storage(history_api):
+    client, db, cid, headers = history_api
+    parent = db.add_message({"conversation_id": cid, "sender": "user", "content": "Parent"})
+    child = db.add_message(
+        {"conversation_id": cid, "sender": "assistant", "content": "Child", "parent_message_id": parent}
+    )
+    before = db.get_messages_for_conversation(cid)
+    response = client.delete(f"/api/v1/messages/{parent}?expected_version=1&require_leaf=true", headers=headers)
+    assert response.status_code == 409, response.text
+    assert "message_has_descendants" in response.text
+    assert db.get_messages_for_conversation(cid) == before
+    assert db.get_message_by_id(child)["parent_message_id"] == parent
+
+
+def test_native_leaf_delete_acknowledges_exact204_and_keeps_parent_graph(history_api):
+    client, db, cid, headers = history_api
+    parent = db.add_message({"conversation_id": cid, "sender": "user", "content": "Parent"})
+    leaf = db.add_message(
+        {"conversation_id": cid, "sender": "assistant", "content": "Leaf", "parent_message_id": parent}
+    )
+    response = client.delete(f"/api/v1/messages/{leaf}?expected_version=1&require_leaf=true", headers=headers)
+    assert response.status_code == 204, response.text
+    assert response.content == b""
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": parent})
+    assert captured.status_code == 200, captured.text
+    assert captured.json()["status"] == "captured"
+    assert [row["id"] for row in captured.json()["snapshot"]["nodes"]] == [parent]
+
+
+def test_native_leaf_delete_preserves_real_wrapper_cas_conflict(history_api, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    client, db, cid, headers = history_api
+    leaf = db.add_message({"conversation_id": cid, "sender": "user", "content": "Original"})
+    verify = character_messages._verify_message_access
+
+    def held_precheck(*args, **kwargs):
+        original = verify(*args, **kwargs)
+        db.update_message(leaf, {"content": "Changed after endpoint read"}, 1)
+        return original
+
+    monkeypatch.setattr(character_messages, "_verify_message_access", held_precheck)
+    response = client.delete(f"/api/v1/messages/{leaf}?expected_version=1&require_leaf=true", headers=headers)
+    assert response.status_code == 409, response.text
+    assert db.get_message_by_id(leaf)["content"] == "Changed after endpoint read"
+
+
+@pytest.mark.parametrize("native_options", [{"require_leaf": "true"}, {"expected_revision": "opaque"}])
+def test_native_leaf_delete_refuses_enrolled_sync_before_product_or_sync_mutation(
+    history_api, monkeypatch, native_options
+):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    client, db, cid, headers = history_api
+    leaf = db.add_message({"conversation_id": cid, "sender": "user", "content": "Keep current"})
+    before = db.get_message_by_id(leaf)
+    monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
+
+    def no_sync_write(*_args, **_kwargs):
+        raise AssertionError("Unsupported native Sync deletion cannot write")
+
+    monkeypatch.setattr(character_messages, "delete_unenrolled_server_origin_objects", no_sync_write)
+    monkeypatch.setattr(character_messages, "capture_server_origin_mutation", no_sync_write)
+    response = client.delete(
+        f"/api/v1/messages/{leaf}", headers=headers, params={"expected_version": 1, **native_options}
+    )
+    assert response.status_code == 409, response.text
+    assert "unsupported_native_sync_delete" in response.text
+    assert db.get_message_by_id(leaf) == before
+
+
+def test_legacy_non_leaf_delete_semantics_stay_explicitly_unchanged(history_api):
+    client, db, cid, headers = history_api
+    parent = db.add_message({"conversation_id": cid, "sender": "user", "content": "Parent"})
+    child = db.add_message(
+        {"conversation_id": cid, "sender": "assistant", "content": "Child", "parent_message_id": parent}
+    )
+    response = client.delete(f"/api/v1/messages/{parent}?expected_version=1", headers=headers)
+    assert response.status_code == 204, response.text
+    assert db.get_message_by_id(child)["parent_message_id"] == parent
+
+
+@pytest.fixture
+def native_mutation_api(history_db, credentialed_test_client, auth_headers):
+    """Exercise real HTTP mutation on the standard SQLite/Postgres fixture."""
+    db, _seed = history_db
+    client = credentialed_test_client
+    cid = db.add_conversation({"character_id": None, "title": "Native mutation HTTP", "client_id": "1"})
+    client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    yield client, db, cid, {**auth_headers, "X-TLDW-Expected-User-ID": "1"}
+    client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+
+
+@pytest.mark.parametrize("mutation", [None, "metadata", "image"])
+def test_native_leaf_delete_enforces_opaque_cas_through_http(native_mutation_api, mutation):
+    client, db, cid, headers = native_mutation_api
+    leaf = db.add_message({"conversation_id": cid, "sender": "user", "content": "Exact {{char}}  \n"})
+    selected = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": leaf})
+    assert selected.status_code == 200, selected.text
+    revision = selected.json()["snapshot"]["nodes"][0]["revision"]
+    if mutation == "metadata":
+        db.set_message_metadata_extra(leaf, {"pinned": True})
+    elif mutation == "image":
+        db.append_message_image(leaf, b"image changed after capture", "image/png")
+    before = db.get_message_by_id(leaf, include_deleted=True)
+    assert before["version"] == 1
+    response = client.delete(
+        f"/api/v1/messages/{leaf}",
+        headers=headers,
+        params={"expected_version": 1, "require_leaf": "true", "expected_revision": revision},
+    )
+    if mutation is None:
+        assert response.status_code == 204, response.text
+        assert response.content == b""
+        assert db.get_message_by_id(leaf) is None
+    else:
+        assert response.status_code == 409, response.text
+        assert "message_changed" in response.text
+        assert db.get_message_by_id(leaf, include_deleted=True) == before
+
+
+@pytest.mark.parametrize("first", ["put", "delete"])
+def test_actual_put_and_native_delete_use_conversation_first_order(native_mutation_api, monkeypatch, first):
+    client, db, cid, headers = native_mutation_api
+    leaf = db.add_message({"conversation_id": cid, "sender": "user", "content": "Original"})
+    selected = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": leaf})
+    assert selected.status_code == 200, selected.text
+    revision = selected.json()["snapshot"]["nodes"][0]["revision"]
+    writing, release, started, lock_attempt = (threading.Event() for _ in range(4))
+    advance = db.message_store._advance_history_version
+    lock = db.message_store._lock_message_conversation
+    resume = db.get_roleplay_resume_state
+
+    def pause_after_first_write(conn, conversation_id):
+        if not writing.is_set():
+            writing.set()
+            assert release.wait(10)
+        advance(conn, conversation_id)
+
+    def observe_lock(*args, **kwargs):
+        if writing.is_set():
+            lock_attempt.set()
+        return lock(*args, **kwargs)
+
+    def observe_resume(*args, **kwargs):
+        if writing.is_set():
+            lock_attempt.set()
+        return resume(*args, **kwargs)
+
+    monkeypatch.setattr(db.message_store, "_advance_history_version", pause_after_first_write)
+    monkeypatch.setattr(db.message_store, "_lock_message_conversation", observe_lock)
+    monkeypatch.setattr(db, "get_roleplay_resume_state", observe_resume)
+
+    def request(kind, second=False):
+        from fastapi.testclient import TestClient
+
+        # Independent portals let the two synchronous storage transactions race.
+        request_client = TestClient(client.app)
+        if second:
+            started.set()
+        if kind == "put":
+            return request_client.put(
+                f"/api/v1/messages/{leaf}",
+                headers=headers,
+                params={"expected_version": 1},
+                json={"content": "Saved edit", "pinned": True},
+            )
+        return request_client.delete(
+            f"/api/v1/messages/{leaf}",
+            headers=headers,
+            params={"expected_version": 1, "require_leaf": "true", "expected_revision": revision},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(request, first)
+        try:
+            assert writing.wait(10)
+            b = pool.submit(request, "delete" if first == "put" else "put", True)
+            assert started.wait(10)
+            if db.backend_type == BackendType.POSTGRESQL:
+                assert lock_attempt.wait(10)
+            assert not b.done()
+        finally:
+            release.set()
+        original, conflict = a.result(timeout=10), b.result(timeout=10)
+    assert original.status_code == (200 if first == "put" else 204), original.text
+    assert conflict.status_code in ({409} if first == "put" else {404, 409}), conflict.text
+    stored = db.get_message_by_id(leaf, include_deleted=True)
+    if first == "put":
+        assert not stored["deleted"]
+        assert stored["content"] == "Saved edit"
+        assert db.get_message_metadata(leaf)["extra"]["pinned"] is True
+    else:
+        assert stored["deleted"]
+        assert stored["content"] == "Original"
+        assert not (db.get_message_metadata(leaf) or {}).get("extra", {}).get("pinned")

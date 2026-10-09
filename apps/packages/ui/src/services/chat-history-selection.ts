@@ -376,7 +376,7 @@ export type NativeMessageEditReceipt = Readonly<{
   version: number
 }>
 
-const nativeEditTarget = (
+const nativeMessageTarget = (
   capture: HistorySelectionCaptureV1,
   messageId: string
 ) => {
@@ -393,8 +393,12 @@ const nativeEditTarget = (
     !["user", "assistant"].includes(nodes[0].role)
   )
     fail("message_changed")
-  if (content[0].images.length) fail("unsupported_message_payload")
   return { node: nodes[0], content: content[0] }
+}
+const nativeEditTarget = (capture: HistorySelectionCaptureV1, messageId: string) => {
+  const target = nativeMessageTarget(capture, messageId)
+  if (target.content.images.length) fail("unsupported_message_payload")
+  return target
 }
 const nativeEditPreservedState = (
   target: ReturnType<typeof nativeEditTarget>
@@ -542,6 +546,146 @@ export const verifyNativeMessageEditReceipt = async (
     row.version !== receipt.version
   )
     fail("message_edit_unconfirmed")
+}
+
+export type NativeMessageDeleteReceipt = Readonly<{
+  message_id: string
+  parent_message_id: string | null
+}>
+
+export const nativeMessageDeleteView = (
+  original: HistorySelectionCaptureV1,
+  receipt: NativeMessageDeleteReceipt
+): HistoryViewSelectionV1 => {
+  const target = nativeMessageTarget(original, receipt.message_id)
+  if (target.node.parent_id !== receipt.parent_message_id)
+    fail("message_changed")
+  if (
+    original.view.cursor.kind === "empty" ||
+    original.view.cursor.message_id !== receipt.message_id
+  )
+    return original.view
+  if (
+    !Number.isSafeInteger(original.view.selection_revision) ||
+    original.view.selection_revision >= Number.MAX_SAFE_INTEGER
+  )
+    fail("stale_selection")
+  return {
+    ...original.view,
+    selection_revision: original.view.selection_revision + 1,
+    cursor: receipt.parent_message_id
+      ? { kind: "after_message", message_id: receipt.parent_message_id }
+      : { kind: "empty" }
+  }
+}
+
+/** Destructive deletion requires both physical CAS and exact saved content/assets. */
+export const deleteNativeHistoryMessage = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  target: { id: string; message: string; isBot?: boolean; images?: string[] },
+  options?: HistoryOperationOptions
+): Promise<NativeMessageDeleteReceipt> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.view.interpretation.kind !== "parent_graph_v1")
+    fail("unsupported_history_capability")
+  const original = nativeMessageTarget(capture, target.id)
+  if (
+    original.content.message !== target.message ||
+    original.node.role !== (target.isBot ? "assistant" : "user") ||
+    canonicalHistoryJson(original.content.images) !==
+      canonicalHistoryJson(target.images ?? [])
+  )
+    fail("message_changed")
+  if (capture.snapshot.nodes.some((node) => node.parent_id === target.id))
+    fail("message_has_descendants")
+  const receipt = Object.freeze({
+    message_id: target.id,
+    parent_message_id: original.node.parent_id
+  })
+  nativeMessageDeleteView(capture, receipt)
+  const scoped = nativeOptions(owner, options?.signal)
+  const row = await tldwClient.getMessage(target.id, scoped)
+  assertOwnerLease(owner, options)
+  if (
+    !row ||
+    row.id !== target.id ||
+    row.conversation_id !== owner.conversation_id ||
+    row.sender !== original.node.role ||
+    row.parent_message_id !== original.node.parent_id ||
+    row.content !== target.message ||
+    row.has_image !== original.content.images.length > 0 ||
+    !Number.isSafeInteger(row.version) ||
+    row.version <= 0 ||
+    row.version >= Number.MAX_SAFE_INTEGER
+  )
+    fail("message_changed")
+  const fresh = await captureHistorySnapshot(
+    owner,
+    capture.view,
+    "send",
+    options?.signal
+  )
+  assertOwnerLease(owner, options)
+  if (fresh.status !== "captured") return fail(fresh.code)
+  if (
+    canonicalHistoryJson(original) !==
+    canonicalHistoryJson(nativeMessageTarget(fresh, target.id))
+  )
+    fail("message_changed")
+  if (fresh.snapshot.nodes.some((node) => node.parent_id === target.id))
+    fail("message_has_descendants")
+  await tldwClient.deleteMessage(
+    target.id,
+    row.version,
+    owner.conversation_id,
+    {
+      ...scoped,
+      requireLeaf: true,
+      expectedRevision: original.node.revision
+    }
+  )
+  assertOwnerLease(owner, options)
+  return receipt
+}
+
+/** Only the acknowledged leaf disappears; retained history is qualified before publication. */
+export const qualifyNativeMessageDeleteCapture = (
+  original: HistorySelectionCaptureV1,
+  refreshed: HistorySelectionCaptureV1,
+  receipt: NativeMessageDeleteReceipt
+): void => {
+  const expectedView = nativeMessageDeleteView(original, receipt)
+  if (
+    refreshed.snapshot.owner_key !== original.snapshot.owner_key ||
+    refreshed.snapshot.conversation_id !== original.snapshot.conversation_id ||
+    refreshed.snapshot.storage_context_digest !==
+      original.snapshot.storage_context_digest ||
+    canonicalHistoryJson(refreshed.view) !==
+      canonicalHistoryJson(expectedView) ||
+    refreshed.snapshot.nodes.some(
+      (node) =>
+        node.id === receipt.message_id || node.parent_id === receipt.message_id
+    ) ||
+    original.snapshot.nodes.some(
+      (node) =>
+        node.id !== receipt.message_id &&
+        !refreshed.snapshot.nodes.some(
+          (current) =>
+            canonicalHistoryJson(current) === canonicalHistoryJson(node)
+        )
+    ) ||
+    canonicalHistoryJson(refreshed.rows) !==
+      canonicalHistoryJson(
+        original.rows.filter((row) => row.id !== receipt.message_id)
+      ) ||
+    canonicalHistoryJson(refreshed.selected_content) !==
+      canonicalHistoryJson(
+        original.selected_content.filter((row) => row.id !== receipt.message_id)
+      )
+  )
+    fail("message_delete_unconfirmed")
 }
 
 /** Capture an explicit branch without replacing the mounted source/editor. */
