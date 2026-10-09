@@ -529,14 +529,29 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   const blankDraft =
     !currentNote.id && !currentNote.title && !currentNote.content;
+  const canonicalRecoveryNoteId =
+    currentNote.id != null &&
+    !currentNote.isDirty &&
+    !currentNote.pendingNoteWriteKey
+      ? String(currentNote.id)
+      : null;
   useEffect(() => {
     if (
-      !blankDraft ||
+      (!blankDraft && !canonicalRecoveryNoteId) ||
       !activeWorkspaceId ||
       !hasResearchWorkspaceMigrationTombstone(activeWorkspaceId)
     )
       return;
     const controller = new AbortController();
+    const expectedNote = useWorkspaceStore.getState().currentNote;
+    const stopDraft = useWorkspaceStore.subscribe((state) => {
+      if (
+        state.currentNote !== expectedNote ||
+        state.workspaceId !== activeWorkspaceId ||
+        state.workspaceTag !== workspaceTag
+      )
+        controller.abort();
+    });
     const stopOwner = watchChatAccountChanges((invalidated) => {
       if (invalidated) controller.abort();
     });
@@ -570,10 +585,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           Object.values(queue).filter(
             (entry) =>
               entry.key.startsWith(prefix) &&
-              (entry.pendingWrite?.authorityId === authority ||
+              ((blankDraft && entry.pendingWrite?.authorityId === authority) ||
                 (isQuickNotesRetainedDraft(entry) &&
                   entry.metadata?.quickNotesAuthorityId === authority &&
-                  entry.metadata.quickNotesDirty)),
+                  entry.metadata.quickNotesDirty &&
+                  (!canonicalRecoveryNoteId ||
+                    entry.noteId === canonicalRecoveryNoteId))),
           ),
         );
       } finally {
@@ -588,8 +605,15 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     return () => {
       controller.abort();
       stopOwner();
+      stopDraft();
     };
-  }, [activeWorkspaceId, workspaceTag, blankDraft, recoveryRevision]);
+  }, [
+    activeWorkspaceId,
+    workspaceTag,
+    blankDraft,
+    canonicalRecoveryNoteId,
+    recoveryRevision,
+  ]);
 
   const [showSavedIndicator, setShowSavedIndicator] = useState(false)
   const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1750,6 +1774,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         if (
           !isQuickNotesRetainedDraft(entry) ||
           !entry.metadata?.quickNotesDirty ||
+          (expected.currentNote.id != null &&
+            entry.noteId !== String(expected.currentNote.id)) ||
           entry.metadata.quickNotesAuthorityId !== authorityId ||
           entry.metadata.quickNotesWorkspaceId !== expected.workspaceId ||
           entry.metadata.quickNotesWorkspaceTag !== expected.workspaceTag
@@ -2158,26 +2184,34 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )}
       </div>
 
-      {recoverableDrafts.map((entry) => (
-        <Button
-          key={entry.key}
-          size="small"
-          disabled={isSaving}
-          onClick={() => {
-            if (entry.pendingWrite)
-              void handleSave({
-                key: entry.key,
-                workspaceId: activeWorkspaceId,
-                workspaceTag,
-              });
-            else handleResumeLocalDraft(entry.key);
-          }}
-        >
-          {entry.pendingWrite
-            ? "Retry previous save"
-            : "Resume local unsaved draft"}
-        </Button>
-      ))}
+      {recoverableDrafts
+        .filter(
+          (entry) =>
+            entry.key.startsWith(
+              `surface:quick-notes:${JSON.stringify([activeWorkspaceId, workspaceTag])}:`,
+            ) &&
+            (currentNote.id == null || entry.noteId === String(currentNote.id)),
+        )
+        .map((entry) => (
+          <Button
+            key={entry.key}
+            size="small"
+            disabled={isSaving}
+            onClick={() => {
+              if (entry.pendingWrite)
+                void handleSave({
+                  key: entry.key,
+                  workspaceId: activeWorkspaceId,
+                  workspaceTag,
+                });
+              else handleResumeLocalDraft(entry.key);
+            }}
+          >
+            {entry.pendingWrite
+              ? "Retry previous save"
+              : "Resume local unsaved draft"}
+          </Button>
+        ))}
 
       {/* Save button */}
       {(currentNote.content.trim() || currentNote.title.trim() || currentNote.isDirty) && (
