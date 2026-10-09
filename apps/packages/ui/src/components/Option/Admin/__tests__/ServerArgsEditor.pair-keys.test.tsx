@@ -36,6 +36,68 @@ describe("ServerArgsEditor stable pair keys (C-S5)", () => {
     expect(document.activeElement).toBe(screen.getByDisplayValue("2"))
   })
 
+  it("keeps focus while typing an argument key one keystroke at a time (C-S5 fix1)", () => {
+    render(<Harness initial={{ alpha: "1", beta: "2" }} />)
+
+    // Select-all + type "gamma" into alpha's key input: one change event per
+    // keystroke. A remounted row destroys the focused DOM node, so holding
+    // the same node reference proves the row kept its identity per keystroke.
+    const keyInput = screen.getByDisplayValue("alpha")
+    keyInput.focus()
+    expect(document.activeElement).toBe(keyInput)
+
+    for (const typed of ["g", "ga", "gam", "gamm", "gamma"]) {
+      fireEvent.change(keyInput, { target: { value: typed } })
+      expect(document.activeElement).toBe(keyInput)
+      // The staged rename renders immediately (row-local draft state).
+      expect(keyInput).toHaveValue(typed)
+    }
+
+    // The rename committed through the echo: same payload contract as before.
+    expect(screen.getByDisplayValue("gamma")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("beta")).toBeInTheDocument()
+    expect(screen.queryByDisplayValue("alpha")).not.toBeInTheDocument()
+  })
+
+  it("keeps focus while naming a newly added argument per keystroke (C-S5 fix1)", () => {
+    render(<Harness initial={{ threads: "4" }} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add argument/i }))
+
+    // The new row's key input is the (only) empty input with the "key"
+    // placeholder — its value input is empty too.
+    const newKeyInput = screen
+      .getAllByPlaceholderText("key")
+      .find((el) => (el as HTMLInputElement).value === "") as HTMLInputElement
+    newKeyInput.focus()
+
+    // The empty new pair starts with key "" — the old id-by-arg-key scheme
+    // reassigned its id on the very first keystroke.
+    for (const typed of ["c", "ct", "ctx"]) {
+      fireEvent.change(newKeyInput, { target: { value: typed } })
+      expect(document.activeElement).toBe(newKeyInput)
+      expect(newKeyInput).toHaveValue(typed)
+    }
+
+    expect(screen.getByDisplayValue("ctx")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("threads")).toBeInTheDocument()
+  })
+
+  it("keeps focus while typing into a value input per keystroke (C-S5 fix1)", () => {
+    render(<Harness initial={{ threads: "4" }} />)
+
+    const valueInput = screen.getByDisplayValue("4")
+    valueInput.focus()
+
+    for (const typed of ["4", "48", "480"]) {
+      fireEvent.change(valueInput, { target: { value: typed } })
+      expect(document.activeElement).toBe(valueInput)
+      expect(valueInput).toHaveValue(typed)
+    }
+
+    expect(screen.getByDisplayValue("480")).toBeInTheDocument()
+  })
+
   it("renaming a key keeps the onChange contract (value parsed, pair moved)", () => {
     const onChange = vi.fn()
     render(<ServerArgsEditor value={{ alpha: "1", beta: "2" }} onChange={onChange} />)
