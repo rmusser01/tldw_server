@@ -37,7 +37,6 @@ import {
 import {
   linkServerChatMirror,
   reconcileServerChatMirror,
-  removeAcknowledgedServerMirrorMessage,
   serverChatMirrorOwnerKey
 } from "@/db/dexie/server-chat-mirror"
 import {
@@ -5164,11 +5163,39 @@ export const useChatActions = ({
     captureSourceFence: () =>
       captureChatDraftSource(() => actionsMountedRef.current).isCurrent
   })
+  const deleteViewCurrent = historySelection?.fence()
+  const deleteDraftCurrent = captureChatDraftSource(
+    () => actionsMountedRef.current
+  ).isCurrent
   const deleteMessage = React.useCallback(
     async (index: number) => {
+      const deleteSourceCurrent = () =>
+        deleteDraftCurrent() && (deleteViewCurrent?.() ?? true)
+      const deleteCurrent = () => {
+        const state = useStoreMessageOption.getState()
+        return deleteSourceCurrent() && !state.streaming && !state.isProcessing
+      }
+      if (!deleteSourceCurrent()) return false
+      if (!deleteCurrent()) throw new Error("response_in_progress")
       const target = messages[index]
       if (!target?.id) throw new Error("missing_message")
       if (nativeDeleteOrigin) return nativeDeleteMessage(index)
+      if (serverChatId) throw new Error("native_history_mutation_unavailable")
+      const targetCurrent = () => {
+        const liveTargets = useStoreMessageOption
+          .getState()
+          .messages.filter((row) => row.id === target.id)
+        return (
+          liveTargets.length === 1 &&
+          liveTargets[0].message === target.message &&
+          liveTargets[0].isBot === target.isBot &&
+          liveTargets[0].role === target.role &&
+          JSON.stringify(liveTargets[0].images ?? []) ===
+            JSON.stringify(target.images ?? [])
+        )
+      }
+      if (!targetCurrent()) throw new Error("message_changed")
+      const deletionCurrent = () => deleteCurrent() && targetCurrent()
       const selectedHistory = ordinaryLocalMutation ? null : historySelection
       if (
         !selectedHistory &&
@@ -5179,104 +5206,40 @@ export const useChatActions = ({
         throw new Error("history_selection_unavailable")
       if (!selectedHistory) {
         const serverMessageId = target.serverMessageId
-        const historyRole = target.role ?? (target.isBot ? "assistant" : "user")
-        const targetIsInPrompt =
-          excludeLocalRagDiagnostics(messages).includes(target)
-        if (replyTarget?.id === target.id || replyTarget?.id === serverMessageId)
-          clearReplyTarget()
         try {
-          if (serverMessageId) {
-            await tldwClient.initialize().catch(() => null)
-            const serverMessage =
-              target.serverMessageVersion === null ||
-              target.serverMessageVersion === undefined
-                ? await tldwClient.getMessage(serverMessageId)
-                : null
-            const version = target.serverMessageVersion ?? serverMessage?.version
-            if (version === null || version === undefined)
-              throw new Error("Missing server message version")
-            await tldwClient.deleteMessage(
-              serverMessageId,
-              Number(version),
-              serverChatId ?? undefined
-            )
-            invalidateServerChatHistory()
-          }
-          if (historyId) {
-            if (serverMessageId && serverChatId)
-              await removeAcknowledgedServerMirrorMessage({
-                historyId,
-                chatId: serverChatId,
-                localMessageId: target.id,
-                serverMessageId
-              })
-            else await removeMessageById(historyId, target.id)
-          }
+          if (historyId && historyId !== "temp")
+            await removeMessageById(historyId, target.id, undefined, {
+              validate_lease: deletionCurrent
+            })
+          else if (!temporaryChat)
+            throw new Error("history_selection_unavailable")
         } catch (error) {
-          console.error("[deleteMessage] Failed to delete message", error)
+          if (!deletionCurrent()) return false
           throw error
         }
-        setMessages((prev) => prev.filter((row) => row.id !== target.id))
-        setHistory((prev) => {
-          if (!targetIsInPrompt) {
-            return buildHistoryFromMessages(
-              messagesRef.current.filter((row) => row.id !== target.id)
-            )
-          }
-          let removed = false
-          return prev.filter((entry) => {
-            if (
-              !removed &&
-              entry.role === historyRole &&
-              entry.content === target.message
-            ) {
-              removed = true
-              return false
-            }
-            return true
-          })
-        })
-        return
+        if (!deletionCurrent()) return false
+        const reply = useStoreMessageOption.getState().replyTarget
+        if (reply?.id === target.id || reply?.id === serverMessageId)
+          clearReplyTarget()
+        if (!deleteCurrent()) return false
+        setMessages((prev) =>
+          deleteCurrent() ? prev.filter((row) => row.id !== target.id) : prev
+        )
+        if (!deleteCurrent()) return false
+        setHistory((prev) =>
+          deleteCurrent()
+            ? buildHistoryFromMessages(
+                useStoreMessageOption
+                  .getState()
+                  .messages.filter((row) => row.id !== target.id)
+              )
+            : prev
+        )
+        return deleteCurrent()
       }
       const origin = selectedHistory.getCurrent()
-      const current = selectedHistory.fence()
+      const current = deleteCurrent
       try {
-        if (serverChatId && origin?.capture?.status !== "captured") {
-          if (!target.serverMessageId)
-            throw new Error("Missing server message ID")
-          await tldwClient.initialize().catch(() => null)
-          const serverMessage =
-            target.serverMessageVersion === null ||
-            target.serverMessageVersion === undefined
-              ? await tldwClient.getMessage(target.serverMessageId)
-              : null
-          const version = target.serverMessageVersion ?? serverMessage?.version
-          if (version === null || version === undefined)
-            throw new Error("Missing server message version")
-          await tldwClient.deleteMessage(
-            target.serverMessageId,
-            Number(version),
-            serverChatId
-          )
-          if (historyId)
-            await removeAcknowledgedServerMirrorMessage({
-              historyId,
-              chatId: serverChatId,
-              localMessageId: target.id,
-              serverMessageId: target.serverMessageId
-            })
-          if (!current()) return
-          if (
-            replyTarget?.id === target.id ||
-            replyTarget?.id === target.serverMessageId
-          )
-            clearReplyTarget()
-          const remaining = messages.filter((row) => row.id !== target.id)
-          setMessages(remaining)
-          setHistory(historyFromVisibleMessages(remaining))
-          invalidateServerChatHistory()
-          return
-        }
         const owner = captureLocalMutationOwner(
           selectedHistory,
           historyId,
@@ -5285,13 +5248,27 @@ export const useChatActions = ({
         const removed = await removeMessageById(
           owner.conversation_id,
           target.id,
-          owner
+          owner,
+          { validate_lease: deletionCurrent }
         )
-        if (!current()) return
-        if (replyTarget?.id === target.id) clearReplyTarget()
-        const remaining = messages.filter((row) => row.id !== target.id)
+        if (!deletionCurrent()) return false
+        const reply = useStoreMessageOption.getState().replyTarget
+        if (reply?.id === target.id) clearReplyTarget()
+        const remaining = useStoreMessageOption
+          .getState()
+          .messages.filter((row) => row.id !== target.id)
+        if (!current()) return false
         setMessages(remaining)
-        setHistory(historyFromVisibleMessages(remaining))
+        if (!current()) return false
+        setHistory((previous) =>
+          current()
+            ? historyFromVisibleMessages(
+                useStoreMessageOption
+                  .getState()
+                  .messages.filter((row) => row.id !== target.id)
+              )
+            : previous
+        )
         const view = origin?.view
         if (
           removed &&
@@ -5299,36 +5276,43 @@ export const useChatActions = ({
           view.cursor.kind !== "empty" &&
           view.cursor.message_id === target.id
         ) {
-          await selectedHistory.choose(
+          if (!current()) return false
+          const following = selectedHistory.choose(
             removed.parent_message_id
               ? { kind: "after_message", message_id: removed.parent_message_id }
               : { kind: "empty" }
           )
+          const followingCurrent = selectedHistory.fence() ?? (() => false)
+          const followed = await following
+          const state = useStoreMessageOption.getState()
+          return (
+            followed === true &&
+            followingCurrent() &&
+            deleteDraftCurrent() &&
+            !state.streaming &&
+            !state.isProcessing
+          )
         }
+        return current()
       } catch (error) {
-        notification.error({
-          message: "Message deletion failed",
-          description:
-            error instanceof Error ? error.message : "message_delete_failed"
-        })
+        if (!deletionCurrent()) return false
         throw error
       }
     },
     [
       nativeDeleteMessage,
       nativeDeleteOrigin,
+      deleteViewCurrent,
+      deleteDraftCurrent,
       historyId,
       serverChatId,
       temporaryChat,
       messages,
       historySelection,
       ordinaryLocalMutation,
-      replyTarget?.id,
       clearReplyTarget,
       setMessages,
       setHistory,
-      notification,
-      invalidateServerChatHistory,
       buildHistoryFromMessages
     ]
   )

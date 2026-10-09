@@ -227,12 +227,15 @@ export const assertNoPendingLocalSettingsWrite = (
 export const withLocalMessageMutation = async <T,>(
   conversation_id: string,
   capturedOwner: LocalHistoryOwnerV1 | undefined,
-  mutate: () => Promise<T>
+  mutate: () => Promise<T>,
+  options?: HistoryOperationOptions
 ): Promise<T> =>
   db.transaction(
     "rw",
     [db.messages, db.chatHistories, db.userSettings],
     async () => {
+      assertLease(capturedOwner)
+      assertLease(options)
       const profile = await db.userSettings.get("main")
       const owner = capturedOwner ?? {
         kind: "local" as const,
@@ -243,7 +246,12 @@ export const withLocalMessageMutation = async <T,>(
       if (!owner.profile_id || owner.conversation_id !== conversation_id)
         fail("owner_mismatch")
       await ownedHistory(owner)
-      return mutate()
+      assertLease(owner)
+      assertLease(options)
+      const result = await mutate()
+      assertLease(owner)
+      assertLease(options)
+      return result
     }
   )
 

@@ -5,6 +5,7 @@ import {
   type OnDeviceHistoryScope,
   withLocalMessageMutation,
   type LocalHistoryOwnerV1,
+  type HistoryOperationOptions,
   sanitizeImportedHistory,
   sanitizeImportedMessage,
   stripHistoryAuthority
@@ -393,22 +394,28 @@ export class PageAssistDatabase {
   async removeMessage(
     history_id: string,
     message_id: string,
-    owner?: LocalHistoryOwnerV1
+    owner?: LocalHistoryOwnerV1,
+    options?: HistoryOperationOptions
   ) {
-    return withLocalMessageMutation(history_id, owner, async () => {
-      const row = await db.messages.get(message_id);
-      if (!row) throw new Error("missing_message");
-      if (row.history_id !== history_id)
-        throw new Error("message_owner_mismatch");
-      const rows = await db.messages
-        .where("history_id")
-        .equals(history_id)
-        .toArray();
-      if (rows.some((child) => child.parent_message_id === message_id))
-        throw new Error("message_has_descendants");
-      await db.messages.delete(message_id);
-      return row;
-    });
+    return withLocalMessageMutation(
+      history_id,
+      owner,
+      async () => {
+        const row = await db.messages.get(message_id)
+        if (!row) throw new Error("missing_message")
+        if (row.history_id !== history_id)
+          throw new Error("message_owner_mismatch")
+        const rows = await db.messages
+          .where("history_id")
+          .equals(history_id)
+          .toArray()
+        if (rows.some((child) => child.parent_message_id === message_id))
+          throw new Error("message_has_descendants")
+        await db.messages.delete(message_id)
+        return row
+      },
+      options
+    )
   }
 
   async updateLastUsedModel(history_id: string, model_id: string) {

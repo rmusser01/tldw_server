@@ -295,7 +295,7 @@ const createHookOptions = () => ({
   compareMaxModels: 3,
   compareFeatureEnabled: false,
   markCompareHistoryCreated: vi.fn(),
-  replyTarget: null,
+  replyTarget: null as import("@/store/option/types").ReplyTarget | null,
   clearReplyTarget: vi.fn(),
   messageSteeringPrompts: null,
   setSelectedQuickPrompt: vi.fn(),
@@ -631,36 +631,32 @@ it("deletes an ordinary local message while the mounted history controller is id
     serverChatId: null,
     messages: [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
   }
+  messageStoreState.editRows = () => options.messages
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => {
     await result.current.deleteMessage(0)
   })
   expect(helpers.removeMessageById).toHaveBeenCalledWith(
-    "history-character", "plain-message"
+    "history-character", "plain-message", undefined, { validate_lease: expect.any(Function) }
   )
 })
 
-it("removes a legacy server-backed message from its exact mirror after canonical deletion", async () => {
+it("refuses legacy server deletion without canonical owner authority", async () => {
   const helpers = await import("@/db/dexie/helpers")
   const mirror = await import("@/db/dexie/server-chat-mirror")
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   const current = h1.controller.getCurrent()
   current.capture = null
   current.owner = null
-  const options = {
-    ...ordinaryOptions(),
-    serverChatId: nativeChatId,
-    messages: [{ id: "local-message", serverMessageId: "server-message", serverMessageVersion: 1, isBot: true, message: "answer", sources: [] }]
-  }
+  const options = { ...ordinaryOptions(), serverChatId: nativeChatId,
+    messages: [{ id: "local-message", serverMessageId: "server-message", serverMessageVersion: 1, isBot: true, message: "answer", sources: [] }] }
   const { result } = renderHook(() => useChatActions(options as any))
-  await act(async () => { await result.current.deleteMessage(0) })
-  expect(api.deleteMessage).toHaveBeenCalledWith("server-message", 1, nativeChatId)
-  expect(mirror.removeAcknowledgedServerMirrorMessage).toHaveBeenCalledWith({
-    historyId: "history-character", chatId: nativeChatId,
-    localMessageId: "local-message", serverMessageId: "server-message"
-  })
+  await expect(result.current.deleteMessage(0)).rejects.toThrow("native_history_mutation_unavailable")
+  expect(api.getMessage).not.toHaveBeenCalled()
+  expect(api.deleteMessage).not.toHaveBeenCalled()
+  expect(mirror.removeAcknowledgedServerMirrorMessage).not.toHaveBeenCalled()
   expect(helpers.removeMessageById).not.toHaveBeenCalled()
-  expect(options.setMessages).toHaveBeenCalledWith([])
+  expect(options.setMessages).not.toHaveBeenCalled()
 })
 
 it("routes ordinary regeneration while the mounted history controller is idle", async () => {
@@ -2442,6 +2438,7 @@ it("deleting the selected local leaf follows only its captured parent", async ()
     messages: visible,
     historyId: "history-1"
   }
+  messageStoreState.editRows = () => options.messages
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => {
     await result.current.deleteMessage(1)
@@ -2472,6 +2469,7 @@ it("late leaf deletion retains its storage result without moving a new view", as
     messages: visible,
     historyId: "history-1"
   }
+  messageStoreState.editRows = () => options.messages
   const { result } = renderHook(() => useChatActions(options as any))
   options.setMessages.mockClear()
   const pending = result.current.deleteMessage(0)
@@ -5770,3 +5768,377 @@ it.each(["mirror", "refresh"])(
     }
   }
 )
+
+
+describe("rendered Delete ownership", () => {
+  const localDelete = async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    vi.mocked(helpers.removeMessageById).mockReset()
+    vi.mocked(helpers.removeMessageById).mockResolvedValue(undefined)
+    const store =
+      await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    store.useStoreMessageOption.getState().startNewChatDraft()
+    messageStoreState.draftFields = () => {
+      const state = store.useStoreMessageOption.getState()
+      return {
+        chatDraftRevision: state.chatDraftRevision,
+        chatDraftAddress: state.chatDraftAddress
+      }
+    }
+    store.useStoreMessageOption.setState({
+      streaming: false,
+      isProcessing: false
+    })
+    const origin = h1.controller.getCurrent()
+    origin.status = "idle"
+    origin.owner = null
+    origin.capture = null
+    origin.view = null
+    const options = {
+      ...ordinaryOptions(),
+      historyId: "local-delete",
+      serverChatId: null,
+      messages: [
+        {
+          id: "local-leaf",
+          isBot: true,
+          message: "saved answer",
+          sources: [],
+          serverMessageId: undefined as string | undefined
+        }
+      ]
+    }
+    messageStoreState.editRows = () => options.messages
+    const mounted = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    const setters = {
+      messages: options.setMessages,
+      history: options.setHistory
+    }
+
+    setters.messages.mockReset()
+    setters.history.mockReset()
+    return { ...mounted, setters, store, options }
+  }
+  it.each(["new draft", "H1 replacement", "unmount"])(
+    "retires a retained local Delete after %s before storage",
+    async (kind) => {
+      const helpers = await import("@/db/dexie/helpers")
+      const mounted = await localDelete()
+      const retained = mounted.result.current.deleteMessage
+      if (kind === "new draft")
+        mounted.store.useStoreMessageOption.getState().startNewChatDraft()
+      else if (kind === "H1 replacement") h1.controller.navigate()
+      else mounted.unmount()
+      expect(await retained(0)).toBe(false)
+      expect(helpers.removeMessageById).not.toHaveBeenCalled()
+      expect(mounted.setters.messages).not.toHaveBeenCalled()
+      expect(mounted.setters.history).not.toHaveBeenCalled()
+    }
+  )
+  it("refuses a retained local Delete while a reply owns activity", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const mounted = await localDelete()
+    mounted.store.useStoreMessageOption.setState({ streaming: true })
+    await expect(mounted.result.current.deleteMessage(0)).rejects.toThrow(
+      "response_in_progress"
+    )
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+  })
+  it.each(["acknowledged", "rejected"])(
+    "does not publish %s local storage outcome after New",
+    async (outcome) => {
+      const helpers = await import("@/db/dexie/helpers")
+      const mounted = await localDelete()
+      let release!: () => void
+      let reject!: (error: Error) => void
+      vi.mocked(helpers.removeMessageById).mockImplementation(
+        () =>
+          new Promise<Awaited<ReturnType<typeof helpers.removeMessageById>>>(
+            (resolve, fail) => {
+              release = () => resolve(undefined)
+              reject = fail
+            }
+          )
+      )
+      const pending = mounted.result.current.deleteMessage(0)
+      await vi.waitFor(() =>
+        expect(helpers.removeMessageById).toHaveBeenCalled()
+      )
+      mounted.store.useStoreMessageOption.getState().startNewChatDraft()
+      if (outcome === "acknowledged") release()
+      else reject(new Error("storage rejected"))
+      expect(await pending).toBe(false)
+      expect(mounted.setters.messages).not.toHaveBeenCalled()
+      expect(mounted.setters.history).not.toHaveBeenCalled()
+    }
+  )
+  it("deletes only a qualified local copy with an inherited server message alias", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+    const mounted = await localDelete()
+    mounted.options.messages[0].serverMessageId = "server-leaf"
+    const origin = h1.controller.getCurrent()
+    origin.status = "ready"
+    origin.owner = {
+      kind: "local",
+      profile_id: "profile",
+      owner_key: "local-key",
+      conversation_id: "local-delete"
+    }
+    origin.view = {
+      ...captureFor(makeController().getCurrent().view).view,
+      owner_key: "local-key",
+      conversation_id: "local-delete"
+    }
+    mounted.rerender()
+    expect(await mounted.result.current.deleteMessage(0)).toBe(true)
+    expect(api.deleteMessage).not.toHaveBeenCalled()
+    expect(helpers.removeMessageById).toHaveBeenCalled()
+  })
+  it("rejects a changed live row from a retained Delete confirmation", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const mounted = await localDelete()
+    const retained = mounted.result.current.deleteMessage
+    mounted.options.messages = [
+      { ...mounted.options.messages[0], message: "newer content" }
+    ]
+    mounted.rerender()
+    await expect(retained(0)).rejects.toThrow("message_changed")
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+  })
+  it("keeps Temporary Delete usable without a canonical controller", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const mounted = await localDelete()
+    h1.controller = null
+    mounted.options.temporaryChat = true
+    mounted.options.historyId = "temp"
+    mounted.rerender()
+    expect(await mounted.result.current.deleteMessage(0)).toBe(true)
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+    expect(mounted.setters.messages).toHaveBeenCalled()
+  })
+  it("does not publish old history after the message setter synchronously starts New", async () => {
+    const mounted = await localDelete()
+    mounted.setters.messages.mockImplementation(() =>
+      mounted.store.useStoreMessageOption.getState().startNewChatDraft()
+    )
+    expect(await mounted.result.current.deleteMessage(0)).toBe(false)
+    expect(mounted.setters.history).not.toHaveBeenCalled()
+  })
+  it("checks the live target before React has rerendered", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const mounted = await localDelete()
+    const retained = mounted.result.current.deleteMessage
+    messageStoreState.editRows = () => [
+      { ...mounted.options.messages[0], message: "newer content" }
+    ]
+    await expect(retained(0)).rejects.toThrow("message_changed")
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+  })
+  it("retains exact target validity during a held local mutation", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const mounted = await localDelete()
+    let release!: () => void
+    vi.mocked(helpers.removeMessageById).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(undefined)
+        })
+    )
+    const pending = mounted.result.current.deleteMessage(0)
+    await vi.waitFor(() => expect(helpers.removeMessageById).toHaveBeenCalled())
+    const lease = vi.mocked(helpers.removeMessageById).mock.calls[0][3]!
+      .validate_lease!
+    messageStoreState.editRows = () => [
+      { ...mounted.options.messages[0], message: "newer content" }
+    ]
+    expect(lease()).toBe(false)
+    release()
+    expect(await pending).toBe(false)
+    expect(mounted.setters.messages).not.toHaveBeenCalled()
+  })
+  it.each([false, true])(
+    "qualifies only its owned parent-follow epoch (retired=%s)",
+    async (retired) => {
+      const helpers = await import("@/db/dexie/helpers")
+      const mounted = await localDelete()
+      const origin = h1.controller.getCurrent()
+      origin.status = "ready"
+      origin.owner = {
+        kind: "local",
+        profile_id: "profile",
+        owner_key: "local-key",
+        conversation_id: "local-delete"
+      }
+      origin.view = {
+        ...captureFor(makeController().getCurrent().view).view,
+        owner_key: "local-key",
+        conversation_id: "local-delete",
+        cursor: { kind: "after_message", message_id: "local-leaf" }
+      }
+      let epoch = 0
+      h1.controller.fence = () => {
+        const captured = epoch
+        return () => captured === epoch
+      }
+      h1.controller.choose = vi.fn(() => {
+        epoch++
+        if (retired)
+          queueMicrotask(() => {
+            epoch++
+          })
+        return Promise.resolve(true)
+      })
+      vi.mocked(helpers.removeMessageById).mockResolvedValue({
+        id: "local-leaf",
+        history_id: "local-delete",
+        parent_message_id: null
+      } as Awaited<ReturnType<typeof helpers.removeMessageById>>)
+      mounted.rerender()
+      expect(await mounted.result.current.deleteMessage(0)).toBe(!retired)
+    }
+  )
+  it.each([false, true])(
+    "deletes the exact repeated reply from prompt history (Temporary=%s)",
+    async (temporary) => {
+      const mounted = await localDelete()
+      const rows = [
+        {
+          id: "question-1",
+          isBot: false,
+          message: "First question",
+          sources: [],
+          serverMessageId: undefined
+        },
+        {
+          id: "answer-1",
+          isBot: true,
+          message: "Sure.",
+          sources: [],
+          serverMessageId: undefined
+        },
+        {
+          id: "question-2",
+          isBot: false,
+          message: "Second question",
+          sources: [],
+          serverMessageId: undefined
+        },
+        {
+          id: "answer-2",
+          isBot: true,
+          message: "Sure.",
+          sources: [],
+          serverMessageId: undefined
+        }
+      ]
+      mounted.options.messages = rows
+      if (temporary) {
+        h1.controller = null
+        mounted.options.temporaryChat = true
+        mounted.options.historyId = "temp"
+      }
+      mounted.rerender()
+      expect(await mounted.result.current.deleteMessage(3)).toBe(true)
+      const published = mounted.setters.messages.mock.calls.at(-1)![0]
+      expect(
+        typeof published === "function" ? published(rows) : published
+      ).toEqual(rows.slice(0, 3))
+      const previous = rows.map((row) => ({
+        role: row.isBot ? "assistant" : "user",
+        content: row.message
+      }))
+      const history = mounted.setters.history.mock.calls.at(-1)![0]
+      const next = typeof history === "function" ? history(previous) : history
+      expect(next.map(({ role, content }) => ({ role, content }))).toEqual(
+        previous.slice(0, 3)
+      )
+    }
+  )
+  it("preserves a newer Reply target and does not clear Reply before acknowledgement", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const mounted = await localDelete()
+    mounted.options.replyTarget = { id: "local-leaf", preview: "saved answer" }
+    mounted.store.useStoreMessageOption
+      .getState()
+      .setReplyTarget(mounted.options.replyTarget)
+    mounted.rerender()
+    let release!: () => void
+    vi.mocked(helpers.removeMessageById).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(undefined)
+        })
+    )
+    const pending = mounted.result.current.deleteMessage(0)
+    await vi.waitFor(() => expect(helpers.removeMessageById).toHaveBeenCalled())
+    const clearedBeforeAck = mounted.options.clearReplyTarget.mock.calls.length
+    mounted.store.useStoreMessageOption
+      .getState()
+      .setReplyTarget({ id: "other-reply", preview: "new reply" })
+    release()
+    await pending
+    expect(clearedBeforeAck).toBe(0)
+    expect(mounted.options.clearReplyTarget).not.toHaveBeenCalled()
+  })
+  it.each([false, true])(
+    "preserves a surviving message edited during held Delete (diagnostic=%s)",
+    async (diagnostic) => {
+      const helpers = await import("@/db/dexie/helpers")
+      const mounted = await localDelete()
+      const rows = [
+        {
+          ...mounted.options.messages[0],
+          generationInfo: diagnostic
+            ? {
+                mode: "rag",
+                grounded: false,
+                reason: "selected_source_retrieval_failed"
+              }
+            : undefined
+        },
+        {
+          id: "other-leaf",
+          isBot: true,
+          message: "original sibling",
+          sources: [],
+          serverMessageId: undefined
+        }
+      ]
+      mounted.options.messages = rows
+      mounted.rerender()
+      let release!: () => void
+      vi.mocked(helpers.removeMessageById).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(undefined)
+          })
+      )
+      const pending = mounted.result.current.deleteMessage(0)
+      await vi.waitFor(() =>
+        expect(helpers.removeMessageById).toHaveBeenCalled()
+      )
+      const updated = [rows[0], { ...rows[1], message: "edited sibling" }]
+      mounted.options.messages = updated
+      release()
+      await pending
+      const published = mounted.setters.messages.mock.calls.at(-1)![0]
+      expect(
+        typeof published === "function" ? published(updated) : published
+      ).toEqual([updated[1]])
+      const history = mounted.setters.history.mock.calls.at(-1)![0]
+      expect(
+        typeof history === "function"
+          ? history(
+              updated.map((row) => ({
+                role: "assistant",
+                content: row.message
+              }))
+            )
+          : history
+      ).toEqual([{ role: "assistant", content: "edited sibling" }])
+    }
+  )
+})

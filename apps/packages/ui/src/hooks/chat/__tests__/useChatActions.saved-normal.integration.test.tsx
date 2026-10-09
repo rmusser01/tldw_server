@@ -82,6 +82,7 @@ vi.mock("@/services/tldw/TldwAuth", () => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getMessage: vi.fn(),
     deleteMessage: mocks.deleteMessage,
     initialize: mocks.initialize,
     getConfig: async () => mocks.config,
@@ -510,33 +511,86 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect([...mocks.serverRows.values()].flat().map(row => row.role).sort()).toEqual(["assistant", "user"])
   })
 
-  it.each(["local", "server"])("deletes a qualified mirror row and clears its %s reply target using the canonical request ID", async replyKind => {
-    const localId = "history-A:server:answer"
-    const serverId = "canonical-answer"
-    mocks.mirrorHistories.set("mirror", {
-      id: "mirror", server_chat_id: "cedar",
-      server_scope_key: serverChatMirrorOwnerKey({ requestScope: {
-        config: { serverUrl: mocks.config.serverUrl, authMode: "single-user" }, userId: null
-      } })
-    })
-    const stored = { id: localId, history_id: "mirror", serverMessageId: serverId,
-      serverMessageVersion: 2, role: "assistant", content: "Cedar reply", createdAt: 1 }
-    const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
-    const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
-    mocks.rows.push(stored, draft, otherHistory)
-    useStoreMessageOption.setState({ historyId: "mirror", serverChatId: "cedar", temporaryChat: false,
-      messages: [{ id: localId, serverMessageId: serverId, serverMessageVersion: 2, role: "assistant", isBot: true, name: "Cedar", message: "Cedar reply" }],
-      history: [{ role: "assistant", content: "Cedar reply" }],
-      replyTarget: { id: replyKind === "local" ? localId : serverId, role: "assistant", text: "Cedar reply" }
-    })
-    const { result } = renderWorkspace()
-    await act(async () => { await result.current.actions.deleteMessage(0) })
-    expect(mocks.deleteMessage).toHaveBeenCalledWith(serverId, 2, "cedar")
-    expect(mocks.rows.find(row => row.id === localId)).toBeUndefined()
-    expect(mocks.rows).toEqual([draft, otherHistory])
-    expect(useStoreMessageOption.getState().messages).toEqual([])
-    expect(useStoreMessageOption.getState().replyTarget).toBeNull()
-  })
+  it.each(["local", "server"])(
+    "refuses server mirror deletion without canonical ownership for its %s Reply target",
+    async (replyKind) => {
+      const localId = "history-A:server:answer"
+      const serverId = "canonical-answer"
+      mocks.mirrorHistories.set("mirror", {
+        id: "mirror",
+        server_chat_id: "cedar",
+        server_scope_key: serverChatMirrorOwnerKey({
+          requestScope: {
+            config: {
+              serverUrl: mocks.config.serverUrl,
+              authMode: "single-user"
+            },
+            userId: null
+          }
+        })
+      })
+      const stored = {
+        id: localId,
+        history_id: "mirror",
+        serverMessageId: serverId,
+        serverMessageVersion: 2,
+        role: "assistant",
+        content: "Cedar reply",
+        createdAt: 1
+      }
+      const draft = {
+        ...stored,
+        id: "same-text-draft",
+        serverMessageId: undefined
+      }
+      const otherHistory = {
+        ...stored,
+        id: "other-history:server:answer",
+        history_id: "other-history"
+      }
+      mocks.rows.push(stored, draft, otherHistory)
+      useStoreMessageOption.setState({
+        historyId: "mirror",
+        serverChatId: "cedar",
+        temporaryChat: false,
+        messages: [
+          {
+            id: localId,
+            serverMessageId: serverId,
+            serverMessageVersion: 2,
+            role: "assistant",
+            isBot: true,
+            name: "Cedar",
+            message: "Cedar reply"
+          }
+        ],
+        history: [{ role: "assistant", content: "Cedar reply" }],
+        replyTarget: {
+          id: replyKind === "local" ? localId : serverId,
+          role: "assistant",
+          text: "Cedar reply"
+        }
+      })
+      const { result } = renderWorkspace()
+      const original = useStoreMessageOption.getState()
+      await act(async () => {
+        await expect(result.current.actions.deleteMessage(0)).rejects.toThrow(
+          "native_history_mutation_unavailable"
+        )
+      })
+      expect(mocks.deleteMessage).not.toHaveBeenCalled()
+      expect(
+        (await import("@/services/tldw/TldwApiClient")).tldwClient.getMessage
+      ).not.toHaveBeenCalled()
+      expect(mocks.removeMessageById).not.toHaveBeenCalled()
+      expect(mocks.rows).toEqual([stored, draft, otherHistory])
+      expect(useStoreMessageOption.getState().messages).toEqual(original.messages)
+      expect(useStoreMessageOption.getState().history).toEqual(original.history)
+      expect(useStoreMessageOption.getState().replyTarget).toEqual(
+        original.replyTarget
+      )
+    }
+  )
 
   it.each(["immediate", "delayed ACK", "ambiguous ACK"])("UAT131 promotes exact greeting identity through loader, send and reload: %s", async boundary => {
     mocks.withLoader = true
@@ -957,7 +1011,10 @@ describe("saved normal Chat pipeline with autosave", () => {
     await act(async () => { await view.result.current.actions.deleteMessage(1) })
     const reloadMessages = formatToMessage(mocks.rows)
     const reloadHistory = formatToChatHistory(mocks.rows)
-    expect(mocks.removeMessageById).toHaveBeenCalledWith("local", "diagnostic-answer")
+    expect(mocks.removeMessageById).toHaveBeenCalledWith(
+      "local", "diagnostic-answer", undefined,
+      { validate_lease: expect.any(Function) }
+    )
     expect(view.result.current.state.messages.map(row => row.id)).toEqual(["diagnostic-user", "real-user", "real-answer"])
     expect(reloadMessages.map(row => row.id)).toEqual(["diagnostic-user", "real-user", "real-answer"])
     const promptRows = (history: typeof reloadHistory) => history.map(({ role, content }) => ({ role, content }))

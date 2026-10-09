@@ -1,4 +1,4 @@
-import type { LocalHistoryOwnerV1 } from "./history-selection"
+import type { HistoryOperationOptions, LocalHistoryOwnerV1 } from "./history-selection"
 import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { isLocalHistoryOwnerKey } from "@/utils/history-selection"
@@ -543,9 +543,15 @@ export const updateMessageById = async (
 export const removeMessageById = async (
   history_id: string,
   message_id: string,
-  owner?: LocalHistoryOwnerV1
+  owner?: LocalHistoryOwnerV1,
+  options?: HistoryOperationOptions
 ) => {
-  return new PageAssistDatabase().removeMessage(history_id, message_id, owner)
+  return new PageAssistDatabase().removeMessage(
+    history_id,
+    message_id,
+    owner,
+    options
+  )
 }
 
 // Delete every persisted message ordered after `message_id` (used by the edit +

@@ -398,6 +398,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     addChatMessage: vi.fn(async () => ({ id: "saved-user", version: 1 })),
     streamCharacterChatCompletion: vi.fn(async function* () { yield { delta: "Image received" } }),
     persistCharacterCompletion: vi.fn(async () => ({ assistant_message_id: "saved-answer", version: 1 })),
+    getMessage: vi.fn(),
     deleteMessage: mocks.deleteMessage,
     addMedia: (...args: unknown[]) => mocks.addMedia(...args),
     ragSearch: (...args: unknown[]) => mocks.ragSearch(...args)
@@ -827,33 +828,86 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     }
   )
 
-  it.each(["local", "server"])("deletes a qualified sidepanel row and clears the %s reply target", async replyKind => {
-    const previous = { ...mocks.storeState }
-    const localId = "history-A:server:answer"
-    const canonicalId = "canonical-answer"
-    try {
-      mocks.mirrorHistories.set("history-1", {
-        id: "history-1", title: "Cedar", createdAt: 1, is_rag: false,
-        message_source: "server", server_chat_id: "cedar",
-        server_scope_key: serverChatMirrorOwnerKey(mocks.makeSnapshot())
-      })
-      const stored: StoredMessage = { id: localId, history_id: "history-1", name: "Cedar",
-        role: "assistant", content: "Cedar reply", createdAt: 1,
-        serverMessageId: canonicalId, serverMessageVersion: 2 }
-      const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
-      const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
-      for (const row of [stored, draft, otherHistory]) mocks.mirrorMessages.set(row.id, row)
-      Object.assign(mocks.storeState, { serverChatId: "cedar", replyTarget: { id: replyKind === "local" ? localId : canonicalId }, messages: [{ id: localId, serverMessageId: canonicalId, serverMessageVersion: 2, isBot: true, name: "Cedar", message: "Cedar reply" }] })
-      const { result } = renderHook(() => useMessage())
-      await act(async () => { await result.current.deleteMessage(0) })
-      expect(mocks.deleteMessage).toHaveBeenCalledWith(canonicalId, 2, "cedar")
-      expect([...mocks.mirrorMessages.values()]).toEqual([draft, otherHistory])
-      expect(mocks.setMessages).toHaveBeenCalledWith([])
-      expect(mocks.storeState.clearReplyTarget).toHaveBeenCalledOnce()
-    } finally {
-      Object.assign(mocks.storeState, previous)
+  it.each(["local", "server"])(
+    "refuses server mirror deletion without canonical ownership for the %s Reply target",
+    async (replyKind) => {
+      const previous = { ...mocks.storeState }
+      const localId = "history-A:server:answer"
+      const canonicalId = "canonical-answer"
+      try {
+        mocks.mirrorHistories.set("history-1", {
+          id: "history-1",
+          title: "Cedar",
+          createdAt: 1,
+          is_rag: false,
+          message_source: "server",
+          server_chat_id: "cedar",
+          server_scope_key: serverChatMirrorOwnerKey(mocks.makeSnapshot())
+        })
+        const stored: StoredMessage = {
+          id: localId,
+          history_id: "history-1",
+          name: "Cedar",
+          role: "assistant",
+          content: "Cedar reply",
+          createdAt: 1,
+          serverMessageId: canonicalId,
+          serverMessageVersion: 2
+        }
+        const draft = {
+          ...stored,
+          id: "same-text-draft",
+          serverMessageId: undefined
+        }
+        const otherHistory = {
+          ...stored,
+          id: "other-history:server:answer",
+          history_id: "other-history"
+        }
+        for (const row of [stored, draft, otherHistory])
+          mocks.mirrorMessages.set(row.id, row)
+        Object.assign(mocks.storeState, {
+          serverChatId: "cedar",
+          replyTarget: { id: replyKind === "local" ? localId : canonicalId },
+          messages: [
+            {
+              id: localId,
+              serverMessageId: canonicalId,
+              serverMessageVersion: 2,
+              isBot: true,
+              name: "Cedar",
+              message: "Cedar reply"
+            }
+          ]
+        })
+        const { result } = renderHook(() => useMessage())
+        const original = { ...mocks.storeState }
+        mocks.setMessages.mockClear()
+        mocks.setHistory.mockClear()
+        await act(async () => {
+          await expect(result.current.deleteMessage(0)).rejects.toThrow(
+            "native_history_mutation_unavailable"
+          )
+        })
+        expect(mocks.deleteMessage).not.toHaveBeenCalled()
+        expect(
+          (await import("@/services/tldw/TldwApiClient")).tldwClient.getMessage
+        ).not.toHaveBeenCalled()
+        expect(mocks.removeMessageById).not.toHaveBeenCalled()
+        expect([...mocks.mirrorMessages.values()]).toEqual([
+          stored,
+          draft,
+          otherHistory
+        ])
+        expect(mocks.setMessages).not.toHaveBeenCalled()
+        expect(mocks.setHistory).not.toHaveBeenCalled()
+        expect(mocks.storeState.replyTarget).toEqual(original.replyTarget)
+        expect(mocks.storeState.clearReplyTarget).not.toHaveBeenCalled()
+      } finally {
+        Object.assign(mocks.storeState, previous)
+      }
     }
-  })
+  )
 
   it("loads one immutable RAG snapshot before the first message mutation", async () => {
     const controller = new AbortController()
