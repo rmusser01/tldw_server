@@ -215,12 +215,16 @@ export type PageHelpModalProps = {
   initialTab?: TabKey
   scope?: "full" | "sidepanel"
   modeNavigationEnabled?: boolean
+  sidebarToggleEnabled?: boolean
+  quickChatEnabled?: boolean
 }
 
 export function PageHelpModal({
   initialTab,
   scope = "full",
-  modeNavigationEnabled = true
+  modeNavigationEnabled = true,
+  sidebarToggleEnabled = true,
+  quickChatEnabled = true
 }: PageHelpModalProps = {}) {
   const { isOpen, close } = useHelpModal()
   const startTutorial = useTutorialStore((state) => state.startTutorial)
@@ -284,10 +288,14 @@ export function PageHelpModal({
             label: t("common:shortcuts.focusTextarea", "Focus message input"),
             keys: formatShortcut(shortcuts.focusTextarea)
           },
-          {
-            label: t("common:shortcuts.toggleSidebar", "Toggle sidebar"),
-            keys: formatShortcut(shortcuts.toggleSidebar)
-          }
+          ...(sidebarToggleEnabled
+            ? [
+                {
+                  label: t("common:shortcuts.toggleSidebar", "Toggle sidebar"),
+                  keys: formatShortcut(shortcuts.toggleSidebar)
+                }
+              ]
+            : [])
         ]
       },
       {
@@ -315,13 +323,17 @@ export function PageHelpModal({
                 }
               ]
             : [
-                {
-                  label: t(
-                    "common:shortcuts.toggleQuickChat",
-                    "Toggle Quick Chat Helper"
-                  ),
-                  keys: formatShortcut(shortcuts.toggleQuickChatHelper)
-                },
+                ...(quickChatEnabled
+                  ? [
+                      {
+                        label: t(
+                          "common:shortcuts.toggleQuickChat",
+                          "Toggle Quick Chat Helper"
+                        ),
+                        keys: formatShortcut(shortcuts.toggleQuickChatHelper)
+                      }
+                    ]
+                  : []),
                 {
                   label: t(
                     "common:shortcuts.searchThread",
@@ -441,7 +453,15 @@ export function PageHelpModal({
           ]
         : [])
     ],
-    [modKey, t, shortcuts, scope, modeNavigationEnabled]
+    [
+      modKey,
+      t,
+      shortcuts,
+      scope,
+      modeNavigationEnabled,
+      sidebarToggleEnabled,
+      quickChatEnabled
+    ]
   )
 
   const handleClose = useCallback(() => {

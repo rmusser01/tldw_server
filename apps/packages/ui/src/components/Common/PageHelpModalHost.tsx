@@ -19,7 +19,10 @@ const hasOtherOpenDialog = () =>
 
 type PageHelpModalHostProps = Pick<
   PageHelpModalProps,
-  "scope" | "modeNavigationEnabled"
+  | "scope"
+  | "modeNavigationEnabled"
+  | "sidebarToggleEnabled"
+  | "quickChatEnabled"
 > & {
   loadModal?: () => Promise<{
     PageHelpModal: React.ComponentType<PageHelpModalProps>
@@ -32,7 +35,9 @@ export function PageHelpModalHost({
   loadModal = loadPageHelpModal,
   reloadPage = reloadCurrentPage,
   scope = "full",
-  modeNavigationEnabled = true
+  modeNavigationEnabled = true,
+  sidebarToggleEnabled = true,
+  quickChatEnabled = true
 }: PageHelpModalHostProps) {
   const { isOpen, open, close } = useHelpModal()
   const { pathname } = useLocation()
@@ -133,6 +138,8 @@ export function PageHelpModalHost({
         initialTab={initialTab}
         scope={scope}
         modeNavigationEnabled={modeNavigationEnabled}
+        sidebarToggleEnabled={sidebarToggleEnabled}
+        quickChatEnabled={quickChatEnabled}
       />
     )
 

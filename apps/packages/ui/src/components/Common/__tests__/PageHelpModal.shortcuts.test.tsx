@@ -283,6 +283,24 @@ describe("PageHelpModal shortcuts", () => {
       expect(within(dialog).queryByText(text)).not.toBeInTheDocument()
   })
 
+  it("omits sidebar and Quick Chat commands when their hosts are unavailable", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <PageHelpModalHost
+          sidebarToggleEnabled={false}
+          quickChatEnabled={false}
+        />
+      </MemoryRouter>
+    )
+    act(() => window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal")))
+    const dialog = await screen.findByRole("dialog", { name: "Page Help" })
+    expect(within(dialog).queryByText("Toggle sidebar")).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByText("Toggle Quick Chat Helper")
+    ).not.toBeInTheDocument()
+    expect(within(dialog).getByText("Start new chat")).toBeVisible()
+  })
+
   it("omits page navigation bindings when the shell disables that handler", async () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>

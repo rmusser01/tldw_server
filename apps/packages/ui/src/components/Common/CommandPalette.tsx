@@ -217,16 +217,23 @@ export function CommandPalette({
   }, [open, openSignal, rememberFocusBeforeOpen])
 
   useEffect(() => {
+    let timer: number | undefined
     if (wasOpenRef.current && !open) {
       const focusTarget = focusReturnRef.current
       focusReturnRef.current = null
-      window.setTimeout(() => {
-        if (focusTarget?.isConnected) {
+      timer = window.setTimeout(() => {
+        if (
+          focusTarget?.isConnected &&
+          document.activeElement === document.body
+        ) {
           focusTarget.focus()
         }
       }, 0)
     }
     wasOpenRef.current = open
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
   }, [open])
 
   // Build default commands

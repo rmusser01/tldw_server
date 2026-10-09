@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import SharedLayout from "@/components/Layouts/Layout"
+import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
 import type { CommandItem } from "@/components/Common/CommandPalette"
 import { useTutorialStore } from "@/store/tutorials"
 import WebLayout from "../../../components/layout/WebLayout"
@@ -187,3 +188,91 @@ it("keeps the shared layout's current prompt commands after nested header change
   expect(currentAction).toHaveBeenCalledTimes(1)
   expect(previousAction).not.toHaveBeenCalled()
 })
+
+
+it('lets the compact debug page own one real command palette inside its hidden Web shell', async () => {
+  const toggleSidebar = vi.fn();
+  render(
+    <MemoryRouter initialEntries={['/__debug__/sidepanel-chat']}>
+      <WebLayout hideHeader hideSidebar>
+        <button type="button">Compact trigger</button>
+        <CommandPaletteHost
+          commandPaletteProps={{ scope: 'sidepanel', onToggleSidebar: toggleSidebar }}
+        />
+      </WebLayout>
+    </MemoryRouter>
+  );
+  const trigger = screen.getByRole('button', { name: 'Compact trigger' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'k', ctrlKey: true });
+  await waitFor(() =>
+    expect(screen.getAllByRole('dialog', { name: 'Search commands' })).toHaveLength(1)
+  );
+  const input = screen.getByRole('textbox', { name: 'Search commands' });
+  await waitFor(() => expect(input).toHaveFocus());
+  fireEvent.change(input, { target: { value: 'Toggle Sidebar' } });
+  fireEvent.click(screen.getByRole('option', { name: /^Toggle Sidebar/ }));
+  expect(toggleSidebar).toHaveBeenCalledOnce();
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Search commands' })).not.toBeInTheDocument()
+  );
+});
+
+
+it('keeps the Find destination focused after the real palette closes', async () => {
+  const find = vi.fn(() => screen.getByRole('textbox', { name: 'Conversation search' }).focus());
+  render(
+    <MemoryRouter initialEntries={['/__debug__/sidepanel-chat']}>
+      <WebLayout hideHeader hideSidebar>
+        <button type="button">Compact trigger</button>
+        <input aria-label="Conversation search" />
+        <CommandPaletteHost commandPaletteProps={{ scope: 'sidepanel', onSearchHistory: find }} />
+      </WebLayout>
+    </MemoryRouter>
+  );
+  const trigger = screen.getByRole('button', { name: 'Compact trigger' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'k', ctrlKey: true });
+  const input = await screen.findByRole('textbox', { name: 'Search commands' });
+  await waitFor(() => expect(input).toHaveFocus());
+  fireEvent.click(screen.getByRole('option', { name: /^Find conversations/ }));
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Search commands' })).not.toBeInTheDocument()
+  );
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+  });
+  expect(find).toHaveBeenCalledOnce();
+  expect(screen.getByRole('textbox', { name: 'Conversation search' })).toHaveFocus();
+});
+
+
+it('cancels the old close focus return when a real palette reopens before its timer', async () => {
+  render(
+    <MemoryRouter initialEntries={['/__debug__/sidepanel-chat']}>
+      <WebLayout hideHeader hideSidebar>
+        <button type="button">Compact trigger</button>
+        <CommandPaletteHost commandPaletteProps={{ scope: 'sidepanel' }} />
+      </WebLayout>
+    </MemoryRouter>
+  );
+  const trigger = screen.getByRole('button', { name: 'Compact trigger' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'k', ctrlKey: true });
+  const input = await screen.findByRole('textbox', { name: 'Search commands' });
+  await waitFor(() => expect(input).toHaveFocus());
+  const oldReturn = vi.spyOn(trigger, 'focus');
+  vi.useFakeTimers();
+  try {
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Search commands' })).not.toBeInTheDocument();
+    expect(document.body).toHaveFocus();
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-command-palette')));
+    expect(screen.getByRole('dialog', { name: 'Search commands' })).toBeInTheDocument();
+    act(() => vi.runOnlyPendingTimers());
+    expect(oldReturn).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Search commands' })).toHaveFocus();
+  } finally {
+    vi.useRealTimers();
+  }
+});

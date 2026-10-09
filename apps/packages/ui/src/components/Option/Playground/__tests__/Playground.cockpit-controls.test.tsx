@@ -1466,6 +1466,27 @@ describe("Playground cockpit controls", () => {
     expect(actual.result.current.status).toBe("legacy_review_required");
   });
 
+  it("reveals the existing conversation shell for an explicit Find event in Focus", async () => {
+    storageState.values.set("playgroundChatLayoutMode", "focus")
+    const originalMessages = structuredClone(messageOptionState.value.messages)
+    renderPlayground()
+    expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute(
+      "data-mode",
+      "focus"
+    )
+    act(() => window.dispatchEvent(new Event("tldw:open-chat-sidebar")))
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute(
+        "data-mode",
+        "cockpit"
+      )
+    )
+    expect(layoutShellOverrideState.overrides.at(-1)).toBeNull()
+    expect(messageOptionState.value.messages).toEqual(originalMessages)
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+  })
+
   it("does not render cockpit control rails in focus mode", async () => {
     storageState.values.set("playgroundChatLayoutMode", "focus");
 

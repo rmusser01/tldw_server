@@ -1,6 +1,10 @@
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 // @vitest-environment jsdom
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { useChatShortcuts } from '@/hooks/keyboard/useKeyboardShortcuts';
+import { useQuickChatStore } from '@/store/quick-chat';
+import { QuickChatHelperButton } from '@/components/Common/QuickChatHelper';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +27,7 @@ const webLayoutSourcePath = resolve(
 const routerState = vi.hoisted(() => ({
   location: {
     pathname: '/chat',
+    key: 'chat-start',
     search: '',
     hash: '',
   },
@@ -63,11 +68,9 @@ const optionStoreState = vi.hoisted(() => ({
   },
 }));
 
-const quickChatState = vi.hoisted(() => ({
-  value: {
-    isOpen: false,
-    setIsOpen: vi.fn(),
-  },
+const capabilityProbe = vi.hoisted(() => ({
+  actualDrawer: false,
+  paletteProps: null as { onToggleSidebar?: () => void; onSwitchModel?: () => void } | null,
 }));
 
 const connectionState = vi.hoisted(() => ({
@@ -109,11 +112,18 @@ const backendUnavailableGateState = vi.hoisted(() => ({
   props: [] as Array<Record<string, unknown>>,
 }));
 
-vi.mock('antd', () => ({
-  Drawer: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>
-    open ? <div data-testid="drawer">{children}</div> : null,
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock('antd', async (original) => {
+  const actual = await original<typeof import('antd')>();
+  return {
+    Drawer: (props: React.ComponentProps<typeof actual.Drawer>) =>
+      capabilityProbe.actualDrawer ? (
+        <actual.Drawer {...props} />
+      ) : props.open ? (
+        <div data-testid="drawer">{props.children}</div>
+      ) : null,
+    Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
 
 vi.mock('lucide-react', async (original) => ({
   ...(await original<typeof import('lucide-react')>()),
@@ -181,17 +191,16 @@ vi.mock('@/hooks/useMessageOption', () => ({
   useMessageOption: () => messageOptionState.value,
 }));
 
-vi.mock('@/hooks/keyboard/useKeyboardShortcuts', () => ({
-  isMac: false,
-  useChatShortcuts: () => undefined,
-  useSidebarShortcuts: () => undefined,
-  useQuickChatShortcuts: () => undefined,
-  useModeNavigationShortcuts: () => undefined,
-}));
-
-vi.mock('@/store/quick-chat', () => ({
-  useQuickChatStore: () => quickChatState.value,
-}));
+vi.mock('@/hooks/keyboard/useKeyboardShortcuts', async (original) => {
+  const actual = await original<typeof import('@/hooks/keyboard/useKeyboardShortcuts')>();
+  return {
+    isMac: false,
+    useChatShortcuts: actual.useChatShortcuts,
+    useSidebarShortcuts: actual.useSidebarShortcuts,
+    useQuickChatShortcuts: actual.useQuickChatShortcuts,
+    useModeNavigationShortcuts: () => undefined,
+  };
+});
 
 vi.mock('@/store/option', async (original) => {
   const actual = await original<typeof import('@/store/option')>();
@@ -220,7 +229,21 @@ vi.mock('@/store/route-transition', () => ({
 }));
 
 vi.mock('@/components/Common/QuickChatHelper', () => ({
-  QuickChatHelperButton: () => <div data-testid="quick-chat-helper" />,
+  QuickChatHelperButton: () => {
+    const { isOpen } = useQuickChatStore();
+    return (
+      <>
+        <div data-testid="quick-chat-helper" />
+        {isOpen &&
+          createPortal(
+            <div role="dialog" aria-label="Quick Chat Helper probe">
+              Quick Chat mounted
+            </div>,
+            document.body
+          )}
+      </>
+    );
+  },
 }));
 
 vi.mock('@/components/Common/NotesDock', () => ({
@@ -309,7 +332,17 @@ vi.mock('@/hooks/useServerOnline', () => ({
 vi.mock('@/components/Common/ChatSidebar', () => ({
   ChatSidebar: (props: Record<string, unknown>) => {
     chatSidebarMockState.props.push(props);
-    return <aside data-testid="chat-sidebar" data-history-controller={useHistorySelectionContext() ? "present" : "absent"}><button onClick={() => (props.onConversationSelected as (() => void) | undefined)?.()}>Select saved conversation</button></aside>;
+    return (
+      <aside
+        data-testid="chat-sidebar"
+        data-history-controller={useHistorySelectionContext() ? 'present' : 'absent'}
+      >
+        <button onClick={() => (props.onConversationSelected as (() => void) | undefined)?.()}>
+          Select saved conversation
+        </button>
+        <QuickChatHelperButton />
+      </aside>
+    );
   },
 }));
 
@@ -393,7 +426,14 @@ vi.mock('@web/components/ui/ToastProvider', () => ({
 }));
 
 vi.mock('@/components/Common/CommandPaletteHost', () => ({
-  CommandPaletteHost: () => null,
+  CommandPaletteHost: ({
+    commandPaletteProps,
+  }: {
+    commandPaletteProps: NonNullable<typeof capabilityProbe.paletteProps>;
+  }) => {
+    capabilityProbe.paletteProps = commandPaletteProps;
+    return null;
+  },
 }));
 
 vi.mock('@/components/Common/TutorialRunner', () => ({
@@ -439,7 +479,11 @@ describe('WebLayout /chat scroll contract', () => {
   beforeEach(() => {
     delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
     vi.clearAllMocks();
+    capabilityProbe.actualDrawer = false;
+    capabilityProbe.paletteProps = null;
+    useQuickChatStore.getState().setIsOpen(false);
     routerState.location.pathname = '/chat';
+    routerState.location.key = 'chat-start';
     routerState.location.search = '';
     routerState.location.hash = '';
     storageState.stickyChatInput = true;
@@ -461,6 +505,88 @@ describe('WebLayout /chat scroll contract', () => {
   afterEach(() => {
     cleanup();
     delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+  });
+
+  it.each(['/__debug__/sidepanel-chat', '/chat'])(
+    'keeps one current New shortcut owner on %s',
+    (pathname) => {
+      routerState.location.pathname = pathname;
+      const newTab = vi.fn();
+      function CompactNewControl() {
+        useChatShortcuts(newTab);
+        return null;
+      }
+      render(
+        <OptionLayout hideHeader hideSidebar>
+          {pathname === '/__debug__/sidepanel-chat' && <CompactNewControl />}
+          <textarea aria-label="Exact draft" defaultValue="Keep this source.  " />
+        </OptionLayout>
+      );
+      fireEvent.keyDown(document, { key: 'u', ctrlKey: true, shiftKey: true });
+      expect(messageOptionState.value.clearChat).toHaveBeenCalledTimes(pathname === '/chat' ? 1 : 0);
+      expect(newTab).toHaveBeenCalledTimes(pathname === '/chat' ? 0 : 1);
+      expect(screen.getByRole('textbox', { name: 'Exact draft' })).toHaveValue('Keep this source.  ');
+    }
+  );
+
+  it.each([
+    { hideHeader: true, hideSidebar: false },
+    { hideHeader: false, hideSidebar: true },
+  ])('does not dispatch or advertise hidden shell hosts with %j', async (overrides) => {
+    useTutorialStore.getState().closeHelpModal();
+    render(
+      <OptionLayout {...overrides}>
+        <textarea aria-label="Exact draft" defaultValue="Keep this draft.  " />
+      </OptionLayout>
+    );
+    fireEvent.keyDown(document, { key: 'b', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 'h', ctrlKey: true, shiftKey: true });
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+    expect(useQuickChatStore.getState().isOpen).toBe(false);
+    expect(capabilityProbe.paletteProps?.onToggleSidebar).toBeUndefined();
+    if (overrides.hideHeader) expect(capabilityProbe.paletteProps?.onSwitchModel).toBeUndefined();
+    else expect(capabilityProbe.paletteProps?.onSwitchModel).toBeTypeOf('function');
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-shortcuts-modal')));
+    const help = await screen.findByRole('dialog', { name: 'Page Help' });
+    expect(within(help).queryByText('Toggle sidebar')).not.toBeInTheDocument();
+    expect(within(help).queryByText('Toggle Quick Chat Helper')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Exact draft' })).toHaveValue('Keep this draft.  ');
+    fireEvent.keyDown(help, { key: 'Escape' });
+  });
+
+  it('keeps available legacy sidebar and Quick Chat keyboard actions working', () => {
+    render(
+      <OptionLayout>
+        <textarea aria-label="Exact draft" defaultValue="Visible draft" />
+      </OptionLayout>
+    );
+    fireEvent.keyDown(document, { key: 'b', ctrlKey: true });
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'b', ctrlKey: true });
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'h', ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole('dialog', { name: 'Quick Chat Helper probe' })).toBeVisible();
+    expect(capabilityProbe.paletteProps?.onToggleSidebar).toBeTypeOf('function');
+    fireEvent.keyDown(document, { key: 'h', ctrlKey: true, shiftKey: true });
+    expect(screen.queryByRole('dialog', { name: 'Quick Chat Helper probe' })).not.toBeInTheDocument();
+  });
+
+  it('demand-mounts the helper in a cold real mobile Drawer without opening the sidebar', async () => {
+    capabilityProbe.actualDrawer = true;
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    render(
+      <OptionLayout>
+        <textarea aria-label="Exact draft" defaultValue="Mobile draft" />
+      </OptionLayout>
+    );
+    expect(screen.queryByTestId('chat-sidebar')).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'h', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Quick Chat Helper probe' })).toBeVisible();
+    expect(screen.getByTestId('chat-sidebar')).not.toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Exact draft' })).toHaveValue('Mobile draft');
   });
 
   it('keeps an ambiguous backend-unreachable candidate hidden when forced recovery finishes connected', async () => {
@@ -842,7 +968,7 @@ describe('WebLayout /chat scroll contract', () => {
     layoutUiState.value.setChatSidebarCollapsed.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Select saved conversation' }));
     expect(screen.getByTestId('chat-sidebar')).toBeInTheDocument();
-    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalled();
+    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalledWith(false);
   });
 
   it('still closes an open mobile drawer on an ordinary route change', () => {
@@ -886,7 +1012,7 @@ describe('WebLayout /chat scroll contract', () => {
     expect(source).toContain('if (!sidebarOpen) signalChatSidebarOpen()');
     expect(source).toContain('if (chatSidebarCollapsed) signalChatSidebarOpen()');
     expect(source).toContain("window.addEventListener('tldw:open-chat-sidebar', handler)");
-    expect(source).toContain("if (typeof window === 'undefined' || !showChatSidebar) return;");
+    expect(source).not.toContain("if (typeof window === 'undefined' || !showChatSidebar");
   });
 
   it('does not render a chat-specific collapsed rail edge button', () => {
@@ -902,7 +1028,99 @@ describe('WebLayout /chat scroll contract', () => {
     expect(screen.queryByTestId('chat-sidebar-edge-expand')).toBeNull();
   });
 
-  it('ignores chat sidebar open events when the shared ChatSidebar feature is disabled', async () => {
+  it.each([false, true])(
+    'fulfills an explicit Find request once the Web shell is revealed (shared=%s)',
+    (shared) => {
+      featureFlagState.showChatSidebar = shared;
+      mediaQueryState.isMobile = true;
+      const view = render(
+        <OptionLayout hideHeader hideSidebar>
+          <div>Draft</div>
+        </OptionLayout>
+      );
+      act(() => {
+        window.dispatchEvent(new Event('tldw:open-chat-sidebar'));
+        window.dispatchEvent(new Event('tldw:open-chat-sidebar'));
+      });
+      expect(screen.queryByTestId('drawer')).toBeNull();
+      view.rerender(
+        <OptionLayout>
+          <div>Draft</div>
+        </OptionLayout>
+      );
+      expect(screen.getByTestId('drawer')).toBeInTheDocument();
+      expect(screen.getByTestId('header')).toHaveAttribute('aria-label', 'Collapse sidebar');
+      if (shared) expect(chatSidebarMockState.props.at(-1)?.openResetKey).toBe(1);
+    }
+  );
+
+  it.each([false, true])(
+    'abandons a hidden Web Find request on route departure (shared=%s)',
+    (shared) => {
+      featureFlagState.showChatSidebar = shared;
+      mediaQueryState.isMobile = true;
+      const view = render(
+        <OptionLayout hideHeader hideSidebar>
+          <div>Draft</div>
+        </OptionLayout>
+      );
+      act(() => window.dispatchEvent(new Event('tldw:open-chat-sidebar')));
+      routerState.location.pathname = '/notes';
+      view.rerender(
+        <OptionLayout hideHeader hideSidebar>
+          <div>Notes</div>
+        </OptionLayout>
+      );
+      routerState.location.pathname = '/chat';
+      view.rerender(
+        <OptionLayout>
+          <div>Draft</div>
+        </OptionLayout>
+      );
+      expect(screen.queryByTestId('drawer')).toBeNull();
+      expect(screen.getByTestId('header')).toHaveAttribute('aria-label', 'Expand sidebar');
+      expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalledWith(false);
+    }
+  );
+
+  it('abandons a hidden Web Find request when the route incarnation changes', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    const view = render(
+      <OptionLayout hideHeader hideSidebar>
+        <div>Draft</div>
+      </OptionLayout>
+    );
+    act(() => window.dispatchEvent(new Event('tldw:open-chat-sidebar')));
+    routerState.location.key = 'chat-replaced';
+    view.rerender(
+      <OptionLayout>
+        <div>Draft</div>
+      </OptionLayout>
+    );
+    expect(screen.queryByTestId('drawer')).toBeNull();
+  });
+
+  it('fulfills a pending Find through the current mobile host after viewport change', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = false;
+    const view = render(
+      <OptionLayout hideHeader hideSidebar>
+        <div>Draft</div>
+      </OptionLayout>
+    );
+    act(() => window.dispatchEvent(new Event('tldw:open-chat-sidebar')));
+    mediaQueryState.isMobile = true;
+    view.rerender(
+      <OptionLayout>
+        <div>Draft</div>
+      </OptionLayout>
+    );
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalledWith(false);
+  });
+
+  it('opens the available legacy sidebar for Find conversations events', async () => {
     featureFlagState.showChatSidebar = false;
 
     render(
@@ -918,7 +1136,8 @@ describe('WebLayout /chat scroll contract', () => {
       window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar'));
     });
 
-    expect(screen.queryByTestId('drawer')).toBeNull();
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('header')).toHaveAttribute('aria-label', 'Collapse sidebar');
     expect(chatSidebarMockState.props).toHaveLength(0);
   });
 

@@ -863,6 +863,13 @@ const PlaygroundContent = () => {
     },
     [setChatLayoutMode],
   );
+  React.useEffect(() => {
+    if (!focusModeActive) return
+    const revealConversations = () => handleChatLayoutModeChange("cockpit")
+    window.addEventListener("tldw:open-chat-sidebar", revealConversations)
+    return () =>
+      window.removeEventListener("tldw:open-chat-sidebar", revealConversations)
+  }, [focusModeActive, handleChatLayoutModeChange])
   const nextChatLayoutMode: PlaygroundCockpitMode =
     focusModeActive ? "cockpit" : "focus";
   const chatLayoutToggleLabel =

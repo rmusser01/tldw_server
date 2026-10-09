@@ -43,6 +43,7 @@ const io = vi.hoisted(() => ({
   t: (key: string, fallback?: string) =>
     typeof fallback === "string" ? fallback : key,
   user: "alice",
+  uiMode: "pro" as "pro" | "casual",
   sequence: 0,
   localId: "foreign",
   serverId: "server-chat",
@@ -166,12 +167,18 @@ vi.mock("@/hooks/useSmartScroll", () => ({
     autoScrollToBottom: io.noop
   })
 }))
-vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
-  useChatShortcuts: (action: () => void) => { io.keyboardNew = action },
-  useSidebarShortcuts: io.noop,
-  useChatModeShortcuts: io.noop,
-  useWebSearchShortcuts: io.noop
-}))
+vi.mock("@/hooks/keyboard/useKeyboardShortcuts", async (original) => {
+  const actual =
+    await original<typeof import("@/hooks/keyboard/useKeyboardShortcuts")>()
+  return {
+    useChatShortcuts: (action: () => void) => {
+      io.keyboardNew = action
+    },
+    useSidebarShortcuts: actual.useSidebarShortcuts,
+    useChatModeShortcuts: io.noop,
+    useWebSearchShortcuts: io.noop
+  }
+})
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionActions: () => ({ checkOnce: io.noop })
 }))
@@ -201,7 +208,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (select: (state: unknown) => unknown) =>
-    select({ mode: "pro" })
+    select({ mode: io.uiMode })
 }))
 vi.mock("@/store/artifacts", () => ({
   useArtifactsStore: (select: (state: unknown) => unknown) =>
@@ -307,46 +314,96 @@ vi.mock("@/components/Sidepanel/Chat/form", () => ({
   SidepanelForm: (props: { draftKey: string }) => io.useComposer ? <ComposerProbe {...props} /> : null
 }))
 vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
-  SidepanelHeaderSimple: (props: { chatReady?: boolean; onOpenChatInWebUi?: () => void }) => <button disabled={!props.chatReady}
-    onClick={() => props.onOpenChatInWebUi?.()}>Open full chat in WebUI</button>
+  SidepanelHeaderSimple: (props: {
+    chatReady?: boolean
+    onOpenChatInWebUi?: () => void
+    sidebarOpen: boolean
+    setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
+  }) => (
+    <>
+      <button
+        aria-label="Toggle conversation sidebar"
+        aria-expanded={props.sidebarOpen}
+        onClick={() => props.setSidebarOpen((previous) => !previous)}>
+        Toggle sidebar
+      </button>
+      <button
+        disabled={!props.chatReady}
+        onClick={() => props.onOpenChatInWebUi?.()}>
+        Open full chat in WebUI
+      </button>
+    </>
+  )
 }))
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
   ConnectionBanner: () => null
 }))
 vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
   SidepanelChatSidebar: (props: {
+    onClose: () => void
+    variant: "docked" | "overlay"
     tabs: { id: string; label: string }[]
     onSelectTab: (id: string) => void
-    onCloseTab: (id: string, options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }) => Promise<boolean | void>
+    onCloseTab: (
+      id: string,
+      options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }
+    ) => Promise<boolean | void>
     onNewTab: () => void
     onOpenLocalHistory: (id: string) => void
     onOpenServerChat: (chat: { id: string; title: string }) => void
   }) => {
     io.closeTab = props.onCloseTab
     return (
-    <nav>
-      <button onClick={props.onNewTab}>New conversation</button>
-      {props.tabs.map((tab) => (
-        <React.Fragment key={tab.id}><button onClick={() => props.onSelectTab(tab.id)}>
-          {tab.label}
-        </button><button aria-label={`Close ${tab.label}`} onClick={() => props.onCloseTab(tab.id)}>Close</button></React.Fragment>
-      ))}
-      <button onClick={() => props.onOpenLocalHistory(io.localId)}>
-        Open cached history
-      </button>
-      <button
-        onClick={() =>
-          props.onOpenServerChat({ id: io.serverId, title: "Server chat" })
-        }>
-        Open server history
-      </button>
-    </nav>
+      <nav data-testid="compact-sidebar" data-variant={props.variant}>
+        <button onClick={props.onClose}>Collapse conversation sidebar</button>
+        <button onClick={props.onNewTab}>New conversation</button>
+        {props.tabs.map((tab) => (
+          <React.Fragment key={tab.id}>
+            <button onClick={() => props.onSelectTab(tab.id)}>
+              {tab.label}
+            </button>
+            <button
+              aria-label={`Close ${tab.label}`}
+              onClick={() => props.onCloseTab(tab.id)}>
+              Close
+            </button>
+          </React.Fragment>
+        ))}
+        <button onClick={() => props.onOpenLocalHistory(io.localId)}>
+          Open cached history
+        </button>
+        <button
+          onClick={() =>
+            props.onOpenServerChat({ id: io.serverId, title: "Server chat" })
+          }>
+          Open server history
+        </button>
+      </nav>
     )
   }
 }))
 vi.mock("@/components/Common/CommandPaletteHost", () => ({
-  CommandPaletteHost: ({ commandPaletteProps }: { commandPaletteProps: { onNewChat: () => void } }) =>
-    <button onClick={() => commandPaletteProps.onNewChat()}>Palette New chat</button>
+  CommandPaletteHost: ({
+    commandPaletteProps
+  }: {
+    commandPaletteProps: {
+      onNewChat: () => void
+      onToggleSidebar: () => void
+      onSearchHistory: () => void
+    }
+  }) => (
+    <>
+      <button onClick={() => commandPaletteProps.onNewChat()}>
+        Palette New chat
+      </button>
+      <button onClick={commandPaletteProps.onToggleSidebar}>
+        Palette toggle sidebar
+      </button>
+      <button onClick={commandPaletteProps.onSearchHistory}>
+        Palette find conversations
+      </button>
+    </>
+  )
 }))
 vi.mock("@/components/Common/CommandPalette", () => ({
   CommandPalette: () => null
@@ -451,6 +508,33 @@ const switchAccount = (user: string) =>
     )
   })
 
+const installSidebarViewport = (initialNarrow: boolean) => {
+  let narrow = initialNarrow
+  const listeners = new Set<() => void>()
+  const media = {
+    get matches() {
+      return narrow
+    },
+    media: "(max-width: 400px)",
+    onchange: null,
+    addEventListener: (_type: string, listener: () => void) =>
+      listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) =>
+      listeners.delete(listener),
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true
+  }
+  vi.stubGlobal("matchMedia", () => media)
+  return {
+    setNarrow: (value: boolean) =>
+      act(() => {
+        narrow = value
+        listeners.forEach((listener) => listener())
+      })
+  }
+}
+
 const completedReplyFixture = () => {
   const saved = tabsState()
   const stale = saved.snapshotsById["alice-one"]
@@ -480,6 +564,7 @@ describe("current shared Clipper handoff consumer", () => {
   beforeEach(() => {
     io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.user = "alice"
+    io.uiMode = "pro"
     io.sequence = 0
     sessionStorage.clear()
     io.submit.mockReset().mockResolvedValue(undefined)
@@ -597,6 +682,7 @@ describe.each([
     vi.unstubAllGlobals()
     vi.spyOn(window, "open").mockReset().mockImplementation(() => ({}) as Window)
     io.user = "alice"
+    io.uiMode = "pro"
     io.sequence = 0
     io.localId = "foreign"
     io.serverId = "server-chat"
@@ -629,6 +715,100 @@ describe.each([
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
     useSidepanelChatTabsStore.getState().clear()
     useStoreChatModelSettings.getState().reset()
+  })
+
+  it.each(["keyboard", "header", "palette", "close"])(
+    "wide Pro honors %s collapse and Find reopens the same draft",
+    async (entry) => {
+      installSidebarViewport(false)
+      io.data.set(storedKey("alice"), tabsState())
+      const page = render(<Route />)
+      await screen.findByText("alice first")
+      expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute(
+        "data-variant",
+        "docked"
+      )
+      if (entry === "keyboard")
+        fireEvent.keyDown(document, { key: "b", ctrlKey: true })
+      else
+        fireEvent.click(
+          screen.getByRole("button", {
+            name:
+              entry === "header"
+                ? "Toggle conversation sidebar"
+                : entry === "palette"
+                  ? "Palette toggle sidebar"
+                  : "Collapse conversation sidebar"
+          })
+        )
+      expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+      page.rerender(<Route />)
+      expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+      fireEvent.click(
+        screen.getByRole("button", { name: "Palette find conversations" })
+      )
+      expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute(
+        "data-variant",
+        "docked"
+      )
+      expect(
+        screen.getByRole("button", { name: "Toggle conversation sidebar" })
+      ).toHaveAttribute("aria-expanded", "true")
+      expect(screen.getByText("alice first")).toBeVisible()
+      expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+      expect(io.submit).not.toHaveBeenCalled()
+    }
+  )
+
+  it("cold narrow Pro starts collapsed and its keyboard opens an overlay", async () => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "b", ctrlKey: true })
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute(
+      "data-variant",
+      "overlay"
+    )
+    fireEvent.keyDown(document, { key: "b", ctrlKey: true })
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+  })
+
+  it("changes default visibility only at docked-layout transitions", async () => {
+    const viewport = installSidebarViewport(false)
+    io.uiMode = "casual"
+    io.data.set(storedKey("alice"), tabsState())
+    const page = render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    io.uiMode = "pro"
+    page.rerender(<Route />)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute(
+      "data-variant",
+      "docked"
+    )
+    expect(
+      screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    ).toHaveAttribute("aria-expanded", "true")
+    fireEvent.keyDown(document, { key: "b", ctrlKey: true })
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    viewport.setNarrow(true)
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "b", ctrlKey: true })
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute(
+      "data-variant",
+      "overlay"
+    )
+    viewport.setNarrow(false)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute(
+      "data-variant",
+      "docked"
+    )
+    io.uiMode = "casual"
+    page.rerender(<Route />)
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    expect(screen.getByText("alice first")).toBeVisible()
   })
 
   if (_name === "shared")

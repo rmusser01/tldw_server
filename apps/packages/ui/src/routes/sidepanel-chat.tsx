@@ -535,7 +535,6 @@ const SidepanelChatContent = ({
   useServerOnline()
   const drop = React.useRef<HTMLDivElement>(null)
   const [dropedFile, setDropedFile] = React.useState<File | undefined>()
-  const [sidebarOpen, setSidebarOpen] = React.useState(false)
   const [sidebarSearchQuery, setSidebarSearchQuery] = React.useState("")
   const sidebarSearchInputRef = React.useRef<HTMLInputElement>(null)
   const [sidebarSearchFocusNonce, setSidebarSearchFocusNonce] = React.useState(0)
@@ -692,7 +691,17 @@ const SidepanelChatContent = ({
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
     useSmartScroll(messages, streaming, 100)
   const uiMode = useUiModeStore((state) => state.mode)
-  const [isNarrow, setIsNarrow] = React.useState(false)
+  const [isNarrow, setIsNarrow] = React.useState(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.("(max-width: 400px)").matches)
+  )
+  const isDockedSidebar = uiMode === "pro" && !isNarrow
+  const [sidebarOpen, setSidebarOpen] = React.useState(isDockedSidebar)
+  React.useEffect(() => {
+    setSidebarOpen(isDockedSidebar)
+  }, [isDockedSidebar])
+
   const { checkOnce } = useConnectionActions()
   const [noteModalOpen, setNoteModalOpen] = React.useState(false)
   const [noteDraftContent, setNoteDraftContent] = React.useState("")
@@ -1156,11 +1165,9 @@ const SidepanelChatContent = ({
   }
 
   const requestSidebarSearchFocus = React.useCallback(() => {
-    if (uiMode !== "pro" || isNarrow) {
-      setSidebarOpen(true)
-    }
+    setSidebarOpen(true)
     setSidebarSearchFocusNonce((prev) => prev + 1)
-  }, [isNarrow, uiMode])
+  }, [])
 
   const toggleChatMode = () => {
     setChatMode(chatMode === "rag" ? "normal" : "rag")
@@ -2689,8 +2696,7 @@ const SidepanelChatContent = ({
 
   const freshnessNotice =
     freshness.notice?.tabId === activeTabId ? freshness.notice : null
-  const isDockedSidebar = uiMode === "pro" && !isNarrow
-  const isSidebarVisible = isDockedSidebar || sidebarOpen
+  const isSidebarVisible = sidebarOpen
   const messagePadding = uiMode === "pro" ? "px-4" : "px-6"
   const artifactsOpen = useArtifactsStore((state) => state.isOpen)
   const closeArtifacts = useArtifactsStore((state) => state.closeArtifact)
