@@ -1401,6 +1401,7 @@
     "collapseText": "Collapse text",
     "captureDisclosure": "Save creates an additional capture Note and a new source containing the complete extracted article snapshot. Original retrieved evidence stays intact.",
     "capturePublicOnly": "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used.",
+    "captureBrowserUnavailable": "Safe browser capture is unavailable for this page. Try another public URL, or use the Web Clipper or import readable content you can provide.",
     "captureCompleteText": "The complete text is saved; it is never silently shortened.",
     "extractedSnapshot": "Extracted article snapshot",
     "retrievedExcerpt": "Retrieved excerpt",
