@@ -432,6 +432,101 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     };
   }, [flushBoundDraft]);
 
+  // Reopening keeps the editor's exact row pointer, but not this component's binding.
+  useEffect(() => {
+    const expected = useWorkspaceStore.getState();
+    const key = expected.currentNote.pendingNoteWriteKey;
+    const prefix = `surface:quick-notes:${JSON.stringify([expected.workspaceId, expected.workspaceTag])}:`;
+    if (!key?.startsWith(prefix) || draftBindingRef.current?.active) return;
+    const controller = new AbortController();
+    const unchanged = () => {
+      const state = useWorkspaceStore.getState();
+      return (
+        state.workspaceId === expected.workspaceId &&
+        state.workspaceTag === expected.workspaceTag &&
+        state.currentNote.id === expected.currentNote.id &&
+        state.currentNote.pendingNoteWriteKey === key
+      );
+    };
+    const stopDraft = useWorkspaceStore.subscribe(() => {
+      if (!unchanged()) controller.abort();
+    });
+    const stopOwner = watchChatAccountChanges((invalidated) => {
+      if (invalidated) controller.abort();
+    });
+    void (async () => {
+      const scope = await loadServicePromptSnapshot([], {
+        signal: controller.signal,
+      });
+      try {
+        const user =
+          scope.requestScope.userId == null
+            ? await tldwAuth.getCurrentUser()
+            : null;
+        const ownerId =
+          scope.requestScope.userId ?? (user?.is_active ? user.id : null);
+        if (ownerId == null) return;
+        const authorityScope = createNotesGraphAuthorityScope(
+          scope.requestScope.config.serverUrl,
+          ownerId,
+        );
+        const authorityId = servicePromptAuthorityKey(scope.requestScope);
+        const entry = (await readSurfaceOfflineDraftQueue(authorityScope))[key];
+        if (
+          controller.signal.aborted ||
+          scope.scopeSignal.aborted ||
+          scope.scopeInvalidatedSignal.aborted ||
+          !unchanged() ||
+          draftBindingRef.current?.active
+        )
+          return;
+        if (
+          !entry ||
+          entry.metadata?.quickNotesAuthorityId !== authorityId ||
+          entry.metadata.quickNotesWorkspaceId !== expected.workspaceId ||
+          entry.metadata.quickNotesWorkspaceTag !== expected.workspaceTag ||
+          (entry.pendingWrite
+            ? entry.pendingWrite.authorityId !== authorityId
+            : !isQuickNotesRetainedDraft(entry)) ||
+          (expected.currentNote.id == null
+            ? entry.noteId !== null
+            : String(expected.currentNote.id) !==
+              String(entry.noteId ?? entry.pendingWrite?.body.id)) ||
+          (!entry.pendingWrite &&
+            expected.currentNote.version !== entry.baseVersion)
+        )
+          return;
+        draftBindingRef.current = {
+          authorityScope,
+          authorityId,
+          key,
+          pendingKey:
+            entry.pendingWrite?.key ||
+            entry.metadata.quickNotesAcceptedKey ||
+            entry.metadata.quickNotesRejectedKey,
+          workspaceId: expected.workspaceId,
+          workspaceTag: expected.workspaceTag,
+          noteId: expected.currentNote.id,
+          active: true,
+          latest: useWorkspaceStore.getState().currentNote,
+        };
+        await flushBoundDraft();
+      } finally {
+        scope.release();
+      }
+    })().catch(() => {
+      if (!controller.signal.aborted)
+        messageApiRef.current.error(
+          "Could not read the current local note draft on this device.",
+        );
+    });
+    return () => {
+      controller.abort();
+      stopDraft();
+      stopOwner();
+    };
+  }, [flushBoundDraft]);
+
   const blankDraft =
     !currentNote.id && !currentNote.title && !currentNote.content;
   useEffect(() => {
@@ -783,12 +878,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     searchNotes()
   }
 
-  const readCurrentNoteDetails = useCallback(
-    async (
-      id: string | number,
-      expected: ReturnType<typeof useWorkspaceStore.getState>,
-      apply: (note: NoteListItem) => void,
-    ) => {
+  const beginCurrentNoteRead = useCallback(
+    (expected: ReturnType<typeof useWorkspaceStore.getState>) => {
+      readControllerRef.current?.abort();
+      const controller = new AbortController();
+      readControllerRef.current = controller;
       const unchanged = () => {
         const state = useWorkspaceStore.getState();
         return (
@@ -797,16 +891,37 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           state.workspaceTag === expected.workspaceTag
         );
       };
-      if (!unchanged()) return;
-      readControllerRef.current?.abort();
-      const controller = new AbortController();
-      readControllerRef.current = controller;
       const stopDraft = useWorkspaceStore.subscribe(() => {
         if (!unchanged()) controller.abort();
       });
       const stopOwner = watchChatAccountChanges((invalidated) => {
         if (invalidated) controller.abort();
       });
+      controller.signal.addEventListener(
+        "abort",
+        () => {
+          stopDraft();
+          stopOwner();
+        },
+        { once: true },
+      );
+      return { controller, unchanged };
+    },
+    [],
+  );
+
+  const readCurrentNoteDetails = useCallback(
+    async (
+      id: string | number,
+      expected: ReturnType<typeof useWorkspaceStore.getState>,
+      apply: (note: NoteListItem) => void,
+      intent = beginCurrentNoteRead(expected),
+    ) => {
+      const { controller, unchanged } = intent;
+      if (controller.signal.aborted || !unchanged()) {
+        controller.abort();
+        return;
+      }
       let scope: ServicePromptSnapshot | undefined;
       try {
         scope = await loadServicePromptSnapshot([], {
@@ -831,28 +946,33 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       } catch (error) {
         if (!controller.signal.aborted) throw error;
       } finally {
-        stopDraft();
-        stopOwner();
+        controller.abort();
         scope?.release();
       }
     },
-    [],
+    [beginCurrentNoteRead],
   );
 
   // Confirmation and its eventual GET both belong to the exact draft being replaced.
   const handleSelectNote = useCallback(
     (note: NoteListItem) => {
       const expected = useWorkspaceStore.getState();
+      const intent = beginCurrentNoteRead(expected);
       const select = async () => {
         try {
-          await readCurrentNoteDetails(note.id, expected, (fullNote) => {
-            hideSavedIndicator();
-            loadNote(serializeNoteForEditor(fullNote));
-            setIsLoadModalOpen(false);
-            messageApi.success(
-              t("playground:studio.noteLoaded", "Note loaded"),
-            );
-          });
+          await readCurrentNoteDetails(
+            note.id,
+            expected,
+            (fullNote) => {
+              hideSavedIndicator();
+              loadNote(serializeNoteForEditor(fullNote));
+              setIsLoadModalOpen(false);
+              messageApi.success(
+                t("playground:studio.noteLoaded", "Note loaded"),
+              );
+            },
+            intent,
+          );
         } catch {
           messageApi.error(
             t("playground:studio.loadNoteError", "Failed to load note"),
@@ -864,10 +984,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           title: t("playground:studio.unsavedChanges", "Unsaved Changes"),
           content: "Replace the current unsaved draft with the saved note?",
           onOk: select,
+          onCancel: () => intent.controller.abort(),
         });
       else void select();
     },
     [
+      beginCurrentNoteRead,
       hideSavedIndicator,
       loadNote,
       messageApi,
@@ -1594,28 +1716,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   const handleResumeLocalDraft = (key: string) => {
     const expected = useWorkspaceStore.getState();
+    const { controller, unchanged } = beginCurrentNoteRead(expected);
     const resume = async () => {
-      const current = useWorkspaceStore.getState();
-      if (
-        current.currentNote !== expected.currentNote ||
-        current.workspaceId !== expected.workspaceId ||
-        current.workspaceTag !== expected.workspaceTag
-      )
+      if (controller.signal.aborted || !unchanged()) {
+        controller.abort();
         return;
-      const controller = new AbortController();
-      readControllerRef.current?.abort();
-      readControllerRef.current = controller;
-      const stop = watchChatAccountChanges((invalidated) => {
-        if (invalidated) controller.abort();
-      });
-      const stopDraft = useWorkspaceStore.subscribe((state) => {
-        if (
-          state.currentNote !== expected.currentNote ||
-          state.workspaceId !== expected.workspaceId ||
-          state.workspaceTag !== expected.workspaceTag
-        )
-          controller.abort();
-      });
+      }
       let scope: ServicePromptSnapshot | undefined;
       try {
         scope = await loadServicePromptSnapshot([], {
@@ -1653,7 +1759,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           );
         if (draftBindingRef.current) draftBindingRef.current.active = false;
         draftBindingRef.current = null;
-        stopDraft();
+        controller.abort();
         const resumed = {
           ...knowledgeNoteHead(entry.metadata),
           id: entry.noteId!,
@@ -1687,8 +1793,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             "Could not resume the retained local draft. Restore its Workspace and service and retry.",
           );
       } finally {
-        stop();
-        stopDraft();
+        controller.abort();
         scope?.release();
       }
     };
@@ -1698,6 +1803,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         content:
           "Replace the current unsaved draft with the retained local draft?",
         onOk: resume,
+        onCancel: () => controller.abort(),
       });
     else void resume();
   };
