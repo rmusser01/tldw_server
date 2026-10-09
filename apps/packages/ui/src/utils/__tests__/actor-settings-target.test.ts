@@ -64,6 +64,32 @@ describe("scene target qualification from original address and H1 owner", () => 
     expect(a?.key).not.toBe(b?.key)
     expect(a?.accountKey).toBe(chatDraftOwnerKey(scope))
   })
+  it("keeps the original account and typed fresh address independently of source binding", () => {
+    let sourceCurrent = true,
+      accountCurrent = true
+    const address = structuredClone(fresh)
+    const original = captureActorSettingsTarget({
+      ...captured(address),
+      isCurrent: () => sourceCurrent,
+      accountIsCurrent: () => accountCurrent
+    })!
+    sourceCurrent = false
+    address.id = "mutated-input"
+    expect(original.isCurrent()).toBe(false)
+    expect(original.address).toEqual(fresh)
+    expect(original.account?.requestScope).toEqual(scope)
+    expect(original.account?.isCurrent()).toBe(true)
+    accountCurrent = false
+    expect(original.account?.isCurrent()).toBe(false)
+  })
+  it("retains the typed accepted saved address and its original account", () => {
+    const target = captureActorSettingsTarget({
+      ...captured(native),
+      ...receipt("native")
+    })!
+    expect(target.address).toEqual(native)
+    expect(target.account?.requestScope).toEqual(scope)
+  })
   it.each([
     {
       label: "server",

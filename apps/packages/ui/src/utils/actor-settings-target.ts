@@ -8,6 +8,11 @@ export type ActorSettingsTarget = Readonly<{
   key: string
   accountKey: string | null
   localProfileId?: string
+  account?: Readonly<{
+    requestScope: ServicePromptRequestScope
+    isCurrent: () => boolean
+  }>
+  address?: ChatDraftAddress
   isCurrent: () => boolean
   profileIsCurrent: () => boolean
 }>
@@ -47,9 +52,21 @@ export const captureActorSettingsTarget = (params: {
   const { address, owner, view, requestScope, accountIsCurrent, isCurrent } =
     params
   if (!isChatDraftAddress(address) || !isCurrent()) return null
+  const capturedAddress = Object.freeze(
+    address.kind === "local"
+      ? { ...address }
+      : { ...address, scope: Object.freeze(structuredClone(address.scope)) }
+  )
   const accountCurrent = () => accountIsCurrent?.() === true
   const accountKey =
     requestScope && accountCurrent() ? chatDraftOwnerKey(requestScope) : null
+  const account =
+    accountKey && requestScope
+      ? Object.freeze({
+          requestScope: structuredClone(requestScope),
+          isCurrent: accountCurrent
+        })
+      : undefined
   if (address.kind === "fresh") {
     if (!accountKey) return null
     const current = () => isCurrent() && accountCurrent()
@@ -62,6 +79,8 @@ export const captureActorSettingsTarget = (params: {
         address.id
       ]),
       accountKey,
+      account,
+      address: capturedAddress,
       isCurrent: current,
       profileIsCurrent: current
     })
@@ -84,7 +103,9 @@ export const captureActorSettingsTarget = (params: {
     return Object.freeze({
       key: JSON.stringify(["local", owner.profile_id, owner.conversation_id]),
       localProfileId: owner.profile_id,
+      address: capturedAddress,
       accountKey,
+      account,
       isCurrent: sourceCurrent,
       profileIsCurrent: () =>
         Boolean(accountKey) && sourceCurrent() && accountCurrent()
@@ -117,6 +138,11 @@ export const captureActorSettingsTarget = (params: {
       address.id
     ]),
     accountKey: nativeAccountKey,
+    address: capturedAddress,
+    account: Object.freeze({
+      requestScope: structuredClone(owner.request_scope),
+      isCurrent: accountCurrent
+    }),
     isCurrent: current,
     profileIsCurrent: current
   })

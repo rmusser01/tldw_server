@@ -53,6 +53,8 @@ import { createImageDataUrl } from "@/utils/image-utils"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { systemPromptFormatter } from "@/utils/system-message"
 import type { ActorSettings } from "@/types/actor"
+import type { ActorSceneRead } from "@/services/actor-settings"
+import { bindActorSceneAfterLoad } from "@/hooks/chat/actor-scene-source"
 import { maybeInjectActorMessage } from "@/utils/actor"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { getSearchSettings } from "@/services/search"
@@ -238,6 +240,7 @@ type NormalChatModeParams = {
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
+  actorScene?: ActorSceneRead
   systemPromptAppendix?: string
   overlaySystemPrompt?: string
   webSearch?: boolean
@@ -759,6 +762,15 @@ const captureNormalHistoryTurn = async (
   const preparationIsCurrent = () => draftIsCurrent() && acceptDraftBind?.isCurrent() !== false &&
     !signal.aborted && !snapshot.scopeInvalidatedSignal.aborted && dispatchIsCurrent()
   if (!preparationIsCurrent()) throw new Error("stale_selection")
+  if (
+    params.actorScene &&
+    (!params.actorScene.target.isCurrent() ||
+      (params.actorScene.target.localProfileId === undefined &&
+        (!params.actorScene.target.account?.isCurrent() ||
+          params.actorScene.target.accountKey !==
+            chatDraftOwnerKey(snapshot.requestScope))))
+  )
+    throw new Error("actor_settings_scope_changed")
   if (!current.owner && current.status === "idle") {
     const scope = params.scope ? structuredClone(params.scope) : undefined
     let localId = params.historyId
@@ -850,6 +862,31 @@ const captureNormalHistoryTurn = async (
         throw new Error("stale_selection")
       selectionCurrent = adoptionIsCurrent
       if (creationHandle && serverId) await markChatCreationBound(creationHandle, serverId)
+      if (!selectionCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
+      if (acceptDraftBind && params.actorScene) {
+        const acceptedReceipt = receipt
+        const boundIsCurrent = () =>
+          acceptDraftBind.isCurrent() &&
+          controller.getCurrent().owner === acceptedReceipt.owner &&
+          controller.getCurrent().view?.owner_key ===
+            acceptedReceipt.view.owner_key &&
+          controller.getCurrent().view?.conversation_id ===
+            acceptedReceipt.view.conversation_id
+        const scenePreparationIsCurrent = () =>
+          preparationIsCurrent() &&
+          adoptionIsCurrent?.() === true &&
+          controller.getCurrent().owner === acceptedReceipt.owner &&
+          controller.getCurrent().view === acceptedReceipt.view
+        if (
+          !(await bindActorSceneAfterLoad(
+            params.actorScene,
+            acceptedReceipt,
+            boundIsCurrent,
+            scenePreparationIsCurrent
+          ))
+        )
+          throw new Error("actor_settings_bind_not_committed")
+      }
       if (!selectionCurrent() || !preparationIsCurrent() || controller.getCurrent().owner !== receipt.owner || controller.getCurrent().view !== receipt.view)
         throw new Error("stale_selection")
     } finally {
@@ -1222,13 +1259,14 @@ export const normalChatMode = async (
           {
             signal,
             requestScope:
-              params.historySelection?.controller.getCurrent().owner?.kind ===
+              params.actorScene?.target.account?.requestScope ??
+              (params.historySelection?.controller.getCurrent().owner?.kind ===
               "native"
                 ? (
                     params.historySelection.controller.getCurrent()
                       .owner as import("@/services/chat-history-selection").NativeHistoryOwnerV1
                   ).request_scope
-                : undefined
+                : undefined)
           }
         )
       : undefined)

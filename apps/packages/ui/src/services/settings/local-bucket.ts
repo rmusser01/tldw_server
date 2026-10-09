@@ -39,7 +39,7 @@ const hasDurableBackend = () => {
 }
 
 
-const withRecordLock = async <T>(key: string, operation: () => Promise<T>): Promise<T> => {
+export const withRecordLock = async <T>(key: string, operation: () => Promise<T>): Promise<T> => {
   if (typeof navigator === "undefined" || !navigator.locks?.request) return operation()
   return navigator.locks.request(`tldw:local-registry:${key}`, operation)
 }

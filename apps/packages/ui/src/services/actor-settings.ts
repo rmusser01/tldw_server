@@ -10,6 +10,7 @@ import {
 
 import {
   createLocalRegistryBucket,
+  withRecordLock,
   type LocalRegistryRecord
 } from "./settings/local-bucket"
 import {
@@ -321,6 +322,82 @@ export const getActorSceneForChat = async (params: {
   } catch (error) {
     console.error("Failed to load owned Actor scene", error)
     throw new Error("actor_settings_unavailable")
+  }
+}
+
+/** Copy only an original saved fresh scene after its caller accepted the destination bind. */
+export const copyActorSceneToBoundChat = async (
+  source: ActorSceneRead,
+  destination: ActorSettingsTarget,
+  validate_lease: () => boolean = () => true
+): Promise<boolean> => {
+  const fresh = source.target.address
+  const boundAddress = destination.address
+  const account = source.target.account
+  const current = () =>
+    account?.isCurrent() === true && destination.isCurrent() && validate_lease()
+  if (
+    fresh?.kind !== "fresh" ||
+    fresh.temporary ||
+    !account ||
+    !source.target.accountKey ||
+    source.origin !== "scene" ||
+    !source.originalRecord ||
+    !isValidSceneRecord(source.originalRecord) ||
+    !boundAddress ||
+    boundAddress.kind === "fresh" ||
+    destination.key === source.target.key ||
+    (boundAddress.kind === "native" &&
+      (boundAddress.scope.type !== fresh.scope.type ||
+        (boundAddress.scope.type === "workspace" &&
+          fresh.scope.type === "workspace" &&
+          boundAddress.scope.workspaceId !== fresh.scope.workspaceId))) ||
+    (destination.localProfileId === undefined &&
+      destination.accountKey !== source.target.accountKey) ||
+    !current() ||
+    typeof navigator === "undefined" ||
+    !navigator.locks?.request
+  )
+    return false
+  const original = structuredClone(source.originalRecord)
+  try {
+    return await withRecordLock(
+      scenes.buildKey(source.target.key),
+      async () => {
+        const retained = await readOwnedRecord(scenes, {
+          key: source.target.key,
+          isCurrent: current
+        })
+        if (JSON.stringify(retained) !== JSON.stringify(original)) return false
+        const bound = await readOwnedRecord(scenes, {
+          ...destination,
+          isCurrent: current
+        })
+        if (
+          bound !== null &&
+          JSON.stringify(bound) !== JSON.stringify(original)
+        )
+          return false
+        // The same conditional write also certifies an exact prior copy under its destination lock.
+        const saved = await scenes.set(
+          destination.key,
+          original.value,
+          original.updatedAt,
+          bound,
+          current
+        )
+        if (saved && destination.localProfileId !== undefined) {
+          await verifyOriginalLocalProfile({
+            ...destination,
+            isCurrent: current
+          })
+          if (!scenes.isDurable()) return false
+        }
+        return saved && current()
+      }
+    )
+  } catch {
+    return false
   }
 }
 

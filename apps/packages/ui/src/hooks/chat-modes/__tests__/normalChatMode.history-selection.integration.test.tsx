@@ -110,6 +110,16 @@ import { Storage } from "@plasmohq/storage"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { readChatCreationRecovery } from "@/services/pending-chat-promotion"
 import type { ChatDraftHandle } from "@/utils/chat-draft-address"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import {
+  getActorSceneForChat,
+  saveActorSettingsForChat,
+  type ActorSceneRead
+} from "@/services/actor-settings"
+import { createDefaultActorSettings } from "@/types/actor"
+import { useActorStore } from "@/store/actor"
+import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 
 let newServerId = "new-server"
 const createdServerChat = async (body: { id?: string }) => {
@@ -126,41 +136,72 @@ const snapshot = (): ServicePromptSnapshot => ({
   scopeInvalidatedSignal: new AbortController().signal,
   release: () => {}
 })
-const send = (controller: HistorySelectionController, options: {
-  historyId?: string
-  serverChatId?: string
-  message?: string
-  image?: string
-  snapshot?: ServicePromptSnapshot | null
-  originIsCurrent?: () => boolean
-  sourceIsCurrent?: () => boolean
-  setHistoryId?: (id: string) => void
-  toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
-  fixedOverrides?: boolean
-  setServerChatId?: (id: string) => void
-  saveOnSuccess?: typeof saveMessageOnSuccess
-  surface?: "playground" | "sidepanel"
-} = {}) => {
+const send = (
+  controller: HistorySelectionController,
+  options: {
+    historyId?: string
+    serverChatId?: string
+    actorScene?: ActorSceneRead
+    message?: string
+    image?: string
+    snapshot?: ServicePromptSnapshot | null
+    originIsCurrent?: () => boolean
+    sourceIsCurrent?: () => boolean
+    setHistoryId?: (id: string) => void
+    toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
+    fixedOverrides?: boolean
+    setServerChatId?: (id: string) => void
+    saveOnSuccess?: typeof saveMessageOnSuccess
+    surface?: "playground" | "sidepanel"
+  } = {}
+) => {
   const params: Parameters<typeof normalChatMode>[6] = {
-    selectedModel: "test", selectedSystemPrompt: "", useOCR: false,
-    currentChatModelSettings: {}, servicePromptSnapshot: options.snapshot === null ? undefined : options.snapshot ?? snapshot(),
-    toolChoice: options.toolChoice ?? useStoreMessageOption.getState().toolChoice,
+    actorScene: options.actorScene,
+    actorSettings: options.actorScene?.settings,
+    selectedModel: "test",
+    selectedSystemPrompt: "",
+    useOCR: false,
+    currentChatModelSettings: {},
+    servicePromptSnapshot:
+      options.snapshot === null ? undefined : options.snapshot ?? snapshot(),
+    toolChoice:
+      options.toolChoice ?? useStoreMessageOption.getState().toolChoice,
     selectionSource: {
       model: options.fixedOverrides ? "explicit" : "global",
       toolChoice: options.fixedOverrides ? "explicit" : "global"
     },
-    historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true), ...(options.sourceIsCurrent ? { sourceIsCurrent: options.sourceIsCurrent } : {}), createServerChat: Boolean(options.setServerChatId) },
+    historySelection: {
+      controller,
+      originIsCurrent: options.originIsCurrent ?? (() => true),
+      ...(options.sourceIsCurrent
+        ? { sourceIsCurrent: options.sourceIsCurrent }
+        : {}),
+      createServerChat: Boolean(options.setServerChatId)
+    },
     historyId: options.historyId ?? null,
     serverChatId: options.serverChatId,
     setServerChatId: options.setServerChatId,
     ...{ surface: options.surface ?? "playground" },
     setHistoryId: options.setHistoryId ?? (() => {}),
-    setMessages: () => {}, setHistory: () => {}, setIsProcessing: () => {},
-    setStreaming: () => {}, setAbortController: () => {},
-    saveMessageOnSuccess: options.saveOnSuccess ?? saveMessageOnSuccess, saveMessageOnError,
-    userMessageId: "first-user", assistantMessageId: "first-answer"
+    setMessages: () => {},
+    setHistory: () => {},
+    setIsProcessing: () => {},
+    setStreaming: () => {},
+    setAbortController: () => {},
+    saveMessageOnSuccess: options.saveOnSuccess ?? saveMessageOnSuccess,
+    saveMessageOnError,
+    userMessageId: "first-user",
+    assistantMessageId: "first-answer"
   }
-  return normalChatMode(options.message ?? "First question", options.image ?? "", false, [], [], new AbortController().signal, params)
+  return normalChatMode(
+    options.message ?? "First question",
+    options.image ?? "",
+    false,
+    [],
+    [],
+    new AbortController().signal,
+    params
+  )
 }
 const publicHistory = (id: string): HistoryInfo => ({ id, title: "Imported", createdAt: 1, is_rag: false, message_source: "web-ui" })
 const savedMessages = async (): Promise<Message[]> => await storage.tables.messages.toArray() as Message[]
@@ -221,6 +262,265 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks() })
 
 describe("normal Chat owned history creation and H1 admission", () => {
+  it.each(["native", "local"] as const)(
+    "carries the original saved fresh scene through its accepted %s first bind",
+    async (kind) => {
+      const source = useStoreMessageOption.getState()
+      const target = captureActorSettingsTarget({
+        address: source.chatDraftAddress,
+        requestScope: snapshot().requestScope,
+        accountIsCurrent: () => true,
+        isCurrent: () =>
+          useStoreMessageOption.getState().chatDraftAddress ===
+          source.chatDraftAddress
+      })!
+      const scene = {
+        ...createDefaultActorSettings(),
+        isEnabled: true,
+        notes: "Exact original first-send scene"
+      }
+      expect(
+        await saveActorSettingsForChat({
+          historyId: null,
+          serverChatId: null,
+          target,
+          expectedRecord: null,
+          settings: scene
+        })
+      ).toBe(true)
+      const read = await getActorSceneForChat({ target })
+      const mounted = renderHook(() => useHistorySelection())
+      useActorStore.getState().reset()
+      if (kind === "native") {
+        vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+        vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+          async (_id, request) => emptyServerCapture(request)
+        )
+        vi.spyOn(tldwClient, "addChatMessage").mockImplementation(
+          async (_id, body) =>
+            ({
+              id: body.id,
+              ...(body.tldw_history_selection_v1
+                ? {
+                    tldw_history_admission_v1: {
+                      version: 1,
+                      owner_key: "server-owner",
+                      conversation_id: newServerId,
+                      input_message_id: body.id,
+                      input_message_revision: "1",
+                      selection_digest:
+                        body.tldw_history_selection_v1.selection_digest,
+                      messages: body.tldw_history_selection_v1.messages,
+                      originating_selection_revision:
+                        body.tldw_history_selection_v1.selection_revision
+                    }
+                  }
+                : {})
+            }) as never
+        )
+      }
+      await act(async () => {
+        expect(
+          await send(mounted.result.current, {
+            actorScene: read,
+            setHistoryId: (id) =>
+              useStoreMessageOption.getState().setHistoryId(id),
+            ...(kind === "native"
+              ? {
+                  setServerChatId: (id) =>
+                    useStoreMessageOption.getState().setServerChatId(id)
+                }
+              : {})
+          })
+        ).toEqual({ status: "submitted" })
+      })
+      const selected = mounted.result.current.getCurrent()
+      const bound = captureActorSettingsTarget({
+        address: useStoreMessageOption.getState().chatDraftAddress,
+        owner: selected.owner,
+        view: selected.view,
+        requestScope: snapshot().requestScope,
+        accountIsCurrent: () => true,
+        isCurrent: () => true
+      })!
+      expect(
+        (await getActorSceneForChat({ target: bound })).originalRecord
+      ).toEqual(read.originalRecord)
+      expect(
+        await new Storage({ area: "local" }).get(
+          `actorSettings:owned:${target.key}`
+        )
+      ).toEqual(read.originalRecord)
+      expect(useActorStore.getState().applied?.target.key).toBe(bound.key)
+      expect(useActorStore.getState().applied?.settings).toEqual(scene)
+      expect(
+        JSON.stringify(vi.mocked(tldwChat.streamMessage).mock.calls)
+      ).toContain(scene.notes)
+      mounted.unmount()
+    }
+  )
+  it("sends the original genuine-local scene without requiring unrelated backend-default verification", async () => {
+    const created = await saveHistory(
+      "Local scene",
+      false,
+      "web-ui",
+      undefined,
+      undefined,
+      snapshot().requestScope
+    )
+    const mounted = renderHook(() => useHistorySelection())
+    await act(async () => {
+      expect(
+        await mounted.result.current.loadConversation({ historyId: created.id })
+      ).toBe(true)
+    })
+    const selected = mounted.result.current.getCurrent()
+    if (!selected.owner || !selected.view) throw new Error("fixture_receipt")
+    expect(
+      captureChatDraftLoad("switch")({
+        owner: selected.owner,
+        view: selected.view
+      })
+    ).toBe(true)
+    useStoreMessageOption.getState().setHistoryId(created.id)
+    const target = captureCurrentActorSceneTarget(mounted.result.current)!
+    expect(target.account).toBeUndefined()
+    const scene = {
+      ...createDefaultActorSettings(),
+      isEnabled: true,
+      notes: "Owned local scene remains usable"
+    }
+    expect(
+      await saveActorSettingsForChat({
+        historyId: created.id,
+        serverChatId: null,
+        target,
+        expectedRecord: null,
+        settings: scene
+      })
+    ).toBe(true)
+    const read = await getActorSceneForChat({ target })
+    await act(async () => {
+      expect(
+        await send(mounted.result.current, {
+          actorScene: read,
+          historyId: created.id
+        })
+      ).toEqual({ status: "submitted" })
+    })
+    expect(tldwChat.streamMessage).toHaveBeenCalledOnce()
+    mounted.unmount()
+  })
+
+  it.each(["same-ID reload", "destination conflict"] as const)(
+    "retains the accepted identity bind and prevents scene dispatch after %s",
+    async (boundary) => {
+      const handle = creationSource()
+      const state = useStoreMessageOption.getState()
+      const target = captureActorSettingsTarget({
+        address: state.chatDraftAddress,
+        requestScope: snapshot().requestScope,
+        accountIsCurrent: () => true,
+        isCurrent: () =>
+          useStoreMessageOption.getState().chatDraftAddress ===
+          state.chatDraftAddress
+      })!
+      const scene = {
+        ...createDefaultActorSettings(),
+        notes: "Saved original scene before native bind"
+      }
+      expect(
+        await saveActorSettingsForChat({
+          historyId: null,
+          serverChatId: null,
+          target,
+          expectedRecord: null,
+          settings: scene
+        })
+      ).toBe(true)
+      const read = await getActorSceneForChat({ target })
+      const mounted = renderHook(() => useHistorySelection())
+      useActorStore.getState().reset()
+      vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+      vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+        async (_id, request) => emptyServerCapture(request)
+      )
+      vi.spyOn(tldwClient, "addChatMessage")
+      const sourceKey = `actorSettings:owned:${target.key}`
+      let release!: () => void
+      let writeEntered!: () => void
+      const entered = new Promise<void>((resolve) => {
+        writeEntered = resolve
+      })
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const originalSet = Storage.prototype.set
+      const originalGet = Storage.prototype.get
+      const competing = {
+        value: { ...scene, notes: "Independent destination scene" },
+        updatedAt: 999
+      }
+      let destinationKey: string | undefined
+      if (boundary === "same-ID reload") {
+        vi.spyOn(Storage.prototype, "set").mockImplementation(
+          async function (key, value) {
+            if (key.startsWith("actorSettings:owned:") && key !== sourceKey) {
+              destinationKey = key
+              writeEntered()
+              await held
+            }
+            return originalSet.call(this, key, value)
+          }
+        )
+      } else {
+        vi.spyOn(Storage.prototype, "get").mockImplementation(
+          async function (key) {
+            if (
+              key.startsWith("actorSettings:owned:") &&
+              key !== sourceKey &&
+              !destinationKey
+            ) {
+              destinationKey = key
+              await originalSet.call(this, key, competing)
+            }
+            return originalGet.call(this, key)
+          }
+        )
+      }
+      let attempt!: Promise<unknown>
+      await act(async () => {
+        attempt = send(mounted.result.current, {
+          actorScene: read,
+          setServerChatId: (id) =>
+            useStoreMessageOption.getState().setServerChatId(id)
+        }).catch((error) => error)
+        if (boundary === "same-ID reload") {
+          await entered
+          mounted.result.current.beginLoad()
+          release()
+        }
+        expect(await attempt).toBeInstanceOf(Error)
+      })
+      expect(useActorStore.getState().applied).toBeNull()
+      expect(await readChatCreationRecovery(handle)).toMatchObject({
+        state: "bound",
+        chatId: newServerId,
+        inputText: "First question"
+      })
+      expect(tldwClient.addChatMessage).not.toHaveBeenCalled()
+      expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+      expect(await new Storage({ area: "local" }).get(sourceKey)).toEqual(
+        read.originalRecord
+      )
+      if (boundary === "destination conflict")
+        expect(await new Storage({ area: "local" }).get(destinationKey!)).toEqual(
+          competing
+        )
+      mounted.unmount()
+    }
+  )
+
   it.each(["owned", "foreign", "other conversation"])("checks a historyId-only native mirror against its captured owner (%s)", async kind => {
     const historyId = await linkServerChatMirror({ chatId: kind === "other conversation" ? "other" : "native",
       title: "Mirror", ownerKey: kind === "foreign" ? "other-account" : ACCOUNT })

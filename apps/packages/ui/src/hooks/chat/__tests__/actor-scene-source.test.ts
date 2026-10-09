@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftLoad } from "../chat-draft-transition"
-import { captureCurrentActorSceneTarget } from "../actor-scene-source"
+import {
+  captureCurrentActorSceneTarget,
+  captureBoundActorSceneTarget
+} from "../actor-scene-source"
 import type {
   HistorySelectionController,
   HistoryLoadReceipt
@@ -77,6 +80,21 @@ describe("scene destination captured from actual store and declared accepted H1 
       original?.key
     )
   })
+  it("refuses a command whose rendered source was already retired", () => {
+    const { controller } = selection()
+    expect(captureCurrentActorSceneTarget(controller, () => false)).toBeNull()
+  })
+  it("retains the original command guard through later preparation", () => {
+    const { controller } = selection()
+    let commandCurrent = true
+    const target = captureCurrentActorSceneTarget(
+      controller,
+      () => commandCurrent
+    )
+    expect(target?.isCurrent()).toBe(true)
+    commandCurrent = false
+    expect(target?.isCurrent()).toBe(false)
+  })
   it("refuses a fresh source without verified account ownership", () => {
     const source = selection()
     source.retireAccount()
@@ -151,6 +169,56 @@ describe("scene destination captured from actual store and declared accepted H1 
       } as HistoryLoadReceipt["owner"]
     })
     expect(captureCurrentActorSceneTarget(source.controller)).toBeNull()
+  })
+  it.each(["native", "local"] as const)(
+    "qualifies accepted %s binding from the original fresh account after its strict source retires",
+    (kind) => {
+      const source = selection()
+      const fresh = captureCurrentActorSceneTarget(source.controller)!
+      const accept = captureChatDraftLoad("bind")
+      const h1 = receipt(kind)
+      source.replace(h1)
+      expect(accept(h1)).toBe(true)
+      useStoreMessageOption.setState({
+        historyId: kind === "local" ? "one" : null,
+        serverChatId: kind === "native" ? "one" : null
+      })
+      expect(fresh.isCurrent()).toBe(false)
+      const bound = captureBoundActorSceneTarget(fresh, h1, accept.isCurrent)
+      expect(bound?.isCurrent()).toBe(true)
+      source.retireAccount()
+      expect(bound?.isCurrent()).toBe(kind === "local")
+      expect(bound?.account?.isCurrent()).toBe(false)
+    }
+  )
+  it.each(["account", "workspace", "binding"] as const)(
+    "refuses an accepted-bind target with a different original %s",
+    (mismatch) => {
+      const source = selection()
+      const fresh = captureCurrentActorSceneTarget(source.controller)!
+      const h1 = receipt("native")
+      if (h1.owner.kind !== "native") throw new Error("fixture_owner")
+      if (mismatch === "account")
+        h1.owner = {
+          ...h1.owner,
+          request_scope: { ...requestScope, userId: 2 }
+        }
+      if (mismatch === "workspace")
+        h1.owner = {
+          ...h1.owner,
+          scope: { type: "workspace", workspaceId: "other" }
+        }
+      expect(
+        captureBoundActorSceneTarget(fresh, h1, () => mismatch !== "binding")
+      ).toBeNull()
+    }
+  )
+  it("refuses to transfer an already saved scene on a switch or reviewed creation", () => {
+    const h1 = receipt("native"),
+      source = selection(h1)
+    install(h1)
+    const saved = captureCurrentActorSceneTarget(source.controller)!
+    expect(captureBoundActorSceneTarget(saved, h1, () => true)).toBeNull()
   })
   it("refuses inconsistent raw server ID versus draft address", () => {
     const h1 = receipt("native"),

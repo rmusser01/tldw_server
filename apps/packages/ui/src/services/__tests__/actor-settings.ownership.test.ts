@@ -30,8 +30,22 @@ import {
   getActorSceneForChat,
   saveActorSettingsForChat,
   getActorProfileForCharacter,
-  saveActorProfileForCharacter
+  saveActorProfileForCharacter,
+  copyActorSceneToBoundChat
 } from "../actor-settings"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import {
+  bindActorSceneAfterLoad,
+  readActorSceneForSend
+} from "@/hooks/chat/actor-scene-source"
+import { useActorStore } from "@/store/actor"
+import { useStoreMessageOption } from "@/store/option"
+import type { ChatScope } from "@/types/chat-scope"
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
+import type {
+  HistorySelectionController,
+  HistoryLoadReceipt
+} from "@/hooks/chat/useHistorySelection"
 
 const accountA = "a".repeat(64),
   accountB = "b".repeat(64)
@@ -149,6 +163,433 @@ describe("qualified scene and character-default records", () => {
     expect(io.values.get(legacyKey)).toEqual(sceneA)
     expect(io.get).not.toHaveBeenCalledWith(legacyKey)
     expect(io.set).not.toHaveBeenCalled()
+  })
+
+  describe("frozen fresh scene copy after an explicitly accepted bind", () => {
+    const requestScope = {
+      config: {
+        serverUrl: "https://bind-scene.example",
+        authMode: "single-user" as const
+      },
+      userId: 1
+    }
+    const arrangeBind = async (
+      kind: "native" | "local" = "native",
+      saved = true,
+      scope: ChatScope = { type: "global" }
+    ) => {
+      let sourceCurrent = true,
+        accountCurrent = true,
+        bindingCurrent = true
+      const fresh = captureActorSettingsTarget({
+        address: { kind: "fresh", id: "fresh-copy", scope, temporary: false },
+        requestScope,
+        accountIsCurrent: () => accountCurrent,
+        isCurrent: () => sourceCurrent
+      })!
+      const record = { value: structuredClone(sceneA), updatedAt: 7 }
+      if (saved) io.values.set(sceneKey(fresh), record)
+      const read = await getActorSceneForChat({ target: fresh })
+      const owner =
+        kind === "native"
+          ? {
+              kind,
+              conversation_id: "bound-one",
+              owner_key: "accepted-owner",
+              request_scope: requestScope,
+              scope,
+              validate_lease: () => bindingCurrent
+            }
+          : {
+              kind,
+              conversation_id: "bound-one",
+              owner_key: "accepted-owner",
+              profile_id: "profile-a",
+              validate_lease: () => bindingCurrent
+            }
+      const destination = captureActorSettingsTarget({
+        address:
+          kind === "native"
+            ? { kind, id: "bound-one", ownerKey: "accepted-owner", scope }
+            : { kind, id: "bound-one", profileId: "profile-a" },
+        owner,
+        view: {
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one"
+        } as HistoryLoadReceipt["view"],
+        requestScope,
+        accountIsCurrent: () => accountCurrent,
+        isCurrent: () => bindingCurrent
+      })!
+      sourceCurrent = false
+      io.set.mockClear()
+      return {
+        fresh,
+        destination,
+        read,
+        record,
+        retireAccount: () => {
+          accountCurrent = false
+        },
+        retireBinding: () => {
+          bindingCurrent = false
+        }
+      }
+    }
+    it.each(["native", "local"] as const)(
+      "copies an original saved scene to accepted %s ownership and retains its source",
+      async (kind) => {
+        const bound = await arrangeBind(kind)
+        expect(bound.fresh.isCurrent()).toBe(false)
+        expect(
+          await copyActorSceneToBoundChat(bound.read, bound.destination)
+        ).toBe(true)
+        expect(io.values.get(sceneKey(bound.fresh))).toEqual(bound.record)
+        expect(io.values.get(sceneKey(bound.destination))).toEqual(bound.record)
+      }
+    )
+    it("publishes an owned atomic scene only after its accepted copy is acknowledged", async () => {
+      const bound = await arrangeBind()
+      const receipt: HistoryLoadReceipt = {
+        owner: {
+          kind: "native",
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one",
+          request_scope: requestScope,
+          validate_lease: () => true
+        },
+        view: {
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one"
+        } as HistoryLoadReceipt["view"]
+      }
+      useActorStore.getState().reset()
+      expect(await bindActorSceneAfterLoad(bound.read, receipt, () => true)).toBe(
+        true
+      )
+      expect(useActorStore.getState().applied?.target.key).toBe(
+        bound.destination.key
+      )
+      expect(useActorStore.getState().applied?.settings).toEqual(sceneA)
+      expect(io.values.get(sceneKey(bound.destination))).toEqual(bound.record)
+    })
+    it("keeps inherited defaults staged after an accepted bind", async () => {
+      const bound = await arrangeBind("native", false)
+      const receipt: HistoryLoadReceipt = {
+        owner: {
+          kind: "native",
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one",
+          request_scope: requestScope,
+          validate_lease: () => true
+        },
+        view: {
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one"
+        } as HistoryLoadReceipt["view"]
+      }
+      useActorStore.getState().reset()
+      expect(
+        await bindActorSceneAfterLoad(
+          { ...bound.read, origin: "profile", settings: sceneA },
+          receipt,
+          () => true
+        )
+      ).toBe(true)
+      expect(useActorStore.getState().applied).toBeNull()
+      expect(io.set).not.toHaveBeenCalled()
+    })
+    it("does not publish Applied after preparation retires during its copy", async () => {
+      const bound = await arrangeBind()
+      const receipt: HistoryLoadReceipt = {
+        owner: {
+          kind: "native",
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one",
+          request_scope: requestScope,
+          validate_lease: () => true
+        },
+        view: {
+          owner_key: "accepted-owner",
+          conversation_id: "bound-one"
+        } as HistoryLoadReceipt["view"]
+      }
+      useActorStore.getState().reset()
+      let current = true
+      io.set.mockImplementationOnce(async (key: string, value: unknown) => {
+        io.values.set(key, value)
+        current = false
+      })
+      expect(
+        await bindActorSceneAfterLoad(
+          bound.read,
+          receipt,
+          () => true,
+          () => current
+        )
+      ).toBe(false)
+      expect(useActorStore.getState().applied).toBeNull()
+      expect(io.values.get(sceneKey(bound.fresh))).toEqual(bound.record)
+    })
+    it("reads the original qualified send source without inheriting character defaults", async () => {
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+      const controller = {
+        getCurrent: () => ({ status: "idle", owner: null, view: null }),
+        draftAccount: { requestScope, isCurrent: () => true }
+      } as unknown as HistorySelectionController
+      const read = await readActorSceneForSend(controller, () => true)
+      expect(read.originalRecord).toBeNull()
+      expect(read.origin).toBe("default")
+      expect(read.target.account?.requestScope).toEqual(requestScope)
+      expect(
+        io.get.mock.calls.every(([key]) => key.startsWith("actorSettings:owned:"))
+      ).toBe(true)
+    })
+    it("refuses a send source before IO when its original backend account is unavailable", async () => {
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+      const controller = {
+        getCurrent: () => ({ status: "idle", owner: null, view: null }),
+        draftAccount: { requestScope, isCurrent: () => false }
+      } as unknown as HistorySelectionController
+      await expect(readActorSceneForSend(controller, () => true)).rejects.toThrow(
+        "actor_settings_unavailable"
+      )
+      expect(io.get).not.toHaveBeenCalled()
+    })
+    it.each(["preparation", "account"] as const)(
+      "does not acknowledge retirement during Applied publication (%s)",
+      async (retired) => {
+        const bound = await arrangeBind("local")
+        const receipt: HistoryLoadReceipt = {
+          owner: {
+            kind: "local",
+            owner_key: "accepted-owner",
+            conversation_id: "bound-one",
+            profile_id: "profile-a"
+          },
+          view: {
+            owner_key: "accepted-owner",
+            conversation_id: "bound-one"
+          } as HistoryLoadReceipt["view"]
+        }
+        useActorStore.getState().reset()
+        let current = true
+        const unsubscribe = useActorStore.subscribe((state) => {
+          if (state.applied) {
+            if (retired === "preparation") current = false
+            else bound.retireAccount()
+          }
+        })
+        try {
+          expect(
+            await bindActorSceneAfterLoad(
+              bound.read,
+              receipt,
+              () => true,
+              () => current
+            )
+          ).toBe(false)
+          expect(useActorStore.getState().applied?.target.isCurrent()).toBe(true)
+          expect(io.values.get(sceneKey(bound.destination))).toEqual(bound.record)
+        } finally {
+          unsubscribe()
+        }
+      }
+    )
+    it.each(["absent", "retired"] as const)(
+      "reads a genuine-local scene with %s optional backend verification",
+      async (account) => {
+        useStoreMessageOption.getState().startNewChatDraft(false)
+        useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+        const receipt: HistoryLoadReceipt = {
+          owner: {
+            kind: "local",
+            owner_key: "local-owner",
+            conversation_id: "owned-local",
+            profile_id: "profile-a"
+          },
+          view: {
+            owner_key: "local-owner",
+            conversation_id: "owned-local"
+          } as HistoryLoadReceipt["view"]
+        }
+        expect(captureChatDraftLoad("switch")(receipt)).toBe(true)
+        useStoreMessageOption.setState({
+          historyId: "owned-local",
+          serverChatId: null
+        })
+        const controller = {
+          getCurrent: () => ({ status: "ready", ...receipt }),
+          ...(account === "retired"
+            ? { draftAccount: { requestScope, isCurrent: () => false } }
+            : {})
+        } as unknown as HistorySelectionController
+        expect((await readActorSceneForSend(controller)).origin).toBe("default")
+        expect(io.verifyProfile).toHaveBeenCalledWith("profile-a")
+      }
+    )
+    it.each([
+      [{ type: "global" }, { type: "workspace", workspaceId: "workspace-b" }],
+      [{ type: "workspace", workspaceId: "workspace-a" }, { type: "global" }],
+      [
+        { type: "workspace", workspaceId: "workspace-a" },
+        { type: "workspace", workspaceId: "workspace-b" }
+      ]
+    ] as [ChatScope, ChatScope][])(
+      "refuses a qualified native destination in another scope (%j to %j)",
+      async (sourceScope, destinationScope) => {
+        const bound = await arrangeBind("native", true, sourceScope)
+        const destination = captureActorSettingsTarget({
+          address: {
+            kind: "native",
+            id: "other-scope",
+            ownerKey: "other-owner",
+            scope: destinationScope
+          },
+          owner: {
+            kind: "native",
+            conversation_id: "other-scope",
+            owner_key: "other-owner",
+            request_scope: requestScope,
+            scope: destinationScope,
+            validate_lease: () => true
+          },
+          view: {
+            owner_key: "other-owner",
+            conversation_id: "other-scope"
+          } as HistoryLoadReceipt["view"],
+          requestScope,
+          accountIsCurrent: () => true,
+          isCurrent: () => true
+        })!
+        io.get.mockClear()
+        expect(await copyActorSceneToBoundChat(bound.read, destination)).toBe(
+          false
+        )
+        expect(io.get).not.toHaveBeenCalled()
+        expect(io.set).not.toHaveBeenCalled()
+      }
+    )
+    it("settles an exact prior copy without changing its raw record", async () => {
+      const bound = await arrangeBind()
+      io.values.set(sceneKey(bound.destination), structuredClone(bound.record))
+      expect(await copyActorSceneToBoundChat(bound.read, bound.destination)).toBe(
+        true
+      )
+      expect(io.values.get(sceneKey(bound.destination))).toEqual(bound.record)
+      expect(io.set).toHaveBeenCalledWith(
+        sceneKey(bound.destination),
+        bound.record
+      )
+    })
+    it.each(["source", "destination"] as const)(
+      "preserves independently changed %s data instead of refreshing the frozen receipt",
+      async (changed) => {
+        const bound = await arrangeBind()
+        const newer = { value: sceneB, updatedAt: 8 }
+        const key = sceneKey(
+          changed === "source" ? bound.fresh : bound.destination
+        )
+        io.values.set(key, newer)
+        expect(
+          await copyActorSceneToBoundChat(bound.read, bound.destination)
+        ).toBe(false)
+        expect(io.values.get(key)).toEqual(newer)
+        expect(io.set).not.toHaveBeenCalled()
+      }
+    )
+    it.each(["account", "binding"] as const)(
+      "refuses a retired original %s before copy IO",
+      async (retired) => {
+        const bound = await arrangeBind()
+        if (retired === "account") bound.retireAccount()
+        else bound.retireBinding()
+        io.get.mockClear()
+        expect(
+          await copyActorSceneToBoundChat(bound.read, bound.destination)
+        ).toBe(false)
+        expect(io.get).not.toHaveBeenCalled()
+        expect(io.set).not.toHaveBeenCalled()
+      }
+    )
+    it("refuses a non-fresh source even when its scene is saved", async () => {
+      const read = await getActorSceneForChat({ target: native })
+      expect(await copyActorSceneToBoundChat(read, native)).toBe(false)
+      expect(io.set).not.toHaveBeenCalled()
+    })
+    it("does not persist inherited defaults as an applied destination scene", async () => {
+      const bound = await arrangeBind("native", false)
+      const inherited = {
+        ...bound.read,
+        origin: "profile" as const,
+        settings: sceneA
+      }
+      expect(await copyActorSceneToBoundChat(inherited, bound.destination)).toBe(
+        false
+      )
+      expect(io.set).not.toHaveBeenCalled()
+      expect(io.values.has(sceneKey(bound.destination))).toBe(false)
+    })
+    it("requires the same existing cross-context source lock for a saved copy", async () => {
+      const bound = await arrangeBind()
+      vi.stubGlobal(
+        "navigator",
+        Object.create(window.navigator, { locks: { value: undefined } })
+      )
+      expect(await copyActorSceneToBoundChat(bound.read, bound.destination)).toBe(
+        false
+      )
+      expect(io.set).not.toHaveBeenCalled()
+    })
+    it("holds the original source lock through destination CAS", async () => {
+      const bound = await arrangeBind()
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      io.set.mockImplementationOnce(async (key: string, value: unknown) => {
+        await held
+        io.values.set(key, value)
+      })
+      const copying = copyActorSceneToBoundChat(bound.read, bound.destination)
+      await vi.waitFor(() => expect(io.set).toHaveBeenCalledOnce())
+      let replacementSettled = false
+      const replacing = saveActorSettingsForChat({
+        historyId: null,
+        serverChatId: null,
+        target: { ...bound.fresh, isCurrent: () => true },
+        expectedRecord: bound.record,
+        settings: sceneB
+      }).then((result) => {
+        replacementSettled = true
+        return result
+      })
+      await Promise.resolve()
+      expect(replacementSettled).toBe(false)
+      release()
+      expect(await copying).toBe(true)
+      expect(await replacing).toBe(true)
+      expect(io.values.get(sceneKey(bound.destination))).toEqual(bound.record)
+    })
+    it("does not acknowledge a copy whose accepted destination retires during its write", async () => {
+      const bound = await arrangeBind()
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      io.set.mockImplementationOnce(async (key: string, value: unknown) => {
+        await held
+        io.values.set(key, value)
+      })
+      const copying = copyActorSceneToBoundChat(bound.read, bound.destination)
+      await vi.waitFor(() => expect(io.set).toHaveBeenCalledOnce())
+      bound.retireBinding()
+      release()
+      expect(await copying).toBe(false)
+      expect(io.values.get(sceneKey(bound.fresh))).toEqual(bound.record)
+    })
   })
 
   it("isolates the same character card's defaults by captured account", async () => {
