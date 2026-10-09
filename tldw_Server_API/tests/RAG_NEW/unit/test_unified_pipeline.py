@@ -931,7 +931,6 @@ class TestUnifiedPipeline:
                     assert md.get(key) == value
 
 
-
 @pytest.mark.unit
 class TestUnifiedPipelineParams:
     """Basic parameter validation through unified entry point."""
@@ -941,8 +940,6 @@ class TestUnifiedPipelineParams:
         result = await unified_rag_pipeline(query="   ")
         errs = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
         assert errs and len(errs) > 0
-
-
 
 
 @pytest.mark.unit
@@ -1024,11 +1021,15 @@ if __name__ == "__main__":
 async def test_security_exclusion_reason_survives_real_finalization(monkeypatch, interface, outcome):
     """Actual retained counts must survive finalization without attributing unrelated empties."""
     from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
-    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import BaseRetriever, MultiDatabaseRetriever
 
-    class Source:
+    class Source(BaseRetriever):
         def __init__(self, source):
+            super().__init__(":memory:")
             self.source = source
+
+        async def get_metadata(self, doc_id):
+            return {}
 
         async def retrieve(self, query, **kwargs):
             if self.source == DataSource.CHAT_HISTORY:

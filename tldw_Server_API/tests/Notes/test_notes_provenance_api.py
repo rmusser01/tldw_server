@@ -4,6 +4,7 @@ import csv
 import io
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -981,7 +982,7 @@ def test_inactive_keyed_create_replays_original_ack_after_edit(client, chacha_db
     from uuid import uuid4
 
     monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
-    body = {"id": str(uuid4()), "title": "Original", "content": "Original body"}
+    body: dict[str, Any] = {"id": str(uuid4()), "title": "Original", "content": "Original body"}
     if sourced:
         body.update(knowledge_provenance=PAYLOAD, expected_provenance_version=0)
     if organized:
@@ -1022,7 +1023,7 @@ def test_inactive_keyed_plain_update_replays_exact_ack(client, chacha_db, monkey
     monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
     saved = client.post(BASE + "/", json={"title": "Plain", "content": "Before"}).json()
     path = BASE + "/" + saved["id"]
-    body = {"content": "Accepted"}
+    body: dict[str, Any] = {"content": "Accepted"}
     if organized:
         body.update(keywords=["Accepted"], folder_paths=["Accepted"])
     headers = {"expected-version": "1", "Idempotency-Key": "plain-update"}
