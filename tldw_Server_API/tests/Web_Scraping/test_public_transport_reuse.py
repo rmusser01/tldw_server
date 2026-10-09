@@ -19,6 +19,11 @@ URL = "http://public.example/article"
 IP = "93.184.216.34"
 
 
+@pytest.fixture(autouse=True)
+def _allow_public_test_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(egress.ALLOWLIST_ENV, "public.example")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["excess", "compressed", "success"])
 async def test_public_httpx_probe_enforces_existing_body_limit(monkeypatch, kind):
