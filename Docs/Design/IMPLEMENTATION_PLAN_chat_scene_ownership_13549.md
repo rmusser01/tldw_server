@@ -18,13 +18,13 @@ ADR assessment: no new ADR. Derived private device locators, existing bucket rec
 **Goal**: Make the reused storage primitive certify reads, and define original owner/address qualification.
 **Success Criteria**: Held strict reads after backend loss reject before presence/absence; advisory/pinned behavior stays compatible. Captured target tests distinguish account/server/auth-source/org/user/workspace/fresh/local/card collisions and reject unavailable/mismatched/retired owners without storage IO.
 **Tests**: Actual bucket red/green plus existing claims/recovery/tabs; pure and actual-service source controls.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Qualified records and original-read editor commitment
 **Goal**: Replace ambiguous scene/profile storage with private qualified records and original hydration CAS across three editors/default controls.
 **Success Criteria**: Account/chat/local-profile collisions isolate, original-record conflicts preserve newer data/staged proposal, unknown reads cannot Save, held lease retirement cannot acknowledge, and supported metadata remains compatible. All actual editor/default calls carry captured source/receipt; read fallback does not certify an unverified profile.
 **Tests**: Actual service records, held IO/lock/context/ABA, real scene editors and explicit defaults/Retry.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 3: Applied projection and dispatch preparation
 **Goal**: Keep staged/read defaults separate from owned Applied state; every dispatch prepares from its original qualified scene.
@@ -53,3 +53,10 @@ Stage1 prerequisite evidence: held actual bucket read red2 failures/2 positives 
 Accepted-address publication prerequisite (2026-10-09): the actual core setter previously returned true after a synchronous subscriber replaced its address; captureChatDraftLoad then adopted the replacement. Shared setter now verifies the exact issued address reference and revision after subscribers finish. New and same-reference destination ABA refuse; legitimate same-key no-op and unrelated store updates stay accepted. This acknowledges current adoption, not rollback of an already issued publication.
 
 Qualified actual-store matrix8 red failures/11 positives and unchanged-source broader8 failures/710 positives become nine affected suites718/718 green, including native/full/compact/local/restore/composer callers. Both types pass; two authored scopes add zero lint findings, formatter2 is runtime-equivalent and both independent reviews CLEAR. Evidence `/private/tmp/chat-scene-ownership-13549-bind-`. The first broad textual edit matched two accepted variables and made no writes; its ensuing unchanged-source baseline is explicitly not green. Receipt owner/account transport is declared fixture data. Namespace/CAS/projection/actual scene transfer and current native/packaged/physical AT/participant/all-ten acceptance stay open; Bandit N/A TS/Markdown-only. All ownership plan stages remain in progress or not started.
+
+
+Qualified-record primitive checkpoint (2026-10-09): private scene locators distinguish full account/workspace/fresh-address and genuine local profile/conversation; defaults distinguish account/card. New paths reuse durable unpinned local buckets, strict original-record reads and Web Locks CAS. Raw receipt stays distinct from normalized staged proposal. Scene Save freezes original/proposal, refuses unknown expectation/conflicts/retirement, and cannot refresh its original at Save time. Optional inherited-profile unavailability stays explicit in the richer receipt; the settings-only wrapper refuses it and qualified profile reads always fail closed. Both writers certify their own local area, validate exact record/date shape and monotonic successor timestamps, and preserve malformed/ambiguous legacy records.
+
+Evidence: initial namespace red17 failures; held-operation red1/24 positives; strengthened reviewer red12/26 positives; timestamp red2/38 positives. Final six unique suites194 selected checks = shared records40/integrity87/constructors21/assistant15+27 plus selected actual-editor integrity4; 82 other editor cases unselected. Both final client types and six authored TS lint scopes pass (zero introduced findings); formatter5 is runtime-equivalent and both approved independent source reviewers CLEAR. Prefix `/private/tmp/chat-scene-ownership-13549-records-`. The broad whole-editor run was interrupted after stalling in a held model-default interaction; it is unqualified, not a proven HEAD baseline or whole-editor acceptance. Two scoped test writes failed before edits due cwd mismatches; a repeat formatter used a stale import anchor and made no writes, with set-e preventing its CLI. Bandit N/A TS/Markdown-only. Constructor and storage boundaries are declared fixtures, not current native/packaged/physical AT/participant proof.
+
+The new primitive is an incremental prerequisite. Legacy no-target branches remain transitional: all production callers, original editor receipts, independent Applied projection and accepted first-bind transfer are still required before namespace closure. The master settings Stage2/3/4, TASK-13549 and parent/all-ten remain In Progress. No new ADR/protocol/dependency: ADR049/059 and the approved D7 design govern this private locator/CAS repair.
