@@ -2663,7 +2663,7 @@ function OwnedKnowledgeQAProvider({
             })
           }
           const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
-            shouldFlush: () => !streamEnded,
+            shouldFlush: () => !streamEnded && !isStaleSearchRequest(),
             apply: () => emitPartialAnswer(),
           })
 
