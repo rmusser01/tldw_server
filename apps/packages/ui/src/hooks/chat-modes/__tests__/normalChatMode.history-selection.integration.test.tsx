@@ -83,11 +83,11 @@ vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return { pageAssistModel: async (options: ChatTldwOptions) => {
     await preparation.beforeModel()
-    return new ChatTldw({ ...options, streaming: true, apiProvider: "openai" })
+    return new ChatTldw({ ...options, streaming: true, apiProvider: "openai", supportsMultimodal: preparation.multimodal })
   } }
 })
 
-const preparation = vi.hoisted(() => ({ beforeModel: vi.fn() }))
+const preparation = vi.hoisted(() => ({ beforeModel: vi.fn(), multimodal: false }))
 
 import { normalChatMode } from "../normalChatMode"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
@@ -128,6 +128,9 @@ const snapshot = (): ServicePromptSnapshot => ({
 })
 const send = (controller: HistorySelectionController, options: {
   historyId?: string
+  serverChatId?: string
+  message?: string
+  image?: string
   snapshot?: ServicePromptSnapshot | null
   originIsCurrent?: () => boolean
   setHistoryId?: (id: string) => void
@@ -147,6 +150,7 @@ const send = (controller: HistorySelectionController, options: {
     },
     historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true), createServerChat: Boolean(options.setServerChatId) },
     historyId: options.historyId ?? null,
+    serverChatId: options.serverChatId,
     setServerChatId: options.setServerChatId,
     ...{ surface: options.surface ?? "playground" },
     setHistoryId: options.setHistoryId ?? (() => {}),
@@ -155,7 +159,7 @@ const send = (controller: HistorySelectionController, options: {
     saveMessageOnSuccess: options.saveOnSuccess ?? saveMessageOnSuccess, saveMessageOnError,
     userMessageId: "first-user", assistantMessageId: "first-answer"
   }
-  return normalChatMode("First question", "", false, [], [], new AbortController().signal, params)
+  return normalChatMode(options.message ?? "First question", options.image ?? "", false, [], [], new AbortController().signal, params)
 }
 const publicHistory = (id: string): HistoryInfo => ({ id, title: "Imported", createdAt: 1, is_rag: false, message_source: "web-ui" })
 const savedMessages = async (): Promise<Message[]> => await storage.tables.messages.toArray() as Message[]
@@ -183,6 +187,7 @@ beforeEach(() => {
   storage.control.beforeHistoryAdd = undefined
   prompt.scope.userId = "alice"
   preparation.beforeModel.mockReset()
+  preparation.multimodal = false
   useStoreChatModelSettings.getState().reset()
   useMcpToolsStore.setState({ toolsLoading: false, healthState: "unknown" })
   useStoreMessageOption.setState({ selectedModel: "test", toolChoice: "none" })
@@ -328,7 +333,9 @@ describe("normal Chat owned history creation and H1 admission", () => {
     }
   )
 
-  it.each(["First answer", "<think>Reasoning text</think>First answer"])("creates a native owner and reopens its server pair, preserving %s", async answer => {
+  it.each(["playground", "sidepanel"].flatMap(surface =>
+    ["First answer", "<think>Reasoning text</think>First answer"].map(answer => ({ surface, answer }))
+  ))("$surface creates a native owner and reopens its server pair, preserving $answer", async ({ surface, answer }) => {
     const source = creationSource()
     const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
     const stopped = new AbortController()
@@ -367,7 +374,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
     const mounted = renderHook(() => useHistorySelection())
     const adopt = vi.fn()
     await act(async () => {
-      expect(await send(mounted.result.current, { setServerChatId: adopt, snapshot: scoped })).toEqual({ status: "submitted" })
+      expect(await send(mounted.result.current, { setServerChatId: adopt, snapshot: scoped, surface: surface as "playground" | "sidepanel" })).toEqual({ status: "submitted" })
     })
     expect(create).toHaveBeenCalledOnce()
     expect(create.mock.calls[0][1]).toMatchObject({ requestScope: prompt.scope, signal: expect.any(AbortSignal) })
@@ -380,6 +387,8 @@ describe("normal Chat owned history creation and H1 admission", () => {
     const owner = mounted.result.current.getCurrent().owner
     expect(owner?.kind === "native" && owner.validate_lease()).toBe(true)
     expect(append).toHaveBeenCalledTimes(2)
+    expect(append.mock.calls[0][1]).toMatchObject({ tldw_history_branch: false })
+    expect(append.mock.calls[1][1]).not.toHaveProperty("tldw_history_branch")
     expect(rows.map(row => [row.role, row.content, row.parent_message_id])).toEqual([
       ["user", "First question", null], ["assistant", answer, "first-user"]
     ])
@@ -835,9 +844,13 @@ it.each(["playground", "sidepanel"] as const)(
 )
 
 
-it.each(["capture", "dispatch journal", "model"])(
-  "native edit refuses an actual same-ID H1 refresh during held %s before admitting input",
-  async (stage) => {
+it.each(
+  ["capture", "dispatch journal", "model"].flatMap((stage) =>
+    ["edit", "ordinary", "branch"].map((action) => ({ stage, action }))
+  )
+)(
+  "native $action refuses an actual same-ID H1 refresh during held $stage before admitting input",
+  async ({ stage, action }) => {
     const graph = [
       {
         id: "original-user",
@@ -893,7 +906,9 @@ it.each(["capture", "dispatch journal", "model"])(
         storage_context_digest: "storage"
       } as never
     }
-    const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(serverCapture)
+    const capture = vi
+      .spyOn(tldwClient, "captureHistorySelection")
+      .mockImplementation(serverCapture)
     const append = vi.spyOn(tldwClient, "addChatMessage")
     const mounted = renderHook(() => useHistorySelection())
     const native: NativeHistoryOwnerV1 = {
@@ -907,6 +922,11 @@ it.each(["capture", "dispatch journal", "model"])(
     })
     expect(mounted.result.current.status).toBe("ready")
     const origin = mounted.result.current.view!
+    if (action === "branch")
+      act(() => {
+        mounted.result.current.holdStaleSend(origin, () => true)
+        mounted.result.current.branchHere(origin, () => true)
+      })
     const source = mounted.result.current.fence()
     let entered!: () => void, release!: () => void
     const ready = new Promise<void>((done) => {
@@ -948,14 +968,17 @@ it.each(["capture", "dispatch journal", "model"])(
       historySelection: {
         controller: mounted.result.current,
         originIsCurrent: source,
-        editResend: {
-          owner_key: origin.owner_key,
-          conversation_id: origin.conversation_id,
-          message_id: "original-user",
-          message_revision: "u1",
-          isCurrent: () => true,
-          isOriginCurrent: source
-        }
+        editResend:
+          action === "edit"
+            ? {
+                owner_key: origin.owner_key,
+                conversation_id: origin.conversation_id,
+                message_id: "original-user",
+                message_revision: "u1",
+                isCurrent: () => true,
+                isOriginCurrent: source
+              }
+            : undefined
       },
       setHistoryId: () => {},
       setMessages: vi.fn(),
@@ -985,9 +1008,14 @@ it.each(["capture", "dispatch journal", "model"])(
         })
       ])
     })
+    vi.mocked(params.setMessages).mockClear()
+    vi.mocked(params.setHistory).mockClear()
     let refreshing!: Promise<boolean>
     act(() => {
-      refreshing = mounted.result.current.refresh()
+      if (action === "ordinary") {
+        mounted.result.current.beginLoad()
+        refreshing = Promise.resolve(false)
+      } else refreshing = mounted.result.current.refresh()
     })
     expect(source()).toBe(false)
     await act(async () => {
@@ -1000,6 +1028,18 @@ it.each(["capture", "dispatch journal", "model"])(
       selection_revision: origin.selection_revision
     })
     expect(append).not.toHaveBeenCalled()
+    if (stage === "dispatch journal") {
+      const original = mounted.result.current.getCurrent()
+      const kept = await loadHistoryTurnRecoveries(
+        original.bookmarkScope!,
+        origin
+      )
+      expect(kept[0]?.turn).toMatchObject({
+        state: "refused",
+        input_text: "Edited",
+        result_text: ""
+      })
+    }
     expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
     expect(params.setMessages).not.toHaveBeenCalled()
     expect(params.setHistory).not.toHaveBeenCalled()
@@ -1010,3 +1050,90 @@ it.each(["capture", "dispatch journal", "model"])(
     mounted.unmount()
   }
 )
+
+describe("native latest intent and owned refusal", () => {
+  it.each(
+    ["playground", "sidepanel"].flatMap((surface) =>
+      [
+        "",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VbMAAAAASUVORK5CYII="
+      ].map((image) => ({
+        surface: surface as "playground" | "sidepanel",
+        image
+      }))
+    )
+  )(
+    "keeps rejected ordinary input and sends an explicit branch from the same empty view ($surface $image)",
+    async ({ surface, image }) => {
+      vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+      vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+        async (_id, request) => emptyServerCapture(request)
+      )
+      const append = vi
+        .spyOn(tldwClient, "addChatMessage")
+        .mockImplementation(async (_id, _body) => {
+          throw Object.assign(new Error("HTTP 409"), {
+            status: 409,
+            details: {
+              detail: {
+                status: "stale_selection",
+                code: "history_branch_changed",
+                conversation_id: newServerId,
+                parent_message_id: null,
+                leaf_ids: ["elsewhere"],
+                history_version: 2
+              }
+            }
+          })
+        })
+      const hook = renderHook(() => useHistorySelection())
+      preparation.multimodal = Boolean(image)
+      const input = "  exact ordinary input\nspaces  "
+      let outcome: unknown
+      await act(async () => {
+        outcome = await send(hook.result.current, {
+          surface,
+          image,
+          message: input,
+          setServerChatId: () => {}
+        })
+      })
+      expect(outcome).toMatchObject({
+        status: "failed",
+        errorMessage: "native_history_branch_changed"
+      })
+      const current = hook.result.current.getCurrent()
+      const recoveries = await loadHistoryTurnRecoveries(
+        current.bookmarkScope!,
+        current.view!
+      )
+      expect(recoveries[0].turn).toMatchObject({
+        state: "refused",
+        input_text: input,
+        persistence: "client",
+        input_id: "first-user",
+        assistant_id: "first-answer",
+        result_text: ""
+      })
+      expect(recoveries[0].turn.input_images).toEqual(image ? [image] : [])
+      expect(recoveries[0].turn.admission).toBeUndefined()
+      expect(hook.result.current.sendConflict).toBe(true)
+      expect(hook.result.current.status).toBe("stale_selection")
+      expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+      expect(await savedMessages()).toEqual([])
+      act(() => {
+        expect(hook.result.current.branchHere(current.view!, () => true)).toBe(
+          true
+        )
+      })
+      append.mockRejectedValueOnce(new Error("Unknown transport"))
+      await act(async () => {
+        await send(hook.result.current, { surface, serverChatId: newServerId })
+      })
+      expect(append.mock.calls[1][1].tldw_history_branch).toBe(true)
+      expect(append.mock.calls[1][1].parent_message_id ?? null).toBeNull()
+      expect(hook.result.current.branchPending).toBe(false)
+      hook.unmount()
+    }
+  )
+})

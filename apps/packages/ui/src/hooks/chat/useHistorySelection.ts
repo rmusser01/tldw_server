@@ -1,3 +1,4 @@
+import { captureChatDraftSource } from "./chat-draft-transition"
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
@@ -181,6 +182,13 @@ export function useHistorySelection(
   const activeLogicalView = useRef("default")
   const releaseOwnerLease = useRef<(() => void) | null>(null)
   const epoch = useRef(0)
+  const sendChoice = useRef<{
+    kind: "conflict" | "branch"
+    owner: HistoryOwnerV1
+    view: HistoryViewSelectionV1
+    epoch: number
+    isCurrent: () => boolean
+  } | null>(null)
   const request = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   const saves = useRef(Promise.resolve())
@@ -191,6 +199,7 @@ export function useHistorySelection(
   }, [])
   const invalidate = useCallback(() => {
     epoch.current += 1
+    sendChoice.current = null
     if (mounted.current) {
       // Keep already-empty lists: a fresh [] would re-render every consumer on
       // each load start, and callers that start a load from an effect would
@@ -1539,6 +1548,163 @@ export function useHistorySelection(
     },
     [fence, followResult, refreshRecovery]
   )
+  const sendChoiceIsCurrent = useCallback(() => {
+    const choice = sendChoice.current
+    return (
+      !!choice &&
+      mounted.current &&
+      choice.epoch === epoch.current &&
+      live.current.owner === choice.owner &&
+      live.current.view === choice.view &&
+      ownerLeaseValid(choice.owner) &&
+      choice.isCurrent()
+    )
+  }, [])
+  const holdStaleSend = useCallback(
+    (origin: HistoryViewSelectionV1, isCurrent: () => boolean) => {
+      const current = live.current
+      if (
+        !mounted.current ||
+        current.status !== "ready" ||
+        current.owner?.kind !== "native" ||
+        current.view !== origin ||
+        current.capture?.status !== "captured" ||
+        !ownerLeaseValid(current.owner) ||
+        !isCurrent()
+      )
+        return false
+      const draft = captureChatDraftSource()
+      sendChoice.current = {
+        kind: "conflict",
+        owner: current.owner,
+        view: origin,
+        epoch: epoch.current,
+        isCurrent: () => draft.isCurrent() && isCurrent()
+      }
+      publish({
+        ...current,
+        status: "stale_selection",
+        error: "history_branch_changed"
+      })
+      return sendChoiceIsCurrent()
+    },
+    [publish, sendChoiceIsCurrent]
+  )
+  const branchHere = useCallback(
+    (origin: HistoryViewSelectionV1, isCurrent: () => boolean) => {
+      if (
+        sendChoice.current?.kind !== "conflict" ||
+        !sendChoiceIsCurrent() ||
+        live.current.view !== origin ||
+        !isCurrent()
+      )
+        return false
+      const current = live.current
+      const draft = captureChatDraftSource()
+      const operation = invalidate()
+      sendChoice.current = {
+        kind: "branch",
+        owner: current.owner!,
+        view: origin,
+        epoch: operation.epoch,
+        isCurrent: () => draft.isCurrent() && isCurrent()
+      }
+      publish({ ...current, status: "ready", error: null })
+      return sendChoiceIsCurrent()
+    },
+    [invalidate, publish, sendChoiceIsCurrent]
+  )
+  const takeBranchIntent = useCallback(
+    (origin: HistoryViewSelectionV1) => {
+      const allowed =
+        sendChoice.current?.kind === "branch" &&
+        sendChoiceIsCurrent() &&
+        live.current.status === "ready" &&
+        live.current.view === origin
+      sendChoice.current = null
+      if (allowed) publish({ ...live.current })
+      return allowed
+    },
+    [publish, sendChoiceIsCurrent]
+  )
+  const loadLatest = useCallback(
+    async (origin: HistoryViewSelectionV1, isCurrent: () => boolean) => {
+      if (
+        sendChoice.current?.kind !== "conflict" ||
+        !sendChoiceIsCurrent() ||
+        live.current.view !== origin ||
+        !isCurrent()
+      )
+        return false
+      const current = live.current
+      if (current.owner?.kind !== "native" || !current.bookmarkScope) return false
+      const draft = captureChatDraftSource()
+      const operation = invalidate()
+      const owned = () =>
+        mounted.current &&
+        operation.epoch === epoch.current &&
+        live.current.owner === current.owner &&
+        ownerLeaseValid(current.owner) &&
+        draft.isCurrent() &&
+        isCurrent()
+      publish({ ...current, status: "loading", error: null })
+      try {
+        const manifest = await captureHistorySnapshot(
+          current.owner,
+          { ...origin, cursor: { kind: "empty" } },
+          "send",
+          operation.signal
+        )
+        if (!owned()) return false
+        if (manifest.status !== "captured") throw new Error(manifest.code)
+        const latest = latestHistoryTipId(manifest.snapshot.nodes)
+        const view = {
+          ...origin,
+          selection_revision: ++identity.current!.revision,
+          cursor: latest
+            ? { kind: "after_message" as const, message_id: latest }
+            : { kind: "empty" as const }
+        }
+        const result = await captureHistorySnapshot(
+          current.owner,
+          view,
+          "send",
+          operation.signal
+        )
+        if (!owned()) return false
+        if (result.status !== "captured") throw new Error(result.code)
+        return await install(
+          result,
+          current.owner,
+          current.bookmarkScope,
+          operation.epoch,
+          current.pending,
+          owned
+        )
+      } catch (error) {
+        if (owned()) {
+          sendChoice.current = {
+            kind: "conflict",
+            owner: current.owner,
+            view: origin,
+            epoch: operation.epoch,
+            isCurrent: () => draft.isCurrent() && isCurrent()
+          }
+          publish({
+            ...current,
+            status: "stale_selection",
+            error: errorCode(error)
+          })
+        }
+        return false
+      } finally {
+        if (!owned() && live.current.status === "loading")
+          retireCancelledLoad(operation.epoch, current.owner, origin)
+      }
+    },
+    [install, invalidate, publish, retireCancelledLoad, sendChoiceIsCurrent]
+  )
+
   const getCurrent = useCallback(() => live.current, [])
   const reference: HistorySelectionReference | null =
     state.view && state.bookmarkScope
@@ -1581,7 +1747,13 @@ export function useHistorySelection(
     beginLoad: invalidate,
     canAutomaticallyLoad,
     getSignal: () => request.current?.signal,
-    getCurrent
+    getCurrent,
+    holdStaleSend,
+    branchHere,
+    takeBranchIntent,
+    loadLatest,
+    sendConflict: sendChoice.current?.kind === "conflict" && sendChoiceIsCurrent(),
+    branchPending: sendChoice.current?.kind === "branch" && sendChoiceIsCurrent()
   }
 }
 export type HistorySelectionController = ReturnType<typeof useHistorySelection> & {

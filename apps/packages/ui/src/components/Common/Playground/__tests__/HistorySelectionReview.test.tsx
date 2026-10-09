@@ -202,7 +202,7 @@ it("shows recoverable text separately with copy and dismiss but no replay action
   ).toBeNull()
 })
 
-it("shows a confirmed native context refusal with exact input, Copy and Dismiss without uncertain outcome or replay", async () => {
+it("shows confirmed native refusal with exact input, Copy and Dismiss without uncertain outcome or replay", async () => {
   const copy = vi.fn(async () => undefined)
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -228,7 +228,7 @@ it("shows a confirmed native context refusal with exact input, Copy and Dismiss 
   render(<HistorySelectionReview selection={selection} />)
   expect(screen.getByText("Message not added")).toBeVisible()
   expect(
-    screen.getByText(/This saved chat uses unsupported context/)
+    screen.getByText(/Your original input is kept here/)
   ).toBeVisible()
   expect(screen.queryByText(/unknown|Turn needs review/i)).toBeNull()
   fireEvent.click(screen.getByText("Inspect original input and result"))
@@ -628,4 +628,127 @@ it.each(["complete", "refused", "unknown"])("native regeneration %s has accurate
     fireEvent.click(screen.getByRole("button", { name: "Open saved reply" }))
     await waitFor(() => expect(selection.openRecoveryResult).toHaveBeenCalledOnce())
   } else expect(screen.queryByRole("button", { name: "Open saved reply" })).toBeNull()
+})
+
+
+describe("shared native send-conflict choices", () => {
+  it("offers loading latest or a deliberate branch without submitting or changing the selected boundary", () => {
+    const selection = {
+      ...controller(),
+      status: "stale_selection",
+      error: "history_branch_changed",
+      sendConflict: true,
+      loadLatest: vi.fn(),
+      branchHere: vi.fn(),
+      fence: () => () => true
+    }
+    render(
+      <HistorySelectionReview
+        selection={selection as unknown as HistorySelectionController}
+      />
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Updated in another window or tab"
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load latest messages" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Branch here" }))
+    expect(selection.loadLatest).toHaveBeenCalledWith(
+      selection.view,
+      expect.any(Function)
+    )
+    expect(selection.branchHere).toHaveBeenCalledWith(
+      selection.view,
+      expect.any(Function)
+    )
+    expect(selection.choose).not.toHaveBeenCalled()
+    expect(selection.refresh).not.toHaveBeenCalled()
+  })
+  it("refused input never falsely diagnoses unsupported context", () => {
+    const selection = {
+      ...controller(),
+      status: "ready",
+      recoveries: [
+        {
+          scope: { profile_id: "p", client_session_id: "c" },
+          turn: {
+            operation_id: "refused",
+            persistence: "client",
+            state: "refused",
+            input_text: "exact unsent input",
+            result_text: ""
+          }
+        }
+      ]
+    }
+    render(
+      <HistorySelectionReview
+        selection={selection as unknown as HistorySelectionController}
+      />
+    )
+    expect(
+      screen.getByText(/Your original input is kept here/)
+    ).not.toHaveTextContent("unsupported context")
+  })
+})
+
+it("an armed branch can be cancelled without sending and retained native images are downloadable", () => {
+  const selection = controller()
+  Object.assign(selection, {
+    status: "ready",
+    branchPending: true,
+    choose: vi.fn(),
+    recoveries: [
+      {
+        scope: {},
+        turn: {
+          operation_id: "image-refusal",
+          state: "refused",
+          input_text: "Exact image input",
+          input_images: [
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VbMAAAAASUVORK5CYII=",
+            "https://untrusted.test/private.png"
+          ],
+          result_text: ""
+        }
+      }
+    ]
+  })
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByRole("button", { name: "Cancel branch" }))
+  expect(selection.choose).toHaveBeenCalledWith(selection.view!.cursor)
+  expect(
+    screen.getByRole("link", { name: "Download retained image" })
+  ).toHaveAttribute("download", "recovered-image-1")
+  expect(screen.getAllByRole("link")).toHaveLength(1)
+})
+
+it("retired recovery Copy does not write a departed account's input to the clipboard", () => {
+  const selection = controller()
+  let current = true
+  const copy = vi.fn()
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: copy }
+  })
+  Object.assign(selection, {
+    status: "ready",
+    fence: () => () => current,
+    recoveries: [
+      {
+        scope: {},
+        turn: {
+          operation_id: "source-refusal",
+          state: "refused",
+          input_text: "Private original",
+          result_text: ""
+        }
+      }
+    ]
+  })
+  render(<HistorySelectionReview selection={selection} />)
+  current = false
+  fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" }))
+  expect(copy).not.toHaveBeenCalled()
 })

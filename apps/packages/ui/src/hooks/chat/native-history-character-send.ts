@@ -4,7 +4,7 @@ import { createChatWithRecovery, acknowledgeChatCreation, markChatCreationBound,
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { chatDraftAddressKey, isChatDraftHandle, type ChatDraftHandle } from "@/utils/chat-draft-address"
 import type { Dispatch, SetStateAction } from "react"
-import { captureChatDraftLoad } from "./chat-draft-transition"
+import { captureChatDraftLoad, captureChatDraftSource } from "./chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import type { TFunction } from "i18next"
@@ -34,6 +34,7 @@ import {
   finalizeHistorySelection,
   parseNativeHistoryAdmission,
   historyAdmissionReference,
+  isDefinitiveNativeBranchRejection,
   nativeEditResendView,
   nativeRegenerateView,
   nativeRegenerationMessage,
@@ -45,7 +46,7 @@ import {
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
-import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 
 export type NativeHistoryCharacterSendParams = {
@@ -145,6 +146,7 @@ export const sendNativeHistoryCharacter = async (
   if (privateHandle && params.scope && chatDraftAddressKey({ ...privateHandle.address, scope: params.scope } as ChatDraftHandle["address"]) !== chatDraftAddressKey(privateHandle.address))
     throw new Error("chat_creation_source_invalid")
   const acceptDraftBind = !privateHandle && !params.historyId && !params.serverChatId && sourceDraft?.kind === "fresh" ? captureChatDraftLoad("bind") : null
+  const draftIsCurrent = privateHandle ? privateCurrent : acceptDraftBind?.isCurrent ?? captureChatDraftSource().isCurrent
   if (!greetingSeed && !regenerate && !params.message.trim()) throw new Error("native_history_input_required")
   if (greetingSeed && (params.message || !greetingSeed.rawText?.trim() ||
       params.historyId || params.serverChatId || sourceDraft?.kind !== "fresh" ||
@@ -184,7 +186,7 @@ export const sendNativeHistoryCharacter = async (
     throw new Error("request_config_scope_changed")
   }
   const leaseValid = () =>
-    acceptDraftBind?.isCurrent() !== false && privateCurrent() &&
+    draftIsCurrent() && acceptDraftBind?.isCurrent() !== false && privateCurrent() &&
     (!privateHandle || params.originIsCurrent()) &&
     authValid() &&
     !signal.aborted &&
@@ -365,6 +367,7 @@ export const sendNativeHistoryCharacter = async (
     const originOwner = current.owner
     const originalCapture = current.capture
     const originView = current.view
+    const historyBranch = Boolean(explicitAction || controller.takeBranchIntent?.(originView))
     const view = editResend
       ? nativeEditResendView(
           current.owner,
@@ -590,7 +593,7 @@ export const sendNativeHistoryCharacter = async (
       const wire = {
         ...(structuredClone(prepared.payload) as ChatCompletionRequest),
         tldw_history_selection_v1: structuredClone(selection),
-        ...(explicitAction ? { tldw_history_branch: true } : {})
+        tldw_history_branch: historyBranch
       }
       for await (const chunk of tldwClient.streamChatCompletion(wire, {
         signal: snapshot.scopeSignal,
@@ -668,26 +671,38 @@ export const sendNativeHistoryCharacter = async (
         !admission &&
         !resultId &&
         content === "" &&
-        isSavedContextRefusal(error)
+        (isSavedContextRefusal(error) ||
+          (!historyBranch && isDefinitiveNativeBranchRejection(error, selection)))
       ) {
         const acceptedOwner = current.owner
-        const refusal = new NativeHistoryContextRefusal(
+        const branchRefusal =
+          !historyBranch && isDefinitiveNativeBranchRejection(error, selection)
+        const Refusal = branchRefusal
+          ? NativeHistoryBranchRefusal
+          : NativeHistoryContextRefusal
+        const refusal = new Refusal(
           error,
           () =>
             selectionCurrent() &&
             privateCurrent() &&
+            draftIsCurrent() &&
             sameView() &&
             acceptedOwner.validate_lease()
         )
         try {
           // Composer retention is not an acknowledged write; keep the only durable input.
           await saveHistoryTurnRecovery(scope, view, record("refused"))
-          if (refusal.isCurrent()) await controller.refreshRecovery()
         } catch {
           // The earlier dispatch record remains recoverable if storage or its account retired.
-          console.warn(
-            "Could not record or display a confirmed native context refusal."
-          )
+          console.warn("Could not record or display a confirmed native refusal.")
+        }
+        if (refusal.isCurrent()) {
+          if (branchRefusal) controller.holdStaleSend?.(originView, draftIsCurrent)
+          try {
+            await controller.refreshRecovery()
+          } catch {
+            console.warn("Could not display retained native input.")
+          }
         }
         throw refusal
       }

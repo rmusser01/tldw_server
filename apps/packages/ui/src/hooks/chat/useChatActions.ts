@@ -1,5 +1,5 @@
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
-import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import {
@@ -4541,7 +4541,7 @@ export const useChatActions = ({
         signal.aborted &&
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
-      if ((!historyRegenerate || historyRegenerate.isOriginCurrent()) && (!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
+      if ((!historyRegenerate || historyRegenerate.isOriginCurrent()) && (!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
           description: historyRegenerate ? nativeRegenerationFeedback(e, t) : nativeCharacterPreflightMessage(e, t) ?? errorMessage

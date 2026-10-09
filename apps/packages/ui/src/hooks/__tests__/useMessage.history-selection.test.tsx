@@ -634,6 +634,7 @@ beforeEach(async () => {
   mocks.controllerReader = null
   mocks.useRealPageAssist = false
   mocks.storeState.detachedHistoryResponse = null
+  mocks.storeState.replyTarget = null
   h1.auth = new AbortController()
   h1.native = false
   h1.persona = false
@@ -909,6 +910,7 @@ it("mounted sidepanel native character uses owner selection and ACK without lega
   expect(h1.wire.mock.calls[0][0]).toMatchObject({
     save_to_db: true,
     conversation_id: nativeChatId,
+    tldw_history_branch: false,
     messages: [{ role: "user", content: "next" }]
   })
   expect(
@@ -2163,6 +2165,7 @@ describe("side-panel send gate (XP-08)", () => {
 
   it("holds a send the gate refuses before anything reaches the server", async () => {
     const gate = vi.fn<SidepanelSendGate>(async () => ({ proceed: false, refreshed: false }))
+    h1.controller.getCurrent().owner = { kind: "local" }
     const current = {}
     mocks.storeState.detachedHistoryResponse = current
     const { result } = renderHook(() => useMessage(), { wrapper: withGate(gate) })
@@ -2176,7 +2179,7 @@ describe("side-panel send gate (XP-08)", () => {
     expect(h1.wire).not.toHaveBeenCalled()
   })
 
-  it("sends from the message the gate refreshed the tab onto", async () => {
+  it("native admission preserves its selected point instead of invoking the legacy auto-refresh gate", async () => {
     // The server gained a newer answer (a2); the gate moves the tab onto it.
     const gate = vi.fn<SidepanelSendGate>(async () => {
       const current = h1.controller.getCurrent()
@@ -2188,11 +2191,12 @@ describe("side-panel send gate (XP-08)", () => {
     await act(async () => {
       await result.current.onSubmit({ message: "next", image: "" })
     })
-    expect(gate).toHaveBeenCalledOnce()
+    expect(gate).not.toHaveBeenCalled()
     const user = h1.append.mock.calls[0][1]
     expect(
       user.tldw_history_selection_v1.messages.map((row: any) => row.id)
-    ).toEqual(["u-old", "a2"])
+    ).toEqual(["u-old", "a1"])
+    expect(user.tldw_history_branch).toBe(false)
   })
 
   it("does not ask the gate before regenerating an answer", async () => {
@@ -4001,3 +4005,120 @@ describe("rendered Delete ownership", () => {
     ).toEqual([{ role: "assistant", content: "edited sibling" }])
   })
 })
+
+it.each(["confirmed", "wrong-parent", "stream-evidence", "explicit-branch"])(
+  "native branch refusal distinguishes %s before any observed turn",
+  async (kind) => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    h1.controller.holdStaleSend = vi.fn(() => true)
+    h1.controller.takeBranchIntent = vi.fn(() => kind === "explicit-branch")
+    h1.wire.mockImplementation(async function* () {
+      if (kind === "stream-evidence")
+        yield { choices: [{ delta: { role: "assistant" } }] }
+      yield await Promise.reject(
+        Object.assign(new Error("HTTP 409"), {
+          status: 409,
+          details: {
+            detail: {
+              status: "stale_selection",
+              code: "history_branch_changed",
+              conversation_id: nativeChatId,
+              parent_message_id: kind === "wrong-parent" ? "foreign" : "a1",
+              leaf_ids: ["elsewhere"],
+              history_version: 2
+            }
+          }
+        })
+      )
+    })
+    const { result } = renderHook(() => useMessage())
+    let submitted: unknown
+    await act(async () => {
+      submitted = await result.current.onSubmit({
+        message: "  exact branch input\nspaces  ",
+        image: ""
+      })
+    })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      state: kind === "confirmed" ? "refused" : "unknown",
+      input_text: "  exact branch input\nspaces  "
+    })
+    expect(h1.wire.mock.lastCall?.[0].tldw_history_branch).toBe(
+      kind === "explicit-branch"
+    )
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    if (kind === "confirmed") {
+      expect(submitted).toMatchObject({
+        status: "failed",
+        errorMessage: "native_history_branch_changed"
+      })
+      expect(mocks.setMessages).not.toHaveBeenCalled()
+      expect(h1.controller.holdStaleSend).toHaveBeenCalledOnce()
+    } else expect(h1.controller.holdStaleSend).not.toHaveBeenCalled()
+  }
+)
+
+it.each(["H1", "account", "draft", "journal failure"])(
+  "native confirmed refusal owns its recovery through %s",
+  async (boundary) => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    const actualStore =
+      await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    mocks.draftFields = () => {
+      const state = actualStore.useStoreMessageOption.getState()
+      return {
+        chatDraftAddress: state.chatDraftAddress,
+        chatDraftRevision: state.chatDraftRevision
+      }
+    }
+    h1.controller.holdStaleSend = vi.fn(() => true)
+    if (boundary === "journal failure")
+      h1.recover
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Local storage unavailable"))
+    h1.wire.mockImplementation(async function* () {
+      if (boundary === "H1") h1.controller.navigate()
+      if (boundary === "account") h1.auth.abort()
+      if (boundary === "draft")
+        (
+          await vi.importActual<typeof import("@/store/option")>(
+            "@/store/option"
+          )
+        ).useStoreMessageOption
+          .getState()
+          .startNewChatDraft(false)
+      yield await Promise.reject(
+        Object.assign(new Error("HTTP 409"), {
+          status: 409,
+          details: {
+            detail: {
+              status: "stale_selection",
+              code: "history_branch_changed",
+              conversation_id: nativeChatId,
+              parent_message_id: "a1",
+              leaf_ids: ["elsewhere"],
+              history_version: 2
+            }
+          }
+        })
+      )
+    })
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Original refused input",
+        image: ""
+      })
+    })
+    expect(h1.controller.holdStaleSend).toHaveBeenCalledTimes(
+      boundary === "journal failure" ? 1 : 0
+    )
+    if (boundary !== "journal failure")
+      expect(mocks.notification.error).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+  }
+)

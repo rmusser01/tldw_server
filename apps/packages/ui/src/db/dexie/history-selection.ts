@@ -1067,14 +1067,12 @@ export const saveHistoryTurnRecovery = async (
       fail("history_operation_conflict")
     if (
       detached.state === "refused" &&
-      (detached.persistence !== "server" ||
-        detached.input_id ||
-        detached.assistant_id ||
+      ((detached.persistence === "server" && (detached.input_id || detached.assistant_id)) ||
         detached.admission ||
         detached.result_text ||
         detached.outcome ||
         detached.settled_message_id ||
-        (detached.action !== "regenerate" && detached.input_images?.length))
+        (detached.persistence === "server" && detached.action !== "regenerate" && detached.input_images?.length))
     )
       fail("history_operation_conflict")
 
@@ -1091,9 +1089,10 @@ export const saveHistoryTurnRecovery = async (
       if (prior.state === "refused") {
         if (
           detached.admission ||
-          detached.assistant_id ||
+          (detached.persistence === "server" && detached.assistant_id) ||
           detached.result_text ||
-          detached.outcome
+          detached.outcome ||
+          detached.settled_message_id
         )
           fail("history_operation_conflict")
         return

@@ -1,3 +1,4 @@
+import { NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
   appendSelectedUser,
@@ -1164,16 +1165,30 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   : DEFAULT_INTERRUPTION_REASON
               : undefined
         historyTurn.outcome = outcome
-        await historyTurn.recover(
-          {
-            content: fullText,
-            assistantId: resolvedAssistantMessageId,
-            createdAt,
-            outcome,
-            interruptionReason: keptReason
-          },
-          e
-        )
+        try {
+          await historyTurn.recover(
+            {
+              content: fullText,
+              assistantId: resolvedAssistantMessageId,
+              createdAt,
+              outcome,
+              interruptionReason: keptReason
+            },
+            e
+          )
+        } catch (refusal) {
+          if (!(refusal instanceof NativeHistoryBranchRefusal)) throw refusal
+          if (refusal.isCurrent())
+            setMessagesWithTransition((prev) =>
+              prev.filter(
+                (row) =>
+                  row.id !== resolvedAssistantMessageId &&
+                  row.id !== resolvedUserMessageId
+              )
+            )
+          return chatSubmitFailed(refusal.message)
+        }
+
         if (outcome) {
           const marker = interruptionGenerationInfo(outcome, keptReason)
           setMessagesWithTransition((prev) =>

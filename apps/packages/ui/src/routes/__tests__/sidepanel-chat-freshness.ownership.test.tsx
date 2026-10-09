@@ -102,3 +102,19 @@ it("does not publish a departed focus notice to a replacement owner in the same 
   expect(hook.controller.choose).not.toHaveBeenCalled()
   expect(hook.result.current.notice).toBeNull()
 })
+
+it("focus and send checks preserve an armed explicit branch without fetching or reparenting", async () => {
+  vi.useFakeTimers()
+  const hook = mount()
+  Object.assign(hook.controller, { branchPending: true })
+  io.capture.mockResolvedValue(manifest)
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"))
+    await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+    expect(
+      await hook.result.current.beforeSend({ message: "Branch input" })
+    ).toEqual({ proceed: true, refreshed: false })
+  })
+  expect(io.capture).not.toHaveBeenCalled()
+  expect(hook.controller.choose).not.toHaveBeenCalled()
+})

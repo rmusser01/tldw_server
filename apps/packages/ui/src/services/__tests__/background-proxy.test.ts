@@ -226,6 +226,23 @@ describe("background proxy fallback safety", () => {
     )
 
     it.each(["direct", "extension"] as const)(
+      "preserves a qualified %s native branch refusal through actual message transport",
+      async transport => {
+        const selection = { conversation_id: "owned-chat", messages: [{ id: "old-tip" }] }
+        const detail = { status: "stale_selection", code: "history_branch_changed", conversation_id: "owned-chat",
+          parent_message_id: "old-tip", leaf_ids: ["elsewhere"], history_version: 2 }
+        const { client, fetchMock } = await setupTransport(transport, { detail }, 409)
+        try {
+          const { isDefinitiveNativeBranchRejection } = await import("@/services/chat-history-selection")
+          const error = await client.addChatMessage("owned-chat", { role: "user", content: "Original input", tldw_history_branch: false }).catch(error => error)
+          expect(isDefinitiveNativeBranchRejection(error, selection)).toBe(true)
+          expect(JSON.parse(fetchMock.mock.lastCall![1]!.body as string)).toMatchObject({ tldw_history_branch: false, content: "Original input" })
+          expect(fetchMock).toHaveBeenCalledOnce()
+        } finally { vi.unstubAllGlobals() }
+      }
+    )
+
+    it.each(["direct", "extension"] as const)(
       "sanitizes %s returnResponse details while preserving actionable validation and retry metadata",
       async (transport) => {
         const { bgRequest, fetchMock } = await setupTransport(transport, {
@@ -2638,13 +2655,14 @@ describe("background proxy fallback safety", () => {
     }
   )
 
-  it.each(["direct", "extension"] as const)(
-    "retains a structured native context refusal through the real %s completion stream without replay",
-    async (transport) => {
-      const detail = {
+  it.each(["direct", "extension"].flatMap(transport => ["context", "branch"].map(kind => ({ transport, kind }))) as Array<{transport: "direct" | "extension"; kind: string}>)(
+    "retains a structured native $kind refusal through the real $transport completion stream without replay",
+    async ({ transport, kind }) => {
+      const detail = kind === "context" ? {
         status: "unsupported_history_capability",
         code: "unsupported_history_context_world_books"
-      }
+      } : { status: "stale_selection", code: "history_branch_changed", conversation_id: "owned-chat",
+        parent_message_id: "old-tip", leaf_ids: ["elsewhere"], history_version: 2 }
       mocks.runtimeId = transport === "direct" ? null : "test-extension"
       mocks.storageGet.mockImplementation(async (key) =>
         key === "tldwConfig"

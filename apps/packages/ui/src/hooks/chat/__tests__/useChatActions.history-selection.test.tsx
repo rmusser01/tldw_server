@@ -759,7 +759,8 @@ it.each([
   expect(Object.hasOwn(request, "top_p")).toBe(!omitTopP)
   if (!omitTemperature) expect(request.temperature).toBe(0.23)
   if (!omitTopP) expect(request.top_p).toBe(0.9)
-  const { tldw_history_selection_v1: selection, ...preparedPayload } = request
+  const { tldw_history_selection_v1: selection, tldw_history_branch, ...preparedPayload } = request
+  expect(tldw_history_branch).toBe(false)
   const { historyDigest } = await import("@/db/dexie/history-selection")
   expect(selection.request_context_digest).toBe(historyDigest(preparedPayload))
   expect(api.getChatSettings).toHaveBeenCalledWith(nativeChatId, expect.objectContaining({
@@ -879,6 +880,7 @@ it("mounted native character sends A1 selection and only new input, following th
   expect(request).toMatchObject({
     save_to_db: true,
     conversation_id: nativeChatId,
+    tldw_history_branch: false,
     model: "deepseek-chat",
     api_provider: "openai"
   })
@@ -6142,3 +6144,111 @@ describe("rendered Delete ownership", () => {
     }
   )
 })
+
+it.each(["confirmed", "wrong-parent", "stream-evidence", "explicit-branch"])(
+  "native branch refusal distinguishes %s before any observed turn",
+  async (kind) => {
+    const options = createHookOptions()
+    h1.controller.holdStaleSend = vi.fn(() => true)
+    h1.controller.takeBranchIntent = vi.fn(() => kind === "explicit-branch")
+    h1.wire.mockImplementation(async function* () {
+      if (kind === "stream-evidence")
+        yield { choices: [{ delta: { role: "assistant" } }] }
+      yield await Promise.reject(
+        Object.assign(new Error("HTTP 409"), {
+          status: 409,
+          details: {
+            detail: {
+              status: "stale_selection",
+              code: "history_branch_changed",
+              conversation_id: nativeChatId,
+              parent_message_id: kind === "wrong-parent" ? "foreign" : "a1",
+              leaf_ids: ["elsewhere"],
+              history_version: 2
+            }
+          }
+        })
+      )
+    })
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    let submitted: unknown
+    await act(async () => {
+      submitted = await result.current.onSubmit({
+        message: "  exact branch input\nspaces  ",
+        image: ""
+      })
+    })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      state: kind === "confirmed" ? "refused" : "unknown",
+      input_text: "  exact branch input\nspaces  "
+    })
+    expect(h1.wire.mock.lastCall?.[0].tldw_history_branch).toBe(
+      kind === "explicit-branch"
+    )
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    if (kind === "confirmed") {
+      expect(submitted).toMatchObject({
+        status: "failed",
+        errorMessage: "native_history_branch_changed"
+      })
+      expect(options.setMessages).not.toHaveBeenCalled()
+      expect(h1.controller.holdStaleSend).toHaveBeenCalledOnce()
+    } else expect(h1.controller.holdStaleSend).not.toHaveBeenCalled()
+  }
+)
+
+it.each(["H1", "account", "draft", "journal failure"])(
+  "native confirmed refusal owns its recovery through %s",
+  async (boundary) => {
+    const options = createHookOptions()
+    h1.controller.holdStaleSend = vi.fn(() => true)
+    if (boundary === "journal failure")
+      h1.recover
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Local storage unavailable"))
+    h1.wire.mockImplementation(async function* () {
+      if (boundary === "H1") h1.controller.navigate()
+      if (boundary === "account") h1.auth.abort()
+      if (boundary === "draft")
+        (
+          await vi.importActual<typeof import("@/store/option")>(
+            "@/store/option"
+          )
+        ).useStoreMessageOption
+          .getState()
+          .startNewChatDraft(false)
+      yield await Promise.reject(
+        Object.assign(new Error("HTTP 409"), {
+          status: 409,
+          details: {
+            detail: {
+              status: "stale_selection",
+              code: "history_branch_changed",
+              conversation_id: nativeChatId,
+              parent_message_id: "a1",
+              leaf_ids: ["elsewhere"],
+              history_version: 2
+            }
+          }
+        })
+      )
+    })
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Original refused input",
+        image: ""
+      })
+    })
+    expect(h1.controller.holdStaleSend).toHaveBeenCalledTimes(
+      boundary === "journal failure" ? 1 : 0
+    )
+    if (boundary !== "journal failure")
+      expect(options.notification.error).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+  }
+)

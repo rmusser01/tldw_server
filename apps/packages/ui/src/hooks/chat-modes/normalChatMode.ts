@@ -2,7 +2,8 @@ import type {
   HistoryLoadReceipt,
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
-import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
+import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
 import type {
   HistorySendTurn,
   NativeHistoryEditResend
@@ -12,6 +13,7 @@ import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
   historyAdmissionReference,
+  isDefinitiveNativeBranchRejection,
   nativeEditResendView
 } from "@/services/chat-history-selection"
 import {
@@ -174,6 +176,7 @@ type NormalChatModeParams = {
   surface?: "playground" | "sidepanel"
   historyPreparation?: {
     dispatchIsCurrent: () => boolean
+    draftIsCurrent: () => boolean
     acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null
     sourceDraft: ChatDraftAddress | null
   }
@@ -675,18 +678,26 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 const HISTORY_TURN_CHECKPOINT_INTERVAL_MS = 1_000
 
 /** Capture once before caller setup waits; explicit overrides retain their own values. */
-export const captureNormalChatPreparation = (params: Pick<NormalChatModeParams,
-  "selectedModel" | "selectionSource" | "toolChoice" | "historyId" | "serverChatId"
->) => {
+export const captureNormalChatPreparation = (
+  params: Pick<
+    NormalChatModeParams,
+    | "selectedModel"
+    | "selectionSource"
+    | "toolChoice"
+    | "historyId"
+    | "serverChatId"
+  >
+) => {
   // A Zustand publication replaces the store object even for loading flags or
   // settings for another model. Bind the lease to dispatch inputs instead.
   const dispatchSettings = () => {
     const settings = useStoreChatModelSettings.getState()
     const selection = useStoreMessageOption.getState()
     const tools = useMcpToolsStore.getState()
-    const effectiveToolChoice = params.selectionSource?.toolChoice === "global"
-      ? selection.toolChoice
-      : params.toolChoice ?? selection.toolChoice
+    const effectiveToolChoice =
+      params.selectionSource?.toolChoice === "global"
+        ? selection.toolChoice
+        : params.toolChoice ?? selection.toolChoice
     const toolRequest = resolveChatToolRequest({
       tools: tools.chatTools ?? tools.tools,
       toolChoice: effectiveToolChoice,
@@ -696,21 +707,27 @@ export const captureNormalChatPreparation = (params: Pick<NormalChatModeParams,
     return JSON.stringify({
       settings: settings.getEffectiveSettings(),
       settingsScope: settings.activeSettingsScope,
-      model: params.selectionSource?.model === "global"
-        ? selection.selectedModel
-        : params.selectedModel,
+      model:
+        params.selectionSource?.model === "global"
+          ? selection.selectedModel
+          : params.selectedModel,
       toolChoice: effectiveToolChoice,
       tools: toolRequest.tools,
       requestToolChoice: toolRequest.toolChoice
     })
   }
   const capturedDispatchSettings = dispatchSettings()
-  const dispatchIsCurrent = () => dispatchSettings() === capturedDispatchSettings
+  const dispatchIsCurrent = () =>
+    dispatchSettings() === capturedDispatchSettings
   const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
   const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
-  const acceptDraftBind = !params.historyId && !params.serverChatId && sourceAddress?.kind === "fresh"
-    ? captureChatDraftLoad("bind") : null
-  return { dispatchIsCurrent, acceptDraftBind, sourceDraft }
+  const acceptDraftBind =
+    !params.historyId && !params.serverChatId && sourceAddress?.kind === "fresh"
+      ? captureChatDraftLoad("bind")
+      : null
+  const draftIsCurrent =
+    acceptDraftBind?.isCurrent ?? captureChatDraftSource().isCurrent
+  return { dispatchIsCurrent, draftIsCurrent, acceptDraftBind, sourceDraft }
 }
 
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
@@ -720,6 +737,7 @@ const captureNormalHistoryTurn = async (
   snapshot: ServicePromptSnapshot,
   signal: AbortSignal,
   dispatchIsCurrent: () => boolean,
+  draftIsCurrent: () => boolean,
   acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
   sourceDraft: ChatDraftAddress | null
 ): Promise<HistorySendTurn> => {
@@ -732,7 +750,7 @@ const captureNormalHistoryTurn = async (
   let selectionCurrent = originIsCurrent
   let targetHistoryId = params.historyId
   let targetServerChatId = params.serverChatId
-  const preparationIsCurrent = () => acceptDraftBind?.isCurrent() !== false &&
+  const preparationIsCurrent = () => draftIsCurrent() && acceptDraftBind?.isCurrent() !== false &&
     !signal.aborted && !snapshot.scopeInvalidatedSignal.aborted && dispatchIsCurrent()
   if (!preparationIsCurrent()) throw new Error("stale_selection")
   if (!current.owner && current.status === "idle") {
@@ -850,6 +868,8 @@ const captureNormalHistoryTurn = async (
   const originalCapture = current.capture
   const originView = structuredClone(current.view)
   const editResend = params.historySelection!.editResend
+  const branchIntent = current.owner.kind === "native" && !editResend &&
+    controller.takeBranchIntent?.(current.view) === true
   const view = editResend
     ? nativeEditResendView(
         current.owner,
@@ -876,10 +896,11 @@ const captureNormalHistoryTurn = async (
       : current.owner
   const validateLease = () =>
     authValid() &&
-    dispatchIsCurrent()
+    dispatchIsCurrent() && (owner.kind !== "native" || !!turn.admission || editPreparationIsCurrent())
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
+      draftIsCurrent() && selectionCurrent() && controller.getCurrent().owner === originalOwner &&
       !!now &&
       now.owner_key === originView.owner_key &&
       now.conversation_id === originView.conversation_id &&
@@ -982,7 +1003,7 @@ const captureNormalHistoryTurn = async (
     owner,
     capture,
     ...(retryAdmission ? { retryAdmission } : {}),
-    ...(editResend ? { historyBranch: true } : {}),
+    ...(owner.kind === "native" ? { historyBranch: Boolean(editResend || branchIntent) } : {}),
     currentView: () =>
       editResend
         ? canUpdateView()
@@ -992,10 +1013,10 @@ const captureNormalHistoryTurn = async (
     validateLease,
     canUpdateView,
     beforeDispatch: async () => {
-      if (editResend && !editPreparationIsCurrent())
+      if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
       await saveRecord(record(turn, "", "dispatching"))
-      if (editResend && !editPreparationIsCurrent())
+      if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
     },
     afterAdmission: async () => {
@@ -1013,8 +1034,38 @@ const captureNormalHistoryTurn = async (
       )
       checkpointTimer = setTimeout(flushCheckpoint, wait)
     },
-    recover: async (data) => {
+    recover: async (data, error) => {
       stopCheckpoints()
+      if (
+        owner.kind === "native" &&
+        turn.historyBranch === false &&
+        !turn.retryAdmission &&
+        !turn.admission &&
+        !turn.resultId &&
+        data.content === "" &&
+        turn.selection &&
+        isDefinitiveNativeBranchRejection(error, turn.selection)
+      ) {
+        const refusal = new NativeHistoryBranchRefusal(
+          error,
+          () => canUpdateView() && originalOwner.validate_lease?.() !== false
+        )
+        try {
+          await saveRecord(record(turn, "", "refused"))
+        } catch {
+          console.warn("Could not record a confirmed native branch refusal.")
+        }
+        if (refusal.isCurrent()) {
+          controller.holdStaleSend?.(current.view!, draftIsCurrent)
+          try {
+            await controller.refreshRecovery?.()
+          } catch {
+            console.warn("Could not display retained native input.")
+          }
+        }
+        throw refusal
+      }
+
       if (turn.resultId) {
         // Keep the acknowledged receipt until this view or a reopened view follows it.
         await recoveryWrites
@@ -1050,7 +1101,11 @@ const captureNormalHistoryTurn = async (
     cancelPreparation: async () => {
       stopCheckpoints()
       await recoveryWrites
-      await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
+      if (lastRecord) {
+        try { await saveRecord({ ...lastRecord, state: "refused" }) }
+        catch { console.warn("Could not record retained input from cancelled preparation.") }
+        if (canUpdateView()) await controller.refreshRecovery?.()
+      } else await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
     },
     complete: async (content) => {
       // The reply is settled. Its record stays until the view follows it.
@@ -1170,6 +1225,7 @@ export const normalChatMode = async (
         servicePromptSnapshot!,
         executionSignal,
         preparation!.dispatchIsCurrent,
+        preparation!.draftIsCurrent,
         preparation!.acceptDraftBind,
         preparation!.sourceDraft
       )

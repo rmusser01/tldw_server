@@ -162,6 +162,7 @@ export const useSidepanelChatFreshness = ({
       const tabId = checkableRef.current()
       if (!tabId) return PROCEED
       const selection = selectionRef.current
+      if (selection.branchPending) return PROCEED
       const current = selection.getCurrent()
       const { owner, view, capture } = current
       if (

@@ -343,8 +343,8 @@ export function HistorySelectionReview({
                 </p>
                 <p>
                   {text(
-                    "refusedMessage",
-                    "This saved chat uses unsupported context. Your original input is kept here; copy it and review the saved setup or start a compatible chat. It will not be sent again automatically."
+                    "sendRefusedMessage",
+                    "Your original input is kept here; copy it and review the conversation before trying again. It will not be sent again automatically."
                   )}
                 </p>
               </>
@@ -382,13 +382,35 @@ export function HistorySelectionReview({
               <pre className="whitespace-pre-wrap break-words">
                 {entry.turn.result_text}
               </pre>
+              {entry.turn.input_images
+                ?.filter((image) =>
+                  /^data:image\/(?:png|jpeg|gif|webp|bmp|x-icon);base64,[A-Za-z0-9+/]*={0,2}$/.test(
+                    image
+                  )
+                )
+                .map((image, index) => (
+                  <a
+                    key={index}
+                    className="block text-primary underline"
+                    href={image}
+                    download={`recovered-image-${index + 1}`}
+                    onClick={(event) => {
+                      if (
+                        !mounted.current ||
+                        !renderedSource.isCurrent() ||
+                        !renderedSelectionIsCurrent()
+                      )
+                        event.preventDefault()
+                    }}>
+                    {text("downloadRecoveredImage", "Download retained image")}
+                  </a>
+                ))}
             </details>
             <Button
-              onClick={() =>
-                void navigator.clipboard.writeText(
-                  entry.turn.result_text || entry.turn.input_text
-                )
-              }>
+              onClick={() => {
+                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+                  void navigator.clipboard.writeText(entry.turn.result_text || entry.turn.input_text)
+              }}>
               {text("copyRecovery", "Copy recovered text")}
             </Button>
             {(entry.turn.action === "edit_resend" || entry.turn.action === "regenerate") &&
@@ -438,27 +460,92 @@ export function HistorySelectionReview({
           }
         />
       )}
-      {stale && (
+      {selection.branchPending && (
+        <div role="status">
+          <p>
+            {text(
+              "branchPending",
+              "Your next message will branch from this point. The existing conversation is kept."
+            )}
+          </p>
+          <Button
+            onClick={() => {
+              if (
+                mounted.current &&
+                selection.view &&
+                renderedSource.isCurrent() &&
+                renderedSelectionIsCurrent()
+              )
+                void selection.choose(selection.view.cursor)
+            }}>
+            {text("cancelBranch", "Cancel branch")}
+          </Button>
+        </div>
+      )}
+      {selection.sendConflict ? (
         <div ref={errorRegion} tabIndex={-1}>
           <RecoveryCallout
             state="blocked"
-            title={text("changed", "Conversation history changed")}
             role="alert"
+            title={text("sendConflictTitle", "Updated in another window or tab")}
             message={text(
-              "changedMessage",
-              "Your choices are retained. Refresh the source, then review missing messages or choose a new boundary."
+              "sendConflictMessage",
+              "Your message was not added. Load the latest messages to continue, or branch from the point shown here. Your input is kept."
             )}
-            diagnostics={
-              selection.error
-                ? [{ label: text("reason", "Reason"), value: selection.error }]
-                : undefined
-            }
             primaryAction={{
-              label: text("refresh", "Refresh history"),
-              onClick: () => void selection.refresh()
+              label: text("loadLatest", "Load latest messages"),
+              onClick: () => {
+                if (
+                  mounted.current &&
+                  selection.view &&
+                  renderedSource.isCurrent() &&
+                  renderedSelectionIsCurrent()
+                )
+                  void selection.loadLatest(
+                    selection.view,
+                    renderedSource.isCurrent
+                  )
+              }
             }}
+            secondaryActions={[
+              {
+                label: text("branchHere", "Branch here"),
+                onClick: () => {
+                  if (
+                    mounted.current &&
+                    selection.view &&
+                    renderedSource.isCurrent() &&
+                    renderedSelectionIsCurrent()
+                  )
+                    selection.branchHere(selection.view, renderedSource.isCurrent)
+                }
+              }
+            ]}
           />
         </div>
+      ) : (
+        stale && (
+          <div ref={errorRegion} tabIndex={-1}>
+            <RecoveryCallout
+              state="blocked"
+              title={text("changed", "Conversation history changed")}
+              role="alert"
+              message={text(
+                "changedMessage",
+                "Your choices are retained. Refresh the source, then review missing messages or choose a new boundary."
+              )}
+              diagnostics={
+                selection.error
+                  ? [{ label: text("reason", "Reason"), value: selection.error }]
+                  : undefined
+              }
+              primaryAction={{
+                label: text("refresh", "Refresh history"),
+                onClick: () => void selection.refresh()
+              }}
+            />
+          </div>
+        )
       )}
       {selection.status === "unsupported_history_capability" && (
         <RecoveryCallout

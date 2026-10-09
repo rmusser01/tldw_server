@@ -1559,3 +1559,48 @@ it.each(["client", "before_message"])("regeneration recovery refuses unsupported
   if (boundary === "client") Object.assign(pending, { persistence: "client", input_id: "u", assistant_id: "a" })
   await expect(history.saveHistoryTurnRecovery(bookmark, origin, pending)).rejects.toThrow("unsupported_history_action")
 })
+
+
+it("a refused client-managed native attempt keeps candidate IDs and exact input without admission", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    operation_id: "refused-client-native",
+    persistence: "client",
+    origin_view: origin,
+    owner_key: owner.owner_key,
+    conversation_id: owner.conversation_id,
+    selection_digest: "selected",
+    request_context_digest: "prepared",
+    created_at: 1,
+    input_id: "candidate-user",
+    assistant_id: "candidate-assistant",
+    input_text: "  exact unsent input\nsecond line  ",
+    input_images: ["data:image/png;base64,YQ=="],
+    result_text: "",
+    state: "dispatching"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    state: "refused"
+  })
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const reopened = await history.loadHistoryTurnRecoveries(
+    { ...bookmark, client_session_id: "reopened" },
+    owner
+  )
+  expect(reopened[0].turn).toMatchObject({ ...pending, state: "refused" })
+  expect(reopened[0].turn.admission).toBeUndefined()
+  expect(
+    (await history.captureLocalHistorySnapshot(owner, origin, "send")).snapshot
+      .nodes
+  ).toEqual([])
+  await expect(
+    history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending,
+      state: "unknown",
+      settled_message_id: "invented"
+    })
+  ).rejects.toThrow("history_operation_conflict")
+})

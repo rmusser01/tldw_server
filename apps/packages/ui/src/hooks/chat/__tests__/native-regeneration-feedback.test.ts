@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   NativeHistoryContextRefusal,
   NativeHistorySettingsReadError,
+  nativeCharacterPreflightMessage,
   nativeRegenerationFeedback
 } from "../native-character-preflight"
 
@@ -72,4 +73,10 @@ describe("regeneration recovery guidance", () => {
       "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept."
     )
   })
+})
+
+it("a raw branch-conflict name cannot certify that input was not added", () => {
+  expect(
+    nativeCharacterPreflightMessage(new Error("history_branch_changed"), t)
+  ).toBeNull()
 })

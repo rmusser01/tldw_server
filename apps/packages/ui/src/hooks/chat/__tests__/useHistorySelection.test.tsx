@@ -1,3 +1,4 @@
+import { useSidepanelChatFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/routes/sidepanel-chat-freshness"
 import React from "react"
 import {
   act,
@@ -1734,4 +1735,259 @@ it("explicit regeneration recovery opens the actual alternative reply without tr
   expect(hook.result.current.view?.cursor).toEqual({ kind: "after_message", message_id: "b" })
   expect(mocks.dismissRecovery).toHaveBeenCalledWith(entry.scope, origin, entry.turn.operation_id, "completed")
   hook.unmount()
+})
+
+
+describe("owned native stale-send choices", () => {
+  const nativeOwner = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://chat.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    },
+    validate_lease: () => true
+  }
+  const mountedAtEarlierAnswer = async () => {
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(nativeOwner)
+      await hook.result.current.choose({
+        kind: "after_message",
+        message_id: "a"
+      })
+    })
+    return hook
+  }
+  it("holds the current graph without capture and grants exactly one explicit branch", async () => {
+    const hook = await mountedAtEarlierAnswer()
+    const origin = hook.result.current.getCurrent().view!
+    const capture = hook.result.current.getCurrent().capture
+    const calls = mocks.capture.mock.calls.length
+    act(() => {
+      expect(hook.result.current.holdStaleSend(origin, () => true)).toBe(true)
+    })
+    expect(hook.result.current.status).toBe("stale_selection")
+    expect(hook.result.current.getCurrent().capture).toBe(capture)
+    expect(mocks.capture).toHaveBeenCalledTimes(calls)
+    act(() => {
+      expect(hook.result.current.branchHere(origin, () => true)).toBe(true)
+    })
+    expect(hook.result.current.status).toBe("ready")
+    expect(hook.result.current.branchPending).toBe(true)
+    act(() => {
+      expect(hook.result.current.takeBranchIntent(origin)).toBe(true)
+    })
+    expect(hook.result.current.takeBranchIntent(origin)).toBe(false)
+    expect(hook.result.current.getCurrent().view).toBe(origin)
+    hook.unmount()
+  })
+  it.each(["source", "H1", "New", "unmount"])(
+    "an armed branch retires across %s",
+    async (boundary) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.getCurrent().view!
+      let current = true
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => current)
+        hook.result.current.branchHere(origin, () => current)
+      })
+      act(() => {
+        if (boundary === "source") current = false
+        if (boundary === "H1") hook.result.current.beginLoad()
+        if (boundary === "New") hook.result.current.reset()
+        if (boundary === "unmount") hook.unmount()
+      })
+      expect(hook.result.current.takeBranchIntent(origin)).toBe(false)
+      if (boundary !== "unmount") hook.unmount()
+    }
+  )
+  it.each(["source", "H1"])(
+    "an obsolete %s conflict cannot replace the current view",
+    async (boundary) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.getCurrent().view!
+      const fence = hook.result.current.fence()
+      if (boundary === "H1")
+        act(() => {
+          hook.result.current.beginLoad()
+        })
+      act(() => {
+        expect(
+          hook.result.current.holdStaleSend(
+            origin,
+            boundary === "source" ? () => false : fence
+          )
+        ).toBe(false)
+      })
+      expect(hook.result.current.status).toBe("ready")
+      hook.unmount()
+    }
+  )
+  it("load latest derives its boundary from a new owned graph and clears branch intent", async () => {
+    const hook = await mountedAtEarlierAnswer()
+    const origin = hook.result.current.getCurrent().view!
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+    })
+    const fresh = {
+      ...snapshot,
+      nodes: [
+        ...snapshot.nodes,
+        {
+          ...snapshot.nodes[1],
+          id: "latest",
+          parent_id: "a",
+          revision: "latest-1"
+        }
+      ]
+    }
+    mocks.capture.mockImplementation(async (_owner, selected) => {
+      const resolved = resolveHistorySelection(fresh, selected, "send", "")
+      if (resolved.status !== "ready") throw new Error(resolved.code)
+      return {
+        status: "captured",
+        purpose: "send",
+        snapshot: fresh,
+        view: selected,
+        rows: resolved.rows,
+        selected_content: resolved.rows.map((row) => ({
+          id: row.id,
+          revision: row.revision,
+          message: row.preview,
+          images: []
+        })),
+        storage_context_digest: "storage"
+      }
+    })
+    await act(async () => {
+      expect(await hook.result.current.loadLatest(origin, () => true)).toBe(
+        true
+      )
+    })
+    expect(hook.result.current.getCurrent().view?.cursor).toEqual({
+      kind: "after_message",
+      message_id: "latest"
+    })
+    expect(hook.result.current.status).toBe("ready")
+    expect(hook.result.current.branchPending).toBe(false)
+    expect(
+      hook.result.current.takeBranchIntent(
+        hook.result.current.getCurrent().view!
+      )
+    ).toBe(false)
+    hook.unmount()
+  })
+  it.each(["source", "H1", "New", "unmount"])(
+    "a held latest capture cannot install after %s",
+    async (boundary) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.getCurrent().view!
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => true)
+      })
+      let current = true,
+        release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const actualCapture = mocks.capture.getMockImplementation()!
+      mocks.capture.mockImplementationOnce(async (...args) => {
+        await held
+        return actualCapture(...args)
+      })
+      let loading!: Promise<boolean>
+      act(() => {
+        loading = hook.result.current.loadLatest(origin, () => current)
+      })
+      act(() => {
+        if (boundary === "source") current = false
+        if (boundary === "H1") hook.result.current.beginLoad()
+        if (boundary === "New") hook.result.current.reset()
+        if (boundary === "unmount") hook.unmount()
+      })
+      await act(async () => {
+        release()
+        expect(await loading).toBe(false)
+      })
+      expect(hook.result.current.getCurrent().view?.cursor).not.toEqual({
+        kind: "after_message",
+        message_id: "b"
+      })
+      if (boundary === "source")
+        expect(hook.result.current.status).toBe("stale_selection")
+      if (boundary !== "unmount") hook.unmount()
+    }
+  )
+})
+
+it("an actual H1 branch survives a held compact focus capture and subsequent focus checks", async () => {
+  const nativeOwner = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://chat.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    },
+    validate_lease: () => true
+  }
+  const hook = renderHook(() => {
+    const selection = useHistorySelection()
+    const freshness = useSidepanelChatFreshness({
+      historySelection: selection,
+      checkableTabId: () => "source"
+    })
+    return { selection, freshness }
+  })
+  await act(async () => {
+    await hook.result.current.selection.open(nativeOwner)
+    await hook.result.current.selection.choose({
+      kind: "after_message",
+      message_id: "a"
+    })
+  })
+  vi.useFakeTimers()
+  try {
+    const origin = hook.result.current.selection.getCurrent().view!
+    const actual = mocks.capture.getMockImplementation()!
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return actual(...args)
+    })
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+      await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+    })
+    const reads = mocks.capture.mock.calls.length
+    act(() => {
+      hook.result.current.selection.holdStaleSend(origin, () => true)
+      hook.result.current.selection.branchHere(origin, () => true)
+    })
+    await act(async () => {
+      release()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(FOCUS_CHECK_MIN_INTERVAL_MS)
+      window.dispatchEvent(new Event("focus"))
+      await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+    })
+    expect(hook.result.current.selection.getCurrent().view).toBe(origin)
+    expect(hook.result.current.selection.branchPending).toBe(true)
+    expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    expect(hook.result.current.freshness.notice).toBeNull()
+  } finally {
+    hook.unmount()
+    vi.useRealTimers()
+  }
 })

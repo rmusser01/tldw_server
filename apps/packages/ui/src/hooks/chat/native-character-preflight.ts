@@ -92,6 +92,16 @@ export class NativeHistoryContextRefusal extends Error {
   }
 }
 
+/** The server rejected this input before admission; feedback still belongs to its source. */
+export class NativeHistoryBranchRefusal extends Error {
+  constructor(
+    cause: unknown,
+    readonly isCurrent: () => boolean
+  ) {
+    super("native_history_branch_changed", { cause })
+  }
+}
+
 /** Only a failed pre-dispatch settings read can certify that no input was sent. */
 export class NativeHistorySettingsReadError extends Error {
   constructor(cause: unknown, readonly isCurrent: () => boolean) {
@@ -112,6 +122,11 @@ export const nativeCharacterPreflightMessage = (
     return t(
       'playground:composer.native_history_settings_unverified',
       'Conversation settings could not be verified. Your message has not been sent. Reload this saved chat or try again.'
+    );
+  if (error instanceof NativeHistoryBranchRefusal)
+    return t(
+      "playground:composer.native_history_branch_changed",
+      "This conversation changed in another window or tab. Your message was not added. Load the latest messages or choose Branch here; your input is kept in review."
     );
   if (error instanceof NativeHistoryContextRefusal)
     return t(

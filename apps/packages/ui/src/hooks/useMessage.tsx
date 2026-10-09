@@ -10,7 +10,7 @@ import {
   createSelectedForkAction,
   withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils";
-import { NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
@@ -2468,11 +2468,8 @@ export const useMessage = () => {
     assertCurrent?: () => void;
   }, beginResponse: () => boolean) => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
-    // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
-    // onto the chat's latest message (or the send is held) before a new turn,
-    // so the turn never silently forks the conversation. This runs before the
-    // history fence below because a refresh moves the history selection.
-    if (sendGate?.current && !historyEditResend && !isRegenerate && !chatHistory && !memory) {
+    // Native admission checks the selected tip atomically; legacy tabs retain their gate.
+    if (sendGate?.current && historySelection?.getCurrent().owner?.kind !== "native" && !historyEditResend && !isRegenerate && !chatHistory && !memory) {
       const gate = await sendGate.current({ message });
       if (!gate.proceed) return { status: "skipped" as const, reason: "server_history_refresh_required" };
       if (gate.refreshed) {
@@ -2946,7 +2943,7 @@ export const useMessage = () => {
                   description: t("sidepanel:greetingPicker.changedHelp", "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.")
                 });
               } catch (error) {
-                if (!greetingSeed && !((error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError) && !error.isCurrent())) notification.error({
+                if (!greetingSeed && !((error instanceof NativeHistoryBranchRefusal || error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError) && !error.isCurrent())) notification.error({
                   message: t("error"),
                   description: nativeCharacterPreflightMessage(error, t) ?? (error instanceof Error ? error.message : "Native history completion failed")
                 });
