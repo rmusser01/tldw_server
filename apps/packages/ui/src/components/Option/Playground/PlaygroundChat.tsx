@@ -518,11 +518,13 @@ export const PlaygroundChat = ({
     [getMessageResearchHandoffState, handleAttachResearchRun, onPrepareResearchFollowUp]
   )
   // Per-row researchActions cache keyed by message id: the actions derive
-  // solely from metadataExtra (plus follow-up availability), so rows keep a
-  // stable object identity across renders and the memoized PlaygroundMessage
-  // rows skip re-rendering while unrelated state churns.
+  // from metadataExtra, follow-up availability, AND the builder closure
+  // (linked-research-run state and attach callbacks feed into it), so the
+  // builder identity is part of the validity check — otherwise rows would
+  // keep stale onUseInChat/onFollowUp closures and review labels when a run's
+  // status changes (PR #3210 review follow-up).
   const researchActionsCacheRef = React.useRef(
-    new Map<string, { metadataExtra: Record<string, unknown> | undefined; followUpAvailable: boolean; actions: MessageResearchActions | undefined }>()
+    new Map<string, { metadataExtra: Record<string, unknown> | undefined; followUpAvailable: boolean; builder: typeof buildMessageResearchActions; actions: MessageResearchActions | undefined }>()
   )
   React.useEffect(() => {
     researchActionsCacheRef.current.clear()
@@ -536,12 +538,18 @@ export const PlaygroundChat = ({
       if (
         cached &&
         cached.metadataExtra === metadataExtra &&
-        cached.followUpAvailable === followUpAvailable
+        cached.followUpAvailable === followUpAvailable &&
+        cached.builder === buildMessageResearchActions
       ) {
         return cached.actions
       }
       const actions = buildMessageResearchActions(metadataExtra)
-      cache.set(key, { metadataExtra, followUpAvailable, actions })
+      cache.set(key, {
+        metadataExtra,
+        followUpAvailable,
+        builder: buildMessageResearchActions,
+        actions
+      })
       return actions
     },
     [buildMessageResearchActions, onPrepareResearchFollowUp]
