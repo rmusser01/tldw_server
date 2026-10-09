@@ -3,6 +3,8 @@ import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import type { ActorSceneRead } from "@/services/actor-settings"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { getAllModelSettings } from "@/services/model-settings"
@@ -195,6 +197,8 @@ export const CurrentChatModelSettings = ({
   const selectedCharacterId = selectedCharacter?.id ?? null
   const personaChatActive =
     serverChatAssistantKind === "persona" || selectedAssistant?.kind === "persona"
+  const localScene = useStoreMessageOption(state => state.chatDraftAddress?.kind === "local")
+  const sceneOnly = !personaChatActive && localScene && !(accountIsCurrent?.() ?? true)
   const draftRevision = useStoreMessageOption((state) => state.chatDraftRevision)
   const renderedModelRevision = useStoreMessageOption(state => state.selectedModelRevision)
   const mountedRef = React.useRef(true)
@@ -288,10 +292,10 @@ export const CurrentChatModelSettings = ({
     setSaveError(false)
   }, [renderedView])
 
-  const { commitActorSettings, commitActorPreview } = useActorStore(state => ({
-    commitActorSettings: state.setSettings,
-    commitActorPreview: state.setPreviewAndTokens
-  }), shallow)
+  const applyScene = useActorStore(state => state.applyScene)
+  const sceneReadRef = React.useRef<ActorSceneRead | null>(null)
+  const sceneReviewRef = React.useRef<object | null>(null)
+  const [profileUnavailable, setProfileUnavailable] = React.useState(false)
   const [actorSettings, setActorSettingsState] = React.useState<ActorSettings | null>(null)
   const [{ prompt: actorPreview, tokens: actorTokenCount }, setScenePreview] = React.useState({ prompt: "", tokens: 0 })
   const loadedSource = loadedSourceRef.current
@@ -411,7 +415,7 @@ export const CurrentChatModelSettings = ({
     recomputeActorPreview()
   }, [actorSettings, open, recomputeActorPreview])
 
-  const { data: composerModels = EMPTY_CHAT_MODELS, isLoading: modelsLoading } = useChatModelCatalog(open)
+  const { data: composerModels = EMPTY_CHAT_MODELS, isLoading: modelsLoading } = useChatModelCatalog(open && !sceneOnly)
 
   const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
   const selectedSelection = useMemo(
@@ -422,22 +426,40 @@ export const CurrentChatModelSettings = ({
   const saveSettings = useCallback(
     async (values: CurrentChatModelFormValues) => {
       const isCurrent = loadedSourceRef.current
+      const read = sceneReadRef.current
       if (
+        (!personaChatActive && !read) ||
         !open ||
         viewRef.current !== renderedView ||
-        !(accountIsCurrent?.() ?? true) ||
+        (!sceneOnly && !(accountIsCurrent?.() ?? true)) ||
         (!personaChatActive && !isCurrent?.())
       )
         return false
-      if (useStoreMessageOption.getState().selectedModelRevision !== renderedModelRevision) return false
+      if (
+        useStoreMessageOption.getState().selectedModelRevision !==
+        renderedModelRevision
+      )
+        return false
       const editRevision = editRevisionRef.current
       const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
-      const source = captureChatDraftSource(() => selectionIsCurrent() &&
-        !selectionSignal?.aborted && (accountIsCurrent?.() ?? true))
-      const canPublish = () => mountedRef.current && panelRef.current === renderedPanel &&
-        source.isCurrent() && editRevisionRef.current === editRevision &&
-        useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision
-      const canCommit = () => viewRef.current === renderedView && canPublish() && Boolean(isCurrent?.())
+      const source = captureChatDraftSource(
+        () =>
+          selectionIsCurrent() &&
+          !selectionSignal?.aborted &&
+          (sceneOnly || (accountIsCurrent?.() ?? true))
+      )
+      const canPublish = () =>
+        mountedRef.current &&
+        panelRef.current === renderedPanel &&
+        source.isCurrent() &&
+        editRevisionRef.current === editRevision &&
+        useStoreMessageOption.getState().selectedModelRevision ===
+          renderedModelRevision
+      const canCommit = () =>
+        viewRef.current === renderedView &&
+        sceneReadRef.current === read &&
+        canPublish() &&
+        Boolean(isCurrent?.())
       const latestSettingsState = useStoreChatModelSettings.getState()
       const explicitSettingsScope =
         typeof settingsScope === "string" && settingsScope.trim()
@@ -467,17 +489,20 @@ export const CurrentChatModelSettings = ({
         const saved = await saveActorSettingsForChat({
           historyId,
           serverChatId,
-          settings: next
+          settings: next,
+          target: read!.target,
+          expectedRecord: read!.originalRecord,
+          validate_lease: canCommit
         })
         if (!canCommit()) return false
         if (!saved) throw new Error("actor_settings_save_failed")
       }
       if (!canCommit()) return false
-      if (targetSettingsScope) {
+      if (!sceneOnly && targetSettingsScope) {
         setActiveSettingsScope(targetSettingsScope)
       }
 
-      for (const key of Object.keys(values)) {
+      for (const key of sceneOnly ? [] : Object.keys(values)) {
         if (!canPublish()) return false
         if (!isChatModelSettingKey(key)) continue
         const normalizedValue = normalizeCurrentChatModelSettingValue(
@@ -490,14 +515,26 @@ export const CurrentChatModelSettings = ({
       }
 
       if (!canPublish()) return false
-      if (isOCREnabled && stagedOcrLanguage) setOcrLanguage(stagedOcrLanguage)
-      if (!canPublish()) return false
-      commitActorSettings(next)
+      if (!sceneOnly && isOCREnabled && stagedOcrLanguage)
+        setOcrLanguage(stagedOcrLanguage)
       if (!canPublish()) return false
       const preview = buildActorPrompt(next)
-      commitActorPreview(preview, estimateActorTokens(preview))
+      if (
+        read &&
+        !applyScene({
+          target: read.target,
+          settings: next,
+          preview,
+          tokenCount: estimateActorTokens(preview)
+        })
+      )
+        return false
       if (!canPublish()) return false
-      baselineRef.current = { values: structuredClone(form.getFieldsValue(true)), actor: next, ocrLanguage: stagedOcrLanguage }
+      baselineRef.current = {
+        values: structuredClone(form.getFieldsValue(true)),
+        actor: next,
+        ocrLanguage: stagedOcrLanguage
+      }
       setOpen(false)
       return true
     },
@@ -512,13 +549,13 @@ export const CurrentChatModelSettings = ({
       renderedModelRevision,
       historyId,
       personaChatActive,
+      sceneOnly,
       serverChatId,
       settingsScope,
       composerModels,
       selectedModel,
       setActiveSettingsScope,
-      commitActorSettings,
-      commitActorPreview,
+      applyScene,
       form,
       isOCREnabled,
       stagedOcrLanguage,
@@ -603,6 +640,7 @@ export const CurrentChatModelSettings = ({
   )
 
   const buildBaseValues = useCallback((data?: ModelConfigData | null, promptFallback?: string) => {
+    if (sceneOnly) return {}
     const effective = useStoreChatModelSettings.getState().getEffectiveSettings(selectedSelection.settingsScope)
     const values = Object.fromEntries([...CHAT_MODEL_SETTING_KEYS].map(key => [key, effective[key]])) as Partial<ChatModelSettings>
     if (data) for (const key of CHAT_MODEL_SETTING_KEYS) {
@@ -610,41 +648,53 @@ export const CurrentChatModelSettings = ({
         Object.assign(values, { [key]: data[key as keyof ModelConfigData] })
     }
     return { ...values, systemPrompt: effective.systemPrompt ?? promptFallback ?? "" }
-  }, [selectedSelection.settingsScope])
+  }, [selectedSelection.settingsScope, sceneOnly])
 
   const { isLoading, isFetching, isError } = useQuery({
     queryKey: ["fetchModelConfig2", viewKey, renderedView.revision],
     queryFn: async ({ signal, client }) => {
       const sourceView = renderedView
+      const target = personaChatActive
+        ? null
+        : captureCurrentActorSceneTarget(historySelection)
+      const appliedBeforeRead = useActorStore.getState().applied
       const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
       const { isCurrent } = captureChatDraftSource(
         () =>
           !signal.aborted &&
           selectionIsCurrent() &&
-          (accountIsCurrent?.() ?? true) &&
+          (sceneOnly || (accountIsCurrent?.() ?? true)) &&
+          (personaChatActive || Boolean(target?.isCurrent())) &&
           viewRef.current === sourceView &&
           usePlaygroundSessionStore.getState().restoreRevision ===
             restoreRevision &&
           usePlaygroundSessionStore.getState().sourceSelectionRevision ===
             selectionRevision
       )
-      if (!isCurrent()) throw new Error("stale_selection")
+      if (!isCurrent() || (!personaChatActive && !target))
+        throw new Error("stale_selection")
       readSourceRef.current = isCurrent
       loadedSourceRef.current = null
+      sceneReadRef.current = null
+      sceneReviewRef.current = null
+      setProfileUnavailable(false)
       if (import.meta?.env?.DEV) {
         console.count("CurrentChatModelSettings/fetchModelConfig")
       }
       // Keep the existing model-config cache independent of fresh scene reads.
       const modelConfigKey = ["fetchModelConfig2", true, selectedCharacterId]
-      const cachedModelConfig =
-        client.getQueryData<ModelConfigData>(modelConfigKey)
-      const data = cachedModelConfig ?? (await getAllModelSettings())
+      const cachedModelConfig = sceneOnly
+        ? undefined
+        : client.getQueryData<ModelConfigData>(modelConfigKey)
+      const data = sceneOnly
+        ? {}
+        : cachedModelConfig ?? (await getAllModelSettings())
 
-      const ocrLang = await getOCRLanguage()
+      const ocrLang = sceneOnly ? null : await getOCRLanguage()
 
       let tempSystemPrompt = ""
 
-      if (selectedSystemPrompt) {
+      if (!sceneOnly && selectedSystemPrompt) {
         tempSystemPrompt =
           await resolveSelectedSystemPromptContent(selectedSystemPrompt)
       }
@@ -656,23 +706,26 @@ export const CurrentChatModelSettings = ({
 
       let actor: ActorSettings | null = null
       if (!personaChatActive) {
-        const { getActorSettingsForChatWithCharacterFallback } =
-          await loadActorSettings()
-        if (!isCurrent()) throw new Error("stale_selection")
-        actor = await getActorSettingsForChatWithCharacterFallback({
-          historyId,
-          serverChatId,
-          characterId: selectedCharacterId
+        const { getActorSceneForChat } = await loadActorSettings()
+        if (!isCurrent() || !target) throw new Error("stale_selection")
+        const read = await getActorSceneForChat({
+          target,
+          characterId: selectedCharacterId,
+          validate_lease: isCurrent
         })
+        if (!isCurrent()) throw new Error("stale_selection")
+        sceneReadRef.current = read
+        setProfileUnavailable(read.profileUnavailable)
+        actor = read.settings
       }
       if (!isCurrent()) throw new Error("stale_selection")
       if (!actor) actor = createDefaultActorSettings()
       loadedSourceRef.current = isCurrent
-      if (!cachedModelConfig) client.setQueryData(modelConfigKey, data)
+      if (!sceneOnly && !cachedModelConfig)
+        client.setQueryData(modelConfigKey, data)
       const nextOcrLanguage = ocrLang || ocrLanguage
       setStagedOcrLanguage(nextOcrLanguage)
       setActorSettingsState(actor)
-      commitActorSettings(actor)
       if (!isCurrent()) throw new Error("stale_selection")
 
       const actorFields: Record<string, any> = {
@@ -694,15 +747,29 @@ export const CurrentChatModelSettings = ({
       if (!isCurrent()) throw new Error("stale_selection")
       form.setFieldsValue({ ...baseValues, ...actorFields })
       if (!isCurrent()) throw new Error("stale_selection")
-      baselineRef.current = { values: structuredClone(form.getFieldsValue(true)), actor, ocrLanguage: nextOcrLanguage }
+      baselineRef.current = {
+        values: structuredClone(form.getFieldsValue(true)),
+        actor,
+        ocrLanguage: nextOcrLanguage
+      }
 
       const preview = buildActorPrompt(actor)
       setScenePreview({ prompt: preview, tokens: estimateActorTokens(preview) })
-      commitActorPreview(preview, estimateActorTokens(preview))
+      const read = sceneReadRef.current
+      if (
+        read?.origin === "scene" &&
+        useActorStore.getState().applied === appliedBeforeRead
+      )
+        applyScene({
+          target: read.target,
+          settings: actor,
+          preview,
+          tokenCount: estimateActorTokens(preview)
+        })
       if (!isCurrent()) throw new Error("stale_selection")
       return data
     },
-    enabled: open && !selectedCharacterMeta.isLoading,
+    enabled: open && (sceneOnly || !selectedCharacterMeta.isLoading),
     refetchOnMount: "always",
     refetchOnWindowFocus: false
   })
@@ -956,15 +1023,90 @@ export const CurrentChatModelSettings = ({
     ]
   )
 
-  const sceneUnavailable = isError || !(accountIsCurrent?.() ?? true)
+  const reviewSavedScene = async () => {
+    const original = sceneReadRef.current
+    const sourceIsCurrent = loadedSourceRef.current
+    const revision = editRevisionRef.current
+    const sourceCurrent = () =>
+      mountedRef.current &&
+      viewRef.current === renderedView &&
+      sceneReadRef.current === original &&
+      Boolean(sourceIsCurrent?.()) &&
+      editRevisionRef.current === revision
+    if (!original || saveAttemptRef.current || !sourceCurrent()) return
+    const attempt = {}
+    sceneReviewRef.current = attempt
+    saveAttemptRef.current = attempt
+    setSaving(true)
+    try {
+      const { getActorSceneForChat } = await loadActorSettings()
+      if (!sourceCurrent()) return
+      const current = await getActorSceneForChat({
+        target: original.target,
+        validate_lease: sourceCurrent
+      })
+      if (!sourceCurrent()) return
+      modal.confirm({
+        title: t(
+          "playground:composer.sceneReviewTitle",
+          "Review the current saved scene"
+        ),
+        content: (
+          <div>
+            <p>
+              {t(
+                "playground:composer.sceneReviewHelp",
+                "Your staged edits are still in the editor. Review the saved scene below before choosing to use your edits. Save will still check for newer changes."
+              )}
+            </p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap">
+              {buildActorPrompt({ ...current.settings, isEnabled: true })}
+            </pre>
+          </div>
+        ),
+        okText: t(
+          "playground:composer.sceneReviewUseEdits",
+          "Use my staged edits"
+        ),
+        cancelText: t("common:keepEditing", "Keep editing"),
+        onOk: () => {
+          if (
+            sceneReviewRef.current !== attempt ||
+            !sourceCurrent() ||
+            saveAttemptRef.current
+          )
+            return
+          sceneReviewRef.current = null
+          sceneReadRef.current = current
+          setSaveError(false)
+        },
+        onCancel: () => {
+          if (sceneReviewRef.current === attempt) sceneReviewRef.current = null
+        }
+      })
+    } catch {
+      if (sceneReviewRef.current === attempt) sceneReviewRef.current = null
+      if (sourceCurrent()) setSaveError(true)
+    } finally {
+      if (saveAttemptRef.current === attempt) {
+        saveAttemptRef.current = null
+        if (sourceCurrent()) setSaving(false)
+      }
+    }
+  }
+
+  const sceneUnavailable = isError || (!sceneOnly && !(accountIsCurrent?.() ?? true))
   const sceneReady = !isFetching && Boolean(loadedSourceRef.current?.())
   const renderBody = () => {
     return (
       <>
         {modalContextHolder}
         <p className="mb-3 text-xs text-text-subtle">
-          {t("modelSettings.scopeHelp", "Model and Advanced parameters are defaults for the selected model. Save applies staged defaults and scene edits to future turns. API/model choices apply immediately; conversation controls save separately to this chat.")}
+          {sceneOnly ? t("modelSettings.localSceneHelp", "This scene is saved on this device. Verify your server account to edit model defaults.") : t("modelSettings.scopeHelp", "Model and Advanced parameters are defaults for the selected model. Save applies staged defaults and scene edits to future turns. API/model choices apply immediately; conversation controls save separately to this chat.")}
         </p>
+        {profileUnavailable && !sceneUnavailable ? (
+          <p role="status">{t("playground:actor.defaultUnavailable", "Character defaults are unavailable. You can still edit and save this scene.")}</p>
+        ) : null}
         {sceneUnavailable ? (
           <div className="space-y-2">
             <p role="alert">
@@ -1007,12 +1149,17 @@ export const CurrentChatModelSettings = ({
           </div>
         ) : null}
         {saveError ? (
-          <p role="alert">
-            {t(
-              "playground:composer.sceneSaveError",
-              "Scene settings could not be saved. Your edits are still here; retry Save."
-            )}
-          </p>
+          <div className="space-y-2">
+            <p role="alert">
+              {t(
+                "playground:composer.sceneSaveError",
+                "Scene settings could not be saved. Your edits are still here. Retry Save, or review the saved scene if another edit changed it."
+              )}
+            </p>
+            <Button disabled={saving} onClick={() => void reviewSavedScene()}>
+              {t("playground:composer.sceneReviewAction", "Review saved scene")}
+            </Button>
+          </div>
         ) : null}
         {!isLoading && !sceneUnavailable && sceneReady ? (
           <Form
@@ -1029,6 +1176,7 @@ export const CurrentChatModelSettings = ({
                 viewRef.current !== renderedView
               )
                 return
+              sceneReviewRef.current = null
               const attempt = {}
               const isCurrent = loadedSourceRef.current
               saveAttemptRef.current = attempt
@@ -1074,14 +1222,14 @@ export const CurrentChatModelSettings = ({
               className="min-w-0 border-0 p-0"
               disabled={saving || conversationPending || !sceneReady}>
               <Tabs
-                defaultActiveKey="model"
+                defaultActiveKey={sceneOnly ? "actor" : "model"}
                 destroyOnHidden={false}
-                items={tabItems}
+                items={sceneOnly ? tabItems.filter(item => item.key === "actor") : tabItems}
                 className="settings-tabs"
               />
               <div className="mt-4">
                 <LlamaCppAdvancedControls
-                  selectedModel={selectedModel}
+                  selectedModel={sceneOnly ? null : selectedModel}
                   thinkingBudget={llamaThinkingBudgetTokens}
                   grammarMode={llamaGrammarMode}
                   grammarId={llamaGrammarId}

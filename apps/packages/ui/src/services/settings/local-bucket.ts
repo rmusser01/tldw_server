@@ -16,6 +16,7 @@ type LocalRegistryBucketOptions = {
 export type LocalRegistryListing<T> = { records: Record<string, LocalRegistryRecord<T>>; unavailable: boolean }
 
 export type LocalRegistryBucket<T> = {
+  isDurable: () => boolean
   /** Read candidates without pinning unseen records or deleting stale ones. */
   list: () => Promise<LocalRegistryListing<T>>
   /** Fail-closed reads require an unpinned durable bucket and never delete unreadable records. */
@@ -237,6 +238,7 @@ export const createLocalRegistryBucket = <T>({
   }
 
   return {
+    isDurable: hasDurableBackend,
     list,
     get,
     set,

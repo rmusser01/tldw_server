@@ -7,6 +7,7 @@ import { isChatDraftAddress, type ChatDraftAddress } from "./chat-draft-address"
 export type ActorSettingsTarget = Readonly<{
   key: string
   accountKey: string | null
+  localProfileId?: string
   isCurrent: () => boolean
   profileIsCurrent: () => boolean
 }>
@@ -82,6 +83,7 @@ export const captureActorSettingsTarget = (params: {
       return null
     return Object.freeze({
       key: JSON.stringify(["local", owner.profile_id, owner.conversation_id]),
+      localProfileId: owner.profile_id,
       accountKey,
       isCurrent: sourceCurrent,
       profileIsCurrent: () =>

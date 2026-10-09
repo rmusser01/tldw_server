@@ -35,6 +35,7 @@ import type { ActorPresetId } from "@/data/actor-presets"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
 import type { Character } from "@/types/character"
+import { captureActorProfileTarget } from "@/utils/actor-settings-target"
 
 const parseWorldBookEntryOptions = (content: string): string[] => {
   const text = (content || "").trim()
@@ -158,6 +159,7 @@ export const ActorEditor: React.FC<Props> = ({
       characterMeta?.isCurrent?.() !== false &&
       getSelectedAssistantOperationRevision() === renderedCharacterRevision
     const editIsCurrent = captureEditGuard()
+    const profileTarget = captureActorProfileTarget(characterMeta?.ownerKey, characterId, sourceIsCurrent)
     if (!sourceIsCurrent() || !editIsCurrent()) return
     const attempt = {}
     profileActionRef.current = attempt
@@ -188,6 +190,7 @@ export const ActorEditor: React.FC<Props> = ({
       true
     )
     try {
+      if (!profileTarget) throw new Error("actor_profile_scope_unavailable")
       const proposal =
         action === "save"
           ? buildActorSettingsFromForm(settings, form.getFieldsValue(true))
@@ -197,6 +200,7 @@ export const ActorEditor: React.FC<Props> = ({
       if (proposal) {
         const saved = await service.saveActorProfileForCharacter({
           characterId,
+          target: profileTarget,
           settings: proposal,
           validate_lease: canCommit
         })
@@ -211,6 +215,7 @@ export const ActorEditor: React.FC<Props> = ({
         return
       }
       const profile = await service.getActorProfileForCharacter(characterId, {
+        target: profileTarget,
         throwOnError: true,
         validate_lease: canCommit
       })

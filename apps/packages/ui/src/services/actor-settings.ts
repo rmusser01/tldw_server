@@ -232,12 +232,31 @@ const isValidSceneRecord = (raw: unknown): raw is ActorSceneRecord => {
   )
 }
 
+const verifyOriginalLocalProfile = async (
+  target: ActorProfileTarget & { localProfileId?: string }
+) => {
+  if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  if (target.localProfileId !== undefined) {
+    const { ensureLocalProfileId } = await import(
+      "@/db/dexie/history-selection"
+    )
+    await ensureLocalProfileId(target.localProfileId)
+    if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  }
+}
+
 const readOwnedRecord = async (
   bucket: typeof scenes,
-  target: ActorProfileTarget
+  target: ActorProfileTarget & { localProfileId?: string }
 ): Promise<ActorSceneRecord | null> => {
   if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  if (target.localProfileId !== undefined)
+    await verifyOriginalLocalProfile(target)
   const record = await bucket.get(target.key, { failClosed: true })
+  if (target.localProfileId !== undefined) {
+    await verifyOriginalLocalProfile(target)
+    if (!bucket.isDurable()) throw new Error("actor_settings_unavailable")
+  }
   if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
   if (record !== null && !isValidSceneRecord(record))
     throw new Error("actor_settings_invalid")
@@ -253,6 +272,7 @@ export const getActorSceneForChat = async (params: {
   try {
     const readTarget = {
       key: target.key,
+      localProfileId: target.localProfileId,
       isCurrent: () => target.isCurrent() && params.validate_lease?.() !== false
     }
     const originalRecord = await readOwnedRecord(scenes, readTarget)
@@ -278,21 +298,26 @@ export const getActorSceneForChat = async (params: {
       () => readTarget.isCurrent() && target.profileIsCurrent()
     )
     if (!profileTarget) return { ...empty, profileUnavailable: true }
+    let inherited: ActorSceneRead = empty
     try {
       const profile = await readOwnedRecord(profiles, profileTarget)
       if (profile)
-        return {
+        inherited = {
           ...empty,
           settings: migrateSettings(structuredClone(profile.value)),
           origin: "profile"
         }
-      return empty
     } catch {
-      // Optional inheritance must not revoke a certified local scene absence.
       if (!readTarget.isCurrent())
         throw new Error("actor_settings_scope_changed")
-      return { ...empty, profileUnavailable: true }
+      inherited = { ...empty, profileUnavailable: true }
     }
+    if (target.localProfileId !== undefined) {
+      await verifyOriginalLocalProfile(readTarget)
+      if (!scenes.isDurable()) throw new Error("actor_settings_unavailable")
+    }
+    if (!readTarget.isCurrent()) throw new Error("actor_settings_scope_changed")
+    return inherited
   } catch (error) {
     console.error("Failed to load owned Actor scene", error)
     throw new Error("actor_settings_unavailable")
@@ -371,13 +396,30 @@ export const saveActorSettingsForChat = async (params: {
         expectedRecord === null ? null : structuredClone(expectedRecord)
       const updatedAt = Math.max(Date.now(), (original?.updatedAt ?? -1) + 1)
       if (!Number.isFinite(new Date(updatedAt).getTime())) return false
-      return await scenes.set(
+      if (target.localProfileId !== undefined)
+        await verifyOriginalLocalProfile({
+          key: target.key,
+          localProfileId: target.localProfileId,
+          isCurrent: () =>
+            target.isCurrent() && params.validate_lease?.() !== false
+        })
+      const saved = await scenes.set(
         target.key,
         proposal,
         updatedAt,
         original,
         () => target.isCurrent() && params.validate_lease?.() !== false
       )
+      if (saved && target.localProfileId !== undefined) {
+        await verifyOriginalLocalProfile({
+          key: target.key,
+          localProfileId: target.localProfileId,
+          isCurrent: () =>
+            target.isCurrent() && params.validate_lease?.() !== false
+        })
+        if (!scenes.isDurable()) return false
+      }
+      return saved && target.isCurrent() && params.validate_lease?.() !== false
     }
     requirePersistentStorage(storage)
     const chatKey = resolveActorChatKey(params)

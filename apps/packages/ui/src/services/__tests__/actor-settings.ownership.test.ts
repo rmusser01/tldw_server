@@ -7,7 +7,8 @@ const io = vi.hoisted(() => ({
   localPersistent: true,
   legacyPersistent: true,
   get: vi.fn(),
-  set: vi.fn()
+  set: vi.fn(),
+  verifyProfile: vi.fn()
 }))
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: (options?: { area?: string }) => ({
@@ -19,6 +20,9 @@ vi.mock("@/utils/safe-storage", () => ({
     get: io.get,
     set: io.set
   })
+}))
+vi.mock("@/db/dexie/history-selection", () => ({
+  ensureLocalProfileId: io.verifyProfile
 }))
 import {
   getActorSettingsForChat,
@@ -93,6 +97,10 @@ describe("qualified scene and character-default records", () => {
     io.localPersistent = true
     io.legacyPersistent = true
     io.values.clear()
+    io.verifyProfile.mockReset().mockImplementation(async (expected: string) => {
+      if (expected !== "profile-a") throw new Error("owner_mismatch")
+      return expected
+    })
     io.get
       .mockReset()
       .mockImplementation(async (key: string) => io.values.get(key))
@@ -589,4 +597,105 @@ describe("qualified scene and character-default records", () => {
       expect(io.set).not.toHaveBeenCalled()
     }
   )
+  it.each(["present", "absent", "save"] as const)(
+    "refuses a profile replaced during held %s scene IO before acknowledgement",
+    async (kind) => {
+      const local = {
+        ...target(["local", "profile-a", "collision"], null),
+        localProfileId: "profile-a"
+      }
+      const key = sceneKey(local),
+        raw = { value: sceneA, updatedAt: 1 }
+      if (kind !== "absent") io.values.set(key, raw)
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let profileCurrent = true
+      io.verifyProfile.mockImplementation(async () => {
+        if (!profileCurrent) throw new Error("owner_mismatch")
+      })
+      if (kind === "save")
+        io.set.mockImplementationOnce(async (address: string, value: unknown) => {
+          await held
+          io.values.set(address, value)
+        })
+      else
+        io.get.mockImplementationOnce(async () => {
+          const observed = io.values.get(key)
+          await held
+          return observed
+        })
+      const result =
+        kind === "save"
+          ? saveActorSettingsForChat({
+              historyId: "collision",
+              serverChatId: null,
+              target: local,
+              expectedRecord: raw,
+              settings: sceneB
+            })
+          : getActorSceneForChat({ target: local })
+      const rejected =
+        kind === "save"
+          ? expect(result).resolves.toBe(false)
+          : expect(result).rejects.toThrow("actor_settings_unavailable")
+      await vi.waitFor(() =>
+        expect(kind === "save" ? io.set : io.get).toHaveBeenCalled()
+      )
+      profileCurrent = false
+      release()
+      await rejected
+      // A refused acknowledgement is not rollback of the owned write that already completed.
+      if (kind === "save")
+        expect(io.values.get(key)).toMatchObject({ value: sceneB })
+    }
+  )
+
+  it.each(["read", "save"])(
+    "verifies the original genuine-local profile before %s scene IO",
+    async (kind) => {
+      const local = {
+        ...target(["local", "profile-a", "collision"], null),
+        localProfileId: "profile-a"
+      }
+      const params = { historyId: "collision", serverChatId: null, target: local }
+      if (kind === "read") await getActorSettingsForChat(params)
+      else
+        expect(
+          await saveActorSettingsForChat({
+            ...params,
+            settings: sceneA,
+            expectedRecord: null
+          })
+        ).toBe(true)
+      expect(io.verifyProfile).toHaveBeenCalledWith("profile-a")
+      expect(io.verifyProfile).not.toHaveBeenCalledWith()
+    }
+  )
+  it.each(["read", "save"])(
+    "refuses a replaced persistent local profile before %s scene IO",
+    async (kind) => {
+      const local = {
+        ...target(["local", "profile-b", "collision"], null),
+        localProfileId: "profile-b"
+      }
+      const params = { historyId: "collision", serverChatId: null, target: local }
+      if (kind === "read")
+        await expect(getActorSettingsForChat(params)).rejects.toThrow(
+          "actor_settings_unavailable"
+        )
+      else
+        expect(
+          await saveActorSettingsForChat({
+            ...params,
+            settings: sceneA,
+            expectedRecord: null
+          })
+        ).toBe(false)
+      expect(io.get).not.toHaveBeenCalled()
+      expect(io.set).not.toHaveBeenCalled()
+    }
+  )
+
 })

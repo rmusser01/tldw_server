@@ -290,6 +290,7 @@ export const useSelectedAssistant = (
         (meta?.isLoading ?? false),
       verificationState,
       retryVerification,
+      ownerKey: isCurrent() ? ownerKey : null,
       assistantKey: ownerKey ? assistantKey : null,
       isCurrent,
       readSelection,

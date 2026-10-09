@@ -166,6 +166,11 @@ const SELECTED_ASSISTANT_STORAGE_KEY = `${ASSISTANT_KEY}:owner:account-a`
 const SELECTED_CHARACTER_STORAGE_KEY = `${CHARACTER_KEY}:owner:account-a`
 
 describe("useSelectedAssistant", () => {
+  it("exposes the verified original account key for character-default commands", () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+    expect(result.current[2].ownerKey).toBe("account-a")
+  })
+
   beforeEach(() => {
     mocks.assistantLocal.clear()
     mocks.assistantSync.clear()

@@ -3,6 +3,8 @@ import { Button, Drawer, Form, Modal, Segmented, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import type { ActorSceneRead } from "@/services/actor-settings"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import type { ActorEditorMode, ActorSettings, ActorTarget } from "@/types/actor"
@@ -41,6 +43,8 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const [selectedAssistant, , assistantMeta] = useSelectedAssistant(null)
   const accountIsCurrent = assistantMeta?.isCurrent
   const historySelection = useHistorySelectionContext()
+  const historySelectionRef = React.useRef(historySelection)
+  historySelectionRef.current = historySelection
   const selectionSignal = historySelection?.getSignal()
   const captureSelectionFence = historySelection?.fence
   const [form] = Form.useForm()
@@ -49,14 +53,10 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const baselineRef = React.useRef<{ settings: ActorSettings; fields: Record<string, unknown> } | null>(null)
   const [settings, setSettingsState] = React.useState<ActorSettings | null>(null)
   const [{ preview, tokenCount }, setPreviewState] = React.useState({ preview: "", tokenCount: 0 })
-  const { commitSettings, commitPreview } =
-    useActorStore(
-      (state) => ({
-        commitSettings: state.setSettings,
-        commitPreview: state.setPreviewAndTokens
-      }),
-      shallow
-    )
+  const applyScene = useActorStore((state) => state.applyScene)
+  const sceneReadRef = React.useRef<ActorSceneRead | null>(null)
+  const sceneReviewRef = React.useRef<object | null>(null)
+  const [profileUnavailable, setProfileUnavailable] = React.useState(false)
   const { editorMode, setEditorMode } = useActorEditorPrefs()
   const [loading, setLoading] = React.useState(false)
   const [newAspectTarget, setNewAspectTarget] =
@@ -141,6 +141,9 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
 
   React.useEffect(() => {
     loadedSourceRef.current = null
+    sceneReadRef.current = null
+    sceneReviewRef.current = null
+    setProfileUnavailable(false)
     baselineRef.current = null
     saveAttemptRef.current = null
     setSaving(false)
@@ -148,12 +151,14 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     if (!open || personaChatActive) return
     let active = true
     const sourceView = viewRef.current
+    const target = captureCurrentActorSceneTarget(historySelectionRef.current)
+    const appliedBeforeRead = useActorStore.getState().applied
     const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
     const { isCurrent } = captureChatDraftSource(
       () =>
         active &&
         selectionIsCurrent() &&
-        (accountIsCurrent?.() ?? true) &&
+        Boolean(target?.isCurrent()) &&
         viewRef.current === sourceView &&
         usePlaygroundSessionStore.getState().restoreRevision ===
           restoreRevision &&
@@ -161,7 +166,7 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
           selectionRevision
     )
     readSourceRef.current = isCurrent
-    if (!isCurrent()) {
+    if (!target || !isCurrent()) {
       setLoading(false)
       setLoadError(true)
       return () => {
@@ -172,18 +177,19 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     setLoadError(false)
     const hydrate = async () => {
       try {
-        const { getActorSettingsForChatWithCharacterFallback } =
-          await loadActorSettings()
+        const { getActorSceneForChat } = await loadActorSettings()
         if (!isCurrent()) return
-        const actor = await getActorSettingsForChatWithCharacterFallback({
-          historyId,
-          serverChatId,
-          characterId: selectedCharacter?.id ?? null
+        const read = await getActorSceneForChat({
+          target,
+          characterId: selectedCharacter?.id ?? null,
+          validate_lease: isCurrent
         })
         if (!isCurrent()) return
+        const actor = read.settings
+        sceneReadRef.current = read
         loadedSourceRef.current = isCurrent
+        setProfileUnavailable(read.profileUnavailable)
         setSettingsState(actor)
-        commitSettings(actor)
         if (!isCurrent()) return
         const fields: Record<string, unknown> = {
           actorEnabled: actor.isEnabled,
@@ -203,10 +209,22 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
         if (!isCurrent()) return
         form.setFieldsValue(fields)
         if (!isCurrent()) return
-        baselineRef.current = { settings: structuredClone(actor), fields: structuredClone(form.getFieldsValue(true)) }
+        baselineRef.current = {
+          settings: structuredClone(actor),
+          fields: structuredClone(form.getFieldsValue(true))
+        }
         const text = buildActorPrompt(actor)
         setPreviewState({ preview: text, tokenCount: estimateActorTokens(text) })
-        commitPreview(text, estimateActorTokens(text))
+        if (
+          read.origin === "scene" &&
+          useActorStore.getState().applied === appliedBeforeRead
+        )
+          applyScene({
+            target: read.target,
+            settings: actor,
+            preview: text,
+            tokenCount: estimateActorTokens(text)
+          })
         if (!isCurrent()) return
       } catch {
         if (isCurrent()) setLoadError(true)
@@ -232,8 +250,9 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     selectionSignal,
     captureSelectionFence,
     accountIsCurrent,
-    commitPreview,
-    commitSettings
+    historySelection?.draftAccount?.requestScope,
+    historySelection?.draftAccount?.isCurrent,
+    applyScene
   ])
 
   React.useEffect(() => {
@@ -272,16 +291,23 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
 
   const handleSave = async (values: any) => {
     const isCurrent = loadedSourceRef.current
+    const read = sceneReadRef.current
     if (
+      !read ||
       viewRef.current !== renderedView ||
       !isCurrent?.() ||
       saveAttemptRef.current
     )
       return
+    sceneReviewRef.current = null
     const attempt = {}
     const revision = editRevisionRef.current
-    const canCommit = () => saveAttemptRef.current === attempt &&
-      viewRef.current === renderedView && isCurrent() && editRevisionRef.current === revision
+    const canCommit = () =>
+      saveAttemptRef.current === attempt &&
+      viewRef.current === renderedView &&
+      sceneReadRef.current === read &&
+      isCurrent() &&
+      editRevisionRef.current === revision
     saveAttemptRef.current = attempt
     setSaving(true)
     setSaveError(false)
@@ -295,14 +321,23 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
       const saved = await saveActorSettingsForChat({
         historyId,
         serverChatId,
-        settings: next
+        settings: next,
+        target: read.target,
+        expectedRecord: read.originalRecord,
+        validate_lease: canCommit
       })
       if (!canCommit()) return
       if (!saved) throw new Error("actor_settings_save_failed")
-      commitSettings(next)
-      if (!canCommit()) return
       const text = buildActorPrompt(next)
-      commitPreview(text, estimateActorTokens(text))
+      if (
+        !applyScene({
+          target: read.target,
+          settings: next,
+          preview: text,
+          tokenCount: estimateActorTokens(text)
+        })
+      )
+        return
       if (!canCommit()) return
       setOpen(false)
     } catch {
@@ -311,6 +346,77 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
       if (saveAttemptRef.current === attempt) {
         saveAttemptRef.current = null
         if (isCurrent()) setSaving(false)
+      }
+    }
+  }
+
+  const reviewSavedScene = async () => {
+    const original = sceneReadRef.current
+    const sourceIsCurrent = loadedSourceRef.current
+    const revision = editRevisionRef.current
+    const sourceCurrent = () =>
+      viewRef.current === renderedView &&
+      sceneReadRef.current === original &&
+      Boolean(sourceIsCurrent?.()) &&
+      editRevisionRef.current === revision
+    if (!original || saveAttemptRef.current || !sourceCurrent()) return
+    const attempt = {}
+    sceneReviewRef.current = attempt
+    saveAttemptRef.current = attempt
+    setSaving(true)
+    try {
+      const { getActorSceneForChat } = await loadActorSettings()
+      if (!sourceCurrent()) return
+      const current = await getActorSceneForChat({
+        target: original.target,
+        validate_lease: sourceCurrent
+      })
+      if (!sourceCurrent()) return
+      modal.confirm({
+        title: t(
+          "playground:composer.sceneReviewTitle",
+          "Review the current saved scene"
+        ),
+        content: (
+          <div>
+            <p>
+              {t(
+                "playground:composer.sceneReviewHelp",
+                "Your staged edits are still in the editor. Review the saved scene below before choosing to use your edits. Save will still check for newer changes."
+              )}
+            </p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap">
+              {buildActorPrompt({ ...current.settings, isEnabled: true })}
+            </pre>
+          </div>
+        ),
+        okText: t(
+          "playground:composer.sceneReviewUseEdits",
+          "Use my staged edits"
+        ),
+        cancelText: t("common:keepEditing", "Keep editing"),
+        onOk: () => {
+          if (
+            sceneReviewRef.current !== attempt ||
+            !sourceCurrent() ||
+            saveAttemptRef.current
+          )
+            return
+          sceneReviewRef.current = null
+          sceneReadRef.current = current
+          setSaveError(false)
+        },
+        onCancel: () => {
+          if (sceneReviewRef.current === attempt) sceneReviewRef.current = null
+        }
+      })
+    } catch {
+      if (sceneReviewRef.current === attempt) sceneReviewRef.current = null
+      if (sourceCurrent()) setSaveError(true)
+    } finally {
+      if (saveAttemptRef.current === attempt) {
+        saveAttemptRef.current = null
+        if (sourceCurrent()) setSaving(false)
       }
     }
   }
@@ -360,13 +466,26 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
           )}
         </div>
       ) : null}
-      {saveError ? (
-        <p role="alert">
+      {profileUnavailable && !loadError ? (
+        <p role="status">
           {t(
-            "playground:composer.sceneSaveError",
-            "Scene settings could not be saved. Your edits are still here; retry Save."
+            "playground:actor.defaultUnavailable",
+            "Character defaults are unavailable. You can still edit and save this scene."
           )}
         </p>
+      ) : null}
+      {saveError ? (
+        <div className="space-y-2">
+          <p role="alert">
+            {t(
+              "playground:composer.sceneSaveError",
+              "Scene settings could not be saved. Your edits are still here. Retry Save, or review the saved scene if another edit changed it."
+            )}
+          </p>
+          <Button disabled={saving} onClick={() => void reviewSavedScene()}>
+            {t("playground:composer.sceneReviewAction", "Review saved scene")}
+          </Button>
+        </div>
       ) : null}
       {!personaChatActive && loading ? (
         <Skeleton active />
