@@ -25,6 +25,7 @@ import { ActorEditor } from "../ActorEditor"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
 
 const io = vi.hoisted(() => ({
+  persistent: true,
   values: new Map<string, unknown>(),
   get: vi.fn(),
   set: vi.fn(),
@@ -38,11 +39,17 @@ const io = vi.hoisted(() => ({
 vi.mock("@/utils/safe-storage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
-    hasPersistentBackend: true,
+    get hasPersistentBackend() {
+      return io.persistent
+    },
     get: io.get,
     set: io.set,
     getAll: async () => ({}),
-    watch: () => () => undefined
+    watch: () => () => undefined,
+    unwatch: () => undefined,
+    remove: async (key: string) => {
+      io.values.delete(key)
+    }
   })
 }))
 vi.mock("antd", async (importOriginal) => {
@@ -76,10 +83,19 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [
     { id: io.characterId, name: "Mira" },
     vi.fn(),
-    { isLoading: false }
+    { isLoading: false, isCurrent: io.accountCurrent }
   ]
 }))
-vi.mock("@/hooks/useSelectedAssistant", () => ({
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({
+    ownerKey: "default-action-owner",
+    isCurrent: io.accountCurrent,
+    verificationState: "ready",
+    retryVerification: vi.fn()
+  })
+}))
+vi.mock("@/hooks/useSelectedAssistant", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useSelectedAssistant")>()),
   useSelectedAssistant: () => [null, vi.fn(), { isCurrent: io.accountCurrent }]
 }))
 vi.mock("@/hooks/useChatModelCatalog", () => ({
@@ -184,6 +200,7 @@ const mountEditor = (
 }
 
 beforeEach(() => {
+  io.persistent = true
   target("scene-one")
   useActorStore.setState({ settings: null, preview: "", tokenCount: 0 })
   io.values.clear()
@@ -768,3 +785,398 @@ it.each(["actor", "model"] as const)("keeps a held %s scene Save unchanged when 
   await waitFor(() => expect(view.close).toHaveBeenCalledWith(false))
   expect(useActorStore.getState().settings?.notes).toBe("Original scene.")
 }, 15_000)
+
+
+const defaultActionScene = (notes: string) => {
+  const settings = scene(notes)
+  return { ...settings, aspects: settings.aspects.slice(0, 1) }
+}
+const mountDefaultEditor = async (
+  kind: "actor" | "model",
+  initial = defaultActionScene("Current staged scene.")
+) => {
+  io.realActorEditor = true
+  useActorEditorPrefs.getState().setEditorMode("advanced")
+  io.values.set("actorSettings:server:scene-one", initial)
+  const view = mountEditor(kind)
+  await waitFor(() =>
+    expect(useActorStore.getState().settings?.notes).toBe(initial.notes)
+  )
+  if (kind === "model")
+    fireEvent.click(await screen.findByRole("tab", { name: /scene director/i }))
+  const aspects = await screen.findByRole("button", { name: /^aspects/i })
+  if (aspects.getAttribute("aria-expanded") !== "true") fireEvent.click(aspects)
+  const apply = await screen.findByRole("button", { name: /apply.*default/i })
+  const save = screen.getByRole("button", { name: /save as.*default/i })
+  return { ...view, save, apply }
+}
+
+describe.each(["actor", "model"] as const)(
+  "%s explicit character defaults",
+  (kind) => {
+    it("keeps the staged scene and reports a failed default save until explicit retry ACK", async () => {
+      const view = await mountDefaultEditor(kind)
+      const original = scene("Previous default.")
+      io.values.set("actorProfile:character-one", original)
+      io.set.mockRejectedValueOnce(new Error("profile write unavailable"))
+      fireEvent.click(view.save)
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Character default could not be saved"
+      )
+      expect(io.values.get("actorProfile:character-one")).toEqual(original)
+      expect(view.close).not.toHaveBeenCalled()
+      fireEvent.click(view.save)
+      expect(
+        await screen.findByText("Character default saved on this device.")
+      ).toHaveAttribute("role", "status")
+      expect(io.values.get("actorProfile:character-one")).toMatchObject({
+        notes: "Current staged scene."
+      })
+      expect(io.values.get("actorSettings:server:scene-one")).toEqual(
+        defaultActionScene("Current staged scene.")
+      )
+    }, 15_000)
+
+    it("refuses a default Save after persistent storage becomes unavailable", async () => {
+      const view = await mountDefaultEditor(kind)
+      io.persistent = false
+      fireEvent.click(view.save)
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Character default could not be saved"
+      )
+      expect(io.set).not.toHaveBeenCalled()
+    }, 15_000)
+
+    it("admits one pending default action and waits for actual write acknowledgement", async () => {
+      const view = await mountDefaultEditor(kind)
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      io.set.mockImplementationOnce(async (key: string, value: unknown) => {
+        await held
+        io.values.set(key, value)
+      })
+      act(() => {
+        view.save.click()
+        view.save.click()
+        view.apply.click()
+      })
+      await waitFor(() => expect(io.set).toHaveBeenCalledOnce())
+      expect(
+        await screen.findByText("Saving character default...")
+      ).toHaveAttribute("role", "status")
+      expect(view.save).toBeDisabled()
+      expect(view.apply).toBeDisabled()
+      expect(
+        screen.queryByText("Character default saved on this device.")
+      ).not.toBeInTheDocument()
+      await act(async () => {
+        release()
+        await held
+      })
+      expect(
+        await screen.findByText("Character default saved on this device.")
+      ).toBeInTheDocument()
+      expect(io.set).toHaveBeenCalledOnce()
+      expect(io.get).not.toHaveBeenCalledWith("actorProfile:character-one")
+    }, 15_000)
+
+    it.each(["failed", "absent"])(
+      "distinguishes a %s default read from a staged application",
+      async (outcome) => {
+        const view = await mountDefaultEditor(kind)
+        if (outcome === "failed")
+          io.get.mockImplementation(async (key: string) => {
+            if (key === "actorProfile:character-one")
+              throw new Error("profile read unavailable")
+            return io.values.get(key)
+          })
+        fireEvent.click(view.apply)
+        if (outcome === "failed")
+          expect(await screen.findByRole("alert")).toHaveTextContent(
+            "Character default could not be loaded"
+          )
+        else
+          expect(
+            await screen.findByText(
+              "No saved default exists for this character on this device."
+            )
+          ).toHaveAttribute("role", "status")
+        expect(io.set).not.toHaveBeenCalled()
+        expect(useActorStore.getState().settings?.notes).toBe(
+          "Current staged scene."
+        )
+      },
+      15_000
+    )
+
+    it.each([true, false])(
+      "stages enabled=%s with the default and preserves it through scene Save",
+      async (enabled) => {
+        const view = await mountDefaultEditor(kind, {
+          ...defaultActionScene("Current staged scene."),
+          isEnabled: !enabled
+        })
+        const profile = { ...scene("Profile scene."), isEnabled: enabled }
+        io.values.set("actorProfile:character-one", profile)
+        fireEvent.click(view.apply)
+        fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+        await waitFor(() =>
+          expect(screen.getByLabelText("Scene notes")).toHaveValue(
+            profile.notes
+          )
+        )
+        expect(io.set).not.toHaveBeenCalled()
+        fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        await waitFor(() => expect(view.close).toHaveBeenCalledWith(false))
+        expect(io.values.get("actorSettings:server:scene-one")).toEqual(profile)
+      },
+      15_000
+    )
+
+    it("suppresses late default Save feedback after actual New returns to the same IDs", async () => {
+      const view = await mountDefaultEditor(kind)
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      io.set.mockReturnValueOnce(held)
+      fireEvent.click(view.save)
+      await waitFor(() => expect(io.set).toHaveBeenCalledOnce())
+      act(() => target("scene-one"))
+      await act(async () => {
+        release()
+        await held
+      })
+      expect(
+        screen.queryByText("Character default saved on this device.")
+      ).not.toBeInTheDocument()
+      expect(view.close).not.toHaveBeenCalled()
+    }, 15_000)
+
+    it.each(["same-value", "A/B/A"])(
+      "retires a held default Apply on actual %s assistant operation revisions",
+      async (change) => {
+        const actual = await vi.importActual<
+          typeof import("@/hooks/useSelectedAssistant")
+        >("@/hooks/useSelectedAssistant")
+        const selection = renderHook(() => actual.useSelectedAssistant())
+        await waitFor(() =>
+          expect(selection.result.current[2].isLoading).toBe(false)
+        )
+        const a = {
+          kind: "character" as const,
+          id: "character-one",
+          name: "Mira"
+        }
+        await act(async () => {
+          expect(await selection.result.current[1](a)).toBe(true)
+        })
+        const view = await mountDefaultEditor(kind)
+        let release!: (value: ReturnType<typeof scene>) => void
+        const held = new Promise<ReturnType<typeof scene>>((resolve) => {
+          release = resolve
+        })
+        io.get.mockImplementation((key: string) =>
+          key === "actorProfile:character-one"
+            ? held
+            : Promise.resolve(io.values.get(key))
+        )
+        fireEvent.click(view.apply)
+        await waitFor(() =>
+          expect(io.get).toHaveBeenCalledWith("actorProfile:character-one")
+        )
+        await act(async () => {
+          if (change === "A/B/A")
+            expect(
+              await selection.result.current[1]({ ...a, id: "character-two" })
+            ).toBe(true)
+          expect(await selection.result.current[1](a)).toBe(true)
+          release(scene("Retired profile."))
+          await held
+        })
+        fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+        expect(await screen.findByLabelText("Scene notes")).toHaveValue(
+          "Current staged scene."
+        )
+        expect(
+          screen.queryByText(
+            "Character default applied to this draft. Save applies it to this chat."
+          )
+        ).not.toBeInTheDocument()
+      },
+      15_000
+    )
+
+    it("reports a present malformed falsy default as a load error and retains it", async () => {
+      const view = await mountDefaultEditor(kind)
+      io.values.set("actorProfile:character-one", false)
+      fireEvent.click(view.apply)
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Character default could not be loaded"
+      )
+      expect(io.values.get("actorProfile:character-one")).toBe(false)
+      expect(io.set).not.toHaveBeenCalled()
+      expect(useActorStore.getState().settings?.notes).toBe(
+        "Current staged scene."
+      )
+    }, 15_000)
+
+    it("retires the saved-default status after a later edit even when its value is restored", async () => {
+      const view = await mountDefaultEditor(kind)
+      fireEvent.click(view.save)
+      expect(
+        await screen.findByText("Character default saved on this device.")
+      ).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+      const notes = await screen.findByLabelText("Scene notes")
+      fireEvent.change(notes, { target: { value: "A later staged edit." } })
+      expect(
+        screen.queryByText("Character default saved on this device.")
+      ).not.toBeInTheDocument()
+      fireEvent.change(notes, { target: { value: "Current staged scene." } })
+      expect(
+        screen.queryByText("Character default saved on this device.")
+      ).not.toBeInTheDocument()
+      expect(io.set).toHaveBeenCalledOnce()
+    }, 15_000)
+
+    it("shows its own staged-default status and retires it after a later Reset", async () => {
+      const view = await mountDefaultEditor(kind)
+      io.values.set(
+        "actorProfile:character-one",
+        scene("Applied profile scene.")
+      )
+      fireEvent.click(view.apply)
+      expect(
+        await screen.findByText(
+          "Character default applied to this draft. Save applies it to this chat."
+        )
+      ).toBeInTheDocument()
+      fireEvent.click(
+        screen.getByRole("button", { name: "Reset for this chat" })
+      )
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Confirm", exact: true })
+      )
+      expect(
+        screen.queryByText(
+          "Character default applied to this draft. Save applies it to this chat."
+        )
+      ).not.toBeInTheDocument()
+      expect(io.set).not.toHaveBeenCalled()
+    }, 15_000)
+
+    it.each(["save", "apply"] as const)(
+      "retires held %s feedback on a later edit while keeping physical admission until settlement",
+      async (action) => {
+        const view = await mountDefaultEditor(kind)
+        let release!: (value: ReturnType<typeof scene>) => void
+        const held = new Promise<ReturnType<typeof scene>>((resolve) => {
+          release = resolve
+        })
+        if (action === "save") io.set.mockReturnValueOnce(held)
+        else
+          io.get.mockImplementation((key: string) =>
+            key === "actorProfile:character-one"
+              ? held
+              : Promise.resolve(io.values.get(key))
+          )
+        fireEvent.click(action === "save" ? view.save : view.apply)
+        const pendingMessage =
+          action === "save"
+            ? "Saving character default..."
+            : "Loading character default..."
+        expect(await screen.findByText(pendingMessage)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+        const notes = await screen.findByLabelText("Scene notes")
+        fireEvent.change(notes, {
+          target: { value: "Later edit during default IO." }
+        })
+        expect(screen.queryByText(pendingMessage)).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: /^aspects/i }))
+        const pendingSave = screen.getByRole("button", {
+          name: /save as.*default/i
+        })
+        const pendingApply = screen.getByRole("button", {
+          name: /apply.*default/i
+        })
+        expect(pendingSave).toBeDisabled()
+        expect(pendingApply).toBeDisabled()
+        expect(
+          screen.getByText(
+            "Waiting for the previous character default action..."
+          )
+        ).toHaveAttribute("role", "status")
+        await act(async () => {
+          release(scene("Retired profile."))
+          await held
+        })
+        await waitFor(() => expect(pendingSave).not.toBeDisabled())
+        expect(pendingApply).not.toBeDisabled()
+        fireEvent.click(screen.getByRole("button", { name: /^scene notes/i }))
+        expect(await screen.findByLabelText("Scene notes")).toHaveValue(
+          "Later edit during default IO."
+        )
+        expect(
+          screen.queryByText("Character default saved on this device.")
+        ).not.toBeInTheDocument()
+        expect(
+          screen.queryByText(
+            "Character default applied to this draft. Save applies it to this chat."
+          )
+        ).not.toBeInTheDocument()
+      },
+      15_000
+    )
+
+    it("refuses retained Save entry after a structural edit before render and accepts a freshly rendered retry", async () => {
+      const view = await mountDefaultEditor(kind)
+      fireEvent.change(
+        screen.getByPlaceholderText("Aspect name (e.g., Mood, Role, Location)"),
+        { target: { value: "New continuity" } }
+      )
+      const add = screen.getByRole("button", { name: "Add aspect" })
+      act(() => {
+        add.click()
+        view.save.click()
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(io.set).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: /save as.*default/i }))
+      expect(
+        await screen.findByText("Character default saved on this device.")
+      ).toBeInTheDocument()
+      expect(io.values.get("actorProfile:character-one")).toMatchObject({
+        aspects: expect.arrayContaining([
+          expect.objectContaining({ name: "New continuity" })
+        ])
+      })
+    }, 15_000)
+
+    it("saves an immediate free-aspect form edit without waiting for preview recomputation", async () => {
+      const view = await mountDefaultEditor(kind)
+      const field = screen.getAllByPlaceholderText(
+        "Describe briefly (optional)"
+      )[0]
+      act(() => {
+        fireEvent.change(field, { target: { value: "Immediate role edit." } })
+        view.save.click()
+      })
+      expect(
+        await screen.findByText("Character default saved on this device.")
+      ).toBeInTheDocument()
+      expect(io.values.get("actorProfile:character-one")).toMatchObject({
+        aspects: expect.arrayContaining([
+          expect.objectContaining({
+            id: "user_role",
+            value: "Immediate role edit."
+          })
+        ])
+      })
+    }, 15_000)
+  }
+)

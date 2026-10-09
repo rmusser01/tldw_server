@@ -33,6 +33,8 @@ const Markdown = React.lazy(() => import("@/components/Common/Markdown"))
 import { ACTOR_PRESETS, applyActorPresetById } from "@/data/actor-presets"
 import type { ActorPresetId } from "@/data/actor-presets"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
+import type { Character } from "@/types/character"
 
 const parseWorldBookEntryOptions = (content: string): string[] => {
   const text = (content || "").trim()
@@ -69,7 +71,7 @@ type ActorBladeId = "aspects" | "notes" | "placement" | "tokens"
 export const ActorEditor: React.FC<Props> = ({
   form,
   settings,
-  setSettings,
+  setSettings: setSettingsState,
   isCurrent,
   captureEditGuard,
   actorPreview,
@@ -108,9 +110,186 @@ export const ActorEditor: React.FC<Props> = ({
     tokens: null
   })
 
+  const settingsRevisionRef = React.useRef(0)
+  const renderedSettingsRevision = settingsRevisionRef.current
+  const setSettings = React.useCallback(
+    (next: ActorSettings) => {
+      if (!isCurrent()) return
+      settingsRevisionRef.current++
+      setSettingsState(next)
+    },
+    [isCurrent, setSettingsState]
+  )
+
   // Currently active assistant/character (from CharacterSelect).
   // Used to label per-character defaults and profiles.
-  const [selectedCharacter] = useSelectedCharacter<any>(null)
+  const [selectedCharacter, , characterMeta] =
+    useSelectedCharacter<Character>(null)
+  const renderedCharacterRevision = getSelectedAssistantOperationRevision()
+  const profileActionRef = React.useRef<object | null>(null)
+  const profileMountedRef = React.useRef(true)
+  const [profileBusy, setProfileBusy] = React.useState(false)
+  const [profileFeedback, setProfileFeedback] = React.useState<{
+    attempt: object
+    pending: boolean
+    error: boolean
+    message: string
+    isCurrent: () => boolean
+  } | null>(null)
+  React.useEffect(() => {
+    profileMountedRef.current = true
+    return () => {
+      profileMountedRef.current = false
+    }
+  }, [])
+
+  const runCharacterDefault = async (action: "save" | "apply") => {
+    const characterId = selectedCharacter?.id
+    if (
+      profileActionRef.current ||
+      !settings ||
+      !characterId ||
+      settingsRevisionRef.current !== renderedSettingsRevision
+    )
+      return
+    const sourceIsCurrent = () =>
+      profileMountedRef.current &&
+      isCurrent() &&
+      characterMeta?.isCurrent?.() !== false &&
+      getSelectedAssistantOperationRevision() === renderedCharacterRevision
+    const editIsCurrent = captureEditGuard()
+    if (!sourceIsCurrent() || !editIsCurrent()) return
+    const attempt = {}
+    profileActionRef.current = attempt
+    const canPublish = () =>
+      profileActionRef.current === attempt && sourceIsCurrent()
+    const canCommit = () => canPublish() && editIsCurrent()
+    const feedback = (
+      message: string,
+      error = false,
+      pending = false,
+      editGuard = editIsCurrent
+    ) =>
+      setProfileFeedback({
+        attempt,
+        pending,
+        error,
+        message,
+        isCurrent: () => sourceIsCurrent() && editGuard()
+      })
+    let staged = false
+    let stagedEditIsCurrent = editIsCurrent
+    setProfileBusy(true)
+    feedback(
+      action === "save"
+        ? t("playground:actor.defaultSaving", "Saving character default...")
+        : t("playground:actor.defaultLoading", "Loading character default..."),
+      false,
+      true
+    )
+    try {
+      const proposal =
+        action === "save"
+          ? buildActorSettingsFromForm(settings, form.getFieldsValue(true))
+          : null
+      const service = await import("@/services/actor-settings")
+      if (!canCommit()) return
+      if (proposal) {
+        const saved = await service.saveActorProfileForCharacter({
+          characterId,
+          settings: proposal,
+          validate_lease: canCommit
+        })
+        if (!canCommit()) return
+        if (!saved) throw new Error("actor_profile_save_failed")
+        feedback(
+          t(
+            "playground:actor.defaultSaved",
+            "Character default saved on this device."
+          )
+        )
+        return
+      }
+      const profile = await service.getActorProfileForCharacter(characterId, {
+        throwOnError: true,
+        validate_lease: canCommit
+      })
+      if (!canCommit()) return
+      if (!profile) {
+        feedback(
+          t(
+            "playground:actor.defaultAbsent",
+            "No saved default exists for this character on this device."
+          )
+        )
+        return
+      }
+      staged = true
+      setSettings(profile)
+      if (!canPublish()) return
+      stagedEditIsCurrent = captureEditGuard()
+      if (!stagedEditIsCurrent()) return
+      const fieldValues: Record<string, unknown> = {
+        actorEnabled: profile.isEnabled,
+        actorNotes: profile.notes ?? "",
+        actorNotesGmOnly: profile.notesGmOnly ?? false,
+        actorChatPosition: profile.chatPosition,
+        actorChatDepth: profile.chatDepth,
+        actorChatRole: profile.chatRole,
+        actorTemplateMode: profile.templateMode ?? "merge",
+        actorAppendable: profile.appendable ?? false
+      }
+      for (const aspect of profile.aspects || []) {
+        fieldValues[`actor_${aspect.id}`] = aspect.value ?? ""
+        fieldValues[`actor_key_${aspect.id}`] = aspect.key
+      }
+      form.setFieldsValue(fieldValues)
+      if (!canPublish() || !stagedEditIsCurrent()) return
+      onRecompute()
+      if (!canPublish() || !stagedEditIsCurrent()) return
+      feedback(
+        t(
+          "playground:actor.defaultStaged",
+          "Character default applied to this draft. Save applies it to this chat."
+        ),
+        false,
+        false,
+        stagedEditIsCurrent
+      )
+    } catch {
+      if (!(staged ? canPublish() && stagedEditIsCurrent() : canCommit())) return
+      feedback(
+        action === "save"
+          ? t(
+              "playground:actor.defaultSaveError",
+              "Character default could not be saved. Your staged edits are still here; try Save default again."
+            )
+          : staged
+            ? t(
+                "playground:actor.defaultApplyError",
+                "Character default could not be applied. Review your staged scene and try Apply default again."
+              )
+            : t(
+                "playground:actor.defaultLoadError",
+                "Character default could not be loaded. Your staged edits are still here; try Apply default again."
+              ),
+        true,
+        false,
+        staged ? stagedEditIsCurrent : editIsCurrent
+      )
+    } finally {
+      // Keep an issued write's admission until it settles, even after its view retires.
+      if (profileActionRef.current === attempt) {
+        profileActionRef.current = null
+        if (profileMountedRef.current) {
+          setProfileBusy(false)
+          setProfileFeedback((current) =>
+            current?.attempt === attempt && current.pending ? null : current
+          )
+        }
+      }
+    }
+  }
 
   // Focus management: focus first interactive element when blade changes
   React.useEffect(() => {
@@ -807,6 +986,24 @@ export const ActorEditor: React.FC<Props> = ({
   return (
     <div className="space-y-3">
       {modalContextHolder}
+      <Form.Item noStyle shouldUpdate>
+        {() =>
+          profileFeedback?.isCurrent() ? (
+            <div
+              role={profileFeedback.error ? "alert" : "status"}
+              className="text-xs text-text-muted">
+              {profileFeedback.message}
+            </div>
+          ) : profileBusy ? (
+            <div role="status" className="text-xs text-text-muted">
+              {t(
+                "playground:actor.defaultWaiting",
+                "Waiting for the previous character default action..."
+              )}
+            </div>
+          ) : null
+        }
+      </Form.Item>
       <div className="space-y-2">
         {renderBladeHeader(
           "aspects",
@@ -984,19 +1181,10 @@ export const ActorEditor: React.FC<Props> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!settings || !isCurrent()) return
-                      const characterId = selectedCharacter?.id
-                      const canSave = captureEditGuard()
-                      if (!characterId || !canSave()) return
-                      const proposal = buildActorSettingsFromForm(settings, form.getFieldsValue(true))
-                      const { saveActorProfileForCharacter } = await import(
-                        "@/services/actor-settings"
-                      )
-                      if (!canSave()) return
-                      await saveActorProfileForCharacter({ characterId, settings: proposal })
+                    onClick={() => {
+                      void runCharacterDefault("save")
                     }}
-                    disabled={!selectedCharacter?.id}
+                    disabled={profileBusy || !selectedCharacter?.id}
                     className="inline-flex items-center justify-center rounded-md border border-border-strong px-2 py-1 text-xs text-text hover:bg-surface2 disabled:opacity-50">
                     {t(
                       "playground:actor.saveAsCharacterDefault",
@@ -1006,41 +1194,14 @@ export const ActorEditor: React.FC<Props> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={async () => {
-                      const characterId = selectedCharacter?.id
-                      const canApply = captureEditGuard()
-                      if (!characterId || !canApply()) return
-                      const {
-                        getActorProfileForCharacter
-                      } = await import("@/services/actor-settings")
-                      if (!canApply()) return
-                      const profile = await getActorProfileForCharacter(characterId)
-                      if (!profile || !canApply()) return
-                      setSettings(profile)
-                      if (!isCurrent()) return
-                      const fieldValues: Record<string, any> = {
-                        actorNotes: profile.notes ?? "",
-                        actorNotesGmOnly: profile.notesGmOnly ?? false,
-                        actorChatPosition: profile.chatPosition,
-                        actorChatDepth: profile.chatDepth,
-                        actorChatRole: profile.chatRole,
-                        actorTemplateMode: profile.templateMode ?? "merge",
-                        actorAppendable: profile.appendable ?? false
-                      }
-                      for (const aspect of profile.aspects || []) {
-                        fieldValues[`actor_${aspect.id}`] = aspect.value ?? ""
-                        fieldValues[`actor_key_${aspect.id}`] = aspect.key
-                      }
-                      form.setFieldsValue(fieldValues)
-                      onRecompute()
+                    onClick={() => {
+                      void runCharacterDefault("apply")
                     }}
-                    disabled={!selectedCharacter?.id}
+                    disabled={profileBusy || !selectedCharacter?.id}
                     className="inline-flex items-center justify-center rounded-md border border-border-strong px-2 py-1 text-xs text-text hover:bg-surface2 disabled:opacity-50">
-                    {t(
-                      "playground:actor.applyCharacterDefault",
-                      "Apply {{name}}'s default",
-                      { name: selectedCharacter?.name || "character" }
-                    )}
+                    {t("playground:actor.applyCharacterDefault", "Apply {{name}}'s default", {
+                      name: selectedCharacter?.name || "character"
+                    })}
                   </button>
                 </div>
               </>

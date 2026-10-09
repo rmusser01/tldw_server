@@ -239,16 +239,27 @@ export const saveActorSettingsForChat = async (params: {
 
 export const getActorProfileForCharacter = async (
   characterId: string | number | null | undefined,
-  options?: { throwOnError?: boolean }
+  options?: { throwOnError?: boolean; validate_lease?: () => boolean }
 ): Promise<ActorSettings | null> => {
   if (!characterId) return null
   try {
     if (options?.throwOnError) requirePersistentStorage(storage)
+    if (options?.validate_lease?.() === false)
+      throw new Error("actor_settings_scope_changed")
     const key = getActorProfileStorageKey(characterId)
     const stored = await storage.get<ActorSettings | undefined>(key)
-    if (!stored) {
+    if (options?.throwOnError) requirePersistentStorage(storage)
+    if (options?.validate_lease?.() === false)
+      throw new Error("actor_settings_scope_changed")
+    if (stored === undefined || (!options?.throwOnError && !stored)) {
       return null
     }
+    if (
+      options?.throwOnError &&
+      (!isValidActorSettings(stored) ||
+        stored.version !== ACTOR_SETTINGS_VERSION)
+    )
+      throw new Error("actor_profile_invalid")
     return migrateSettings(stored)
   } catch (error) {
     console.error("Failed to load Actor profile for character", error)
@@ -260,16 +271,23 @@ export const getActorProfileForCharacter = async (
 export const saveActorProfileForCharacter = async (params: {
   characterId: string | number
   settings: ActorSettings
-}): Promise<void> => {
+  validate_lease?: () => boolean
+}): Promise<boolean> => {
   try {
+    requirePersistentStorage(storage)
+    if (params.validate_lease?.() === false) return false
     const key = getActorProfileStorageKey(params.characterId)
     const payload: ActorSettings = {
       ...params.settings,
       version: ACTOR_SETTINGS_VERSION
     }
+    if (!isValidActorSettings(payload)) return false
     await storage.set(key, payload)
+    requirePersistentStorage(storage)
+    return params.validate_lease?.() !== false
   } catch (error) {
     console.error("Failed to save Actor profile for character", error)
+    return false
   }
 }
 
