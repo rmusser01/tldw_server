@@ -459,3 +459,63 @@ it.each([['composed', TldwApiClient], ['base', TldwApiClientBase]] as const)(
     expect(mocks.bgStream.mock.calls.at(-1)?.[0].body).toEqual({ ...body, stream: true })
   }
 )
+
+describe("article capture scoped reads", () => {
+  it("forwards owner and abort through status, membership, pin preview and Media version reads", async () => {
+    const client = new TldwApiClient()
+    vi.spyOn(client, "resolveApiPath").mockImplementation(
+      async (_key, paths) => paths[0] as never
+    )
+    const signal = new AbortController().signal
+    const options = { requestScope, signal }
+    mocks.bgRequest.mockResolvedValue([])
+    await client.getWebClipStatus("clip/1", options)
+    await client.getWorkspaceSources("ws-1", options)
+    await client.getWorkspaceSourcePreview(
+      "ws-1",
+      "web-clipper:uuid",
+      { version_number: 7 },
+      options
+    )
+    await client.listMediaDocumentVersions(71, options)
+    await client.getMediaDocumentVersion(71, 7, options)
+    const requests = mocks.bgRequest.mock.calls.slice(-5).map((call) => call[0])
+    expect(requests.map((r) => r.path)).toEqual([
+      "/api/v1/web-clipper/clip%2F1",
+      "/api/v1/workspaces/ws-1/sources",
+      "/api/v1/workspaces/ws-1/sources/web-clipper%3Auuid/preview?version_number=7",
+      "/api/v1/media/71/versions?include_content=true",
+      "/api/v1/media/71/versions/7?include_content=true"
+    ])
+    for (const request of requests)
+      expect(request).toMatchObject({
+        abortSignal: signal,
+        servicePromptConfig: expectedScopeFields.servicePromptConfig,
+        headers: { "X-TLDW-Expected-User-ID": "42" }
+      })
+  })
+})
+
+it("preserves default version URLs and forwards native page parameters and rows", async () => {
+  const client = new TldwApiClient()
+  const signal = new AbortController().signal
+  const options = { requestScope, signal }
+  const rows = [
+    { media_id: 71, version_number: 9, uuid: "accepted", content: "full text" }
+  ]
+  mocks.bgRequest.mockResolvedValue(rows)
+  expect(await client.listMediaDocumentVersions(71, options)).toBe(rows)
+  expect(mocks.bgRequest.mock.lastCall?.[0].path).toBe(
+    "/api/v1/media/71/versions?include_content=true"
+  )
+  expect(
+    await client.listMediaDocumentVersions(71, options, { limit: 10, page: 2 })
+  ).toBe(rows)
+  expect(mocks.bgRequest.mock.lastCall?.[0]).toMatchObject({
+    path: "/api/v1/media/71/versions?include_content=true&limit=10&page=2",
+    method: "GET",
+    abortSignal: signal,
+    servicePromptConfig: expectedScopeFields.servicePromptConfig,
+    headers: { "X-TLDW-Expected-User-ID": "42" }
+  })
+})

@@ -3325,7 +3325,8 @@ export const useChatActions = ({
     serverChatIdOverride,
     historyIdOverride,
     researchContext,
-    historyRetryAdmission
+    historyRetryAdmission,
+    assertCurrent
   }: {
     message: string
     image: string
@@ -3333,6 +3334,7 @@ export const useChatActions = ({
     isContinue?: boolean
     messages?: Message[]
     memory?: ChatHistory
+    assertCurrent?: () => void
     controller?: AbortController
     docs?: ChatDocuments
     regenerateFromMessage?: Message
@@ -3359,6 +3361,8 @@ export const useChatActions = ({
      */
     historyRetryAdmission?: HistoryAdmissionReferenceV1
   }): Promise<ChatSubmitResult> => {
+    assertCurrent?.()
+    controller?.signal.throwIfAborted()
     // CS-01 (#3106) defence in depth: a turn that addresses no conversation
     // must not be built from a selection another conversation left behind.
     // Reset it before the origin fence is taken, so the turn starts clean.
@@ -3609,6 +3613,8 @@ export const useChatActions = ({
           getRequiredServicePrompt(loadedSnapshot, promptId)
         }
       }
+      signal.throwIfAborted()
+      assertCurrent?.()
       const chatModeParams = await buildChatModeParams(
         {
           ...(requestOverrides ?? {}),
@@ -3641,6 +3647,8 @@ export const useChatActions = ({
               : "global"
         }
       )
+      signal.throwIfAborted()
+      assertCurrent?.()
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
       const replyOverrides = replyActive
@@ -3848,6 +3856,8 @@ export const useChatActions = ({
                 })
             }
           : ragModeParamsWithSnapshot
+        signal.throwIfAborted()
+        assertCurrent?.()
         const ragResult = await ragMode(
           message,
           image,
@@ -4096,6 +4106,8 @@ export const useChatActions = ({
                   })
               }
             : normalModeParams
+          signal.throwIfAborted()
+          assertCurrent?.()
           const normalResult = await normalChatMode(
             message,
             image,
@@ -4936,7 +4948,7 @@ export const useChatActions = ({
   // alternative to the new one; a server chat never received it. Regenerate in
   // general is not supported on selected history yet (CM-01, #3106).
   const retryInterruptedHistoryTurn =
-    async (): Promise<ChatSubmitResult | null> => {
+    async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }): Promise<ChatSubmitResult | null> => {
       const selection = selectedHistoryForActions
       if (!selection) return null
       const replyIndex = messages.length - 1
@@ -4989,6 +5001,8 @@ export const useChatActions = ({
         ).catch(() => null)
       if (!preparingIsCurrent() || !navigationIsCurrent())
         return chatSubmitFailed("history_selection_changed")
+      dispatch?.controller?.signal.throwIfAborted()
+      dispatch?.assertCurrent?.()
       if (retained.some(entry => isHistoryTurnLive(entry.turn.operation_id)))
         return chatSubmitSkipped("Retry is already in progress")
       for (const entry of retained) markHistoryTurnLive(entry.turn.operation_id)
@@ -5009,6 +5023,7 @@ export const useChatActions = ({
         }
         const result = toChatSubmitResult(
           await onSubmit({
+            ...dispatch,
             message: question.message,
             image: question.images?.[0] ?? "",
             // Without an admission (none was recorded) the question is sent
@@ -5026,8 +5041,8 @@ export const useChatActions = ({
         for (const entry of retained) releaseHistoryTurn(entry.turn.operation_id)
       }
     }
-  const regenerateLastMessage = async () =>
-    (await retryInterruptedHistoryTurn()) ?? regenerateLastMessageBase()
+  const regenerateLastMessage = async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }) =>
+    (await retryInterruptedHistoryTurn(dispatch)) ?? regenerateLastMessageBase(dispatch)
 
   const stopStreamingRequest = React.useCallback(
     (options?: unknown) => {

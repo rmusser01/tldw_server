@@ -84,8 +84,14 @@ const isFocusable = (element: HTMLElement | null): element is HTMLElement => {
   return true
 }
 
-const restoreOverlayFocus = (invoker: HTMLElement | null) => {
+const restoreOverlayFocus = (
+  invoker: HTMLElement | null,
+  canRestore: () => boolean = () => true
+) => {
   window.setTimeout(() => {
+    if (!canRestore()) return
+    const focused = document.activeElement as HTMLElement | null
+    if (isFocusable(focused) && focused !== invoker) return
     if (isFocusable(invoker)) {
       invoker.focus()
       return
@@ -158,6 +164,7 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
   onOpenOverlay
 }) => {
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const menuTriggerRef = React.useRef<HTMLButtonElement>(null)
 
   const openOverlay = React.useCallback(
     (
@@ -319,6 +326,7 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
       }
     }
     setMenuOpen(false)
+    menuTriggerRef.current?.focus()
   }
 
   const unavailableDescriptionId = React.useId()
@@ -332,10 +340,18 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
         menu={{
           items: menuItems,
           onClick: handleMenuClick,
+          onKeyDown: (event) => {
+            if (event.key !== "Escape") return
+            event.preventDefault()
+            event.stopPropagation()
+            setMenuOpen(false)
+            menuTriggerRef.current?.focus()
+          },
           selectable: false
         }}
       >
         <Button
+          ref={menuTriggerRef}
           size="small"
           data-source-view-trigger
           aria-label="Source views"
@@ -389,16 +405,17 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   const [nameTouched, setNameTouched] = React.useState(false)
   const nameErrorId = React.useId()
   const inputRef = React.useRef<React.ComponentRef<typeof Input>>(null)
+  const mountedRef = React.useRef(false)
   const handledRequestIdRef = React.useRef<number | null>(null)
   const announcementAtOpenRef = React.useRef<string | null>(null)
   const mutationCycleObservedRef = React.useRef(false)
   const pendingFocusRestoreRef = React.useRef<{
     token: number
     invoker: HTMLElement | null
+    generation: number
   } | null>(null)
   const focusRestoreSequenceRef = React.useRef(0)
   const lastRestoredFocusTokenRef = React.useRef(0)
-  const [focusRestoreToken, setFocusRestoreToken] = React.useState(0)
 
   const close = React.useCallback(
     (restoreFocus = true) => {
@@ -408,29 +425,50 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         const token = focusRestoreSequenceRef.current
         pendingFocusRestoreRef.current = {
           token,
-          invoker: activeRequest.invoker
+          invoker:
+            activeRequest.generation === controller.generation
+              ? activeRequest.invoker
+              : null,
+          generation: controller.generation
         }
-        setFocusRestoreToken(token)
       }
       setActiveRequest(null)
       setName("")
       setNameTouched(false)
     },
-    [activeRequest]
+    [activeRequest, controller.generation]
   )
 
-  React.useEffect(() => {
+  const restoreClosedOverlayFocus = () => {
     const pending = pendingFocusRestoreRef.current
     if (
       !pending ||
-      pending.token !== focusRestoreToken ||
+      activeRequest ||
+      pending.generation !== controller.generation ||
       pending.token <= lastRestoredFocusTokenRef.current
     ) {
       return
     }
     lastRestoredFocusTokenRef.current = pending.token
-    restoreOverlayFocus(pending.invoker)
-  }, [focusRestoreToken])
+    restoreOverlayFocus(
+      pending.invoker,
+      () => pendingFocusRestoreRef.current === pending
+    )
+  }
+
+  React.useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      pendingFocusRestoreRef.current = null
+    }
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (pendingFocusRestoreRef.current?.generation !== controller.generation) {
+      pendingFocusRestoreRef.current = null
+    }
+  }, [controller.generation])
 
   React.useLayoutEffect(() => {
     if (!request || handledRequestIdRef.current === request.id) return
@@ -439,10 +477,14 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       request.generation !== controller.generation ||
       !controller.available
     ) {
-      restoreOverlayFocus(request.invoker)
+      restoreOverlayFocus(
+        request.invoker,
+        () => mountedRef.current && handledRequestIdRef.current === request.id
+      )
       onRequestHandled()
       return
     }
+    pendingFocusRestoreRef.current = null
     setActiveRequest(request)
     announcementAtOpenRef.current = controller.announcement
     mutationCycleObservedRef.current = false
@@ -677,6 +719,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         destroyOnHidden
         focusable={{ focusTriggerAfterClose: false }}
         afterOpenChange={(open) => {
+          if (!open) restoreClosedOverlayFocus()
           if (open && activeRequest?.kind === "save" && !duplicate) {
             window.setTimeout(() => inputRef.current?.focus(), 0)
           }
@@ -736,11 +779,17 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
               }}
               onPressEnter={() => void submit()}
             />
-            {nameTouched && nameInvalid && (
-              <p id={nameErrorId} role="alert" className="text-xs text-error">
-                Name must contain between 1 and 120 characters.
-              </p>
-            )}
+            {/* Keep the footer still when pointer-down blurs an invalid name. */}
+            <p
+              id={nameErrorId}
+              role="alert"
+              className="text-xs text-error"
+              style={{
+                visibility: nameTouched && nameInvalid ? "visible" : "hidden"
+              }}
+            >
+              Name must contain between 1 and 120 characters.
+            </p>
             {controller.serializationIssues.length > 0 && (
               <ul role="alert" className="space-y-1 text-xs text-error">
                 {controller.serializationIssues.map((issue) => (

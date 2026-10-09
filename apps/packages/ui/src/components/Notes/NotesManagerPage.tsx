@@ -866,6 +866,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     selectedId: ed.selectedId,
     title: ed.title,
     content: ed.content,
+    originalMetadata: ed.originalMetadata,
     editorKeywords: kw.editorKeywords,
     selectedStudioState: effectiveStudioState,
     studioPaperSize: selectedStudioPaperSize,
@@ -2831,6 +2832,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         wikilinkSelectionIndex={wl.wikilinkSelectionIndex}
         metricSummaryText={ed.metricSummaryText}
         provenanceSummaryText={ed.provenanceSummaryText}
+        sourceHistory={ed.originalMetadata}
+        onRestoreSourceHistory={ed.originalMetadata?.knowledge_provenance_state === 'deleted'
+          ? () => { void ed.saveNote({ restoreProvenance: true }) } : undefined}
         queuedOfflineDraftCount={ed.queuedOfflineDraftCount}
         titleInputRef={ed.titleInputRef}
         contentTextareaRef={ed.contentTextareaRef}

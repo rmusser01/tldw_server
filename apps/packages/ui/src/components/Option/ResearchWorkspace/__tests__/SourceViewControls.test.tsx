@@ -1,6 +1,14 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { ConfigProvider } from "antd"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
 import {
@@ -10,6 +18,33 @@ import {
 } from "../SourcesPane/SourceViewControls"
 import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
+
+// rc-component uses the same "test-id" for tooltip and dialog in NODE_ENV=test.
+// Keep the real tooltip and give it the React ID used outside that test branch.
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>()
+  const React = await import("react")
+  return {
+    ...actual,
+    Tooltip: React.forwardRef<
+      React.ComponentRef<typeof actual.Tooltip>,
+      React.ComponentProps<typeof actual.Tooltip>
+    >(function Tooltip(props, ref) {
+      const id = React.useId()
+      return <actual.Tooltip {...props} id={props.id ?? id} ref={ref} />
+    })
+  }
+})
+
+// Keep real Ant Design dialogs and menus; jsdom never completes CSS leave motion.
+const render = (ui: React.ReactElement) =>
+  rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        {children}
+      </ConfigProvider>
+    )
+  })
 
 const validView = (
   overrides: Partial<WorkspaceSourceSavedViewResponse> = {}
@@ -159,17 +194,54 @@ describe("SourceViewControls", () => {
     vi.clearAllMocks()
   })
 
+  it("reserves hidden validation text and exposes it only for an invalid touched name", async () => {
+    const model = controller()
+    render(<Harness model={model} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    await waitFor(() => expect(dialog).toBeVisible())
+    const input = within(dialog).getByRole("textbox", { name: "View name" })
+    const save = within(dialog).getByRole("button", { name: "Save" })
+    const feedback = within(dialog).getByText(/Name must contain between 1 and 120/)
+    expect(feedback).not.toBeVisible()
+    expect(within(dialog).queryByRole("alert")).toBeNull()
+    expect(input).not.toHaveAttribute("aria-describedby")
+    expect(input).toHaveAttribute("aria-invalid", "false")
+    expect(save).toBeDisabled()
+
+    fireEvent.blur(input)
+    expect(within(dialog).getByRole("alert")).toBe(feedback)
+    expect(feedback).toBeVisible()
+    expect(input).toHaveAccessibleDescription(feedback.textContent ?? "")
+    for (const value of ["   ", "x".repeat(121)]) {
+      fireEvent.change(input, { target: { value } })
+      expect(input).toHaveAttribute("aria-invalid", "true")
+      expect(save).toBeDisabled()
+      expect(within(dialog).getByRole("alert")).toBe(feedback)
+    }
+    fireEvent.change(input, { target: { value: "x".repeat(120) } })
+    expect(feedback).not.toBeVisible()
+    expect(within(dialog).queryByRole("alert")).toBeNull()
+    expect(input).toHaveAttribute("aria-invalid", "false")
+    expect(input).not.toHaveAttribute("aria-describedby")
+    expect(save).toBeEnabled()
+    expect(model.createView).not.toHaveBeenCalled()
+  })
+
   it("renders fixed-order grouped built-ins and saved views and applies them by keyboard", async () => {
     const user = userEvent.setup()
     const model = controller()
     const applyState = vi.fn()
     render(
-      <SourceViewControls
-        controller={model}
-        sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
-        onApplySourceListViewState={applyState}
-        onOpenOverlay={vi.fn()}
-      />
+      <>
+        <SourceViewControls
+          controller={model}
+          sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+          onApplySourceListViewState={applyState}
+          onOpenOverlay={vi.fn()}
+        />
+        <button>Outside destination</button>
+      </>
     )
 
     const trigger = screen.getByRole("button", { name: "Source views" })
@@ -199,6 +271,7 @@ describe("SourceViewControls", () => {
     })
     activateMenuItemByKeyboard(needsReview)
     expect(applyState).toHaveBeenCalledTimes(1)
+    expect(trigger).toHaveFocus()
 
     trigger.focus()
     await user.keyboard(" ")
@@ -206,8 +279,27 @@ describe("SourceViewControls", () => {
     const pdfs = screen.getByRole("menuitem", { name: "PDFs" })
     activateMenuItemByKeyboard(pdfs)
     expect(applyState).toHaveBeenCalledTimes(2)
-    fireEvent.keyDown(document, { key: "Escape" })
+    expect(trigger).toHaveFocus()
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+
+    // Escape must close an open menu, not merely observe selection's prior close.
+    trigger.focus()
+    await user.keyboard("{Enter}")
+    const openMenu = await screen.findByRole("menu")
+    const focusedItem = within(openMenu).getByRole("menuitem", { name: "PDFs" })
+    focusedItem.focus()
+    fireEvent.keyDown(focusedItem, {
+      key: "Escape", code: "Escape", keyCode: 27, which: 27
+    })
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    expect(await screen.findByRole("menu")).toBeInTheDocument()
+    const outside = screen.getByRole("button", { name: "Outside destination" })
+    await user.click(outside)
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+    expect(outside).toHaveFocus()
   })
 
   it("keeps built-ins enabled while disabling save for a null workspace", async () => {
@@ -353,6 +445,7 @@ describe("SourceViewControls", () => {
     })
     fireEvent.click(save)
     await waitFor(() => expect(createView).toHaveBeenCalledWith("My PDFs"))
+    expect(dialog).toBeInTheDocument() // A resolved mutation is not server confirmation.
 
     rerender(
       <Harness
@@ -628,6 +721,173 @@ describe("SourceViewControls", () => {
     await waitFor(() => expect(focusFallback).toHaveFocus())
   })
 
+  it.each([
+    {
+      label: "Replace",
+      viewName: "My PDFs",
+      actionName: "Replace saved view My PDFs",
+      announcement: "Saved view replaced.",
+      method: "replaceView" as const
+    },
+    {
+      label: "Replace missing row",
+      viewName: "My PDFs",
+      actionName: "Replace saved view My PDFs",
+      announcement: "Saved view no longer exists.",
+      method: "replaceView" as const
+    },
+    {
+      label: "Reset",
+      viewName: "Old view",
+      actionName: "Reset saved view Old view",
+      announcement: "Saved view reset.",
+      method: "resetView" as const
+    }
+  ])(
+    "restores $label fallback only after native closing motion completes",
+    async (testCase) => {
+      const user = userEvent.setup()
+      const mutation = vi.fn().mockResolvedValue(undefined)
+      // Unlike compatibility tests above, keep the real Modal/CSSMotion enabled.
+      const nativeHarness = (
+        model: SourceSavedViewsController,
+        showControls = true
+      ) => (
+        <>
+          <Harness model={model} showControls={showControls} />
+          {testCase.label === "Replace missing row" && (
+            <SourceViewControls
+              controller={model}
+              sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+              onApplySourceListViewState={vi.fn()}
+              onOpenOverlay={vi.fn()}
+            />
+          )}
+        </>
+      )
+      const { rerender } = rtlRender(
+        nativeHarness(controller({ [testCase.method]: mutation }))
+      )
+      await user.click(
+        screen.getAllByRole("button", { name: "Source views" })[0]!
+      )
+      await openSavedViewCommands(user, testCase.viewName)
+      const invoker = screen.getByRole("menuitem", { name: testCase.actionName })
+      await user.click(invoker)
+      const dialog = await screen.findByRole("dialog")
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-appear-active")
+      )
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() =>
+        expect(dialog.className).not.toContain("ant-zoom-appear")
+      )
+      const submit = within(dialog).getByRole("button", {
+        name: testCase.method === "replaceView" ? "Replace" : "Reset"
+      })
+      await user.click(submit)
+      expect(mutation).toHaveBeenCalledTimes(1)
+      expect(dialog).toBeInTheDocument() // Promise resolution is not server acknowledgment.
+      rerender(
+        nativeHarness(
+          controller({
+            busy: true,
+            mutation: "replace",
+            [testCase.method]: mutation
+          })
+        )
+      )
+      fireEvent.keyDown(dialog, {
+        key: "Escape",
+        code: "Escape",
+        keyCode: 27,
+        which: 27
+      })
+      expect(dialog).toBeInTheDocument()
+      // Remove the actual invoking pane/menu, retaining a current visible fallback.
+      rerender(
+        nativeHarness(
+          controller({
+            [testCase.method]: mutation,
+            announcement: testCase.announcement
+          }),
+          false
+        )
+      )
+      expect(invoker.isConnected).toBe(false)
+      const fallback =
+        testCase.label === "Replace missing row"
+          ? screen.getByRole("button", { name: "Source views" })
+          : screen.getByRole("complementary", { name: "Sources" })
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-leave-active")
+      )
+      expect(fallback).not.toHaveFocus()
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      await waitFor(() => expect(fallback).toHaveFocus())
+    }
+  )
+
+  it.each(["outside destination", "later dialog", "later generation"])(
+    "respects %s focus authority during native closing motion",
+    async (authority) => {
+      const initial = controller()
+      const { rerender } = rtlRender(
+        <>
+          <Harness model={initial} />
+          <button>Outside destination</button>
+        </>
+      )
+      const invoker = screen.getByRole("button", { name: "Save source view" })
+      fireEvent.click(invoker)
+      const dialog = await screen.findByRole("dialog")
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-appear-active")
+      )
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() =>
+        expect(dialog.className).not.toContain("ant-zoom-appear")
+      )
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-leave-active")
+      )
+      const outside = screen.getByRole("button", { name: "Outside destination" })
+      if (authority === "later generation") {
+        rerender(
+          <>
+            <Harness model={controller({ generation: 4 })} />
+            <button>Outside destination</button>
+          </>
+        )
+      }
+      if (authority === "later dialog") {
+        fireEvent.click(invoker)
+        const input = await screen.findByRole("textbox", { name: "View name" })
+        input.focus()
+        await waitFor(() =>
+          expect(dialog.className).toContain("ant-zoom-enter-active")
+        )
+        fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(dialog)
+        await waitFor(() => expect(dialog.className).not.toContain("ant-zoom"))
+        expect(input).toHaveFocus()
+        expect(dialog).toBeInTheDocument()
+      } else {
+        if (authority === "outside destination") outside.focus()
+        fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(dialog)
+        await waitFor(() => expect(dialog).not.toBeInTheDocument())
+        expect(invoker).not.toHaveFocus()
+        if (authority === "outside destination") expect(outside).toHaveFocus()
+      }
+    }
+  )
+
   it("closes a duplicate replacement dialog when PATCH reports the row missing", async () => {
     const user = userEvent.setup()
     const createView = vi.fn().mockResolvedValue(undefined)
@@ -857,7 +1117,9 @@ describe("SourceViewControls", () => {
     expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument()
 
-    fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
+    fireEvent.keyDown(dialog, {
+      key: "Escape", code: "Escape", keyCode: 27, which: 27
+    })
     expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
 
     const wrapper = dialog.closest(".ant-modal-wrap")
@@ -1196,4 +1458,83 @@ describe("SourceViewControls", () => {
       await screen.findByRole("dialog", { name: "Delete saved view?" })
     ).toBeInTheDocument()
   })
+
+  it.each(["Cancel", "Close", "Escape"])(
+      "dismisses a rapid reopened native Save via %s",
+      async (action) => {
+        const user = userEvent.setup()
+        rtlRender(
+          <Harness
+            model={controller({ announcement: "Saved view no longer exists." })}
+          />
+        )
+        const invoker = screen.getByRole("button", { name: "Save source view" })
+        await user.click(invoker)
+        const first = await screen.findByRole("dialog")
+        await waitFor(() =>
+          expect(first.className).toContain("ant-zoom-appear-active")
+        )
+        fireEvent(first, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(first)
+        await waitFor(() => expect(first.className).not.toContain("ant-zoom"))
+        await user.type(
+          screen.getByRole("textbox", { name: "View name" }),
+          "Old draft"
+        )
+        await user.click(within(first).getByRole("button", { name: "Cancel" }))
+        invoker.focus()
+        await user.keyboard("{Enter}")
+        const input = await screen.findByRole("textbox", { name: "View name" })
+        expect(input).toHaveValue("")
+        const current = input.closest("[role=dialog]")!
+        await waitFor(() =>
+          expect(current.className).toContain("ant-zoom-enter-active")
+        )
+        fireEvent(current, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(current)
+        await waitFor(() => expect(current.className).not.toContain("ant-zoom"))
+        if (action === "Escape") {
+          fireEvent.keyDown(current, {
+            key: "Escape",
+            code: "Escape",
+            keyCode: 27,
+            which: 27
+          })
+        } else
+          await user.click(within(current).getByRole("button", { name: action }))
+        await waitFor(() =>
+          expect(current.className).toContain("ant-zoom-leave-active")
+        )
+        fireEvent(current, new Event("webkitAnimationEnd", { bubbles: true }))
+        fireEvent.animationEnd(current)
+        await waitFor(() => expect(current).not.toBeInTheDocument())
+      }
+    )
+
+  it("does not restore a rejected unopened request after host teardown", async () => {
+      vi.useFakeTimers()
+      try {
+        rtlRender(<button data-source-view-trigger>Current source views</button>)
+        const fallback = screen.getByRole("button", {
+          name: "Current source views"
+        })
+        const { unmount } = rtlRender(
+          <SourceViewOverlayHost
+            controller={controller({ generation: 2 })}
+            request={{
+              id: 987654,
+              kind: "save",
+              generation: 1,
+              invoker: document.createElement("button")
+            }}
+            onRequestHandled={vi.fn()}
+          />
+        )
+        unmount()
+        await act(async () => vi.runOnlyPendingTimers())
+        expect(fallback).not.toHaveFocus()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
 })

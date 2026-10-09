@@ -1,7 +1,7 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AudioGenerationSettings,
   GeneratedArtifact,
@@ -1030,6 +1030,10 @@ describe("StudioPane literature work products", () => {
     expect(query).toContain("Selected source IDs: none")
     expect(query).toContain("Skipped sources: none")
     expect(query).toContain("Truncated sources: none")
+  })
+
+  beforeAll(async () => {
+    await import("../StudioPane/ArtifactModalContent")
   })
 
   beforeEach(() => {

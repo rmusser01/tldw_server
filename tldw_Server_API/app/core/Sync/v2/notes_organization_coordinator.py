@@ -250,13 +250,14 @@ class NotesOrganizationCoordinator:
         request_fingerprint: str,
         result_domain: SyncDomain | None,
         relationship_result: bool = False,
+        require_organization: bool = True,
     ) -> PlannedNotesMutation | None:
         """Return an exact durable manifest before mutable projection checks."""
 
         normalized_key = str(idempotency_key or "").strip()
         if not normalized_key:
             return None
-        dataset = self.require_ready()
+        dataset = self.require_ready() if require_organization else self.active_dataset()
         manifest = load_server_origin_mutation_batch_manifest(
             service=self.service,
             dataset_id=dataset.dataset_id,

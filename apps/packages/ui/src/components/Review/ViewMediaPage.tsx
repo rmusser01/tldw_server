@@ -54,6 +54,7 @@ import {
   trackMediaNavigationTelemetry
 } from "@/utils/media-navigation-telemetry"
 import { normalizeRequestedMediaRenderMode } from '@/utils/media-render-mode'
+import { stripMediaMetadata } from '@/utils/media-metadata-display'
 import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
 import {
   CheckSquare,
@@ -448,7 +449,20 @@ const MediaPageContent: React.FC = () => {
     enabled: navigationEnabled,
     includeGeneratedFallback: viewPrefs.includeGeneratedFallbackValue
   })
-  const navigationNodes = navigationData?.nodes || []
+  const navigationNodes = useMemo(() => {
+    const nodes = navigationData?.nodes || []
+    const readingContent = stripMediaMetadata(nav.selectedContent)
+    if (readingContent === nav.selectedContent) return nodes
+    // API character ranges refer to the stored source, including its envelope.
+    const prefixLength = nav.selectedContent.length - readingContent.length
+    return nodes
+      .filter(node => node.target_type !== 'char_range' || node.target_end == null || node.target_end > prefixLength)
+      .map(node => node.target_type === 'char_range' ? {
+        ...node,
+        target_start: node.target_start == null ? null : Math.max(0, node.target_start - prefixLength),
+        target_end: node.target_end == null ? null : Math.max(0, node.target_end - prefixLength)
+      } : node)
+  }, [nav.selectedContent, navigationData?.nodes])
 
   const [selectedNavigationNodeId, setSelectedNavigationNodeId] =
     useState<string | null>(null)

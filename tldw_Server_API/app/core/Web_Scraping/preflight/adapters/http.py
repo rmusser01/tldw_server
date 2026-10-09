@@ -16,6 +16,10 @@ from loguru import logger
 
 from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.exceptions import NetworkError
+from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    DEFAULT_MAX_ARTICLE_BYTES as _PUBLIC_CAPTURE_MAX_PROBE_BYTES,
+)
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -473,7 +477,10 @@ class HttpxProbeTransport:
 
     async def send(self, request: ProbeHttpRequest) -> Any:
         proxies = _mutable_proxies(request.proxies)
-        client = http_client.create_async_client(proxies=proxies)
+        public_capture = public_url_policy_active()
+        client = http_client.create_async_client(
+            proxies=proxies, **({"trust_env": False} if public_capture else {})
+        )
         try:
             response = await http_client.afetch(
                 method="GET",
@@ -486,6 +493,7 @@ class HttpxProbeTransport:
                 proxies=proxies,
                 retry=http_client.RetryPolicy(attempts=1),
                 sensitive_observability=True,
+                **({"max_response_bytes": _PUBLIC_CAPTURE_MAX_PROBE_BYTES} if public_capture else {}),
             )
         except asyncio.CancelledError:
             await _close_resource(client, label="client")
@@ -565,6 +573,8 @@ class CurlCffiProbeTransport:
         self._session_factory = _CurlAsyncSession if session_factory is _DEFAULT_SESSION_FACTORY else session_factory
 
     async def send(self, request: ProbeHttpRequest) -> Any:
+        if public_url_policy_active():
+            raise ProbeUnavailable()
         if self._session_factory is None or _CurlOpt is None:
             raise ProbeUnavailable(error_code="missing_dependency")
 

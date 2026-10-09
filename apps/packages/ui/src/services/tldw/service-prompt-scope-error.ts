@@ -84,6 +84,7 @@ const readCanonicalPathname = (path: unknown): string | null => {
   if (!pathname.startsWith("/") ||
     pathname.includes("\\") ||
     pathname.includes("//") ||
+    /[\t\r\n]/.test(pathname) ||
     /%(?:2e|2f|5c)/i.test(pathname) ||
     pathname.split("/").some((segment) => segment === "." || segment === "..")
   ) {
@@ -109,6 +110,10 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))
+    return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
+    return ["PATCH", "DELETE"].includes(requestMethod)
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (requestMethod === "GET" && /^\/api\/v1\/messages\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return true
   if (requestMethod === "GET" && (
@@ -120,6 +125,13 @@ export const isServicePromptRequestPath = (
   if (pathname === "/api/v1/notes/wikilinks/resolve") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
+  if (pathname === "/api/v1/media/ingest-web-content")
+    return requestMethod === "POST"
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/web-clipper\/[^/]+\/?$/.test(pathname) ||
+    /^\/api\/v1\/media\/[0-9]+\/versions(?:\/[1-9][0-9]*)?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources(?:\/[^/]+\/preview)?$/.test(pathname)
+  )) return true
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
   if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
@@ -146,7 +158,7 @@ export const isServicePromptRequestPath = (
       pathname === "/api/v1/media/ingest/jobs")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
-  if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/restore$/.test(pathname))) return true
+  if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/(?:provenance\/)?restore$/.test(pathname))) return true
   if (pathname === "/api/v1/notes/") return requestMethod === "POST"
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
     return (

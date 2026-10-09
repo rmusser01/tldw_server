@@ -62,6 +62,8 @@ def test_postgres_task_operations_do_not_leak_dataset_scope_to_the_session(
 def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
     """Replace the current graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:
+        # The v64 concurrency fixture intentionally predates this sidecar.
+        db.backend.execute("DROP TABLE IF EXISTS notes_knowledge_provenance", connection=conn)
         # Remove newer graph references before reconstructing the v59 index.
         for table in (
             "note_graph_suggestion_evidence",

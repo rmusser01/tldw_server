@@ -974,7 +974,10 @@
   },
   "quickIngest": {
     "invalidUrl": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space.",
-    "configureEligibleCount": "{{count}} eligible items in this run",
+    "configureEligibleCount": "{count, plural, one {# eligible item} other {# eligible items}} in this run",
+    "queueSavedExcluded": "Saved — excluded from this run",
+    "queueSkippedExcluded": "Skipped — excluded from this run",
+    "queueCompletedExcluded": "Completed — excluded from this run",
     "queueInvalidExcluded": "Invalid — excluded",
     "queueUnselected": "Not selected — excluded",
     "queueDuplicateExcluded": "Already queued — excluded",
@@ -1294,7 +1297,7 @@
     "wizard": {
       "results": {
         "batchAccounting": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled",
-        "reviewSaved": "Review these {{count}} saved items",
+        "reviewSaved": "Review {count, plural, one {this # saved item} other {these # saved items}}",
         "savedState": "Saved",
         "extractedState": "Extracted content; not saved",
         "knowledgeUnconfirmed": "Knowledge readiness unconfirmed",
@@ -1314,6 +1317,8 @@
   "libraryView": "Library View",
   "notes": "Notes",
   "notesSearch": {
+    "editingManual": "Editing: Manual",
+    "latestAssistPrefix": "Latest AI assist",
     "placeholder": "Search titles and contents",
     "clear": "Clear search & filters",
     "keywordsPlaceholder": "Filter by tag",

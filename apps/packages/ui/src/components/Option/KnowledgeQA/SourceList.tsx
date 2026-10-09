@@ -20,6 +20,7 @@ import {
   filterItemsByDateRange,
   filterItemsByKeyword,
   filterItemsBySourceType,
+  getOriginalResultIndex,
   getResultChunkId,
   getResultSourceId,
   getSourceContentFacetLabel,
@@ -172,14 +173,6 @@ function getResultFeedbackKey(result: RagResult, index: number): string {
   return `source-${index}`
 }
 
-function getOriginalResultIndex(result: RagResult, fallbackIndex: number): number {
-  const rawIndex = result.metadata?.original_result_index
-  if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) {
-    return fallbackIndex
-  }
-  return Math.max(0, Math.round(rawIndex))
-}
-
 function buildAskPrompt(template: SourceAskTemplate, title: string): string {
   if (template === "summary") {
     return `Summarize ${title}`
@@ -260,6 +253,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     focusSource,
     setQuery,
     query = "",
+    resultQuery,
     answer = null,
     searchDetails = null,
     currentThreadId = null,
@@ -267,6 +261,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     scrollToCitation = () => undefined,
     setPinnedSourceFilters = () => undefined,
   } = useKnowledgeQA()
+  const answeredQuery = resultQuery === undefined ? query : resultQuery ?? ""
   const messageApi = useAntdMessage()
 
   const [sortMode, setSortMode] = React.useState<SourceSortMode>(DEFAULT_SORT_MODE)
@@ -309,13 +304,13 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
   const answerSessionKey = useMemo(
     () =>
       `${currentThreadId ?? "no-thread"}::${latestAssistantMessageId ?? "no-assistant"}::${
-        query.trim() || "no-query"
+        answeredQuery.trim() || "no-query"
       }`,
-    [currentThreadId, latestAssistantMessageId, query]
+    [currentThreadId, latestAssistantMessageId, answeredQuery]
   )
   const highlightTerms = useMemo(
-    () => buildHighlightTerms(query, searchDetails?.expandedQueries || []),
-    [query, searchDetails?.expandedQueries]
+    () => buildHighlightTerms(answeredQuery, searchDetails?.expandedQueries || []),
+    [answeredQuery, searchDetails?.expandedQueries]
   )
   const citationUsageByIndex = useMemo(
     () => buildCitationUsageAnchors(answer),
@@ -660,7 +655,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
         await qaClient.submitSourceFeedback({
           conversation_id: currentThreadId || undefined,
           message_id: latestAssistantMessageId || undefined,
-          query: query.trim() || undefined,
+          query: answeredQuery.trim() || undefined,
           feedback_type: "relevance",
           relevance_score: thumb === "up" ? 5 : 1,
           document_ids: result.id ? [result.id] : undefined,
@@ -712,7 +707,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
       feedbackSessionId,
       latestAssistantMessageId,
       messageApi,
-      query,
+      answeredQuery,
       answerSessionKey,
       isAuthorityCurrent,
       qaClient,

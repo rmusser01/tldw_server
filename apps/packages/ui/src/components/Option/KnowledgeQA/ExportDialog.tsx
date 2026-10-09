@@ -1,11 +1,13 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
+import { toPrefillSource } from "@/utils/research-workspace-prefill"
 /**
  * ExportDialog - Export conversations as markdown/PDF with citations
  */
 
-import { getMeasuredRelevance } from "./sourceListUtils"
+import { getMeasuredRelevance, getOriginalResultIndex } from "./sourceListUtils"
 
-import React, { useState, useCallback, useEffect, useRef } from "react"
-import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
+import { retainKnowledgeNoteProvenance, validateKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import {
@@ -97,15 +99,30 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     answer,
     answerTrustState,
     answerEvidenceOrigin,
-    query,
+    answerTrustReasonCodes,
+    lastSearchScope,
+    query: editableQuery,
+    resultQuery,
     settings,
     preset,
     searchDetails,
   } = useKnowledgeQA()
+  const query = resultQuery === undefined ? editableQuery : resultQuery ?? ""
+  const exportSettings = useMemo(() => lastSearchScope ? {
+    ...settings,
+    sources: lastSearchScope.sources,
+    include_media_ids: lastSearchScope.includeMediaIds,
+    include_note_ids: lastSearchScope.includeNoteIds,
+    collection_id: lastSearchScope.collectionId,
+    keyword_filter: lastSearchScope.keywordFilter,
+    enable_web_fallback: lastSearchScope.webFallback,
+  } : settings, [lastSearchScope, settings])
+  const exportPreset = lastSearchScope?.preset ?? preset
   const message = useAntdMessage()
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
   const [isSavingNote, setIsSavingNote] = useState(false)
+  const pendingNoteRef = useRef<{ session: string; client: typeof tldwClient; content: string; fields: Record<string, unknown>; idempotencyKey: string } | null>(null)
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null)
   const [exportedContent, setExportedContent] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -211,8 +228,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           options,
           {
             citations,
-            settings,
-            preset,
+            settings: exportSettings,
+            preset: exportPreset,
             searchDetails,
             trustState: answerTrustState,
             evidenceOrigin: answerEvidenceOrigin,
@@ -232,8 +249,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           options,
           {
             citations,
-            settings,
-            preset,
+            settings: exportSettings,
+            preset: exportPreset,
             searchDetails,
             trustState: answerTrustState,
             evidenceOrigin: answerEvidenceOrigin,
@@ -327,8 +344,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     results,
     messages,
     citations,
-    settings,
-    preset,
+    exportSettings,
+    exportPreset,
     searchDetails,
     answerTrustState,
     answerEvidenceOrigin,
@@ -372,7 +389,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   }, [clearCopiedTimeout, dialogSessionKey, exportedContent, isAuthorityCurrent])
 
   const handleSaveToNotes = useCallback(async () => {
-    if (!isAuthorityCurrent() || !canSubmitExport) return
+    if (!isAuthorityCurrent() || !canSubmitExport || isSavingNote) return
     const requestSessionKey = dialogSessionKey
 
     setIsSavingNote(true)
@@ -385,8 +402,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         { ...options, format: "markdown" },
         {
           citations,
-          settings,
-          preset,
+          settings: exportSettings,
+          preset: exportPreset,
           searchDetails,
           trustState: answerTrustState,
           evidenceOrigin: answerEvidenceOrigin,
@@ -414,21 +431,41 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         metadata.thread_id = currentThreadId
       }
 
-      const savedNote = await tldwClient.createNote(
-        retainKnowledgeNoteProvenance(noteContent, metadata),
-        {
-          title,
-          metadata,
-          ...(currentThreadId && !currentThreadId.startsWith("shared-")
-            ? { conversation_id: currentThreadId }
-            : {}),
-        },
-      )
+      let pending = pendingNoteRef.current
+      if (pending?.session !== requestSessionKey || pending.client !== tldwClient) pending = null
+      if (!pending) {
+        const provenance = validateKnowledgeNoteProvenance({
+          origin: "knowledge_qa", trust_state: answerTrustState,
+          evidence_origin: answerEvidenceOrigin, thread_id: currentThreadId,
+          question: query, trust_reason_codes: answerTrustReasonCodes,
+          scope: lastSearchScope ? {
+            sources: lastSearchScope.sources, include_media_ids: lastSearchScope.includeMediaIds,
+            include_note_ids: lastSearchScope.includeNoteIds, collection_id: lastSearchScope.collectionId,
+            enable_web_fallback: lastSearchScope.webFallback, keyword_filter: lastSearchScope.keywordFilter,
+          } : {
+            sources: settings.sources, include_media_ids: settings.include_media_ids,
+            include_note_ids: settings.include_note_ids, collection_id: settings.collection_id,
+            keyword_filter: settings.keyword_filter, enable_web_fallback: settings.enable_web_fallback,
+          },
+          sources: results.map((result, index) => toPrefillSource(result, index, new Set(citations.map(citation => citation.index)))),
+        })
+        if (!provenance) throw new Error("Source history is invalid or too large to save.")
+        pending = {
+          session: requestSessionKey, client: tldwClient, idempotencyKey: crypto.randomUUID(),
+          content: retainKnowledgeNoteProvenance(noteContent, provenance),
+          fields: { title, metadata, knowledge_provenance: provenance, expected_provenance_version: 0,
+            ...(currentThreadId && !currentThreadId.startsWith("shared-") ? { conversation_id: currentThreadId } : {}),
+          },
+        }
+        pendingNoteRef.current = pending
+      }
+      const savedNote = await tldwClient.createNote(pending.content, pending.fields, { idempotencyKey: pending.idempotencyKey })
       if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       if (savedNote?.id == null)
         throw new Error("The saved note response did not include its ID.")
+      pendingNoteRef.current = null
       setSavedNoteId(String(savedNote.id))
       message.open({
         type: "success",
@@ -439,8 +476,10 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
-      const mappedError =
-        error instanceof Error && error.message
+      if (isDefinitiveWriteRejection(error)) pendingNoteRef.current = null
+      const mappedError = isNotesProvenancePolicyUnavailable(error)
+        ? NOTES_PROVENANCE_UNAVAILABLE_MESSAGE
+        : error instanceof Error && error.message
           ? `Failed to save to Notes. ${error.message}`
           : "Failed to save to Notes."
       message.open({
@@ -456,6 +495,9 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   }, [
     isAuthorityCurrent,
     canSubmitExport,
+    isSavingNote,
+    answerTrustReasonCodes,
+    lastSearchScope,
     dialogSessionKey,
     query,
     answer,
@@ -464,7 +506,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     options,
     citations,
     settings,
-    preset,
+    exportSettings,
+    exportPreset,
     searchDetails,
     answerTrustState,
     answerEvidenceOrigin,
@@ -1224,16 +1267,26 @@ function generateMarkdown(
     lines.push("## Citations")
     lines.push("")
     citationIndexes.forEach((citationIndex) => {
-      const sourceIndex = citationIndex - 1
+      const citation = context?.citations?.find(candidate => candidate.index === citationIndex)
+      let sourceIndex = results.findIndex((result, index) =>
+        getOriginalResultIndex(result, index) + 1 === citationIndex &&
+        (!citation?.documentId || result.id === citation.documentId)
+      )
+      if (sourceIndex === -1 && citation?.documentId) {
+        sourceIndex = results.findIndex(result =>
+          result.id === citation.documentId && getOriginalResultIndex(result, -1) === -1
+        )
+      }
       const result = results[sourceIndex]
-      const title = getSourceTitle(result, sourceIndex)
 
       if (!result) {
         lines.push(`- [${citationIndex}] Source unavailable in exported results.`)
         return
       }
 
-      lines.push(`- [${citationIndex}] ${title} maps to Source ${sourceIndex + 1}.`)
+      const originalIndex = getOriginalResultIndex(result, sourceIndex)
+      const title = getSourceTitle(result, originalIndex)
+      lines.push(`- [${citationIndex}] ${title} maps to Source ${originalIndex + 1}.`)
       if (result.metadata?.page_number) {
         lines.push(`  Page: ${result.metadata.page_number}`)
       }
@@ -1249,12 +1302,13 @@ function generateMarkdown(
     lines.push("## Sources")
     lines.push("")
     results.forEach((result, index) => {
-      const title = getSourceTitle(result, index)
+      const originalIndex = getOriginalResultIndex(result, index)
+      const title = getSourceTitle(result, originalIndex)
       const url = result.metadata?.url
       const score = getMeasuredRelevance(result)
       const content = result.content || result.text || ""
 
-      lines.push(`### [${index + 1}] ${title}`)
+      lines.push(`### [${originalIndex + 1}] ${title}`)
       lines.push("")
       if (url) {
         lines.push(`URL: ${url}`)
@@ -1296,7 +1350,7 @@ function generateMarkdown(
     )
     lines.push("")
     results.forEach((result, index) => {
-      const citation = formatCitation(result, index + 1, options.citationStyle)
+      const citation = formatCitation(result, getOriginalResultIndex(result, index) + 1, options.citationStyle)
       lines.push(citation)
       lines.push("")
     })

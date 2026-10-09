@@ -7,12 +7,13 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Optional
+from urllib.parse import urlsplit
 
 import yaml
 
 #
 # 3rd-party imports
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.attachment_policy import (
@@ -872,6 +873,8 @@ class WebScrapingRequest(BaseModel):
 
 
 class IngestWebContentRequest(BaseModel):
+    credential_free: bool = Field(False, description="Preview one public article without site credentials or analysis.")
+
     # Core fields
     urls: list[str]  # Usually 1+ URLs.
     titles: Optional[list[str]] = None
@@ -920,6 +923,45 @@ class IngestWebContentRequest(BaseModel):
     crawl_strategy: Optional[str] = None  # e.g., "best_first" or "default"
     include_external: Optional[bool] = None
     score_threshold: Optional[float] = None
+
+    @model_validator(mode="after")
+    def validate_credential_free_profile(self) -> "IngestWebContentRequest":
+        """Reject options incompatible with a public, nonpersisting preview."""
+        if not self.credential_free:
+            return self
+        if len(self.urls) != 1 or self.scrape_method != ScrapeMethod.INDIVIDUAL:
+            raise ValueError("credential_free requires one individual HTTP(S) URL")
+        try:
+            parsed = urlsplit(self.urls[0])
+            valid_url = (
+                parsed.scheme in {"http", "https"}
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+            )
+            _ = parsed.port
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            raise ValueError("credential_free requires an HTTP(S) URL without userinfo")
+        if any(
+            (
+                self.perform_analysis,
+                self.perform_translation,
+                self.perform_chunking,
+                self.use_cookies,
+                self.cookies is not None,
+                self.api_key is not None,
+                self.auto_chunking_use_llm,
+                self.perform_rolling_summarization,
+                self.perform_confabulation_check_of_analysis,
+                self.overwrite_existing,
+            )
+        ):
+            raise ValueError(
+                "credential_free forbids cookies, credentials, analysis, translation, chunking and overwrite"
+            )
+        return self
 
 
 #

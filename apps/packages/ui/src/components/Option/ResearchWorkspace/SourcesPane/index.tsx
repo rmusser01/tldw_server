@@ -349,6 +349,7 @@ const persistSourceAnnotations = (
 }
 
 interface SourcesPaneProps {
+  onCaptureArticle?: (source: WorkspaceSource) => void
   /** Callback to hide/collapse the pane */
   onHide?: () => void
   /** Open the shared transfer modal for the current effective selection. */
@@ -379,6 +380,7 @@ interface SourcesPaneProps {
  * SourcesPane - Left pane for managing research sources
  */
 export const SourcesPane: React.FC<SourcesPaneProps> = ({
+  onCaptureArticle,
   onHide,
   onOpenTransferSources,
   statusGuardrailsEnabled = true,
@@ -1598,6 +1600,30 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 </span>
               )}
             </div>
+            {source.webCapture ? (
+              <p className="text-xs text-text-muted">
+                {t(
+                  "playground:sources.extractedSnapshot",
+                  "Extracted article snapshot"
+                )}{" "}
+                · {source.webCapture.capturedAt}
+                <br />
+                {t(
+                  "playground:sources.snapshotVersion",
+                  "Source snapshot: Media version {{version}}",
+                  { version: source.webCapture.versionNumber }
+                )}
+              </p>
+            ) : (
+              source.knowledgeQaEvidence?.snapshot && (
+                <p className="text-xs text-text-muted">
+                  {t(
+                    "playground:sources.retrievedExcerpt",
+                    "Retrieved excerpt"
+                  )}
+                </p>
+              )
+            )}
             <Tooltip title={metadataTooltip}>
               <p className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate text-[11px] text-text-subtle">
                 <Info className="h-3 w-3 shrink-0" />
@@ -1654,6 +1680,13 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             isSelected ? "border border-primary/20 bg-primary/5" : ""
           }`}
         >
+          {source.url && onCaptureArticle && (
+            <Button size="small" onClick={() => onCaptureArticle(source)}>
+              {source.webCapture
+                ? t("playground:sources.refreshCapture", "Refresh capture")
+                : t("playground:sources.captureArticle", "Capture article")}
+            </Button>
+          )}
           <SourceFolderMembershipMenu
             sourceTitle={source.title}
             folderOptions={sourceFolderOptions}

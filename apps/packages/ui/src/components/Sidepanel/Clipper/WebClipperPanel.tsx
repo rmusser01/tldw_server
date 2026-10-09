@@ -1,3 +1,4 @@
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import React from "react"
 import {
   loadServicePromptSnapshot,
@@ -659,6 +660,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
       if (action === "analyze" && hasSavedCanonicalNote(response) && response.note) {
         writePendingWebClipAnalyzeRequest(
           buildPendingWebClipAnalyzeRequest({
+            ownerKey: serverChatMirrorOwnerKey(owner),
             draft,
             clipId: response.clip_id,
             noteId: response.note.id,

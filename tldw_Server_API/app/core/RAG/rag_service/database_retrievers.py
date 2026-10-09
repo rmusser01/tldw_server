@@ -3018,8 +3018,7 @@ class NotesDBRetriever(BaseRetriever):
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
-            docs = self._retrieve_via_chacha(query, notebook_id)
-            return docs
+            return await asyncio.to_thread(self._retrieve_via_chacha, query, notebook_id)
 
         documents = []
 
@@ -3185,7 +3184,7 @@ class NotesDBRetriever(BaseRetriever):
         if self.chacha_db is None:
             return []
         try:
-            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results))
+            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results), match_any=True)
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error(f"ChaCha notes search failed: {exc}")
             return []

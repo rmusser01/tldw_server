@@ -123,51 +123,8 @@ class NotesMaterializer:
         object_revision = self._next_object_revision(envelope, current_state)
         object_hash = envelope.payload_hash or ""
         try:
-            if envelope.operation == "upsert":
-                payload = _note_payload(envelope.payload)
-                expected_product_version = _trusted_expected_product_version(
-                    envelope,
-                    self.note_db,
-                )
-                projection_timestamp = None
-                if expected_product_version is not None:
-                    if (
-                        envelope.routing_metadata.get("source") == "notes-ingestion"
-                        and object_revision != expected_product_version + 1
-                    ):
-                        raise ValueError(
-                            "Trusted ingestion product revision is inconsistent"
-                        )
-                    projection_timestamp = (
-                        envelope.server_timestamp or envelope.received_at_server
-                    )
-                    if not projection_timestamp:
-                        raise ValueError(
-                            "Trusted ingestion envelope is missing a server timestamp"
-                        )
-                self.note_db.upsert_note_from_sync(
-                    note_id=envelope.object_id,
-                    title=payload["title"],
-                    content=payload["content"],
-                    conversation_id=payload.get("conversation_id"),
-                    message_id=payload.get("message_id"),
-                    sync_client_id=_projection_client_id(self.note_db),
-                    object_revision=object_revision,
-                    object_hash=object_hash,
-                    expected_product_version=expected_product_version,
-                    projection_timestamp=projection_timestamp,
-                )
-                deleted = False
-            elif envelope.operation == "tombstone":
-                self.note_db.tombstone_note_from_sync(
-                    note_id=envelope.object_id,
-                    sync_client_id=_projection_client_id(self.note_db),
-                    object_revision=object_revision,
-                    object_hash=object_hash,
-                )
-                deleted = True
-            else:
-                raise ValueError(f"Unsupported notes.note operation: {envelope.operation}")
+            self.project_product(envelope, object_revision=object_revision, conn=None)
+            deleted = envelope.operation == "tombstone"
 
             store.upsert_object_state(
                 SyncObjectState(
@@ -222,6 +179,58 @@ class NotesMaterializer:
             )
 
         return MaterializationResult(status="applied")
+
+    def project_product(self, envelope: SyncEnvelope, *, object_revision: int, conn: Any | None) -> None:
+        """Project core bytes using the caller transaction when a sidecar is paired."""
+
+        object_hash = envelope.payload_hash or ""
+        if envelope.operation == "upsert":
+            payload = _note_payload(envelope.payload)
+            expected_product_version = _trusted_expected_product_version(
+                envelope,
+                self.note_db,
+            )
+            projection_timestamp = None
+            if expected_product_version is not None:
+                if (
+                    envelope.routing_metadata.get("source") == "notes-ingestion"
+                    and object_revision != expected_product_version + 1
+                ):
+                    raise ValueError(
+                        "Trusted ingestion product revision is inconsistent"
+                    )
+                projection_timestamp = (
+                    envelope.server_timestamp or envelope.received_at_server
+                )
+                if not projection_timestamp:
+                    raise ValueError(
+                        "Trusted ingestion envelope is missing a server timestamp"
+                    )
+            self.note_db.upsert_note_from_sync(
+                note_id=envelope.object_id,
+                title=payload["title"],
+                content=payload["content"],
+                conversation_id=payload.get("conversation_id"),
+                message_id=payload.get("message_id"),
+                sync_client_id=_projection_client_id(self.note_db),
+                object_revision=object_revision,
+                object_hash=object_hash,
+                expected_product_version=expected_product_version,
+                projection_timestamp=projection_timestamp,
+                conn=conn,
+            )
+
+        elif envelope.operation == "tombstone":
+            self.note_db.tombstone_note_from_sync(
+                note_id=envelope.object_id,
+                sync_client_id=_projection_client_id(self.note_db),
+                object_revision=object_revision,
+                object_hash=object_hash,
+                conn=conn,
+            )
+
+        else:
+            raise ValueError(f"Unsupported notes.note operation: {envelope.operation}")
 
     def _detect_conflict(
         self,

@@ -873,6 +873,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
@@ -1217,6 +1218,7 @@ jobs:
               tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py
               tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -2527,6 +2529,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
@@ -2872,6 +2875,7 @@ jobs:
               tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py
               tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -4021,6 +4025,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
@@ -4366,6 +4371,7 @@ jobs:
               tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py
               tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -5426,6 +5432,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
@@ -5771,6 +5778,7 @@ jobs:
               tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py
               tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
@@ -6822,6 +6830,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
@@ -7167,6 +7176,7 @@ jobs:
               tldw_Server_API/tests/Media/test_audio_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
               tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_capture_version_deletion_current_material.py
               tldw_Server_API/tests/Media/test_ebook_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_email_summary_service_prompt.py
               tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py

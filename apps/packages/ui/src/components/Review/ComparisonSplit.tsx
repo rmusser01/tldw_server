@@ -9,7 +9,7 @@ import {
   type DiffLine
 } from "@/components/Media/diff-worker-client"
 import type { MediaDetail } from "@/components/Review/media-review-types"
-import { getContent } from "@/components/Review/media-review-types"
+import { getReadingContent } from "@/components/Review/media-review-types"
 
 interface ComparisonSplitProps {
   items: MediaDetail[]
@@ -36,8 +36,8 @@ export const ComparisonSplit: React.FC<ComparisonSplitProps> = ({
 
   const diffLines = React.useMemo<DiffLine[] | null>(() => {
     if (items.length !== 2 || !showDiff) return null
-    const left = getContent(items[0]) || ""
-    const right = getContent(items[1]) || ""
+    const left = getReadingContent(items[0]) || ""
+    const right = getReadingContent(items[1]) || ""
     // Skip diff for very large content
     if (shouldRequireSampling(left, right)) return null
     return computeDiffSync(left, right)
@@ -128,7 +128,7 @@ export const ComparisonSplit: React.FC<ComparisonSplitProps> = ({
                 />
               ) : (
                 <ContentRenderer
-                  content={getContent(item) || ""}
+                  content={getReadingContent(item) || ""}
                   hideTranscriptTimings={hideTranscriptTimings}
                 />
               )}

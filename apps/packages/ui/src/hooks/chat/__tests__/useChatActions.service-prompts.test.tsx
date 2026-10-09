@@ -430,6 +430,24 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])("retires a captured turn during real prompt preparation (rag=%s)", async (rag) => {
+    const pending = deferred<typeof snapshot>();
+    loadServicePromptSnapshotMock.mockReturnValueOnce(pending.promise);
+    const options = { ...createHookOptions({ webSearch: false }), compareModeActive: false, ragMediaIds: rag ? [101] : null, fileRetrievalEnabled: rag };
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));
+    const controller = new AbortController();
+    let submission!: ReturnType<typeof result.current.onSubmit>;
+    await act(async () => {
+      submission = result.current.onSubmit({ message: "Captured question", image: "", controller });
+      await vi.waitFor(() => expect(loadServicePromptSnapshotMock).toHaveBeenCalledOnce());
+    });
+    controller.abort();
+    await act(async () => { pending.resolve(snapshot); await submission; });
+    expect(normalChatModeMock).not.toHaveBeenCalled();
+    expect(ragModeMock).not.toHaveBeenCalled();
+    expect(createChatMock).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("stamps a new persisted Compare with its captured owner (webSearch=%s)", async webSearch => {
     const options = createHookOptions({ webSearch });
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));

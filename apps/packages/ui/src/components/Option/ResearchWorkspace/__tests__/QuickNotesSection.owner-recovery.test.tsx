@@ -62,10 +62,10 @@ describe("UUID Notes owner and canonical reopen boundaries", () => {
     boundary.getWorkspaceSources.mockResolvedValue(server.sources)
     boundary.getWorkspaceArtifacts.mockResolvedValue(server.artifacts)
     boundary.getWorkspaceNotes.mockResolvedValue(server.notes)
+    const ownedNote = { id: uuid, title: "Alice title", content, version: 4, keywords: ["private", "workspace:server-research"] }
     boundary.request.mockImplementation(async ({ path }: { path: string }) =>
-      path.startsWith("/api/v1/notes/search/")
-        ? { notes: [{ id: uuid, title: "Alice title", content, version: 4, keywords: ["private", "workspace:server-research"] }] }
-        : []
+      path.startsWith("/api/v1/notes/search/") ? { notes: [ownedNote] }
+        : path === `/api/v1/notes/${uuid}` ? ownedNote : []
     )
     const local = await hydrateWorkspaceFromServer(server.id, { fetch: async () => server })
     local.currentNote = { id: uuid, title: "Alice title", content, keywords: ["private"], version: 4, isDirty: false,
@@ -139,6 +139,10 @@ describe("UUID Notes owner and canonical reopen boundaries", () => {
     expect(useWorkspaceStore.getState().sources.map(source => source.id)).toEqual(serverWorkspacePayload().sources.map(source => source.id))
     expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
       path: expect.stringContaining("/api/v1/notes/search/"), method: "GET", abortSignal: expect.any(AbortSignal),
+      servicePromptConfig: expect.objectContaining({ expectedUserId: "alice" }), headers: { "X-TLDW-Expected-User-ID": "alice" }
+    }))
+    expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: `/api/v1/notes/${uuid}`, method: "GET", abortSignal: expect.any(AbortSignal),
       servicePromptConfig: expect.objectContaining({ expectedUserId: "alice" }), headers: { "X-TLDW-Expected-User-ID": "alice" }
     }))
   })

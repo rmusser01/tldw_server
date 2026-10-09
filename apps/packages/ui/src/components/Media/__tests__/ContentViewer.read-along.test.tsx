@@ -366,6 +366,15 @@ describe('ContentViewer read-along integration', () => {
     restoreUrlObjectUrlHelpers()
   })
 
+  it('reads the visible article aloud without speaking the stored metadata envelope', async () => {
+    renderViewer({ content: '[METADATA]\n{"url":"https://example.com/","content_hash":"fixture"}\n[/METADATA]\n\nArticle body.' })
+    selectTextInside('Article body.')
+    fireEvent.click(await screen.findByTestId('media-selection-action-read-full-item'))
+    await waitFor(() => expect(audioInstances.length).toBeGreaterThan(0))
+    const firstAudio = [...cacheEntries.values()][0]
+    expect(await firstAudio.blob.text()).toBe('Article body.')
+  })
+
   it('shows no read-along UI before content selection', () => {
     renderViewer()
 

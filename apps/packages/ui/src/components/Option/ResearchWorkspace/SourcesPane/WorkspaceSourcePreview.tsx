@@ -51,6 +51,10 @@ type PreviewRequest = {
   workspaceId: string
   sourceId: string
   mediaId: number | null
+  capturePin: WorkspaceSource["webCapture"]
+  captureClipId: string | undefined
+  captureVersionNumber: number | undefined
+  captureVersionUuid: string | undefined
   generation: number
   controller: AbortController
 }
@@ -85,6 +89,10 @@ export const WorkspaceSourcePreview = ({
   const capturedWorkspaceId = workspaceId?.trim() || null
   const sourceId = previewSource?.id ?? null
   const mediaId = previewSource?.mediaId ?? null
+  const capturePin = previewSource?.webCapture
+  const captureClipId = capturePin?.clipId
+  const captureVersionNumber = capturePin?.versionNumber
+  const captureVersionUuid = capturePin?.versionUuid
   const [previewReloadNonce, setPreviewReloadNonce] = React.useState(0)
   const [loadState, setLoadState] = React.useState<PreviewLoadState | null>(
     null
@@ -95,14 +103,22 @@ export const WorkspaceSourcePreview = ({
   const currentTarget = React.useRef({
     workspaceId: capturedWorkspaceId,
     sourceId,
-    mediaId
+    mediaId,
+    capturePin,
+    captureClipId,
+    captureVersionNumber,
+    captureVersionUuid
   })
   const closeCallback = React.useRef(onClose)
   const previousWorkspace = React.useRef(capturedWorkspaceId)
   currentTarget.current = {
     workspaceId: capturedWorkspaceId,
     sourceId,
-    mediaId
+    mediaId,
+    capturePin,
+    captureClipId,
+    captureVersionNumber,
+    captureVersionUuid
   }
   closeCallback.current = onClose
 
@@ -139,6 +155,10 @@ export const WorkspaceSourcePreview = ({
       workspaceId: capturedWorkspaceId,
       sourceId,
       mediaId,
+      capturePin,
+      captureClipId,
+      captureVersionNumber,
+      captureVersionUuid,
       generation: ++generation.current,
       controller: new AbortController()
     }
@@ -149,7 +169,11 @@ export const WorkspaceSourcePreview = ({
     const matchesRenderedTarget = () =>
       currentTarget.current.workspaceId === request.workspaceId &&
       currentTarget.current.sourceId === request.sourceId &&
-      currentTarget.current.mediaId === request.mediaId
+      currentTarget.current.mediaId === request.mediaId &&
+      currentTarget.current.capturePin === request.capturePin &&
+      currentTarget.current.captureClipId === request.captureClipId &&
+      currentTarget.current.captureVersionNumber === request.captureVersionNumber &&
+      currentTarget.current.captureVersionUuid === request.captureVersionUuid
     const isCurrent = () => {
       const state = useWorkspaceStore.getState()
       const source = state.sources.find((item) => item.id === request.sourceId)
@@ -160,7 +184,11 @@ export const WorkspaceSourcePreview = ({
         matchesRenderedTarget() &&
         state.workspaceId?.trim() === request.workspaceId &&
         source &&
-        (source.mediaId ?? null) === request.mediaId
+        (source.mediaId ?? null) === request.mediaId &&
+        source.webCapture === request.capturePin &&
+        source.webCapture?.clipId === request.captureClipId &&
+        source.webCapture?.versionNumber === request.captureVersionNumber &&
+        source.webCapture?.versionUuid === request.captureVersionUuid
       )
     }
     // Store subscribers see intervening transitions even when React batches A -> B -> A.
@@ -169,7 +197,11 @@ export const WorkspaceSourcePreview = ({
       if (
         state.workspaceId !== previous.workspaceId ||
         !source ||
-        (source.mediaId ?? null) !== request.mediaId
+        (source.mediaId ?? null) !== request.mediaId ||
+        source.webCapture !== request.capturePin ||
+        source.webCapture?.clipId !== request.captureClipId ||
+        source.webCapture?.versionNumber !== request.captureVersionNumber ||
+        source.webCapture?.versionUuid !== request.captureVersionUuid
       ) {
         if (activeRequest.current !== request) return
         if (matchesRenderedTarget()) dismissPreview()
@@ -191,7 +223,8 @@ export const WorkspaceSourcePreview = ({
           request.sourceId,
           {
             max_chars: SOURCE_PREVIEW_MAX_CHARS,
-            chunk_limit: SOURCE_PREVIEW_CHUNK_LIMIT
+            chunk_limit: SOURCE_PREVIEW_CHUNK_LIMIT,
+            ...(request.capturePin ? { version_number: request.captureVersionNumber } : {})
           },
           { requestScope: scope, signal: request.controller.signal }
         )
@@ -212,6 +245,9 @@ export const WorkspaceSourcePreview = ({
           throw new Error(
             "Source preview did not match the captured workspace source."
           )
+        }
+        if (request.capturePin && data.document_version_number !== request.captureVersionNumber) {
+          throw new Error("Exact capture version unavailable")
         }
         setLoadState({ request, loading: false, error: null, data })
       } catch (error) {
@@ -241,6 +277,10 @@ export const WorkspaceSourcePreview = ({
     capturedWorkspaceId,
     sourceId,
     mediaId,
+    capturePin,
+    captureClipId,
+    captureVersionNumber,
+    captureVersionUuid,
     previewReloadNonce,
     dismissPreview
   ])
@@ -252,6 +292,10 @@ export const WorkspaceSourcePreview = ({
     loadState.request.workspaceId === capturedWorkspaceId &&
     loadState.request.sourceId === sourceId &&
     loadState.request.mediaId === mediaId &&
+    loadState.request.capturePin === capturePin &&
+    loadState.request.captureClipId === captureClipId &&
+    loadState.request.captureVersionNumber === captureVersionNumber &&
+    loadState.request.captureVersionUuid === captureVersionUuid &&
     !loadState.request.controller.signal.aborted
   )
 

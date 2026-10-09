@@ -1,10 +1,17 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import { normalizeNoteKeyword } from "@/services/note-keywords"
 import { bgRequest } from "@/services/background-proxy"
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 import {
   retainKnowledgeNoteProvenance,
-  readKnowledgeNoteProvenance,
+  reconcileCapturedNoteProvenance,
+  resolveKnowledgeNoteProvenance,
+  knowledgeNoteHead,
+  knowledgeNoteProvenanceMatches,
+  knowledgeNoteWriteFields,
+  type KnowledgeNoteHead,
   validateKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance,
 } from "./knowledge-note-provenance"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
@@ -36,14 +43,19 @@ const emptyStatus = {
   error: null as string | null,
 }
 
+type RecoveryPrefill = ResearchWorkspacePrefill & {
+  confirmedSeedlessWrite?: NonNullable<ResearchWorkspacePrefill["pendingNoteWrite"]>
+}
+
 /** Retain the handoff and successful snapshot IDs until every source can attach. */
 export function useResearchWorkspacePrefill(
   workspaceId: string | null,
   hydrated: boolean,
+  serverBacked = false,
 ) {
   const [status, setStatus] = useState(emptyStatus)
   const [attempt, setAttempt] = useState(0)
-  const retained = useRef<ResearchWorkspacePrefill | null>(null)
+  const retained = useRef<RecoveryPrefill | null>(null)
   const retry = useCallback(async () => {
     setAttempt((value) => value + 1)
   }, [])
@@ -74,7 +86,7 @@ export function useResearchWorkspacePrefill(
         const owner = await getResearchWorkspaceOwner()
         assertCurrent()
         const cached = retained.current
-        const payload =
+        const payload: RecoveryPrefill | null =
           cached?.ownerScope === owner && !cached.completed
             ? cached
             : await consumeResearchWorkspacePrefill(owner, true)
@@ -108,7 +120,7 @@ export function useResearchWorkspacePrefill(
           payload.selectionIntent = { mediaIds: [], selectedSourceIds: [] }
         }
         const checkpointSelection = () => {
-          void saveResearchWorkspacePrefill(payload).catch(() => {
+          void saveResearchWorkspacePrefill(payload, "selection").catch(() => {
             if (isCurrent())
               setStatus((previous) => ({
                 ...previous,
@@ -197,23 +209,70 @@ export function useResearchWorkspacePrefill(
           let mediaId = source.mediaId ?? source.snapshotMediaId
           if (mediaId == null) {
             try {
-              if (!sources.some((item) => item.excerpt.trim()))
+              const isNote = /note/i.test(source.sourceType || "")
+              let fullNote: { content: string; version: number } | null = null
+              if (isNote) {
+                if (source.originalId == null)
+                  throw new Error("Missing original note identity")
+                const note = await bgRequest<{
+                  id: string
+                  content: string
+                  version: number
+                  deleted?: boolean
+                }>({
+                  ...requestScopeFields(requestScope),
+                  abortSignal: controller.signal,
+                  path: `/api/v1/notes/${encodeURIComponent(String(source.originalId))}`,
+                  method: "GET",
+                })
+                assertCurrent()
+                if (
+                  note?.id !== String(source.originalId) ||
+                  note.deleted === true ||
+                  typeof note.content !== "string" ||
+                  !note.content.length ||
+                  note.content.length > 5_000_000 ||
+                  !Number.isSafeInteger(note.version) ||
+                  note.version <= 0
+                )
+                  throw new Error(
+                    "Original note content or revision is unavailable",
+                  )
+                fullNote = {
+                  content: stripKnowledgeNoteProvenance(note.content),
+                  version: note.version,
+                }
+              } else if (!sources.some((item) => item.excerpt.trim())) {
                 throw new Error("No retrieved excerpt to import")
-              const text = buildKnowledgeQaSeedNote({
+              }
+              const snapshotLabel = fullNote
+                ? `full note snapshot (v${fullNote.version})`
+                : "retrieved excerpts"
+              const evidence = buildKnowledgeQaSeedNote({
                 ...payload,
                 answer: null,
-                sources,
+                sources: fullNote
+                  ? sources.map((item) => ({
+                      ...item,
+                      originalVersion: fullNote.version,
+                    }))
+                  : sources,
               })
+              const text = fullNote
+                ? `${evidence}\n\nFull note content (version ${fullNote.version}):\n${fullNote.content}`
+                : evidence
               const file = new File(
                 [text],
-                `${source.title} - retrieved excerpts.txt`,
-                { type: "text/plain" },
+                `${source.title} - ${snapshotLabel}.txt`,
+                {
+                  type: "text/plain",
+                },
               )
               const result = await tldwClient.uploadMedia(
                 file,
                 {
                   media_type: "document",
-                  title: `${source.title} — retrieved excerpts`,
+                  title: `${source.title} — ${snapshotLabel}`,
                   overwrite: false,
                   perform_analysis: false,
                   perform_chunking: true,
@@ -230,6 +289,7 @@ export function useResearchWorkspacePrefill(
               mediaId = id
               for (const item of sources) {
                 item.snapshotMediaId = id
+                if (fullNote) item.originalVersion = fullNote.version
                 delete item.importError
               }
               // Checkpoint under the original owner/destination even if navigation just
@@ -240,8 +300,9 @@ export function useResearchWorkspacePrefill(
               assertCurrent()
               failed += 1
               for (const item of sources)
-                item.importError =
-                  "Could not import retrieved excerpts. Retry when the server is available."
+                item.importError = /note/i.test(item.sourceType || "")
+                  ? "Could not import the full note. Retry when the server is available."
+                  : "Could not import retrieved excerpts. Retry when the server is available."
               await saveResearchWorkspacePrefill(payload)
               assertCurrent()
               setStatus({
@@ -256,15 +317,20 @@ export function useResearchWorkspacePrefill(
           }
           assertCurrent()
           const state = useWorkspaceStore.getState()
+          // Snapshot ingestion can reuse media also returned by retrieval.
+          // ponytail: scans each handoff per attachment; index if large batches slow it.
+          const evidenceSources = payload.sources.filter(
+            (item) => (item.mediaId ?? item.snapshotMediaId) === mediaId,
+          )
           const knowledgeQaEvidence = {
             importId: payload.id,
             threadId: payload.threadId,
-            sources,
+            sources: evidenceSources,
             trustState: payload.answerTrustState,
             trustReasonCodes: payload.answerTrustReasonCodes,
             evidenceOrigin: payload.answerEvidenceOrigin,
             scope: payload.scope,
-            snapshot: source.mediaId == null,
+            snapshot: evidenceSources.some((item) => item.mediaId == null),
           }
           if (!state.sources.some((item) => item.mediaId === mediaId)) {
             state.addSources([
@@ -272,7 +338,9 @@ export function useResearchWorkspacePrefill(
                 mediaId,
                 title:
                   source.mediaId == null
-                    ? `${source.title} — retrieved excerpts`
+                    ? source.originalVersion != null
+                      ? `${source.title} — full note snapshot (v${source.originalVersion})`
+                      : `${source.title} — retrieved excerpts`
                     : source.title,
                 type: source.mediaId == null ? "text" : source.type,
                 ...(source.mediaId == null
@@ -310,22 +378,40 @@ export function useResearchWorkspacePrefill(
         assertCurrent()
         const state = useWorkspaceStore.getState()
         const draftWasDirty = state.currentNote.isDirty
+        const recoveryWrite = payload.pendingNoteWrite || payload.confirmedSeedlessWrite
+        const seedlessReceipt = !payload.draftRetained && recoveryWrite &&
+          !String(recoveryWrite.body.content).includes(`Import reference: ${payload.id}`)
+          ? recoveryWrite : null
+        if (
+          state.currentNote.serverWorkspaceId ||
+          (state.serverWorkspace && state.serverWorkspace.scopeKey !== owner) ||
+          (state.currentNote.serverScopeKey && state.currentNote.serverScopeKey !== owner)
+        )
+          throw new Error("Import destination owner changed")
+        const title = payload.threadId || payload.query || payload.answer
+          ? `Knowledge QA: ${payload.query.slice(0, 80) || "import"}`
+          : "Reviewed sources"
+        const seed = `## ${title}\n\n${buildKnowledgeQaSeedNote(payload).trim()}`
         if (
           !payload.draftRetained &&
+          !payload.pendingNoteWrite &&
           (!payload.canonicalNoteId ||
-            (!draftWasDirty && state.currentNote.id == null)) &&
+            (!draftWasDirty && state.currentNote.id == null && payload.legacyNoteId == null)) &&
           !state.currentNote.content.includes(`Import reference: ${payload.id}`)
         ) {
-          state.captureToCurrentNote({
-            title:
-              payload.threadId || payload.query || payload.answer
-                ? `Knowledge QA: ${payload.query.slice(0, 80) || "import"}`
-                : "Reviewed sources",
-            content: buildKnowledgeQaSeedNote(payload),
-            mode: "append",
+          // Owned imports retain the draft separately from view-only manual capture.
+          const body = state.currentNote.content.trim()
+          state.setCurrentNote({
+            ...state.currentNote,
+            title: state.currentNote.title.trim() || title,
+            content: body ? `${body}\n\n---\n\n${seed}` : seed,
+            isDirty: true,
           })
         }
-        if (hasResearchWorkspaceMigrationTombstone(workspaceId)) {
+        if (
+          serverBacked ||
+          hasResearchWorkspaceMigrationTombstone(workspaceId)
+        ) {
           const current = useWorkspaceStore.getState()
           const draft = current.currentNote
           // Retain the original legacy identity across a lost response and remount.
@@ -349,7 +435,7 @@ export function useResearchWorkspacePrefill(
             draft.id === payload.legacyNoteId
           let draftDiscarded = Boolean(
             !convertingLegacyDraft &&
-            (payload.draftRetained || draft.id != null) &&
+            (payload.draftRetained || draft.id != null || payload.legacyNoteId != null) &&
             draft.id !== payload.canonicalNoteId,
           )
           const stopWatchingDraft = useWorkspaceStore.subscribe((next) => {
@@ -367,7 +453,7 @@ export function useResearchWorkspacePrefill(
             }
             const path =
               `/api/v1/notes/${encodeURIComponent(payload.canonicalNoteId)}` as const
-            type CanonicalNote = {
+            type CanonicalNote = KnowledgeNoteHead & {
               id: string
               title: string
               content: string
@@ -389,13 +475,15 @@ export function useResearchWorkspacePrefill(
               throw new Error("Canonical note identity changed")
             const alreadyRetained =
               existing?.content.includes(`Import reference: ${payload.id}`) ||
-              readKnowledgeNoteProvenance(existing?.content || "")?.research
+              resolveKnowledgeNoteProvenance(existing).provenance?.research
                 ?.import_id === payload.id
             // The owned dirty draft is authoritative even when a prior attempt
             // reached the server. Capture-to-note itself must not count as an edit.
             const preferDraft =
               !alreadyRetained || (!draftDiscarded && draftWasDirty)
             const body = preferDraft ? draft.content : existing!.content
+            if (existing?.knowledge_provenance_state === "deleted")
+              throw new Error("Source history was removed. Restore it explicitly before retaining this import.")
             const requiredProvenance = validateKnowledgeNoteProvenance({
               origin:
                 payload.threadId || payload.query || payload.answer
@@ -404,6 +492,10 @@ export function useResearchWorkspacePrefill(
               trust_state: payload.answerTrustState,
               evidence_origin: payload.answerEvidenceOrigin,
               thread_id: payload.threadId,
+              question: payload.query,
+              scope: payload.scope,
+              trust_reason_codes: payload.answerTrustReasonCodes,
+              sources: payload.sources.map(({ importError: _error, ...source }) => source),
               research: {
                 workspace_id: workspaceId,
                 import_id: payload.id,
@@ -418,24 +510,32 @@ export function useResearchWorkspacePrefill(
             // A required checkpoint cannot fall back to an older note marker.
             if (!requiredProvenance)
               throw new Error("Current research provenance is invalid")
+            if (!payload.pendingNoteWrite && !payload.confirmedSeedlessWrite && !payload.draftRetained && payload.legacyNoteId != null &&
+                alreadyRetained && !existing?.content.includes(`Import reference: ${payload.id}`) &&
+                !draft.content.includes(`Import reference: ${payload.id}`))
+              throw new Error("Earlier save confirmed; the missing answer draft was not retained.")
+            // Old servers have no receipt API; their owned exact GET acknowledges the stable client UUID.
+            if (existing && alreadyRetained && !["active", "absent", "deleted"].includes(existing.knowledge_provenance_state || "")) delete payload.pendingNoteWrite
             const content = retainKnowledgeNoteProvenance(
               body,
               requiredProvenance,
             )
-            const saved = await bgRequest<CanonicalNote>({
-              ...request,
-              path: existing ? path : "/api/v1/notes/",
+            let pending = payload.pendingNoteWrite
+            if (!pending && payload.confirmedSeedlessWrite && !draft.content.includes(`Import reference: ${payload.id}`)) {
+              const original = payload.confirmedSeedlessWrite
+              if (draftDiscarded || (!convertingLegacyDraft && draft.id !== payload.canonicalNoteId) ||
+                  (draft.title || "Knowledge research") !== original.body.title ||
+                  stripKnowledgeNoteProvenance(draft.content).trimEnd() !== stripKnowledgeNoteProvenance(String(original.body.content)))
+                throw new Error("Earlier save confirmed; the missing answer draft was not retained.")
+              pending = original
+            }
+            pending ||= {
+              idempotencyKey: crypto.randomUUID(),
               method: existing ? "PUT" : "POST",
-              ...(existing
-                ? {
-                    headers: {
-                      ...request.headers,
-                      "expected-version": String(existing.version),
-                    },
-                  }
-                : {}),
+              expectedVersion: existing?.version,
               body: {
                 ...(existing ? {} : { id: payload.canonicalNoteId }),
+                ...knowledgeNoteWriteFields(content, existing, { create: !existing, replacement: requiredProvenance }),
                 title:
                   (preferDraft ? draft.title : existing?.title) ||
                   "Knowledge research",
@@ -460,7 +560,33 @@ export function useResearchWorkspacePrefill(
                   ? { conversation_id: payload.threadId }
                   : {}),
               },
-            })
+            }
+            // Replace the recovery journal only when the new immutable write is durable.
+            const writeCheckpoint = structuredClone(payload)
+            writeCheckpoint.pendingNoteWrite = pending
+            if (String(pending.body.content).includes(`Import reference: ${payload.id}`))
+              delete writeCheckpoint.confirmedSeedlessWrite
+            await saveResearchWorkspacePrefill(writeCheckpoint)
+            assertCurrent()
+            payload.pendingNoteWrite = pending
+            if (!writeCheckpoint.confirmedSeedlessWrite) delete payload.confirmedSeedlessWrite
+            let saved: CanonicalNote
+            try {
+              saved = await bgRequest<CanonicalNote>({
+                ...request, path: pending.method === "POST" ? "/api/v1/notes/" : path,
+                method: pending.method,
+                headers: { ...request.headers, "Idempotency-Key": pending.idempotencyKey,
+                  ...(pending.expectedVersion != null ? { "expected-version": String(pending.expectedVersion) } : {}),
+                },
+                body: pending.body,
+              })
+            } catch (error) {
+              if (isDefinitiveWriteRejection(error)) {
+                delete payload.pendingNoteWrite
+                await saveResearchWorkspacePrefill(payload)
+              }
+              throw error
+            }
             assertCurrent()
             const confirmed = await bgRequest<CanonicalNote>({
               ...request,
@@ -471,34 +597,88 @@ export function useResearchWorkspacePrefill(
             const keywords = (confirmed.keywords || [])
               .map(normalizeNoteKeyword)
               .filter((keyword): keyword is string => keyword !== null)
-            const provenance = readKnowledgeNoteProvenance(confirmed.content)
+            const provenance = resolveKnowledgeNoteProvenance(confirmed).provenance
             if (
               saved.id !== payload.canonicalNoteId ||
               confirmed.id !== payload.canonicalNoteId ||
-              confirmed.content !== content ||
+              (confirmed.version <= saved.version && stripKnowledgeNoteProvenance(confirmed.content) !== stripKnowledgeNoteProvenance(String(pending.body.content))) ||
               !keywords.includes(`workspace:${workspaceId}`) ||
               provenance?.research?.import_id !== payload.id
             )
               throw new Error("Canonical research note was not retained")
+            // A confirmed seedless receipt remains recoverable across draft/checkpoint retirement.
+            const confirmedCheckpoint = structuredClone(payload)
+            if (seedlessReceipt && !confirmed.content.includes(`Import reference: ${payload.id}`))
+              confirmedCheckpoint.confirmedSeedlessWrite = pending
+            delete confirmedCheckpoint.pendingNoteWrite
+            await saveResearchWorkspacePrefill(confirmedCheckpoint)
+            assertCurrent()
+            delete payload.pendingNoteWrite
+            if (confirmedCheckpoint.confirmedSeedlessWrite)
+              payload.confirmedSeedlessWrite = confirmedCheckpoint.confirmedSeedlessWrite
+            else delete payload.confirmedSeedlessWrite
             // Do not replace edits made while canonical persistence was pending.
             const latest = useWorkspaceStore.getState().currentNote
-            if (!draftDiscarded && latest === draft)
-              current.loadNote({
+            if (seedlessReceipt && !confirmed.content.includes(`Import reference: ${payload.id}`)) {
+              // Confirm the old immutable receipt before staging a separately keyed repair.
+              if (!draftDiscarded && latest === draft &&
+                  (convertingLegacyDraft || draft.id === payload.canonicalNoteId) &&
+                  (draft.title || "Knowledge research") === seedlessReceipt.body.title &&
+                  stripKnowledgeNoteProvenance(draft.content).trimEnd() === stripKnowledgeNoteProvenance(String(seedlessReceipt.body.content))) {
+                const body = stripKnowledgeNoteProvenance(draft.content).trim()
+                current.setCurrentNote({
+                  ...latest,
+                  id: confirmed.id,
+                  version: confirmed.version,
+                  ...knowledgeNoteHead(confirmed),
+                  pendingKnowledgeProvenance: reconcileCapturedNoteProvenance(latest, confirmed),
+                  content: retainKnowledgeNoteProvenance(body ? `${body}\n\n---\n\n${seed}` : seed, confirmed),
+                  isDirty: true,
+                })
+              }
+              throw new Error("Earlier save confirmed; retry to retain the missing answer.")
+            }
+            // A receipt only acknowledges its original source snapshot. Preserve the
+            // unfinished handoff so a deliberate retry can save newly attached sources.
+            if (!knowledgeNoteProvenanceMatches(provenance, requiredProvenance))
+              throw new Error("Earlier save confirmed; retry to retain the remaining source history.")
+            const [draftKeywords, pendingKeywords] = [draft.keywords, Array.isArray(pending.body.keywords) ? pending.body.keywords : []]
+              .map((values) => [...new Set(values.map(normalizeNoteKeyword).filter(
+                (keyword): keyword is string => keyword !== null && keyword !== current.workspaceTag && keyword !== `workspace:${workspaceId}`,
+              ))].sort())
+            if (!draftDiscarded && latest === draft && (!draftWasDirty || (draft.title === pending.body.title && stripKnowledgeNoteProvenance(draft.content) === stripKnowledgeNoteProvenance(String(pending.body.content)) &&
+                draftKeywords.length === pendingKeywords.length && draftKeywords.every((keyword, index) => keyword === pendingKeywords[index])))) {
+              const pendingKnowledgeProvenance = reconcileCapturedNoteProvenance(latest, confirmed)
+              const acknowledged = {
                 ...confirmed,
                 keywords: keywords.filter(
                   (keyword) =>
                     keyword !== current.workspaceTag &&
                     keyword !== `workspace:${workspaceId}`,
                 ),
-              })
+              }
+              if (pendingKnowledgeProvenance)
+                current.setCurrentNote({
+                  ...acknowledged,
+                  ...knowledgeNoteHead(confirmed),
+                  content: retainKnowledgeNoteProvenance(confirmed.content, confirmed),
+                  pendingKnowledgeProvenance,
+                  isDirty: true,
+                })
+              else current.loadNote(acknowledged)
+            }
             else if (!draftDiscarded && latest.id === draft.id)
               current.setCurrentNote({
                 ...latest,
+                ...(latest.pendingKnowledgeProvenance?.sources
+                  ? { pendingKnowledgeProvenance: reconcileCapturedNoteProvenance(latest, confirmed) }
+                  : {}),
                 id: confirmed.id,
-                version: confirmed.version,
+                version: latest.id === confirmed.id ? Math.max(latest.version || 0, confirmed.version) : confirmed.version,
+                ...knowledgeNoteHead(confirmed),
                 content: retainKnowledgeNoteProvenance(
                   latest.content,
-                  provenance,
+                  confirmed,
                 ),
               })
           } finally {
@@ -542,12 +722,12 @@ export function useResearchWorkspacePrefill(
           importing: false,
           error: null,
         })
-      } catch {
+      } catch (error) {
         if (isCurrent())
           setStatus((previous) => ({
             ...previous,
             importing: false,
-            error:
+            error: isNotesProvenancePolicyUnavailable(error) ? NOTES_PROVENANCE_UNAVAILABLE_MESSAGE :
               "Knowledge import could not be saved. Your pending evidence is retained; retry unfinished imports.",
           }))
       }
@@ -559,6 +739,6 @@ export function useResearchWorkspacePrefill(
       stopSelection()
       stop()
     }
-  }, [workspaceId, hydrated, attempt])
+  }, [workspaceId, hydrated, serverBacked, attempt])
   return { ...status, retry }
 }

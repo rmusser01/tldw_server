@@ -4,6 +4,35 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -214,7 +243,7 @@ describe("NotesManagerPage stage 19 accessibility skip links and labels", () => 
         }
       }
       if (path === "/api/v1/notes/" && method === "POST") {
-        throw new Error("Server unavailable")
+        throw Object.assign(new Error("Note content was rejected"), { status: 422 })
       }
       return {}
     })
@@ -228,7 +257,8 @@ describe("NotesManagerPage stage 19 accessibility skip links and labels", () => 
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
     const status = await screen.findByRole("alert", { name: "Note save status" })
-    expect(status).toHaveTextContent("Could not save")
+    expect(status).toHaveTextContent("The server did not accept this note.")
+    expect(status).toHaveTextContent("Note content was rejected")
     await waitFor(() => {
       expect(status).toHaveFocus()
     })

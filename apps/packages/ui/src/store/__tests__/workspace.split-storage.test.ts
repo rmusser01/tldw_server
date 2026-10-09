@@ -7,6 +7,7 @@ import {
   createWorkspaceStorage,
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY
 } from "../workspace"
+import { serverWorkspaceMetadata } from "./workspace-activation.fixtures"
 
 const STORAGE_KEY = WORKSPACE_STORAGE_KEY
 
@@ -33,7 +34,7 @@ describe("workspace split-key persistence storage adapter", () => {
   })
 
   it.each(["split-read", "fresh-write", "monolithic-read"])(
-    "retains historical migration metadata without hiding or deleting fresh content on %s",
+    "retains historical migration metadata without hiding or deleting fresh canonical content on %s",
     async (mode) => {
       const workspaceId = "historically-migrated"
       const markerKey = `tldw:research-workspace:migration:tombstone:${workspaceId}`
@@ -44,6 +45,11 @@ describe("workspace split-key persistence storage adapter", () => {
       })
       const snapshot = {
         workspaceId, workspaceName: "Fresh writable workspace",
+        serverWorkspace: {
+          scopeKey: "owner-a",
+          metadata: { ...serverWorkspaceMetadata, id: workspaceId },
+          sources: [], artifacts: [], notes: [], readOnly: true
+        },
         sources: [], selectedSourceIds: [], generatedArtifacts: [], notes: "Fresh notes",
         currentNote: { title: "Draft", content: "Fresh writable draft", isDirty: true }
       }

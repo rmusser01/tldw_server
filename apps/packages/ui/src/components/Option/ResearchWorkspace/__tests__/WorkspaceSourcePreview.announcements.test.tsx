@@ -20,6 +20,13 @@ vi.mock("@/store/workspace", async () => {
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, fallback?: string) => fallback || key }) }))
 
 const source: WorkspaceSource = { id: "s1", mediaId: 1, title: "Report", type: "pdf", status: "ready", addedAt: new Date("2026-09-29") }
+const capturedSource: WorkspaceSource = {
+  ...source,
+  webCapture: {
+    clipId: "clip-7", requestedUrl: "https://source.test/report", capturedAt: "2026-09-29T00:00:00Z",
+    contentSha256: "a".repeat(64), refreshOf: null, mediaId: 1, versionNumber: 7, versionUuid: "version-7"
+  }
+}
 const preview: WorkspaceSourcePreviewResponse = {
   workspace_id: "ws-a", source_id: "s1", media_id: 1, title: "Report", source_type: "pdf", url: null,
   state: "queryable", status_reason: "source_queryable",
@@ -38,6 +45,60 @@ describe("Canonical source preview announcements", () => {
     request.mockReset()
     useWorkspaceStore.setState({ workspaceId: "ws-a", sources: [source] })
   })
+
+  it("requests and renders the exact pinned capture version with its account scope and abort signal", async () => {
+    useWorkspaceStore.setState({ sources: [capturedSource] })
+    request.mockResolvedValue({ ...preview, document_version_number: 7 })
+    renderPreview(capturedSource)
+    await screen.findByText("Captured report text")
+    expect(request).toHaveBeenCalledWith("ws-a", "s1",
+      { max_chars: 3000, chunk_limit: 3, version_number: 7 },
+      { requestScope: expect.objectContaining({ scopeKey: "owner-7", userId: 7 }), signal: expect.any(AbortSignal) })
+  })
+
+  it.each([undefined, null, 8])("does not render a capture response with version %s", async version => {
+    useWorkspaceStore.setState({ sources: [capturedSource] })
+    request.mockResolvedValue({ ...preview, document_version_number: version, text_preview: "Wrong revision text" })
+    await act(async () => { renderPreview(capturedSource) })
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("Wrong revision text")).not.toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("Exact capture version unavailable")
+  })
+
+  it.each(["reference", "identity", "version", "in-place identity", "in-place version", "in-place UUID"] as const)(
+    "retires a pending capture preview across a %s pin ABA transition", async change => {
+      const currentSource = { ...capturedSource, webCapture: { ...capturedSource.webCapture! } }
+      useWorkspaceStore.setState({ sources: [currentSource] })
+      let resolve!: (value: WorkspaceSourcePreviewResponse) => void
+      request.mockReturnValue(new Promise<WorkspaceSourcePreviewResponse>(yes => { resolve = yes }))
+      renderPreview(currentSource)
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(1))
+      const signal = request.mock.calls[0][3].signal as AbortSignal
+      act(() => {
+        if (change === "in-place identity" || change === "in-place version" || change === "in-place UUID") {
+          if (change === "in-place version") currentSource.webCapture.versionNumber = 8
+          else if (change === "in-place UUID") currentSource.webCapture.versionUuid = "version-8"
+          else currentSource.webCapture.clipId = "clip-8"
+          useWorkspaceStore.setState({ sources: [currentSource] })
+          currentSource.webCapture.clipId = "clip-7"
+          currentSource.webCapture.versionNumber = 7
+          currentSource.webCapture.versionUuid = "version-7"
+        } else {
+          const nextPin = {
+            ...currentSource.webCapture,
+            ...(change === "identity" ? { clipId: "clip-8" } : {}),
+            ...(change === "version" ? { versionNumber: 8, versionUuid: "version-8" } : {})
+          }
+          useWorkspaceStore.setState({ sources: [{ ...currentSource, webCapture: nextPin }] })
+        }
+        useWorkspaceStore.setState({ sources: [currentSource] })
+      })
+      await act(async () => resolve({ ...preview, document_version_number: 7, text_preview: "Retired revision text" }))
+      expect(screen.queryByText("Retired revision text")).not.toBeInTheDocument()
+      expect(signal.aborted).toBe(true)
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    }
+  )
 
   it.each([
     ["title", "Canonical report", "Report"],

@@ -443,3 +443,16 @@ def test_postgres_note_keyword_queries_filter_both_endpoints(postgres_db, operat
             assert [row["id"] for row in store.get_notes_for_keyword(1)] == ["own"]
         else:
             assert store.get_notes_for_keyword(2) == []
+
+
+def test_postgres_question_search_preserves_owner_and_matches_literal_terms(monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    db.execute_query = MagicMock(return_value=_CursorStub([{"id": "owned-note"}]))
+    store = NoteStore(db)
+
+    assert store.search_notes("Vega? next review date", limit=3, match_any=True) == [{"id": "owned-note"}]
+    sql, params = db.execute_query.call_args[0]
+    assert "n.client_id = ?" in sql and "n.deleted = FALSE" in sql
+    assert params == ("'Vega' | 'next' | 'review' | 'date'", "pg-test", "'Vega' | 'next' | 'review' | 'date'", 3, 0)

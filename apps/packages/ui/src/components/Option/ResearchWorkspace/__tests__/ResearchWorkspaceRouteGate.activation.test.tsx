@@ -4,14 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWorkspaceStore } from "@/store/workspace"
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api"
 import { serverWorkspacePayload } from "@/store/__tests__/workspace-activation.fixtures"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { ActivatedLocalWorkspace, ResearchWorkspaceRouteGate } from "../ResearchWorkspaceRouteGate"
 
 // External API/account boundaries only are doubled; activation and the store are real.
 const boundary = vi.hoisted(() => ({
   location: { search: "?workspace=server-research", key: "first", hash: "" },
-  scope: { scopeKey: "owner-a", config: { serverUrl: "https://owner.test", authMode: "multi-user" }, userId: 42 },
+  scope: { scopeKey: "owner-a", config: { serverUrl: "https://owner.test", authMode: "multi-user" as const }, userId: 42 },
   resolve: vi.fn(),
   request: vi.fn(),
+  captures: vi.fn(),
   changed: null as null | ((invalidated: boolean) => void),
   getWorkspace: vi.fn(), getWorkspaceSources: vi.fn(), getWorkspaceArtifacts: vi.fn(), getWorkspaceNotes: vi.fn()
 }))
@@ -21,6 +23,10 @@ vi.mock("react-router-dom", async importOriginal => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: boundary }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }))
+vi.mock("@/utils/research-workspace-prefill", async importOriginal => ({
+  ...await importOriginal<typeof import("@/utils/research-workspace-prefill")>(),
+  readResearchWebCaptures: boundary.captures
+}))
 vi.mock("@/services/service-prompts", () => ({ resolveServicePromptScope: boundary.resolve }))
 vi.mock("@/services/chat-account-boundary", () => ({
   watchChatAccountChanges: (changed: (invalidated: boolean) => void) => {
@@ -50,6 +56,8 @@ describe("canonical route activation (unit regression doubles)", () => {
     useWorkspaceStore.getState().updateNoteContent("Dirty draft")
     boundary.location = { search: "?workspace=server-research", key: "first", hash: "" }
     boundary.scope.scopeKey = "owner-a"
+    boundary.scope.userId = 42
+    boundary.captures.mockReset().mockResolvedValue([])
     boundary.resolve.mockImplementation(async () => boundary.scope)
     boundary.request.mockResolvedValue({ notes: [] })
     const payload = serverWorkspacePayload()
@@ -57,6 +65,106 @@ describe("canonical route activation (unit regression doubles)", () => {
     boundary.getWorkspaceSources.mockResolvedValue(payload.sources)
     boundary.getWorkspaceArtifacts.mockResolvedValue(payload.artifacts)
     boundary.getWorkspaceNotes.mockResolvedValue(payload.notes)
+  })
+
+  const captureFixture = async (refused: boolean, cached = false) => {
+    const pin = {
+      clipId: "route-clip", requestedUrl: "https://article.test/canonical",
+      capturedAt: "2026-10-07T00:00:00Z", contentSha256: "digest", refreshOf: null,
+      mediaId: 101, versionNumber: 1, versionUuid: "route-version-one"
+    }
+    const payload = serverWorkspacePayload()
+    payload.sources[0] = { ...payload.sources[0], id: "web-clipper:route-clip", url: pin.requestedUrl, selected: true }
+    boundary.getWorkspaceSources.mockResolvedValue(payload.sources)
+    const owner = buildChatSurfaceScopeKeyFromConfig(boundary.scope.config, { userId: 42 })
+    boundary.captures.mockImplementation(async (scope: string, workspace: string) =>
+      scope === owner && workspace === "server-research" ? [{ pin }] : [])
+    if (refused) {
+      const local = await hydrateWorkspaceFromServer("server-research", { requireComplete: true, fetch: async () => payload })
+      local.sources[0].webCapture = pin
+      expect(useWorkspaceStore.getState().installServerWorkspace(local, {
+        scopeKey: "owner-a", expectedWorkspaceId: useWorkspaceStore.getState().workspaceId
+      })).toBe(true)
+      useWorkspaceStore.getState().setSourceStatusById("web-clipper:route-clip", "error", "Head moved", undefined,
+        { statusReason: "capture_head_changed", retryEligible: false })
+      if (cached) useWorkspaceStore.getState().createNewWorkspace("Outgoing after refusal")
+    }
+    return { pin, payload, owner }
+  }
+
+  it("hydrates owner-bound capture pins only on canonical membership before activation", async () => {
+    const { pin, owner } = await captureFixture(false)
+    render(<ResearchWorkspaceRouteGate />)
+    expect(await screen.findByTestId("activated-body")).toBeVisible()
+    expect(boundary.captures).toHaveBeenCalledWith(owner, "server-research")
+    expect(useWorkspaceStore.getState().sources).toMatchObject([{ id: "web-clipper:route-clip", webCapture: pin }])
+    expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([101])
+  })
+
+  it.each(["active", "cached"])("retains exact-pin refusal from an owned %s canonical cache", async display => {
+    const { pin } = await captureFixture(true, display === "cached")
+    render(<ResearchWorkspaceRouteGate />)
+    expect(await screen.findByTestId("activated-body")).toBeVisible()
+    expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+      webCapture: pin, status: "error", statusMessage: "Head moved",
+      statusDetails: { statusReason: "capture_head_changed", retryEligible: false }
+    })
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([])
+    expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([])
+  })
+
+  it.each(["pin", "removed", "foreign-owner", "missing-record", "legacy", "media", "url", "capture-read-failure"])("does not grant capture authority across %s boundaries", async change => {
+    const { pin, payload } = await captureFixture(true)
+    const retained = useWorkspaceStore.getState()
+    if (change === "pin") boundary.captures.mockResolvedValue([{ pin: { ...pin, versionNumber: 2, versionUuid: "route-version-two" } }])
+    if (change === "removed") boundary.getWorkspaceSources.mockResolvedValue([])
+    if (change === "foreign-owner") { boundary.scope.userId = 43; boundary.scope.scopeKey = "owner-b" }
+    if (change === "missing-record") boundary.captures.mockResolvedValue([])
+    if (change === "media") boundary.getWorkspaceSources.mockResolvedValue([{ ...payload.sources[0], media_id: 202 }])
+    if (change === "url") boundary.getWorkspaceSources.mockResolvedValue([{ ...payload.sources[0], url: "https://article.test/other" }])
+    if (change === "capture-read-failure") boundary.captures.mockRejectedValue(new Error("Capture storage unavailable"))
+    if (change === "legacy") {
+      useWorkspaceStore.setState({ serverWorkspace: null })
+      useWorkspaceStore.getState().saveCurrentWorkspace()
+    }
+    render(<ResearchWorkspaceRouteGate />)
+    if (change === "foreign-owner" || change === "legacy" || change === "capture-read-failure") {
+      expect(await screen.findByRole("alert")).toBeVisible()
+      expect(useWorkspaceStore.getState().sources).toEqual(retained.sources)
+      expect(screen.queryByTestId("activated-body")).toBeNull()
+    } else {
+      expect(await screen.findByTestId("activated-body")).toBeVisible()
+      const sources = useWorkspaceStore.getState().sources
+      if (change === "removed") expect(sources).toEqual([])
+      else {
+        expect(sources[0].status).toBe("ready")
+        expect(sources[0].mediaId).toBe(change === "media" ? 202 : payload.sources[0].media_id)
+        if (change === "pin") expect(sources[0].webCapture?.versionNumber).toBe(2)
+        if (["missing-record", "media", "url"].includes(change)) expect(sources[0].webCapture).toBeUndefined()
+      }
+    }
+  })
+
+  it.each(["account-aba", "workspace-aba", "unmount"])("does not install after %s during capture hydration", async change => {
+    const { pin } = await captureFixture(false)
+    const capture = deferred<Array<{ pin: typeof pin }>>()
+    boundary.captures.mockReturnValue(capture.promise)
+    const outgoing = useWorkspaceStore.getState().workspaceId
+    const view = render(<ResearchWorkspaceRouteGate />)
+    await waitFor(() => expect(boundary.captures).toHaveBeenCalled())
+    act(() => {
+      if (change === "account-aba") { boundary.changed?.(true); boundary.scope.scopeKey = "owner-a" }
+      if (change === "workspace-aba") {
+        useWorkspaceStore.getState().createNewWorkspace("Intervening")
+        useWorkspaceStore.getState().switchWorkspace(outgoing)
+      }
+      if (change === "unmount") view.unmount()
+    })
+    await act(async () => capture.resolve([{ pin }]))
+    expect(useWorkspaceStore.getState().workspaceId).toBe(outgoing)
+    expect(useWorkspaceStore.getState().workspaceSnapshots["server-research"]).toBeUndefined()
+    expect(screen.queryByTestId("activated-body")).toBeNull()
+    if (change !== "unmount") expect(screen.getByRole("alert")).toBeVisible()
   })
 
   it("keeps the body unmounted until every scoped read completes", async () => {

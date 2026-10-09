@@ -64,6 +64,16 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 import { WizardResultsStep } from "../WizardResultsStep"
 
 describe("WizardResultsStep navigation buttons", () => {
+  it.each([1, 2])("labels and opens exactly %s saved items", count => {
+    setSinglePdfResult({ mediaId: 42, persisted: true })
+    wizardHarness.results = Array.from({ length: count }, (_, index) => ({ ...wizardHarness.results[0], id: `saved-${index}`, mediaId: 42 + index }))
+    const onReviewSavedItems = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onReviewSavedItems={onReviewSavedItems} />)
+    const label = count === 1 ? "Review this 1 saved item" : "Review these 2 saved items"
+    fireEvent.click(screen.getByRole("button", { name: label }))
+    expect(onReviewSavedItems).toHaveBeenCalledWith(count === 1 ? [42] : [42, 43])
+  })
+
   it("shows saved warnings separately from clean success while keeping source navigation", () => {
     setSinglePdfResult({ warning: "Analysis failed for chunk 1" })
     const onOpenMedia = vi.fn()
@@ -106,7 +116,7 @@ describe("WizardResultsStep navigation buttons", () => {
     setSinglePdfResult({ mediaId: undefined, persisted: false, warning: "Analysis warning" })
     render(<WizardResultsStep onClose={vi.fn()} onSearchKnowledge={vi.fn()} onReviewSavedItems={vi.fn()} />)
     expect(screen.getByText("Extracted content; not saved")).toBeVisible()
-    expect(screen.queryByRole("button", { name: /Search.*Knowledge|Review.*saved items/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Search.*Knowledge|Review.*saved items?/ })).toBeNull()
     expect(screen.queryByRole("region", { name: "Items saved with warnings" })).toBeNull()
   })
 

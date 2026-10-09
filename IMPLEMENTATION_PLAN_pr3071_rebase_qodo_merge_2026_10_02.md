@@ -2208,3 +2208,264 @@ Private final VN owning reports1087 passes; its completed source/exit/XML
 binding is being independently read before local integration readiness.
 No inference, native UAT, latest-dev global qualification, or publication is
 claimed by these bounded local corrections.
+
+### 2026-10-08 Current Dev Semantic Union
+
+The composed local checkpoint is committed normally as4a1df76f with exact
+parents95b26092 and3ca1ff05. It retains the original failed6138/26/135 backend
+attempt and independently binds all26 failed cases to corrected executions;
+it is not global qualification or publication readiness. Private final VN
+owning1087 passes and Notes/Sync owning215 passes are source/exit/XML checked.
+No current-source native acceptance or protected-data verification is claimed.
+
+Fresh explicit GitHub refs and separate branch API agree actualdev97ea9cd5.
+A normal no-commit merge is active on4a1df76f, with its complete incoming index
+and qualified patches retained. Governing ADR059 remains the task editor rule;
+incoming Accepted ADR066 governs explicit capture/refresh and public egress.
+No new durable architecture decision or accepted ADR rewrite is introduced.
+
+Reviewed bounded catalog79/83, Notes transaction/caller, HTTP probe byte-cap,
+metadata and KnowledgeQA corrections are applied as semantic unions, not
+wholesale side selection. Current-target provenance assertions advance79/83;
+released historical74/78 and75/79 contracts stay pinned. Seven durable message
+facade entries and incoming Workspace insertion/selection behavior are retained.
+
+Workspace production conflicts retain existing H1 Clear/Undo, canonical note
+read-only ownership, cancellation and complete restoration while adopting
+incoming capture pins and exact full-note reads. Private capture Round2 has
+four causal RED failures followed by identical four GREEN passes and370 owning
+passes. Independent review finds no actionable P1/P2 in that private correction;
+the actual parent QuickNotes/prefill/currentness union requires fresh review
+and execution. Existing remote removals, live body edits and new capture
+additions must survive acknowledgment without reintroducing removed history.
+
+Remaining work: complete test/preview/fingerprint unions; freeze actual source;
+run safe integrated backend, Jobs, official isolated PostgreSQL/AuthNZ and
+frontend/extension/admin owning tests, types, immutable build/tokens/unchanged
+budgets, security, substantive current-source review and normal preflights.
+Only then publish to existingPR3071 with explicit GitHub URL and a fresh exact
+published-head lease. Successor hosted gates and applicable acceptance remain
+required before normal PR merge or safe owned cleanup. No publication, hosted
+retry, native/browser/provider operation, artifact serving or cleanup occurred.
+
+### 2026-10-08 Current Union Review Corrections
+
+Actual capture/restore owning execution is394PASS/4FAIL/398cases/17files and
+remains failed. Two exact-UUID GET fixtures return an array instead of the
+required canonical record; the foreign-owner fixture intentionally reaches the
+protected same-ID cache installation refusal. The identical-ID tombstone
+failure exposes a missing incoming persistence barrier, not a fixture-only
+failure. Independent current-source review also finds explicit activation
+dropping capture pins/refusals, canonical capture actions mutating read-only
+notes, and retained remote note listings after account retirement. Bounded
+private corrections preserve ownership, retained drafts and atomic installs.
+
+The extracted preview now requests the exact capture version and validates its
+response while preserving workspace/account/membership and pin ABA retirement.
+The private owning59PASS/1FAIL fixture-contract attempt remains failed; adding
+the actual workspace/source/media response identity yields60PASS. Current
+authority preview, Retry and chat owning392PASS/7files is source-bound. The
+Retry click-time H1 fence reproduces2FAIL/23PASS, then passes the identical
+25cases within186PASS/3files. The guard is checked before dispatch so Retry's
+single intentional choose does not invalidate its own subsequent source lease.
+
+Extension pinned React runtime1PASS and Admin trusted readiness8PASS are actual
+finite owning executions, not native/browser/service acceptance. Fresh explicit
+GitHub refs and separate dev branch API still agree97ea9cd5; published135 remains
+unchanged. Original sandbox DNS failure is a collector limitation, not hosted
+CI failure. Backend review additionally validates omitted-provenance retry ACK
+and personal-dataset import readiness P2s; bounded causal correction is active.
+
+Stage26 remains In Progress. No overall corrected-batch qualification, normal
+publication, successor hosted qualification, native acceptance, merge or cleanup
+is claimed. All original failures and raw reports remain separately retained.
+
+### 2026-10-08 Capture and Notes ACK Follow-Up
+
+The current tombstone/capture-pin union preserves complete deletion receipts,
+canonical owner caches and retained drafts. Its independent review reports no
+actionable P1/P2; seven returned application hashes match the applied source.
+Canonical ChatPane reply capture now refuses live server-note destinations,
+including callbacks captured before the destination changed. The causal test
+run26PASS/2FAIL becomes28PASS within126 connected passes. The earlier invalid
+note fixture attempt remains failed. A separate current-source review finds no
+actionable P1/P2 in this caller correction and retained Retry click fence.
+
+Omitted-provenance retry ACK and personal-dataset import readiness corrections
+pass225 actual Notes/Sync/catalog cases across six files, zero skips. The
+completed Notes review binds22 source and evidence hashes without differences.
+Historical absence of provenance stays absent at the acknowledged parent
+boundary; later children cannot replace that result. Supplied keywords,
+including an empty list, still require organization readiness.
+
+The wider capture/restore execution1481PASS/16FAIL remains failed. Fifteen
+import cases used incomplete deletion receipts without the required deletedAt;
+four existing fixtures now supply the required timestamp without changing
+assertions or deadlines. The distinct import/export run101PASS covers68 import
+and33 literature cases. The unchanged export-dialog failure remains retained;
+compiler contention is not established as its cause.
+
+Independent follow-up review validates two additional open findings: an
+inherited note-keyword cache/in-flight map is not owner-scoped, and the new
+shared canonical capture refusal drops a bound numeric legacy import answer.
+Separate bounded corrections and causal finite-double tests are active.
+Canonical manual-capture refusal, captured-owner guards and existing ACK
+settlement must remain intact. Current source is not globally qualified or
+publication-ready; Stage26 remains In Progress.
+
+### 2026-10-08 Integrated Qualification and Remaining Local Corrections
+
+The frozen current frontend run completed7654PASS/3FAIL/7657cases/394files,
+with all bound source inputs unchanged. It remains failed. Three split-storage
+fixtures described fresh canonical content but supplied only an ownerless legacy
+snapshot alongside a complete deletion receipt. The fixture now supplies the
+existing owner-qualified canonical metadata; every original assertion and
+deadline is retained. The distinct connected storage run109PASS/4files includes
+the deletion-barrier negative controls, without a production guard change.
+
+The keyword helper removes six unscoped cache/in-flight maps. Its original
+owner-currentness regression10PASS/55FAIL becomes65PASS, with127 connected
+passes. A subsequent review reproduces credential A-to-B-to-A under the real
+non-invalidating config/storage notifications:70PASS/21FAIL becomes91PASS with
+identical test bytes, and153 connected cases pass. The bounded helper-local
+retirement correction remains private pending final independent review; the
+shared watcher still permits same-principal refresh.
+
+The numeric legacy import seed correction passes16 new cases and238 connected
+cases while preserving68 existing import cases and the four complete
+receipt timestamps. Follow-up review identifies two open ACK/checkpoint gaps:
+pending local capture additions must survive a successful old acknowledgment,
+and an unfinished seedless immutable write must receive its missing answer
+after acknowledgment before completion. Bounded private corrections are active.
+
+The safe integrated backend run has7920 collected cases across242 selected
+paths, with Jobs enabled and official isolated PostgreSQL fixtures. Only the
+four approved Audio files are selected. Authority application/runtime/test
+source stays frozen during that run. Later frontend-only patches require
+explicit owning-backend source attribution, not a claim that an older broad
+snapshot equals the final entire candidate. No overall qualification,
+publication, successor hosted acceptance, native UAT, merge or cleanup is
+claimed. All failed attempts and their raw reports remain retained.
+
+The keyword credential-ABA final independent review finds no actionable P1/P2;
+the parent verifies all29 inspected hashes and actual RED70PASS/21FAIL,
+GREEN91PASS and owning153PASS evidence. That correction remains private until
+the active authority-source runners finish.
+
+Import ACK follow-up passes the identical13 causal cases after11FAIL/2PASS.
+The eight-file owning run250PASS/1FAIL remains failed, including an unchanged
+literature Export CSV control. Three unchanged owning/isolated/serial attempts
+are retained and stopped. Read-only diagnosis establishes a real asynchronous
+static-modal and lazy-viewer boundary, but not its precise failure cause.
+After reassessment of three existing analogous fixtures, one different-angle
+private experiment explicitly initializes the real viewer module in suite
+setup, preserving the real modal, View click, all export assertions and original
+deadlines. It is not a fourth unchanged retry, a proven production fix or a
+permission to waive a failing owning test.
+
+The next independent import review validates two remaining connected P2s:
+seedless immutable receipt recovery must stage its still-owned answer before a
+changed-source-history refusal loses repair state, and keyword-only edits before
+Retry must survive historical ACK adoption. A third bounded seedless correction
+and a causal keyword-only regression are active privately; no clean final import
+review or overall corrected-batch qualification is claimed. Official OpenAPI
+check exits0 without regeneration, canonical task-editor tests149PASS/0SKIP,
+and the six explicitly opted-in quota limit-view tests pass without selecting
+the heavy evaluation suite. Integrated AuthNZ522 collected cases use the
+official isolated fixtures and an explicitly owned test database.
+
+The actual integrated AuthNZ run now completes522PASS/0FAIL/ERROR/SKIP, exit0,
+with all17451 bound inputs unchanged. Parent independently verifies its XML.
+The one changed-setup literature fixture experiment completes33PASS/0FAIL,
+exit0. Independent review finds no actionable P1/P2; parent verifies all25
+inspected input hashes, raw result, exact baseline reconstruction, all33 case
+bodies,123 assertions and unchanged deadlines. The three prior failed attempts
+remain failed. Awaiting the real viewer in beforeAll does not prove cold-load
+readiness, a sole CPU cause, production root cause or global acceptance.
+Evidence: resumed-literature-fixture-independent-final-review-20261008.json
+and resumed-auth-integrated-runtime-v1-20261008-binding.json in the existing
+private evidence root. Both pending frontend patches remain private while the
+safe backend runner is active; the final import review is still pending.
+
+Final round3 import review remains NOT clean: the receipt-deletion checkpoint
+can complete after account/unmount retirement, before the missing answer is
+durably recoverable. All50 inspected inputs are bound by the retained report
+in task13421-import-round3-review-20261008-f3ck4O. The three prior seedless
+implementations are stopped and preserved;224PASS does not cover this window.
+Reassessment reads the existing cloned/serialized owner-bound prefill writer,
+immutable web-capture journal and generation-fenced workspace persistence.
+Deleting recovery evidence before crossing independent persistence boundaries
+is the wrong transition. Per the direct human fix request and the repository's
+different-angle step after reassessment, one bounded recovery-journal rework
+will retain the original record until a repair is durably recoverable, reusing
+pendingNoteWrite rather than adding a new controller or granting draft authority.
+It must preserve all103 cases/assertions/deadlines, source/version checks,
+intentional edit/clear/replacement behavior and original immutable replay keys.
+It needs actual account/unmount/storage-rejection causal tests, independent
+review and combined-source qualification; it is not a fourth unchanged rerun
+or a permission for repeated speculative patches. The reviewed keyword and
+literature patches are now applied byte-exact; no import round3 patch is applied.
+
+The journal follow-up review remains NOT clean: a concurrent selection-only
+checkpoint can overwrite the copied repair receipt. One valid causal run is
+1FAIL/1PASS/109filtered; the selection case replays the same uncertain body with
+a rotated key and expected-version1->2, while its no-selection control passes.
+This distinct shared-writer root is reassessed at the existing serialized queue:
+selection updates must merge only selectionIntent into the matching stored
+handoff, preserving independently checkpointed receipt/journal/progress fields.
+The minimum private helper/caller correction does not change the seed staging
+or immutable note checkpoint logic. Three prior seedless implementations and
+one journal implementation remain retained; this shared-writer correction is
+honestly the fifth cumulative production round, not a new claim of fewer tries.
+One bounded exact causal GREEN and connected qualification plus independent
+review are required before authority application. ADR required:no new record;
+ADR065/ADR008 already govern these receipts and workspace persistence.
+
+The distinct selection-writer correction now has an identical causal
+1FAIL/1PASS -> 2PASS and connected236PASS. Final independent review finds no
+actionable P1/P2, with all47 inspected inputs independently verified. The
+three-file patch is applied byte-exact. The prior three seedless, journal and
+selection-race failures remain separately retained; five cumulative production
+rounds are recorded rather than relabelled. Later compiler-only changes remove
+duplicate imports, use the existing dictionary metadata type and flatten the
+Web Locks callback promise. A separate28-input review finds no actionable P1/P2.
+Actual typecheck v1 remains failed; v2 exits0. Production build, tokens and
+unchanged budgets pass, and the current frontend owning run439PASS/11files.
+
+Actual Git-parent lint comparison retains33 new explicit-any warnings in the
+import fixtures, despite the earlier private-baseline comparison. A bounded
+test-only typing correction removes those warnings while preserving identical
+emitted runtime, all115 cases, assertions and deadlines. Its private owning
+run115PASS does not qualify the final integrated UI by itself. The final
+combined UI, types, quality, build, normal preflight and publication remain
+pending; no successor hosted/native qualification, PR merge or cleanup is
+claimed. Safe backend7884PASS/36SKIP and AuthNZ522PASS/0SKIP remain bound to
+their unchanged owning runtime inputs, not to later nonowning app changes.
+
+The final combined UI run now completes7769PASS/397files with zero failures,
+pending or todo cases, source-exact across7396 inputs. Final frontend439PASS,
+8GB types, build/tokens/UNCHANGED budgets and matched quality are also exact.
+Quality retains13 inherited TS errors/2781 warnings and11 inherited production
+Bandit findings, with zero new findings or scanner errors. The one-file typing
+follow-up has a completed41-input independent review with no actionable P1/P2;
+its emitted runtime is identical. The recovered final VN worker addendum
+independently reinspects the applied OS-error-origin correction and finds no
+actionable P1/P2; initial OPEN and all failed attempts remain unchanged.
+
+Current safe backend7884PASS/36SKIP, isolated-fixture AuthNZ522PASS/0SKIP,
+opted-in limit views6PASS and OpenAPI check0 retain exact10058 owning inputs.
+Counts overlap, not unique repository totals. Final canonical/normal preflight,
+exact commit/tree/parents and explicit-remote fresh-lease publication remain to
+be completed. New-head hosted gates and applicable native acceptance remain
+unqualified; no normal PR merge, resource cleanup or new artifact serving has
+occurred. Stage26 and TASK13421.1 remain In Progress.
+
+Final canonical149PASS/0SKIP, extension finite runtime1PASS and admin readiness
+8PASS now complete source-exact. Eighteen completed domain/follow-up reports
+compose the current manual review, with no unresolved actionable findings in
+their reviewed corrected scopes; hashing the596 changed-scope inputs is a
+candidate freeze, not a whole-file or native review claim. Local execution and
+review are complete, pending last normal preflight, exact integration commit
+and already-approved explicit-GitHub publication. Actual dev97ea and remote135
+remain independently unchanged. Successor hosted/native acceptance and normal
+PR merge/safe cleanup remain pending.

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     CharactersRAGDB,
@@ -98,6 +99,14 @@ class WebClipperService:
 
     def save_clip(self, request: WebClipperSaveRequest) -> WebClipperSaveResponse:
         """Create or update the canonical note and optional workspace placement."""
+        descriptor = request.capture_metadata.get("web_capture_v1")
+        if descriptor is not None:
+            full_extract = str(request.content.full_extract or "").strip()
+            if not full_extract:
+                raise InputError("web_capture_v1 requires non-empty full_extract.")
+            digest = hashlib.sha256(full_extract.encode("utf-8")).hexdigest()
+            if digest != descriptor["content_sha256"]:
+                raise InputError("web_capture_v1 SHA-256 does not match full_extract.")
         existing_document = self._document_for_save(request.clip_id)
         warnings: list[str] = []
         analysis_state = self._current_analysis_state(request.clip_id)
@@ -287,7 +296,7 @@ class WebClipperService:
                     note_summary=note_summary,
                     note_content=note_content,
                 )
-            except (CharactersRAGDBError, ConflictError, InputError) as exc:
+            except (CharactersRAGDBError, ConflictError, InputError, BackendDatabaseError) as exc:
                 warnings.append(f"Workspace placement failed: {exc}")
             else:
                 if self.promote_workspace_sources:
@@ -301,7 +310,7 @@ class WebClipperService:
                             workspace_id=request.workspace.workspace_id,
                             source=workspace_source,
                         )
-                    except (CharactersRAGDBError, ConflictError, InputError) as exc:
+                    except (CharactersRAGDBError, ConflictError, InputError, BackendDatabaseError) as exc:
                         warnings.append(f"Workspace source promotion failed: {exc}")
 
         status = self._derive_save_status(
@@ -1107,6 +1116,7 @@ class WebClipperService:
                 overwrite=True,
                 chunks=chunks,
                 owner_user_id=self._coerce_owner_user_id(),
+                deduplicate_content="web_capture_v1" not in request.capture_metadata,
             )
         except (MediaConflictError, MediaDatabaseError, MediaInputError) as exc:
             raise CharactersRAGDBError("Media DB workspace clip persistence failed.") from exc  # noqa: TRY003

@@ -4495,26 +4495,32 @@ async def test_worker_entrypoint_rejects_payload_owner_mismatch_before_opening_u
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("capture_timeout, entered_timeout", [(2, 2), (5, 10)], ids=["head-deadlines", "dev-deadlines"])
 async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     chacha_db: CharactersRAGDB,
     character_id: int,
     fake_jobs: FakeJobs,
     monkeypatch: pytest.MonkeyPatch,
+    capture_timeout: int,
+    entered_timeout: int,
 ) -> None:
     from tldw_Server_API.app.core.VN_Assets import service as service_module
 
     service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
     pack = service.create_pack(VNAssetPackCreate(title="Async Capture", primary_character_id=character_id))
     service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
-    entered = threading.Event()
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
     release = threading.Event()
     release_observed = threading.Event()
+    capture_unblocked = threading.Event()
     original = service_module.build_authored_recipe
 
     def slow_recipe(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        entered.set()
-        if release.wait(timeout=2):
+        loop.call_soon_threadsafe(entered.set)
+        if release.wait(timeout=capture_timeout):
             release_observed.set()
+        capture_unblocked.set()
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service_module, "build_authored_recipe", slow_recipe)
@@ -4528,8 +4534,10 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         request_task = asyncio.create_task(client.post(url, json={"idempotency_key": "capture-offload"}))
         try:
-            await asyncio.to_thread(entered.wait, 2)
+            # Timeouts bound a broken test; progress is checked before capture is released.
+            await asyncio.wait_for(entered.wait(), timeout=entered_timeout)
             assert entered.is_set()
+            assert not capture_unblocked.is_set()
             assert not request_task.done()
         finally:
             release.set()

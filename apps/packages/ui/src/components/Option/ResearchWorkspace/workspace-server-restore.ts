@@ -1,6 +1,10 @@
+import {
+  getResearchWorkspaceOwner,
+  readResearchWebCaptures,
+  retainResearchWebCapturePins,
+} from "@/utils/research-workspace-prefill";
 import { normalizeNoteKeyword } from "@/services/note-keywords";
-import { createSlug } from "@/store/workspace";
-import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
+import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance";
 import { bgRequest } from "@/services/background-proxy";
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
@@ -12,6 +16,10 @@ import type {
 } from "@/services/tldw/domains/workspace-api";
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 import { hydrateWorkspaceFromServer, type LocalWorkspaceState } from "@/store/workspace-api";
+import {
+  createSlug,
+  useWorkspaceStore,
+} from "@/store/workspace";
 import { RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX } from "@/store/workspace-migration";
 import type { WorkspaceSourceStatus } from "@/types/workspace";
 
@@ -20,6 +28,28 @@ const INFORMATIONAL_CONTEXT_ERRORS = new Set([
   "media_db_unavailable",
   "membership_summary_unavailable",
 ]);
+
+/** Pins decorate verified membership; recovery records and provenance cannot add sources. */
+export const hydrateCanonicalWorkspaceCapturePins = async (
+  local: LocalWorkspaceState,
+  scope: Pick<ServicePromptSnapshot, "scopeKey" | "requestScope">,
+  assertCurrent: () => void,
+): Promise<void> => {
+  assertCurrent();
+  const owner = await getResearchWorkspaceOwner(scope.requestScope);
+  assertCurrent();
+  const records = await readResearchWebCaptures(owner, local.id);
+  assertCurrent();
+  const state = useWorkspaceStore.getState();
+  const previous = state.workspaceId === local.id ? state : state.workspaceSnapshots[local.id];
+  local.sources = retainResearchWebCapturePins(local.sources, records,
+    previous?.workspaceId === local.id && previous.serverWorkspace?.scopeKey === scope.scopeKey &&
+    previous.serverWorkspace.metadata.id === local.id
+      ? previous.sources : []);
+  const refused = new Set(local.sources.filter(source =>
+    source.statusDetails?.statusReason === "capture_head_changed").map(source => source.id));
+  local.selectedSourceIds = local.selectedSourceIds.filter(id => !refused.has(id));
+};
 
 type MigrationReceipt = {
   id: string;
@@ -79,7 +109,7 @@ export const hydrateCanonicalWorkspaceNote = async (
   const workspaceId = local.id;
   const workspaceTag = `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`;
   const found = await bgRequest<{
-    notes?: Array<{
+    notes?: Array<KnowledgeNoteHead & {
       id: string;
       title: string;
       content: string;
@@ -92,18 +122,33 @@ export const hydrateCanonicalWorkspaceNote = async (
     ...requestScopeFields(scope.requestScope),
     path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
   });
-  const canonical = (found.notes || []).find(
-    (note) =>
-      typeof note.id === "string" &&
-      typeof note.content === "string" &&
-      readKnowledgeNoteProvenance(note.content)?.research?.workspace_id === workspaceId,
-  );
+  signal.throwIfAborted();
+  let canonical: NonNullable<typeof found.notes>[number] | undefined;
+  for (const candidate of found.notes || []) {
+    if (typeof candidate.id !== "string") continue;
+    // Search rows may omit metadata or truncate content. Resolve the exact owned head.
+    const full = await bgRequest<NonNullable<typeof found.notes>[number]>({
+      method: "GET",
+      abortSignal: signal,
+      ...requestScopeFields(scope.requestScope),
+      path: `/api/v1/notes/${encodeURIComponent(candidate.id)}`,
+    });
+    signal.throwIfAborted();
+    if (full.id !== candidate.id) throw new Error("Research note identity changed");
+    if (typeof full.content !== "string") continue;
+    const belongsToWorkspace = (full.keywords || []).map(normalizeNoteKeyword).includes(`workspace:${workspaceId}`);
+    if (belongsToWorkspace || resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
+      canonical = full;
+      break;
+    }
+  }
   if (!canonical) return;
-  const provenance = readKnowledgeNoteProvenance(canonical.content)!;
+  const provenance = resolveKnowledgeNoteProvenance(canonical).provenance;
   local.currentNote = {
     id: canonical.id,
     title: canonical.title,
-    content: canonical.content,
+    content: retainKnowledgeNoteProvenance(canonical.content, canonical),
+    ...knowledgeNoteHead(canonical),
     keywords: (canonical.keywords || [])
       .map(normalizeNoteKeyword)
       .filter((keyword): keyword is string =>
@@ -114,7 +159,9 @@ export const hydrateCanonicalWorkspaceNote = async (
     serverScopeKey: scope.scopeKey,
   };
   local.sources = local.sources.map((source) => {
-    const retained = provenance.research!.sources.find((item) => item.mediaId === source.mediaId);
+    const retained = provenance?.research?.workspace_id === workspaceId
+      ? provenance.research.sources.find((item) => item.mediaId === source.mediaId)
+      : undefined;
     return retained ? { ...source, knowledgeQaEvidence: retained.evidence } : source;
   });
 };
@@ -247,6 +294,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
+    await hydrateCanonicalWorkspaceCapturePins(local, scope, assertCurrent);
     await hydrateCanonicalWorkspaceNote(local, scope, scope.scopeSignal);
     assertCurrent();
     if (!options.apply(local, scope.scopeKey))

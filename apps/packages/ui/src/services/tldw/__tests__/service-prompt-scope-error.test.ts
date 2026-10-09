@@ -396,3 +396,18 @@ describe("exact registered Media listing route variants", () => {
     }
   )
 })
+
+describe("canonical raw URL controls", () => {
+  it.each(["\t", "\r", "\n"])(
+    "rejects raw %j before matching scoped identity routes",
+    (control) => {
+      for (const path of [
+        `/api/v1/workspaces/${control}../sources`,
+        `/api/v1/web-clipper/${control}..`,
+        `/api/v1/workspaces/ws/sources/${control}../preview`,
+        `/api/v1/notes/${control}..`
+      ])
+        expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+    }
+  )
+})

@@ -31,9 +31,7 @@ def _retriever(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]]):
     retriever = NotesDBRetriever.__new__(NotesDBRetriever)
     retriever.config = RetrievalConfig(max_results=10)
     retriever.chacha_db = None
-    monkeypatch.setattr(
-        retriever, "_execute_query", lambda *_args, **_kwargs: list(rows), raising=False
-    )
+    monkeypatch.setattr(retriever, "_execute_query", lambda *_args, **_kwargs: list(rows), raising=False)
     return retriever
 
 
@@ -65,9 +63,7 @@ def test_included_notes_come_back_in_relevance_order(
     """The database returns last_modified order; relevance reorders it."""
     retriever = _retriever(monkeypatch, _ROWS)
 
-    documents = retriever._retrieve_allowed_notes_via_sql(
-        ["1", "2", "3"], None, "alpha"
-    )
+    documents = retriever._retrieve_allowed_notes_via_sql(["1", "2", "3"], None, "alpha")
 
     assert [document.metadata["note_id"] for document in documents] == ["2", "3", "1"]
     assert [document.score for document in documents] == [1.5, 0.5, 0.0]
@@ -80,9 +76,7 @@ def test_a_note_that_does_not_match_is_still_returned_but_scored_zero(
     """The include list is the filter -- no text match is REQUIRED, only scored."""
     retriever = _retriever(monkeypatch, _ROWS)
 
-    documents = retriever._retrieve_allowed_notes_via_sql(
-        ["1", "2", "3"], None, "alpha"
-    )
+    documents = retriever._retrieve_allowed_notes_via_sql(["1", "2", "3"], None, "alpha")
 
     assert len(documents) == 3
     assert documents[-1].metadata["note_id"] == "1"
@@ -97,11 +91,47 @@ def test_the_chacha_include_path_scores_the_same_way(
     retriever = NotesDBRetriever.__new__(NotesDBRetriever)
     retriever.config = RetrievalConfig(max_results=10)
     by_id = {row["id"]: row for row in _ROWS}
-    retriever.chacha_db = type(
-        "_Db", (), {"get_note_by_id": staticmethod(lambda note_id: by_id.get(note_id))}
-    )()
+    retriever.chacha_db = type("_Db", (), {"get_note_by_id": staticmethod(lambda note_id: by_id.get(note_id))})()
 
     documents = retriever._retrieve_allowed_notes_via_chacha(["1", "2", "3"], None, "alpha")
 
     assert [document.metadata["note_id"] for document in documents] == ["2", "3", "1"]
     assert [document.score for document in documents] == [1.5, 0.5, 0.0]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_question_words_retrieve_notes_without_requiring_a_literal_phrase(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    path = tmp_path / "ChaChaNotes.db"
+    db = CharactersRAGDB(path, client_id="knowledge-question")
+    try:
+        note_id = db.add_note("Vega decision log", "The next review is scheduled for 18 November 2026.")
+        removed_id = db.add_note("Vega deleted decision", "The next review is tomorrow.")
+        db.soft_delete_note(removed_id, expected_version=1)
+        db.add_note("Umbra orchard", "Harvest totals are unchanged.")
+        retriever = NotesDBRetriever(str(path), chacha_db=db)
+
+        documents = await retriever.retrieve("Vega next review date")
+
+        assert [doc.metadata["note_id"] for doc in documents] == [note_id]
+        assert db.search_notes("Vega next review date") == []
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("question", ["Vega? next: review!", 'Vega OR "next" -review'])
+def test_question_search_treats_punctuation_and_operators_as_literal_terms(tmp_path, question):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = CharactersRAGDB(tmp_path / "ChaChaNotes.db", client_id="knowledge-question")
+    try:
+        note_id = db.add_note("Vega decision log", "The next review is on 18 November.")
+        db.add_note("Umbra orchard", "Harvest totals are unchanged.")
+
+        assert [row["id"] for row in db.search_notes(question, match_any=True)] == [note_id]
+        assert db.search_notes("?!", match_any=True) == []
+    finally:
+        db.close_all_connections()

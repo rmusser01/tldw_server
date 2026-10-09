@@ -870,7 +870,7 @@ describe("workspace store snapshot persistence", () => {
     expect(indexedDbAdapter.putArtifactPayloadRecord).not.toHaveBeenCalled()
   })
 
-  it("persists writable content while retaining a historical migration marker", async () => {
+  it("suppresses deleted legacy content while retaining its migration marker", async () => {
     localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
     localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
     localStorage.setItem(
@@ -941,14 +941,13 @@ describe("workspace store snapshot persistence", () => {
 
     await storage.setItem(STORAGE_KEY, payload)
 
-    // Approved retain-copies policy: historical deletion is not writer authority.
-    expect(localStorage.getItem(STORAGE_KEY)).toContain("workspace-tombstoned")
-    expect(localStorage.getItem(snapshotKey("workspace-tombstoned"))).toContain("Tombstoned notes")
-    expect(localStorage.getItem(chatKey("workspace-tombstoned"))).toContain("Tombstoned chat message")
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(localStorage.getItem(snapshotKey("workspace-tombstoned"))).toBeNull()
+    expect(localStorage.getItem(chatKey("workspace-tombstoned"))).toBeNull()
     expect(localStorage.getItem(markerKey)).toBe(historicalMarker)
   })
 
-  it("keeps writable workspace keys across repeated writes with a historical marker", async () => {
+  it("does not repersist deleted legacy keys across repeated writes", async () => {
     const workspaceId = "workspace-cleanup-cache"
     localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
     localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
@@ -998,14 +997,14 @@ describe("workspace store snapshot persistence", () => {
     })
 
     await storage.setItem(STORAGE_KEY, payload)
-    expect(localStorage.getItem(snapshotKey(workspaceId))).toContain("Cached cleanup notes")
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
 
     const nextPayload = JSON.parse(payload)
     nextPayload.state.workspaceSnapshots[workspaceId].notes = "Fresh second draft"
     await storage.setItem(STORAGE_KEY, JSON.stringify(nextPayload))
 
-    expect(localStorage.getItem(snapshotKey(workspaceId))).toContain("Fresh second draft")
-    expect(localStorage.getItem(STORAGE_KEY)).toContain(workspaceId)
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     expect(localStorage.getItem(markerKey)).toBe(historicalMarker)
   })
 
@@ -1482,6 +1481,8 @@ describe("workspace store snapshot persistence", () => {
       )
     ).resolves.toBeUndefined()
 
+    expect(setItemSpy).toHaveBeenCalled()
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     expect(quotaEvents).toHaveLength(1)
     expect(quotaEvents[0]?.detail.key).toBe(STORAGE_KEY)
 

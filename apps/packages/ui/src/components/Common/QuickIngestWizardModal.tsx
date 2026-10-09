@@ -1947,6 +1947,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       case 2:
         return (
           <WizardConfigureStep
+            processingItems={validQueueItems}
             isStepVisible={open && !state.isMinimized && currentStep === 2}
             analysisProviderWarning={analysisProviderWarning}
             focusAnalysisProvider={Boolean(analysisProviderWarning)}
@@ -1955,6 +1956,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       case 3:
         return (
           <ReviewStep
+            processingItems={validQueueItems}
             isOnlineForIngest={isOnlineForIngest}
             isCheckingConnection={isCheckingConnection}
             connectionRecoveryMessage={connectionRecoveryMessage}
@@ -2018,6 +2020,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     open,
     analysisProviderWarning,
     state.isMinimized,
+    validQueueItems,
   ])
 
   return (

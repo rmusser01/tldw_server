@@ -96,6 +96,94 @@ describe("KnowledgeQAProvider history hydration", () => {
     })
   })
 
+  it.each([undefined, "local-replay"])("retains displayed provenance when replay is cancelled before output (%s)", async (conversationId) => {
+    let finish!: () => void
+    const end = new Promise<void>(resolve => { finish = resolve })
+    ragSearchMock.mockResolvedValueOnce({
+      results: [{ id: "note-a", sourceType: "notes", sourceId: "note-a", content: "A evidence." }],
+      answer: "A answer [1].",
+    }).mockImplementationOnce(async (_query: string, options: { signal: AbortSignal }) => {
+      await end
+      if (options.signal.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" })
+      return { results: [], answer: "B answer" }
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-existing-a") })
+    act(() => {
+      latestContext!.setQuery("A question")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-a"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    await act(async () => { await latestContext!.search() })
+    const priorScope = latestContext!.lastSearchScope
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.restoreFromHistory({
+      ...baseHistoryItem, query: "B question", conversationId, preset: "thorough",
+      settingsSnapshot: { sources: ["notes"], include_note_ids: ["note-b"], enable_web_fallback: false },
+    }) })
+    try {
+      await waitFor(() => expect(ragSearchMock).toHaveBeenCalledTimes(2))
+      expect(latestContext!.settings.include_note_ids).toEqual(["note-b"])
+      expect(latestContext!.preset).toBe("thorough")
+      expect(latestContext!.answer).toBe("A answer [1].")
+      expect(latestContext!.lastSearchScope).toEqual(priorScope)
+      act(() => { latestContext!.cancelSearch(); finish() })
+      await act(async () => { await pending })
+      expect(latestContext!.resultQuery).toBe("A question")
+      expect(latestContext!.lastSearchScope).toEqual(priorScope)
+      expect(latestContext!.queryStage).toBe("cancelled")
+    } finally {
+      act(() => { latestContext!.cancelSearch(); finish() })
+      await act(async () => { await pending })
+    }
+  })
+
+  it.each([undefined, "local-replay"])("binds the replay preset when results actually publish (%s)", async (conversationId) => {
+    ragSearchMock.mockResolvedValueOnce({
+      results: [{ id: "note-b", sourceType: "notes", sourceId: "note-b", content: "B evidence." }],
+      answer: "B answer [1].",
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-replay-preset") })
+    act(() => { latestContext!.setPreset("fast") })
+    await act(async () => { await latestContext!.restoreFromHistory({
+      ...baseHistoryItem, query: "B question", conversationId, preset: "thorough",
+      settingsSnapshot: { sources: ["notes"], include_note_ids: ["note-b"], enable_generation: true, enable_web_fallback: false },
+    }) })
+    expect(latestContext!.answer).toBe("B answer [1].")
+    expect(latestContext!.lastSearchScope).toMatchObject({ preset: "thorough", sources: ["notes"], includeNoteIds: ["note-b"], webFallback: false })
+  })
+
+  it("binds an older branched turn to its own hydrated scope", async () => {
+    fetchWithAuthMock.mockImplementation(async (path: string) => ({
+      ok: true, status: 200, text: async () => "",
+      json: async () => path.includes("/messages-with-context") ? [
+        { id: "question-a", role: "user", content: "A question" },
+        { id: "answer-a", role: "assistant", content: "A answer [1].", rag_context: {
+          search_query: "A question", generated_answer: "A answer [1].",
+          settings_snapshot: { sources: ["notes"], include_note_ids: ["note-a"], include_media_ids: [], collection_id: 7, enable_web_fallback: false },
+          retrieved_documents: [{ id: "note-a", source_type: "notes", source_id: "note-a", excerpt: "A evidence." }],
+        } },
+        { id: "question-b", role: "user", content: "B question" },
+        { id: "answer-b", role: "assistant", content: "B answer [1].", rag_context: {
+          search_query: "B question", generated_answer: "B answer [1].",
+          settings_snapshot: { sources: ["media_db"], include_note_ids: [], include_media_ids: [84], collection_id: 9, enable_web_fallback: true },
+          retrieved_documents: [{ id: "media-b", source_type: "media_db", source_id: "84", excerpt: "B evidence." }],
+        } },
+      ] : [],
+    }))
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("remote-two-turns") })
+    expect(latestContext!.lastSearchScope).toMatchObject({ sources: ["media_db"], includeMediaIds: [84] })
+    await act(async () => { await latestContext!.branchFromTurn("question-a") })
+    expect(latestContext!.answer).toBe("A answer [1].")
+    expect(latestContext!.results.map(result => result.id)).toEqual(["note-a"])
+    expect(latestContext!.resultQuery).toBe("A question")
+    expect(latestContext!.lastSearchScope).toMatchObject({ sources: ["notes"], includeNoteIds: ["note-a"], includeMediaIds: [], collectionId: 7, webFallback: false })
+    expect(latestContext!.settings).toMatchObject({ sources: ["notes"], include_note_ids: ["note-a"], include_media_ids: [] })
+  })
+
   it("hydrates persisted local history on mount without wiping storage first", async () => {
     localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
 
@@ -320,6 +408,33 @@ describe("KnowledgeQAProvider history hydration", () => {
       if (expected[field] === null) expect(request).not.toHaveProperty(field)
       else expect(request[field]).toBe(expected[field])
     }
+  })
+
+  it.each([true, false])("restores the answered question before an unanswered follow-up (context: %s)", async (withContext) => {
+    fetchWithAuthMock.mockImplementation(async (path: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => path.includes("/messages-with-context") ? [
+        { id: "answered-user", role: "user", content: "Original answered question" },
+        {
+          id: "saved-answer", role: "assistant", content: "Saved answer",
+          ...(withContext ? { rag_context: { search_query: "Original answered question", generated_answer: "Saved answer" } } : {}),
+        },
+        { id: "unanswered-user", role: "user", content: "Unanswered follow-up" },
+      ] : [],
+      text: async () => "",
+    }))
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => { await latestContext!.restoreFromHistory(baseHistoryItem) })
+    expect(latestContext!.answer).toBe("Saved answer")
+    expect(latestContext!.resultQuery).toBe("Original answered question")
+    act(() => latestContext!.setQuery("Edited but not searched"))
+    expect(latestContext!.resultQuery).toBe("Original answered question")
+    ragSearchMock.mockResolvedValue({ results: [], generated_answer: "Follow-up answer", metadata: {} })
+    await act(async () => { await latestContext!.askFollowUp("Next answered question") })
+    expect(latestContext!.resultQuery).toBe("Next answered question")
+    expect(latestContext!.answer).toBe("Follow-up answer")
   })
 
   it("hydrates partial payloads without failing and clears stale results", async () => {

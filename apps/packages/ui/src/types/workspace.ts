@@ -1,7 +1,8 @@
 import type {
-  KnowledgeQaScope,
-  WorkspaceKnowledgeQaPrefillSource,
-} from "@/utils/research-workspace-prefill"
+  KnowledgeNoteHead,
+  KnowledgeNoteEvidence,
+  KnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Types
  * Types for the NotebookLM-style three-pane research interface
@@ -71,19 +72,22 @@ export interface WorkspaceSourceStatusDetails {
   job?: WorkspaceSourceJobStatus | null
 }
 
+export interface WebArticleCapturePin {
+  clipId: string
+  requestedUrl: string
+  capturedAt: string
+  contentSha256: string
+  refreshOf: string | null
+  mediaId: number
+  versionNumber: number
+  versionUuid: string
+}
+
 export interface WorkspaceSource {
+  webCapture?: WebArticleCapturePin
   id: string
   mediaId: number // Server-side media ID
-  knowledgeQaEvidence?: {
-    importId: string
-    threadId: string | null
-    sources: WorkspaceKnowledgeQaPrefillSource[]
-    trustState?: string | null
-    trustReasonCodes?: string[]
-    evidenceOrigin?: string | null
-    scope?: KnowledgeQaScope
-    snapshot: boolean
-  }
+  knowledgeQaEvidence?: KnowledgeNoteEvidence
   title: string
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus
@@ -631,9 +635,10 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // Workspace Note Types (for Quick Notes feature)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface WorkspaceNote {
+export interface WorkspaceNote extends KnowledgeNoteHead {
   serverWorkspaceId?: string
   serverScopeKey?: string
+  pendingKnowledgeProvenance?: KnowledgeNoteProvenance
   id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string
   content: string

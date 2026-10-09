@@ -1,0 +1,7 @@
+{
+  "entry": "CDP runtime-contract handoff; direct panel URL",
+  "body": "tldw Assistant\nAnalyze this web clip in the context of ...\nOpens this selected history in the extension full page. Active streaming stays in this panel.\nYou\n• 10:26 AM\nanalyze\n\nAnalyze this web clip in the context of the captured page.\n\nTitle: Vega native capture fixture\n\nURL: http://127.0.0.1:19135/article\n\nPage text:\nVega greenhouse capture\n\nThis synthetic article is used only for the Knowledge extension usability check.\n\nThe Vega native capture inspection is scheduled for 24 November 2026. The irrigation budget is 75 litres per plot per week.\n\nCapture this source, save the note, then ask about the inspection date.\n\n•••\ntldw:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\n• 10:26 AM\n\nSomething went wrong while talking to your tldw server.\n\nTry again in a moment, or open Health & diagnostics to inspect server health.\n\nShow technical details\nRecommended next actions: Retry same model, Switch model, Try provider fallback\nRetry same model\nSwitch model\nTry provider fallback\n•••\nSave chat to history\nImage\nVoice\nConfig\nDictate\nCharacter\nSEND",
+  "errors": [],
+  "generationCompleted": false,
+  "qualification": "Direct panel URL and runtime contract; route/dispatcher pass, Stream completion failed. Native panel generation is not attested."
+}

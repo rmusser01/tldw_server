@@ -10,7 +10,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolveServicePromptScope } from "@/services/service-prompts";
 import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
-import { hydrateCanonicalWorkspaceNote } from "./workspace-server-restore";
+import { hydrateCanonicalWorkspaceCapturePins, hydrateCanonicalWorkspaceNote } from "./workspace-server-restore";
 
 const LocalResearchWorkspace = React.lazy(() =>
   import("./index").then((module) => ({ default: module.ResearchWorkspace })),
@@ -98,6 +98,9 @@ export const ActivatedLocalWorkspace: React.FC<{ workspaceId: string; webClip: b
           }
         });
         assertCurrent();
+        await hydrateCanonicalWorkspaceCapturePins(staged, {
+          scopeKey: scope.scopeKey, requestScope: options.requestScope
+        }, assertCurrent);
         await hydrateCanonicalWorkspaceNote(staged, {
           scopeKey: scope.scopeKey, requestScope: options.requestScope
         }, controller.signal);

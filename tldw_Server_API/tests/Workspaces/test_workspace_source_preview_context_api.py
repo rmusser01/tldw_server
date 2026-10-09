@@ -585,3 +585,57 @@ def test_workspace_source_preview_reports_missing_media(
     assert payload["content_available"] is False
     assert payload["unavailable_reason"] == "media_not_found"
     assert payload["readiness"]["text_extracted"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("workspace", "source", "version", "expected"),
+    [
+        ("ws-preview", "src-ready", 1, 200),
+        ("ws-preview", "src-ready", 7, 404),
+        ("ws-preview", "src-ready", 0, 422),
+        ("ws-preview", "foreign-source", 1, 404),
+        ("foreign-workspace", "src-ready", 1, 404),
+        ("removed-workspace", "src-ready", 1, 404),
+    ],
+)
+def test_workspace_pinned_preview_checks_membership_before_version_read(
+    workspace_preview_app,
+    workspace_preview_db,
+    workspace,
+    source,
+    version,
+    expected,
+):
+    if workspace == "removed-workspace":
+        workspace_preview_db.delete_workspace("ws-preview", workspace_preview_db.get_workspace("ws-preview")["version"])
+        workspace = "ws-preview"
+    db = _media_db()
+    calls = []
+
+    def get_version(media_id, version_number=None, include_content=True):
+        calls.append((media_id, version_number, include_content))
+        return {"version_number": 1, "content": "old snapshot"} if version_number == 1 else None
+
+    db.get_document_version = get_version
+    _install_overrides(workspace_preview_app, workspace_preview_db, db)
+    try:
+        with TestClient(workspace_preview_app, raise_server_exceptions=False) as client:
+            response = client.get(f"/api/v1/workspaces/{workspace}/sources/{source}/preview?version_number={version}")
+    finally:
+        _clear_overrides(workspace_preview_app)
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        payload = response.json()
+        assert payload["document_version_number"] == 1
+        assert payload["text_preview"] == "old snapshot"
+        assert all(item["kind"] != "chunk" for item in payload["snippets"])
+    if (
+        expected in {200, 404}
+        and workspace == "ws-preview"
+        and source == "src-ready"
+        and workspace_preview_db.get_workspace(workspace)
+    ):
+        assert calls == [(1, version, True)]
+    else:
+        assert calls == []

@@ -906,6 +906,10 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       hydrateServerChat: true,
       scope: { type: "workspace", workspaceId: "workspace-a" }
     })
+    expect(mockUseMessageOption).toHaveBeenCalledWith({
+      scope: { type: "workspace", workspaceId: "workspace-a" },
+      hydrateServerChat: true
+    })
   })
 
   it.each(["system", "user", "assistant"] as const)("forwards restored %s attribution to the existing message renderer", (role) => {

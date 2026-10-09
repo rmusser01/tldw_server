@@ -84,7 +84,9 @@ export const createRegenerateLastMessage = ({
     | void
   >
 }) => {
-  return async () => {
+  return async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }) => {
+    dispatch?.controller?.signal.throwIfAborted()
+    dispatch?.assertCurrent?.()
     if (!allowOrdinaryRetry || historySelection) {
       const target = [...messages].reverse().find((row) => row.isBot && row.id)
       const error = Object.assign(new Error("unsupported_history_regeneration"), {
@@ -158,6 +160,8 @@ export const createRegenerateLastMessage = ({
         newHistory,
         nextMessages
       })) || {}
+    dispatch?.controller?.signal.throwIfAborted()
+    dispatch?.assertCurrent?.()
     const submitHistory = beforeSubmitResult.memory ?? newHistory
     const submitMessages = beforeSubmitResult.messages ?? nextMessages
     const submitExtras = beforeSubmitResult.submitExtras ?? {}
@@ -165,7 +169,7 @@ export const createRegenerateLastMessage = ({
     setHistory(submitHistory)
     setMessages(submitMessages)
 
-    const newController = new AbortController()
+    const newController = dispatch?.controller ?? new AbortController()
     return await onSubmit({
       message: userContent,
       image: userImage,
@@ -175,7 +179,8 @@ export const createRegenerateLastMessage = ({
       controller: newController,
       messageType: userMessageType,
       regenerateFromMessage: submitExtras.serverChatIdOverride ? undefined : lastAssistant,
-      ...submitExtras
+      ...submitExtras,
+      assertCurrent: dispatch?.assertCurrent
     })
   }
 }

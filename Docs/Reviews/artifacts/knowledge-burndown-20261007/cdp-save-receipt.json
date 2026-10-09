@@ -1,0 +1,33 @@
+{
+  "status": 200,
+  "receipt": {
+    "clip_id": "f2637dd7-096c-41d0-a3f7-7e9ba1b8b65c",
+    "status": "saved",
+    "note": {
+      "id": "5d0d9205-008f-4307-8775-f0362d82c2a7",
+      "title": "Vega native capture fixture",
+      "version": 1
+    },
+    "workspace_placements": [],
+    "attachments": [],
+    "analysis": {},
+    "content_budget": {
+      "visible_body": "# Vega greenhouse capture\n\nThis synthetic article is used only for the Knowledge extension usability check.\n\nThe Vega native capture inspection is scheduled for 24 November 2026. The irrigation budget is 75 litres per plot per week.\n\nCapture this source, save the note, then ask about the inspection date.",
+      "visible_body_length": 305,
+      "visible_body_truncated": false,
+      "visible_body_limit": 12000,
+      "full_extract_length": 303,
+      "full_extract_spillover": null,
+      "ocr_inline_limit": 1500,
+      "vlm_inline_limit": 1000,
+      "machine_inline_limit": 2500,
+      "generated_attachment_slots": [],
+      "last_save_status": "saved",
+      "warnings": [],
+      "enhancement_requests": {
+        "run_ocr": false,
+        "run_vlm": false
+      }
+    }
+  }
+}

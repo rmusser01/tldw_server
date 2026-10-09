@@ -547,12 +547,21 @@ class SQLiteBackend(DatabaseBackend):
             raise DatabaseError("SQLite batch execution failed") from None
 
     def create_tables(self, schema: str, connection: Optional[sqlite3.Connection] = None) -> None:
-        """Create tables from a schema definition."""
+        """Create tables without committing an active caller transaction."""
         conn = connection or self.get_pool().get_connection()
 
         try:
-            # Execute the schema as a script
-            conn.executescript(schema)
+            if conn.in_transaction:
+                # executescript commits an existing transaction before running DDL.
+                start = 0
+                for end, character in enumerate(schema, 1):
+                    if character == ";" and sqlite3.complete_statement(schema[start:end]):
+                        conn.execute(schema[start:end])
+                        start = end
+                if schema[start:].strip():
+                    conn.execute(schema[start:])
+            else:
+                conn.executescript(schema)
         except sqlite3.Error as e:
             logger.error("SQLite schema creation failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - privacy boundary excludes exception details
             raise DatabaseError(f"Failed to create schema: {e}") from e

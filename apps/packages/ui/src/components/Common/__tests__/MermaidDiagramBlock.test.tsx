@@ -83,11 +83,13 @@ describe("MermaidDiagramBlock", () => {
 
     createObjectURL = vi.fn(() => "blob:mermaid")
     revokeObjectURL = vi.fn()
-    vi.stubGlobal("URL", {
-      ...URL,
-      createObjectURL,
-      revokeObjectURL
-    })
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = createObjectURL
+        static revokeObjectURL = revokeObjectURL
+      }
+    )
 
     blobParts = undefined
     vi.stubGlobal(
@@ -300,7 +302,7 @@ describe("MermaidDiagramBlock", () => {
     fireEvent.click(previewButton)
 
     expect(
-      screen.getByRole("dialog", { name: "Mermaid diagram preview" })
+      await screen.findByRole("dialog", { name: "Mermaid diagram preview" })
     ).toBeInTheDocument()
     expect(screen.getByTestId("mermaid-preview-canvas").innerHTML).toContain(
       "<svg"

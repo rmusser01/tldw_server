@@ -79,6 +79,8 @@ const testState = {
   workspaceBanner: { title: "", subtitle: "", image: null },
   initializeWorkspace: vi.fn(),
   installServerWorkspace: vi.fn(() => true),
+  restoreServerWorkspace: vi.fn(),
+  workspaceSnapshots: {},
   createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
@@ -882,7 +884,9 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       migrationInput.readLocalStorageValue("tldw-workspace")
     ).resolves.toBe(legacyPayload)
     expect(migrationInput.compareAndDeleteLocalStorageValue).toBeUndefined()
+    expect(migrationInput.deleteLocalStorageValue).toBeUndefined()
     expect(migrationInput.writeLocalStorageValue).toBeUndefined()
+    expect(window.localStorage.getItem("tldw-workspace")).toBe(legacyPayload)
 
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Legacy workspace data found")
@@ -1091,12 +1095,10 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       deletedSurfaceIds: string[]
       message: string
     }>()
-    window.localStorage.setItem(
-      "tldw-workspace",
-      JSON.stringify({
-        workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
-      })
-    )
+    const legacyPayload = JSON.stringify({
+      workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
+    })
+    window.localStorage.setItem("tldw-workspace", legacyPayload)
     mockRunResearchWorkspaceMigration.mockReturnValueOnce(
       migrationDeferred.promise
     )
@@ -1142,6 +1144,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(notice).toHaveTextContent(
       "Automatic local cleanup is disabled"
     )
+    expect(window.localStorage.getItem("tldw-workspace")).toBe(legacyPayload)
   })
 
   it("opens and closes workspace search with keyboard shortcuts", async () => {

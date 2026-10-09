@@ -1,3 +1,7 @@
+import {
+  knowledgeNoteHead,
+  validateKnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Zustand Store
  * Manages state for the NotebookLM-style three-pane research interface
@@ -919,8 +923,63 @@ export const hasResearchWorkspaceMigrationTombstone = (workspaceId: string): boo
     tombstone.contentRetained === false &&
     tombstone.legacyWorkspaceId === trimmedWorkspaceId &&
     typeof tombstone.migrationId === "string" &&
-    tombstone.migrationId.trim().length > 0
+    tombstone.migrationId.trim().length > 0 &&
+    typeof tombstone.serverWorkspaceId === "string" &&
+    tombstone.serverWorkspaceId.trim().length > 0 &&
+    typeof tombstone.deletedAt === "string" &&
+    Number.isFinite(Date.parse(tombstone.deletedAt))
   )
+}
+
+const hasInstalledCanonicalWorkspaceCache = (
+  workspaceId: string,
+  snapshot: Pick<WorkspaceSnapshot, "workspaceId" | "serverWorkspace"> | undefined
+): boolean => {
+  const cache = snapshot?.serverWorkspace
+  return Boolean(snapshot?.workspaceId === workspaceId &&
+    typeof cache?.scopeKey === "string" && cache.scopeKey.trim() &&
+    cache.metadata?.id === workspaceId && cache.metadata.workspace_profile === "research")
+}
+
+type WorkspaceTombstoneState = Pick<PersistedWorkspaceState,
+  "workspaceId" | "savedWorkspaces" | "archivedWorkspaces" | "workspaceSnapshots"
+> & { workspaceChatSessions: Record<string, unknown> }
+
+const omitDeletedLegacyWorkspaceCaches = <T extends WorkspaceTombstoneState>(state: T): T => {
+  const ids = new Set([
+    state.workspaceId, ...Object.keys(state.workspaceSnapshots),
+    ...Object.keys(state.workspaceChatSessions).map(extractWorkspaceIdFromChatSessionKey),
+    ...state.savedWorkspaces.map(workspace => workspace.id),
+    ...state.archivedWorkspaces.map(workspace => workspace.id)
+  ])
+  // A deletion receipt retires legacy copies, not a later owner-qualified canonical installation.
+  const deleted = new Set(Array.from(ids).filter(id =>
+    hasResearchWorkspaceMigrationTombstone(id) &&
+    !hasInstalledCanonicalWorkspaceCache(id, state.workspaceSnapshots[id])))
+  if (!deleted.size) return state
+  return {
+    ...state,
+    workspaceId: deleted.has(state.workspaceId) ? "" : state.workspaceId,
+    savedWorkspaces: state.savedWorkspaces.filter(workspace => !deleted.has(workspace.id)),
+    archivedWorkspaces: state.archivedWorkspaces.filter(workspace => !deleted.has(workspace.id)),
+    workspaceSnapshots: Object.fromEntries(Object.entries(state.workspaceSnapshots).filter(([id]) => !deleted.has(id))),
+    workspaceChatSessions: Object.fromEntries(Object.entries(state.workspaceChatSessions).filter(([key]) =>
+      !deleted.has(extractWorkspaceIdFromChatSessionKey(key))))
+  }
+}
+
+const suppressTombstonedWorkspaceEnvelope = (raw: string | null): string | null => {
+  const envelope = raw && parsePersistedWorkspaceEnvelope(raw)
+  if (!envelope) return raw
+  const ids = getWorkspaceIdsFromStoredValue(raw)
+  for (const list of [envelope.state.savedWorkspaces, envelope.state.archivedWorkspaces]) {
+    if (Array.isArray(list)) for (const workspace of list) {
+      if (isRecord(workspace) && typeof workspace.id === "string") ids.push(workspace.id)
+    }
+  }
+  if (!ids.some(hasResearchWorkspaceMigrationTombstone)) return raw
+  const state = migratePersistedWorkspaceState(envelope.state)
+  return JSON.stringify({ state, version: envelope.version })
 }
 
 const parseWorkspaceFeatureFlagCandidate = (
@@ -1434,17 +1493,20 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
       ] as PersistedWorkspaceChatSessionReference
   }
 
-  const baseState = {
+  const filtered = omitDeletedLegacyWorkspaceCaches({
     workspaceId,
     savedWorkspaces: savedWorkspaces as SavedWorkspace[],
     archivedWorkspaces: archivedWorkspaces as SavedWorkspace[],
-    workspaceCollections
-  }
+    workspaceCollections,
+    workspaceSnapshots: snapshots,
+    workspaceChatSessions: chatSessionReferences
+  })
+  const { workspaceSnapshots: filteredSnapshots, workspaceChatSessions: filteredChatReferences, ...baseState } = filtered
 
   if (!requiresIndexedDbHydration) {
     const chatSessions: Record<string, PersistedWorkspaceChatSession> = {}
     for (const [workspaceStorageId, reference] of Object.entries(
-      chatSessionReferences
+      filteredChatReferences
     )) {
       if (isWorkspaceIndexedDbChatPointer(reference)) continue
       if (!isRecord(reference)) continue
@@ -1452,14 +1514,14 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
     }
     return {
       ...baseState,
-      workspaceSnapshots: snapshots,
+      workspaceSnapshots: filteredSnapshots,
       workspaceChatSessions: chatSessions
     }
   }
 
   return (async () => {
     const hydratedSnapshots: Record<string, WorkspaceSnapshot> = {}
-    for (const [workspaceStorageId, snapshot] of Object.entries(snapshots)) {
+    for (const [workspaceStorageId, snapshot] of Object.entries(filteredSnapshots)) {
       hydratedSnapshots[workspaceStorageId] = await rehydrateWorkspaceSnapshotArtifacts(
         snapshot,
         indexedDbAdapter
@@ -1468,7 +1530,7 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
 
     const hydratedChatSessions: Record<string, PersistedWorkspaceChatSession> = {}
     for (const [workspaceStorageId, reference] of Object.entries(
-      chatSessionReferences
+      filteredChatReferences
     )) {
       const hydratedSession = await rehydrateWorkspaceChatSessionReference(
         reference,
@@ -1508,8 +1570,9 @@ const writeSplitWorkspacePersistence = async (
     ...Object.keys(migrated.workspaceChatSessions || {}),
     migrated.workspaceId
   )
-  const existingWorkspaceIds = getWorkspaceIdsFromStoredValue(
-    localStorage.getItem(name)
+  const existingWorkspaceIds = normalizeWorkspaceStorageIds(
+    ...getWorkspaceIdsFromStoredValue(localStorage.getItem(name)),
+    ...getWorkspaceIdsFromStoredValue(serializedValue)
   )
   const persistedSnapshotsForIndex: Record<string, WorkspaceSnapshot> = {}
   const persistedChatReferencesForIndex: Record<
@@ -1819,7 +1882,7 @@ export const createWorkspaceStorage = (
     getItem: (name: string): string | null | Promise<string | null> => {
       if (name === WORKSPACE_STORAGE_KEY) {
         if (!splitStorageEnabled) {
-          return localStorage.getItem(name)
+          return suppressTombstonedWorkspaceEnvelope(localStorage.getItem(name))
         }
         return rebuildWorkspaceEnvelopeFromStorage(
           name,
@@ -1833,6 +1896,28 @@ export const createWorkspaceStorage = (
       const generation = workspacePersistenceGeneration
       try {
         if (shouldSuppressInitialEmptyWorkspaceWrite(name, value)) return
+
+        if (name === WORKSPACE_STORAGE_KEY && !splitStorageEnabled) {
+          const filteredValue = suppressTombstonedWorkspaceEnvelope(value) ?? value
+          const retainedIds = new Set(getWorkspaceIdsFromStoredValue(filteredValue))
+          for (const id of getWorkspaceIdsFromStoredValue(value)) {
+            const workspaceId = extractWorkspaceIdFromChatSessionKey(id)
+            if (retainedIds.has(id) || !hasResearchWorkspaceMigrationTombstone(workspaceId)) continue
+            const snapshot = readWorkspaceSnapshotFromStorage(id)
+            const ownerSnapshot = readWorkspaceSnapshotFromStorage(workspaceId)
+            if (hasInstalledCanonicalWorkspaceCache(workspaceId, ownerSnapshot ?? undefined)) continue
+            const chat = safeParseJson(localStorage.getItem(buildWorkspaceChatStorageKey(id)))
+            localStorage.removeItem(buildWorkspaceSnapshotStorageKey(id))
+            localStorage.removeItem(buildWorkspaceChatStorageKey(id))
+            await cleanupWorkspaceIndexedDbRecords(id, snapshot, indexedDbAdapter)
+            if (generation !== workspacePersistenceGeneration) return
+            if (isWorkspaceIndexedDbChatPointer(chat)) {
+              await indexedDbAdapter.deleteChatRecord(chat.key)
+              if (generation !== workspacePersistenceGeneration) return
+            }
+          }
+          value = filteredValue
+        }
 
         const handledBySplitStorage = splitStorageEnabled
           ? await writeSplitWorkspacePersistence(name, value, writeIndexedDbAdapter)
@@ -2115,6 +2200,7 @@ export interface WorkspaceUndoSnapshot {
 type CaptureNoteMode = "append" | "replace"
 
 interface CaptureToNoteInput {
+  provenance?: WorkspaceNote["pendingKnowledgeProvenance"]
   title?: string
   content: string
   mode?: CaptureNoteMode
@@ -2246,7 +2332,7 @@ interface StudioActions {
   updateNoteKeywords: (keywords: string[]) => void
   clearCurrentNote: () => void
   captureToCurrentNote: (input: CaptureToNoteInput) => void
-  loadNote: (note: { id: string | number; title: string; content: string; keywords?: string[]; version?: number }) => void
+  loadNote: (note: Omit<WorkspaceNote, "isDirty" | "keywords"> & { id: string | number; keywords?: string[] }) => void
 }
 
 interface UIActions {
@@ -3158,6 +3244,10 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
           (keyword): keyword is string => typeof keyword === "string"
         )
       : [],
+    ...knowledgeNoteHead(candidate),
+    pendingKnowledgeProvenance:
+      validateKnowledgeNoteProvenance(candidate.pendingKnowledgeProvenance) ||
+      undefined,
     version: typeof candidate.version === "number" ? candidate.version : 1,
     isDirty: Boolean(candidate.isDirty)
   }
@@ -3377,7 +3467,7 @@ const migratePersistedWorkspaceState = (
     })
   }
 
-  return {
+  return omitDeletedLegacyWorkspaceCaches({
     workspaceId: resolvedWorkspaceId,
     savedWorkspaces: Array.isArray(persisted.savedWorkspaces)
       ? (persisted.savedWorkspaces as SavedWorkspace[])
@@ -3392,7 +3482,7 @@ const migratePersistedWorkspaceState = (
     workspaceChatSessions: buildPersistedWorkspaceChatSessions(
       normalizeWorkspaceChatSessionsForRehydrate(persisted.workspaceChatSessions)
     )
-  }
+  })
 }
 
 /** Nonempty unowned content must not be adopted or discarded by automatic bootstrap. */
@@ -3979,6 +4069,12 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
               storeHydrationError: currentState.storeHydrationError
             })
             return
+          }
+          if (!state.workspaceId && hasResearchWorkspaceMigrationTombstone(currentState.workspaceId) &&
+              !hasInstalledCanonicalWorkspaceCache(currentState.workspaceId, currentState)) {
+            Object.assign(state, applyWorkspaceSnapshot(createEmptyWorkspaceSnapshot({
+              id: "", name: "", tag: "", createdAt: new Date()
+            })))
           }
           // Ensure dates are Date objects after rehydration
           state.workspaceCreatedAt = reviveDateOrNull(state.workspaceCreatedAt)

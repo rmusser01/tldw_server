@@ -1,5 +1,12 @@
+import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
+import { KnowledgeNoteHistory } from "@/components/Notes/KnowledgeNoteHistory"
 import {
-  readKnowledgeNoteProvenance,
+  knowledgeNoteHead,
+  knowledgeNoteWriteFields,
+  knowledgeNoteProvenanceMatches,
+  reconcileCapturedNoteProvenance,
+  resolveKnowledgeNoteProvenance,
+  type KnowledgeNoteHead,
   retainKnowledgeNoteProvenance,
   stripKnowledgeNoteProvenance
 } from "@/utils/knowledge-note-provenance"
@@ -52,7 +59,7 @@ type NoteKeyword =
       name?: string
     }
 
-interface NoteListItem {
+interface NoteListItem extends KnowledgeNoteHead {
   id: string | number
   title?: string
   content?: string
@@ -319,6 +326,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   // Local state
   const [isSaving, setIsSaving] = useState(false)
   const saveControllerRef = useRef<AbortController | null>(null)
+  const pendingSaveRef = useRef<{
+    scopeKey: string; workspaceId: string | null; noteId: string | number | undefined;
+    draft: typeof currentNote; path: AllowedPath; method: "POST" | "PUT";
+    body: Record<string, unknown>; headers: Record<string, string>;
+  } | null>(null)
   const [showSavedIndicator, setShowSavedIndicator] = useState(false)
   const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
@@ -331,6 +343,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const [keywordsInput, setKeywordsInput] = useState("")
   const [keywordCatalog, setKeywordCatalog] = useState<string[]>([])
   const [keywordSuggestions, setKeywordSuggestions] = useState<string[]>([])
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const titleInputRef = useRef<InputRef | null>(null)
   const contentInputRef = useRef<TextAreaRef | null>(null)
   const latestFrame = useRef({ workspaceId, currentNote })
@@ -341,17 +354,35 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const noteOwnerReady = !notesReadOnly || (canonicalNotesReady &&
     (!currentNote.serverWorkspaceId || (currentNote.serverWorkspaceId === workspaceId &&
       currentNote.serverScopeKey === verifiedNotesScope)))
+  const retireFetchedNotes = useCallback(() => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current)
+      searchDebounceRef.current = null
+    }
+    setNotesList([])
+    setWorkspaceNotes([])
+    setKeywordCatalog([])
+    setKeywordSuggestions([])
+    setSearchQuery("")
+    setIsSearching(false)
+    setIsLoadingWorkspaceNotes(false)
+    setIsLoadModalOpen(false)
+  }, [])
   React.useLayoutEffect(() => { latestFrame.current = { workspaceId, currentNote } })
   React.useLayoutEffect(() => {
     const lifecycle = settlement.current
     lifecycle.mounted = true
     const stopStore = useWorkspaceStore.subscribe?.((state, previous) => {
-      if (state.workspaceId !== previous.workspaceId) settlement.current.generation++
+      if (state.workspaceId !== previous.workspaceId) {
+        settlement.current.generation++
+        retireFetchedNotes()
+      }
     })
     const stopAccount = watchChatAccountChanges(invalidated => {
       if (!invalidated) return
       settlement.current.generation++
       setVerifiedNotesScope(null)
+      retireFetchedNotes()
     })
     return () => {
       lifecycle.mounted = false
@@ -359,7 +390,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       stopStore?.()
       stopAccount()
     }
-  }, [])
+  }, [retireFetchedNotes])
   const captureWorkspaceSettlement = useCallback(() => {
     const frame = useWorkspaceStore.getState?.() || latestFrame.current
     const { generation } = settlement.current
@@ -510,14 +541,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     }
   }, [clearNoteFocusTarget, noteFocusTarget])
 
-  // Debounce timer ref for search
-  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
-
   const serializeNoteForEditor = useCallback(
     (note: NoteListItem) => ({
       id: note.id,
       title: note.title || "",
-      content: note.content || "",
+      content: retainKnowledgeNoteProvenance(note.content || "", note),
+      ...knowledgeNoteHead(note),
       keywords: workspaceTag && !note.workspace_id
         ? stripWorkspaceTagFromKeywords(extractNoteKeywords(note), workspaceTag)
         : extractNoteKeywords(note),
@@ -733,24 +762,52 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     }
   }, [canonicalNotesReady, captureSettlement, currentNote.isDirty, hideSavedIndicator, loadNote, messageApi, serializeNoteForEditor, serverWorkspace, setCurrentNote, t, workspaceId])
 
-  const handleReloadLatestAfterConflict = useCallback(async () => {
-    if (!currentNote.id || serverWorkspace || currentNote.serverWorkspaceId) return
+  const handleReloadLatestAfterConflict = useCallback(async (expected: {
+    scopeKey: string; workspaceId: string | null; workspaceTag: string; noteId: string | number
+  }) => {
+    const { currentNote: draft, workspaceId, workspaceTag, serverWorkspace } = useWorkspaceStore.getState()
+    if (!draft.id || serverWorkspace || draft.serverWorkspaceId || draft.id !== expected.noteId ||
+        workspaceId !== expected.workspaceId || workspaceTag !== expected.workspaceTag ||
+        (saveControllerRef.current && !saveControllerRef.current.signal.aborted)) return
     const canCommit = captureSettlement()
+    const controller = new AbortController()
+    saveControllerRef.current = controller
+    const save = ++settlement.current.save
+    let scope: ServicePromptSnapshot | undefined
+    const isCurrent = () => {
+      const current = useWorkspaceStore.getState()
+      return canCommit() && !controller.signal.aborted && !scope?.scopeSignal.aborted &&
+        !scope?.scopeInvalidatedSignal.aborted && current.currentNote === draft &&
+        !current.serverWorkspace && !current.currentNote.serverWorkspaceId &&
+        current.workspaceId === workspaceId && current.workspaceTag === workspaceTag
+    }
+    const stopWatchingNote = useWorkspaceStore.subscribe(() => {
+      if (!isCurrent()) controller.abort()
+    })
+    const stopWatchingOwner = watchChatAccountChanges((changed) => {
+      if (changed) controller.abort()
+    })
 
     const localDraft = {
-      title: currentNote.title.trim(),
-      content: currentNote.content.trim(),
-      keywords: [...currentNote.keywords]
+      title: draft.title.trim(),
+      content: draft.content.trim(),
+      keywords: [...draft.keywords]
     }
 
+    setIsSaving(true)
     try {
+      scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!isCurrent() || scope.scopeKey !== expected.scopeKey) return
       const latest = await bgRequest<NoteListItem>({
-        path: `/api/v1/notes/${currentNote.id}` as AllowedPath,
+        ...requestScopeFields(scope.requestScope),
+        abortSignal: scope.scopeSignal,
+        path: `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath,
         method: "GET"
       })
-      if (!canCommit()) return
+      if (!isCurrent()) return
 
       const latestForEditor = serializeNoteForEditor(latest)
+      const pendingKnowledgeProvenance = reconcileCapturedNoteProvenance(draft, latestForEditor)
       const latestKeywords = normalizeKeywords(latestForEditor.keywords || [])
       const mergedKeywords = normalizeKeywords([
         ...latestKeywords,
@@ -776,12 +833,14 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
       hideSavedIndicator()
       setCurrentNote({
+        ...knowledgeNoteHead(latestForEditor),
+        pendingKnowledgeProvenance,
         id: latestForEditor.id,
         title: titleChanged ? localDraft.title : latestForEditor.title,
-        content: mergedContent,
+        content: retainKnowledgeNoteProvenance(mergedContent, latestForEditor),
         keywords: mergedKeywords,
         version: latestForEditor.version,
-        isDirty: titleChanged || contentChanged || keywordsChanged
+        isDirty: titleChanged || contentChanged || keywordsChanged || !!pendingKnowledgeProvenance
       })
       setKeywordsInput(mergedKeywords.join(", "))
       messageApi.success(
@@ -791,15 +850,23 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
       )
     } catch (error) {
-      if (!canCommit()) return
+      if (!isCurrent()) return
       messageApi.error(
         t(
           "playground:studio.reloadLatestFailed",
           "Failed to load the latest note version."
         )
       )
+    } finally {
+      stopWatchingNote()
+      stopWatchingOwner()
+      scope?.release()
+      if (saveControllerRef.current === controller) {
+        saveControllerRef.current = null
+        if (settlement.current.mounted && settlement.current.save === save) setIsSaving(false)
+      }
     }
-  }, [captureSettlement, currentNote, hideSavedIndicator, messageApi, serializeNoteForEditor, serverWorkspace, setCurrentNote, t])
+  }, [captureSettlement, hideSavedIndicator, messageApi, serializeNoteForEditor, setCurrentNote, t])
 
   // Save one captured draft under one owner through version lookup and write.
   const handleSave = async () => {
@@ -855,10 +922,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         state.currentNote !== draft &&
         !state.currentNote.title &&
         !state.currentNote.content
-      if (!hasCurrentIdentity() || clearedNewDraft) controller.abort()
+      if (!hasCurrentIdentity() || clearedNewDraft) { controller.abort(); pendingSaveRef.current = null }
     })
     const stopWatchingOwner = watchChatAccountChanges((invalidated) => {
-      if (invalidated) controller.abort()
+      if (invalidated) { controller.abort(); pendingSaveRef.current = null }
     })
     setIsSaving(true)
     try {
@@ -869,9 +936,9 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       const persistedKeywords = buildPersistedKeywords(
         [
           ...draft.keywords,
-          ...(readKnowledgeNoteProvenance(draft.content)?.research
+          ...(resolveKnowledgeNoteProvenance(draft, draft.content).provenance?.research
             ? [
-                `workspace:${readKnowledgeNoteProvenance(draft.content)!.research!.workspace_id}`
+                `workspace:${resolveKnowledgeNoteProvenance(draft, draft.content).provenance!.research!.workspace_id}`
               ]
             : [])
         ],
@@ -879,47 +946,69 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       )
       const payload: Record<string, unknown> = {
         title: draft.title || "Untitled Note",
-        content: draft.content,
+        content: retainKnowledgeNoteProvenance(draft.content, draft),
+        ...knowledgeNoteWriteFields(draft.content, draft, {
+          create: !draft.id,
+          replacement: draft.pendingKnowledgeProvenance
+        }),
         keywords: persistedKeywords.length > 0 ? persistedKeywords : undefined
       }
+      if (payload.knowledge_provenance)
+        payload.content = retainKnowledgeNoteProvenance(draft.content, {
+          knowledge_provenance_state: "active",
+          knowledge_provenance: payload.knowledge_provenance
+        })
       if (draftWorkspaceTag) payload.workspace_tag = draftWorkspaceTag
 
-      let saved: NoteListItem
-      if (draft.id) {
-        const path = `/api/v1/notes/${draft.id}` as AllowedPath
-        const expectedVersion =
-          draft.version ??
-          (await bgRequest<NoteListItem>({ ...request, path, method: "GET" }))
-            .version
-        if (!isCurrent()) return
-        if (expectedVersion == null) {
-          throw new Error("Missing note version; reload before saving.")
+      let pending = pendingSaveRef.current
+      if (pending && (pending.scopeKey !== scope.scopeKey || pending.workspaceId !== workspaceId || pending.noteId !== draft.id)) pending = null
+      if (!pending) {
+        const path = draft.id ? `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath : "/api/v1/notes/"
+        let expectedVersion = draft.version
+        if (draft.id && expectedVersion == null) {
+          const remote = await bgRequest<NoteListItem>({ ...request, path, method: "GET" })
+          if (!isCurrent()) return
+          expectedVersion = remote.version
+          delete payload.knowledge_provenance
+          delete payload.expected_provenance_version
+          Object.assign(
+            payload,
+            knowledgeNoteWriteFields(draft.content, remote, {
+              replacement: reconcileCapturedNoteProvenance(draft, remote)
+            })
+          )
+          payload.content = retainKnowledgeNoteProvenance(
+            draft.content,
+            payload.knowledge_provenance
+              ? {
+                  knowledge_provenance_state: "active",
+                  knowledge_provenance: payload.knowledge_provenance
+                }
+              : remote
+          )
         }
-        saved = await bgRequest<NoteListItem>({
-          ...request,
-          path,
-          method: "PUT",
+        if (draft.id && expectedVersion == null) throw new Error("Missing note version; reload before saving.")
+        pending = {
+          scopeKey: scope.scopeKey, workspaceId, noteId: draft.id, draft,
+          path, method: draft.id ? "PUT" : "POST", body: JSON.parse(JSON.stringify(payload)),
           headers: {
-            ...request.headers,
-            "Content-Type": "application/json",
-            "expected-version": String(expectedVersion)
+            "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID(),
+            ...(draft.id ? { "expected-version": String(expectedVersion) } : {}),
           },
-          body: payload
-        })
-      } else {
-        saved = await bgRequest<NoteListItem>({
-          ...request,
-          path: "/api/v1/notes/",
-          method: "POST",
-          headers: { ...request.headers, "Content-Type": "application/json" },
-          body: payload
-        })
+        }
+        pendingSaveRef.current = pending
       }
+      const saved = await bgRequest<NoteListItem>({ ...request, path: pending.path, method: pending.method, headers: { ...request.headers, ...pending.headers }, body: pending.body })
       if (!isCurrent()) return
       const latest = useWorkspaceStore.getState().currentNote
+      if (pending.draft.pendingKnowledgeProvenance && pending.body.knowledge_provenance &&
+          !knowledgeNoteProvenanceMatches(resolveKnowledgeNoteProvenance(saved).provenance, pending.body.knowledge_provenance)) {
+        throw new Error("Capture source history was not confirmed; retry the saved draft.")
+      }
       // The acknowledgment may assign the first canonical ID to this draft.
       noteId = saved.id
-      if (latest === draft) {
+      pendingSaveRef.current = null
+      if (latest === pending.draft) {
         loadNote(
           serializeNoteForEditor({
             ...saved,
@@ -928,10 +1017,26 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
         showSavedIndicatorTemporarily()
       } else {
+        const acknowledgedHeadIsCurrent =
+          (saved.knowledge_provenance_version || 0) >= (latest.knowledge_provenance_version || 0)
+        const captureHistoryWasRebased = !knowledgeNoteProvenanceMatches(
+          pending.draft.pendingKnowledgeProvenance,
+          pending.body.knowledge_provenance
+        )
         setCurrentNote({
           ...latest,
+          ...(latest.pendingKnowledgeProvenance &&
+          knowledgeNoteProvenanceMatches(
+            latest.pendingKnowledgeProvenance,
+            pending.body.knowledge_provenance
+          )
+            ? { pendingKnowledgeProvenance: undefined }
+            : acknowledgedHeadIsCurrent && captureHistoryWasRebased
+              ? { pendingKnowledgeProvenance: reconcileCapturedNoteProvenance(latest, saved) }
+              : {}),
           id: saved.id,
-          version: saved.version,
+          version: Math.max(latest.version || 0, saved.version || 0),
+          ...(acknowledgedHeadIsCurrent ? knowledgeNoteHead(saved) : {}),
           isDirty: true
         })
       }
@@ -943,8 +1048,21 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       await loadWorkspaceNotes({ request, isCurrent })
     } catch (error: any) {
       if (!isCurrent()) return
-      // Handle version conflict
-      if (error?.message?.includes("version") || error?.status === 409) {
+      if (isDefinitiveWriteRejection(error)) pendingSaveRef.current = null
+      // A policy-blocked receipt remains uncertain and must retain its key/body.
+      if (isNotesProvenancePolicyUnavailable(error)) {
+        messageApi.error(t("playground:studio.sourceHistoryUnavailable", NOTES_PROVENANCE_UNAVAILABLE_MESSAGE))
+      } else if (isDefinitiveWriteRejection(error) && (error?.message?.includes("version") || error?.status === 409)) {
+        pendingSaveRef.current = null
+        if (draft.id && scope && !String(error?.message).includes("encryption_unsupported")) {
+          try {
+            const remote = await bgRequest<NoteListItem>({ ...requestScopeFields(scope.requestScope), abortSignal: scope.scopeSignal, path: `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath, method: "GET" })
+            if (!isCurrent()) return
+            const latest = useWorkspaceStore.getState().currentNote
+            const pendingKnowledgeProvenance = reconcileCapturedNoteProvenance(latest, remote)
+            setCurrentNote({ ...latest, ...knowledgeNoteHead(remote), pendingKnowledgeProvenance, version: remote.version, isDirty: true })
+          } catch { /* Keep the original draft and require another explicit retry. */ }
+        }
         messageApi.open({
           type: "error",
           key: "workspace-note-version-conflict",
@@ -957,13 +1075,16 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
                   "Note was modified elsewhere. Reload the latest version to merge your draft."
                 )}
               </span>
-              {currentNote.id ? (
+              {draft.id && scope ? (
                 <Button
                   size="small"
                   type="link"
                   onClick={() => {
                     messageApi.destroy("workspace-note-version-conflict")
-                    void handleReloadLatestAfterConflict()
+                    void handleReloadLatestAfterConflict({
+                      scopeKey: scope!.scopeKey, workspaceId,
+                      workspaceTag: draftWorkspaceTag, noteId: draft.id!
+                    })
                   }}
                 >
                   {t("common:reload", "Reload latest")}
@@ -1082,7 +1203,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
     const sections = [`# ${title}`]
     if (keywordLine) sections.push(keywordLine)
-    if (currentNote.content.trim()) sections.push(currentNote.content)
+    if (currentNote.content.trim()) sections.push(retainKnowledgeNoteProvenance(currentNote.content, currentNote))
     const markdown = `${sections.join("\n\n").trim()}\n`
     const filename = `${sanitizeFilename(title)}.md`
 
@@ -1205,6 +1326,16 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         </div>
       )}
 
+      {resolveKnowledgeNoteProvenance(currentNote, currentNote.content).state === "deleted" ? (
+        <p role="status" className="mb-2 text-xs text-text-muted">{t("playground:studio.sourceHistoryRemoved", "Source history was removed. Ordinary edits keep it removed.")}</p>
+      ) : resolveKnowledgeNoteProvenance(currentNote, currentNote.content).reconciliation ? (
+        <p role="status" className="mb-2 text-xs text-text-muted">{t("playground:studio.sourceHistoryReconciled", "Retained source history differs from the portable copy. The retained history is used.")}</p>
+      ) : resolveKnowledgeNoteProvenance(currentNote, currentNote.content).provenance ? (
+        <p className="mb-2 text-xs text-text-muted">{t("playground:studio.sourceHistoryRetained", "Original source history is retained with this note.")}</p>
+      ) : null}
+
+      <KnowledgeNoteHistory note={currentNote} />
+
       {/* Title input */}
           <Input
         ref={titleInputRef}
@@ -1307,7 +1438,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
               updateNoteContent(
                 retainKnowledgeNoteProvenance(
                   e.target.value,
-                  readKnowledgeNoteProvenance(currentNote.content)
+                  currentNote
                 )
               )
             }}
@@ -1375,7 +1506,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       )}
 
       {/* Load Note Modal */}
-      <Modal
+      {isLoadModalOpen && <Modal
         title={
           <span className="flex items-center gap-2">
             <FolderOpen className="h-4 w-4" />
@@ -1472,7 +1603,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             </div>
           )}
         </div>
-      </Modal>
+      </Modal>}
       </> : <div role="status" className="text-sm text-text-muted">This note isn't available.</div>}
     </div>
   )

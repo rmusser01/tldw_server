@@ -15,7 +15,15 @@ const recovery: HistoryTurnRecovery = {
   selection_digest: "a".repeat(64), request_context_digest: "b".repeat(64),
   input_text: "Original recovered question", input_images: [], result_text: "", state: "unknown"
 }
-const state = vi.hoisted(() => ({ active: true, restoring: false, epoch: 0, referenceId: "reference-A", ownerKey: "native-A", onSubmit: vi.fn(), getMediaDetails: vi.fn() }))
+const state = vi.hoisted(() => ({ active: true, restoring: false, epoch: 0, referenceId: "reference-A", ownerKey: "native-A", onSubmit: vi.fn(), getMediaDetails: vi.fn(), captureHead: vi.fn(), captureScope: vi.fn(), regenerate: vi.fn() }))
+vi.mock("@/utils/research-web-capture", async () => ({
+  ...(await vi.importActual<typeof import("@/utils/research-web-capture")>("@/utils/research-web-capture")),
+  assertWebCaptureHeadCurrent: (...args: unknown[]) => state.captureHead(...args)
+}))
+vi.mock("@/services/service-prompts", async () => ({
+  ...(await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts")),
+  loadServicePromptSnapshot: (...args: unknown[]) => state.captureScope(...args)
+}))
 vi.mock("@/hooks/chat/useWorkspaceChatCheckpoint", () => ({
   useWorkspaceChatCheckpoint: (options: { setDraft: (value: string) => void }) => ({
     active: state.active, restoring: state.restoring, setDraft: options.setDraft, referenceId: state.referenceId,
@@ -39,7 +47,7 @@ vi.mock("@/components/Common/Playground/HistorySelectionReview", () => ({
 }))
 vi.mock("@/hooks/useMessageOption", async () => {
   const { useStoreMessageOption } = await import("@/store/option")
-  return { useMessageOption: () => ({ ...useStoreMessageOption(), onSubmit: state.onSubmit, stopStreamingRequest: vi.fn() }) }
+  return { useMessageOption: () => ({ ...useStoreMessageOption(), onSubmit: state.onSubmit, regenerateLastMessage: state.regenerate, stopStreamingRequest: vi.fn() }) }
 })
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({ containerRef: { current: null }, isAutoScrollToBottom: true, autoScrollToBottom: vi.fn() })
@@ -55,13 +63,23 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 vi.mock("@/services/tldw-server", () => ({ fetchChatModels: async () => [{ id: "test-model", name: "Test Model", provider: "test" }] }))
 vi.mock("@/components/Option/Playground/ChatModelSelectorDropdown", () => ({ ChatModelSelectorDropdown: () => null }))
-vi.mock("@/components/Common/Playground/Message", () => ({ PlaygroundMessage: () => null }))
+vi.mock("@/components/Common/Playground/Message", () => ({
+  PlaygroundMessage: ({ onRegenerate, onSaveToWorkspaceNotes }: { onRegenerate?: () => void, onSaveToWorkspaceNotes?: () => void }) => {
+    savedReplyCapture = onSaveToWorkspaceNotes
+    return <><button onClick={onRegenerate}>Retry interrupted reply</button>
+      {onSaveToWorkspaceNotes && <button onClick={onSaveToWorkspaceNotes}>Save reply to workspace notes</button>}</>
+  }
+}))
 
 import { useStoreMessageOption } from "@/store/option"
 import { useWorkspaceStore } from "@/store/workspace"
+import { serverWorkspaceMetadata } from "@/store/__tests__/workspace-activation.fixtures"
 import { ChatPane } from "../ChatPane"
 
+let savedReplyCapture: (() => void) | undefined
+
 beforeEach(() => {
+  savedReplyCapture = undefined
   state.active = true
   state.restoring = false
   state.epoch = 0
@@ -69,6 +87,9 @@ beforeEach(() => {
   state.ownerKey = "native-A"
   state.onSubmit.mockReset().mockResolvedValue({ status: "submitted" })
   state.getMediaDetails.mockReset().mockResolvedValue({ content: { text: "Operator source text" } })
+  state.captureHead.mockReset()
+  state.captureScope.mockReset()
+  state.regenerate.mockReset()
   recovery.logical_user_message_id = uuid
   recovery.input_text = "Original recovered question"
   useWorkspaceStore.setState({ workspaceId: "workspace-A", workspaceChatReferenceId: "reference-A", storeHydrated: true,
@@ -80,6 +101,72 @@ const submit = () => {
   fireEvent.change(screen.getByRole("textbox", { name: "Chat message" }), { target: { value: "New question" } })
   fireEvent.click(screen.getByRole("button", { name: "Send" }))
 }
+
+it.each(["local", "workspace", "note"])("checks the live %s destination before capturing a reply", async destination => {
+  useWorkspaceStore.setState({ serverWorkspace: null })
+  useWorkspaceStore.getState().setCurrentNote({ ...useWorkspaceStore.getState().currentNote,
+    id: null, serverWorkspaceId: undefined, serverScopeKey: undefined,
+    title: "Private draft", content: "Unsent body", isDirty: true })
+  useStoreMessageOption.setState({ messages: [{ id: "reply", isBot: true, name: "Assistant", message: "Captured reply", sources: [] }] })
+  render(<MemoryRouter><ChatPane /></MemoryRouter>)
+  const capture = savedReplyCapture
+  expect(capture).toBeTypeOf("function")
+  const before = useWorkspaceStore.getState().currentNote
+  if (destination === "workspace") act(() => {
+    useWorkspaceStore.setState({ serverWorkspace: { scopeKey: "owner-a", sourceSignature: "", selectedSourceSignature: "",
+      metadata: { ...serverWorkspaceMetadata, id: "workspace-A" }, notes: [] } })
+  })
+  if (destination === "note") act(() => {
+    useWorkspaceStore.getState().setCurrentNote({ ...useWorkspaceStore.getState().currentNote,
+      serverWorkspaceId: "workspace-A", serverScopeKey: "owner-a" })
+  })
+  const destinationNote = useWorkspaceStore.getState().currentNote
+  act(() => capture?.())
+  if (destination === "local") {
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("Unsent body")
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("Captured reply")
+  } else {
+    expect(useWorkspaceStore.getState().currentNote).toBe(destinationNote)
+    expect(await screen.findByText("Server notes are view-only")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Save reply to workspace notes" })).toBeNull()
+    expect(useWorkspaceStore.getState().currentNote.content).toBe(before.content)
+  }
+  act(() => { useWorkspaceStore.setState({ serverWorkspace: null }); useWorkspaceStore.getState().setCurrentNote({
+    ...useWorkspaceStore.getState().currentNote, serverWorkspaceId: undefined, serverScopeKey: undefined }) })
+})
+
+it.each(["current", "new selection", "selection ABA"])(
+  "capture preflight keeps Retry's click-time history fence for %s",
+  async transition => {
+    let releaseHead!: () => void
+    const releaseScope = vi.fn()
+    state.captureScope.mockResolvedValue({
+      requestScope: {}, scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal, release: releaseScope
+    })
+    state.captureHead.mockImplementation(() => new Promise<void>(resolve => { releaseHead = resolve }))
+    state.regenerate.mockImplementation(async (dispatch: { assertCurrent?: () => void }) => {
+      state.epoch += 1
+      dispatch.assertCurrent?.()
+    })
+    useWorkspaceStore.setState({
+      sources: [{ id: "capture", mediaId: 1, title: "Captured source", type: "website", status: "ready", addedAt: new Date(0),
+        webCapture: { clipId: "clip", requestedUrl: "https://example.org", capturedAt: "2026-10-08T00:00:00Z",
+          contentSha256: "a".repeat(64), refreshOf: null, mediaId: 1, versionNumber: 1, versionUuid: "version" } }],
+      selectedSourceIds: ["capture"]
+    })
+    useStoreMessageOption.setState({ messages: [{ id: "reply", isBot: true, name: "Assistant", message: "Interrupted reply", sources: [] }] })
+    render(<MemoryRouter><ChatPane /></MemoryRouter>)
+    fireEvent.click(screen.getByRole("button", { name: "Retry interrupted reply" }))
+    await waitFor(() => expect(state.captureHead).toHaveBeenCalledTimes(1))
+    if (transition !== "current") state.epoch += 1
+    if (transition === "selection ABA") state.epoch += 1
+    await act(async () => { releaseHead() })
+    await waitFor(() => expect(releaseScope).toHaveBeenCalledTimes(1))
+    expect(state.regenerate).toHaveBeenCalledTimes(transition === "current" ? 1 : 0)
+    expect(state.onSubmit).not.toHaveBeenCalled()
+  }
+)
 
 it("keeps retained recovery controls in the transcript scroller outside the composer", () => {
   render(<MemoryRouter><ChatPane /></MemoryRouter>)
