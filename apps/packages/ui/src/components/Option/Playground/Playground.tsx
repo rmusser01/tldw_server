@@ -1,3 +1,4 @@
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
@@ -571,6 +572,7 @@ const PlaygroundContent = () => {
     // Do not reload the prior conversation while preparing a fresh card command.
     hydrateServerChat: !routeCharacterIntentId || Boolean(routeCharacterIntentChatId),
   });
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   // CS-04 (#3104): replies that ended early or finished off-screen stay in
   // the transcript; the review panel leaves out the ones shown or handled.
   const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
@@ -3547,7 +3549,7 @@ const PlaygroundContent = () => {
       onInspectAssistant={inspectAssistantFromCockpit}
       onOpenSceneDirector={openActorSettings}
       canStopStreaming={streaming}
-      onStopStreaming={() => stopStreamingRequest()}
+      onStopStreaming={stopStreamingFromUi}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
       regenerateUnavailableReason={

@@ -1,3 +1,4 @@
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { getAssistantSelectionMode } from "@/types/assistant-selection"
@@ -219,6 +220,7 @@ export const PlaygroundChat = ({
     visualIdentityManualExpressionOverride: visualManualExpressionKey,
     setVisualIdentityManualExpressionOverride: setVisualManualExpressionKey
   })
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const confirmSensitiveValues = React.useCallback(async () => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") {
       return false
@@ -1388,7 +1390,7 @@ export const PlaygroundChat = ({
                 modelName={message?.modelName}
                 createdAt={message?.createdAt}
                 temporaryChat={temporaryChat}
-                onStopStreaming={stopStreamingRequest}
+                onStopStreaming={stopStreamingFromUi}
                 onContinue={runContinue}
                 onRunSteeredContinue={runSteeredContinue}
                 documents={message?.documents}
@@ -1500,7 +1502,7 @@ export const PlaygroundChat = ({
                 deleteMessage={deleteMessage}
                 toggleMessagePinned={toggleMessagePinned}
                 createChatBranch={createChatBranch}
-                stopStreamingRequest={stopStreamingRequest}
+                stopStreamingRequest={stopStreamingFromUi}
                 runContinue={runContinue}
                 runSteeredContinue={runSteeredContinue}
                 buildMessageResearchActions={buildMessageResearchActions}

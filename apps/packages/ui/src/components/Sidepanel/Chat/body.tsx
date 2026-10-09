@@ -1,3 +1,4 @@
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
@@ -51,6 +52,7 @@ export const SidePanelBody = ({
     serverChatId,
     isEmbedding
   } = useMessage()
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const { ttsEnabled } = useWebUI()
   const [openReasoning] = useStorage("openReasoning", false)
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
@@ -316,7 +318,7 @@ export const SidePanelBody = ({
                   modelName={message?.modelName}
                   createdAt={message?.createdAt}
                   temporaryChat={temporaryChat}
-                  onStopStreaming={stopStreamingRequest}
+                  onStopStreaming={stopStreamingFromUi}
                   serverChatId={serverChatId}
                   serverMessageId={message.serverMessageId}
                   messageId={message.id}

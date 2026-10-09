@@ -66,7 +66,7 @@ export interface TerminalStackV1Props {
   // --- Send ---
   onSend: () => void
   sending?: boolean
-  stopStreaming?: () => void
+  stopStreaming?: (event?: React.SyntheticEvent<HTMLElement>) => void
   canSend?: boolean
 
   // --- Top rail (simple API) ---
@@ -166,13 +166,13 @@ export const TerminalStackV1: React.FC<TerminalStackV1Props> = ({
     if (e.defaultPrevented) return
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      handleSend()
+      handleSend(e)
     }
   }
 
-  const handleSend = () => {
+  const handleSend = (event?: React.SyntheticEvent<HTMLElement>) => {
     if (sending) {
-      stopStreaming?.()
+      stopStreaming?.(event)
       return
     }
     if (canSend) onSend()

@@ -3294,6 +3294,8 @@ it("compact Stop releases native busy state through the actual shared provider a
     enter(); await gate
     throw new DOMException("Stopped", "AbortError")
   })
+  const focusRequests = vi.fn()
+  window.addEventListener("tldw:focus-composer", focusRequests)
   let pending!: Promise<unknown>
   try {
     act(() => { pending = hook.result.current.actions.regenerateLastMessage() })
@@ -3306,7 +3308,8 @@ it("compact Stop releases native busy state through the actual shared provider a
     expect(mocks.chatBaseState.streaming).toBe(false)
     expect(mocks.chatBaseState.isProcessing).toBe(false)
     expect(h1.controller.followResult).not.toHaveBeenCalled()
-  } finally { release(); await pending; mocks.chatBaseState.streaming = false; mocks.chatBaseState.isProcessing = false; hook.unmount()
+    expect(focusRequests).not.toHaveBeenCalled()
+  } finally { window.removeEventListener("tldw:focus-composer", focusRequests); release(); await pending; mocks.chatBaseState.streaming = false; mocks.chatBaseState.isProcessing = false; hook.unmount()
     mocks.setStreaming.mockReset(); mocks.setIsProcessing.mockReset(); mocks.useRealPageAssist = false }
 })
 

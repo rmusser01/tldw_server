@@ -69,7 +69,7 @@ export interface SplitBriefV3Props {
   // --- Send ---
   onSend: () => void
   sending?: boolean
-  stopStreaming?: () => void
+  stopStreaming?: (event?: React.SyntheticEvent<HTMLElement>) => void
   canSend?: boolean
 
   // --- Brief panel (simple API) ---
@@ -172,9 +172,9 @@ export const SplitBriefV3: React.FC<SplitBriefV3Props> = ({
     }
   }
 
-  const handleSend = () => {
+  const handleSend = (event?: React.SyntheticEvent<HTMLElement>) => {
     if (sending) {
-      stopStreaming?.()
+      stopStreaming?.(event)
       return
     }
     if (canSend) onSend()

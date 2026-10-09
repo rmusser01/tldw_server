@@ -5459,6 +5459,8 @@ it("full Stop releases native busy state through the actual shared provider afte
     enter(); await gate
     throw new DOMException("Stopped", "AbortError")
   })
+  const focusRequests = vi.fn()
+  window.addEventListener("tldw:focus-composer", focusRequests)
   let pending!: Promise<unknown>
   try {
     act(() => { pending = hook.result.current.actions.regenerateLastMessage() })
@@ -5471,7 +5473,8 @@ it("full Stop releases native busy state through the actual shared provider afte
     expect(store.getState().streaming).toBe(false)
     expect(store.getState().isProcessing).toBe(false)
     expect(h1.controller.followResult).not.toHaveBeenCalled()
-  } finally { release(); await pending; store.setState({ streaming: false, isProcessing: false }); hook.unmount() }
+    expect(focusRequests).not.toHaveBeenCalled()
+  } finally { window.removeEventListener("tldw:focus-composer", focusRequests); release(); await pending; store.setState({ streaming: false, isProcessing: false }); hook.unmount() }
 })
 
 

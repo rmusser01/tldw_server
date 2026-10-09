@@ -128,6 +128,7 @@ import { getProviderDisplayName } from "@/utils/provider-registry"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useSetting } from "@/hooks/useSetting"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import {
@@ -805,6 +806,11 @@ export const SidepanelForm = ({
     serverChatId,
     conversationMetadata
   } = useMessage()
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest, () => {
+    const current = captureCompletionGuard(),
+      revision = form.getRevision()
+    return () => current() && form.getRevision() === revision
+  })
   const greetingSubmitGateRef = React.useRef<() => boolean>(() => false)
   const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) =>
     greetingSubmitGateRef.current() ? Promise.resolve({ status: "skipped" as const,
@@ -3869,7 +3875,7 @@ export const SidepanelForm = ({
                                   <Tooltip title={t("tooltip.stopStreaming")}>
                                     <button
                                       type="button"
-                                      onClick={stopStreamingRequest}
+                                      onClick={stopStreamingFromUi}
                                       data-testid="chat-stop-streaming"
                                       className="rounded-md border border-border p-1 text-text-muted hover:bg-surface2 hover:text-text"
                                       title={t(
@@ -4224,7 +4230,7 @@ export const SidepanelForm = ({
                                 <Tooltip title={t("tooltip.stopStreaming")}>
                                   <button
                                     type="button"
-                                    onClick={stopStreamingRequest}
+                                    onClick={stopStreamingFromUi}
                                     data-testid="chat-stop-streaming"
                                     className="h-11 w-11 min-h-[44px] min-w-[44px] rounded-full border border-border p-0 text-text-muted hover:bg-surface2 hover:text-text"
                                     aria-label={t(
@@ -4542,7 +4548,7 @@ export const SidepanelForm = ({
                               <Tooltip title={t("tooltip.stopStreaming")}>
                                 <button
                                   type="button"
-                                  onClick={stopStreamingRequest}
+                                  onClick={stopStreamingFromUi}
                                   data-testid="chat-stop-streaming"
                                   className={v5ActionButtonClass}
                                   aria-label={t(
@@ -4596,7 +4602,7 @@ export const SidepanelForm = ({
                               }
                               onSend={() => void submitForm()}
                               sending={isSending}
-                              stopStreaming={stopStreamingRequest}
+                              stopStreaming={stopStreamingFromUi}
                               density="compact"
                               onPaletteTrigger={handleV5PaletteTrigger}
                               textareaSlot={composerTextareaShellNode}
@@ -4614,7 +4620,7 @@ export const SidepanelForm = ({
                               }
                               onSend={() => void submitForm()}
                               sending={isSending}
-                              stopStreaming={stopStreamingRequest}
+                              stopStreaming={stopStreamingFromUi}
                               briefSections={briefSections}
                               textareaSlot={composerTextareaShellNode}
                               bottomBarSlot={composerControlAreaNode}
@@ -4629,7 +4635,7 @@ export const SidepanelForm = ({
                               }
                               onSend={() => void submitForm()}
                               sending={isSending}
-                              stopStreaming={stopStreamingRequest}
+                              stopStreaming={stopStreamingFromUi}
                               density="compact"
                               textareaSlot={composerTextareaShellNode}
                               bottomBarSlot={composerControlAreaNode}

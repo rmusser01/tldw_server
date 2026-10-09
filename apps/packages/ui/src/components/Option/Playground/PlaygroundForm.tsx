@@ -1,3 +1,4 @@
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition";
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker";
@@ -2209,6 +2210,11 @@ export const PlaygroundForm = ({
     listRetainedDrafts,
     copyRetainedDraft,
   } = composerInput;
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest, () => {
+    const current = captureCompletionGuard(),
+      revision = form.getRevision()
+    return () => current() && form.getRevision() === revision
+  })
   React.useLayoutEffect(() => {
     composerImageRef.current = form.values.image;
     assistantComposerRef.current = { getRevision: form.getRevision, retainCurrentDraft, draftReady };
@@ -5284,7 +5290,7 @@ export const PlaygroundForm = ({
       onSendWhenEnterChange={setSendWhenEnter}
       sendLabel={sendLabel}
       compareNeedsMoreModels={compareNeedsMoreModels}
-      onStopStreaming={stopStreamingRequest}
+      onStopStreaming={stopStreamingFromUi}
       onStopListening={stopListening}
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
@@ -6796,7 +6802,7 @@ export const PlaygroundForm = ({
                                 }
                                 onSend={handleComposerSend}
                                 sending={isSending}
-                                stopStreaming={stopStreamingRequest}
+                                stopStreaming={stopStreamingFromUi}
                                 tokens={tokensProp}
                                 onPaletteTrigger={() => {
                                   // V5 design: ⌘K injects `/` into the
@@ -6825,7 +6831,7 @@ export const PlaygroundForm = ({
                                 }
                                 onSend={handleComposerSend}
                                 sending={isSending}
-                                stopStreaming={stopStreamingRequest}
+                                stopStreaming={stopStreamingFromUi}
                                 tokens={tokensProp}
                                 briefSections={briefSections}
                                 textareaSlot={composerTextareaNode}
@@ -6841,7 +6847,7 @@ export const PlaygroundForm = ({
                                 }
                                 onSend={handleComposerSend}
                                 sending={isSending}
-                                stopStreaming={stopStreamingRequest}
+                                stopStreaming={stopStreamingFromUi}
                                 tokens={tokensProp}
                                 textareaSlot={composerTextareaNode}
                                 bottomBarSlot={composerToolbarSlot}
