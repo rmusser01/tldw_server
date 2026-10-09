@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
+import dynamic from "next/dynamic"
 import { App as AntdApp, ConfigProvider, Empty } from "antd"
 import { StyleProvider } from "@ant-design/cssinjs"
 import { QueryClientProvider } from "@tanstack/react-query"
@@ -8,7 +9,6 @@ import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
 import { FontSizeProvider } from "@/context/FontSizeProvider"
 import { DemoModeProvider } from "@/context/demo-mode"
 import { getQueryClient } from "@/services/query-client"
-import { SplashOverlay } from "@/components/Common/SplashScreen"
 import { NotificationToastBridge } from "@web/components/notifications/NotificationToastBridge"
 import { useSplashScreen } from "@/hooks/useSplashScreen"
 import { SPLASH_TRIGGER_EVENT } from "@/services/splash-events"
@@ -19,6 +19,15 @@ type AppProvidersProps = {
   children: React.ReactNode
   enableNotifications?: boolean
 }
+
+const SplashOverlay = dynamic(
+  () =>
+    import('@/components/Common/SplashScreen/SplashOverlay').catch((error) => {
+      console.warn('Unable to load splash screen', error);
+      throw error;
+    }),
+  { ssr: false, loading: () => null }
+);
 
 const queryClient = getQueryClient()
 const EMPTY_STYLES = { image: { height: 60 } }
