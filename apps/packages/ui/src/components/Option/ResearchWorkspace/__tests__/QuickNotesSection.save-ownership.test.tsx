@@ -2435,3 +2435,274 @@ it.each(["clear", "workspace-return", "account", "server", "unmount", "note"])(
     );
   },
 );
+
+
+async function prepareCanonicalHandoffRecovery() {
+  const { checkpointQuickNotesOfflineDraft } =
+    await import("@/components/Notes/notes-manager-utils");
+  const { servicePromptAuthorityKey } =
+    await import("@/services/tldw/domains/service-prompts");
+  const { loadServicePromptSnapshot } =
+    await import("@/services/service-prompts");
+  const { retainKnowledgeNoteProvenance } =
+    await import("@/utils/knowledge-note-provenance");
+  const scope = await loadServicePromptSnapshot([]);
+  const authorityId = servicePromptAuthorityKey(scope.requestScope);
+  scope.release();
+  const owner = createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId);
+  const reference = {
+    originalId: otherId,
+    originalVersion: 1,
+    snapshotMediaId: 4,
+    mediaId: null,
+    excerpt: "Full original note text. Source reference ORBIT-742.",
+    title: "Original full note",
+    type: "document" as const,
+    sourceType: "notes",
+    url: `/notes?source_ref_id=${otherId}`,
+    citationIndex: 1,
+  };
+  const history = {
+    origin: "knowledge_qa" as const,
+    question: "What does the complete note say?",
+    sources: [reference],
+    research: {
+      workspace_id: "workspace-a",
+      import_id: noteId,
+      sources: [
+        {
+          mediaId: 4,
+          evidence: {
+            importId: noteId,
+            threadId: "thread-a",
+            snapshot: true,
+            sources: [reference],
+          },
+        },
+      ],
+    },
+  };
+  const head = {
+    knowledge_provenance_state: "active" as const,
+    knowledge_provenance_version: 1,
+    knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+    knowledge_provenance: history,
+  };
+  const canonical = {
+    ...draft(),
+    id: noteId,
+    ...head,
+    version: 2,
+    content: "Canonical sourced body.",
+    isDirty: false,
+  };
+  const later = retainKnowledgeNoteProvenance(
+    "Canonical sourced body.\nLater sourced dirty edit.",
+    head,
+  );
+  const key =
+    'surface:quick-notes:["workspace-a","workspace:a"]:canonical-handoff';
+  await retainSurfaceOfflineDraft(owner, {
+    key,
+    noteId,
+    baseVersion: 1,
+    title: canonical.title,
+    content: later,
+    keywords: canonical.keywords,
+    metadata: {
+      ...head,
+      quickNotesAuthorityId: authorityId,
+      quickNotesWorkspaceId: "workspace-a",
+      quickNotesWorkspaceTag: "workspace:a",
+    },
+    backlinkConversationId: null,
+    backlinkMessageId: null,
+    updatedAt: "2026-10-09T00:00:00Z",
+    syncState: "queued",
+    lastError: null,
+    pendingWrite: {
+      authorityId,
+      key: "canonical-update",
+      expectedVersion: 1,
+      body: {
+        title: canonical.title,
+        content: retainKnowledgeNoteProvenance(canonical.content, head),
+        keywords: ["evidence", "workspace:a"],
+      },
+    },
+  });
+  await checkpointQuickNotesOfflineDraft(
+    owner,
+    key,
+    "canonical-update",
+    () => null,
+    canonical,
+  );
+  localStorage.setItem(
+    "tldw:research-workspace:migration:tombstone:workspace-a",
+    JSON.stringify({
+      legacyWorkspaceId: "workspace-a",
+      serverWorkspaceId: "workspace-a",
+      migrationId: "handoff-migration",
+      contentRetained: false,
+      deletedAt: "2026-10-09T00:00:00Z",
+    }),
+  );
+  useWorkspaceStore.getState().clearCurrentNote();
+  await useWorkspaceStore.persist.rehydrate();
+  useWorkspaceStore.setState({
+    workspaceId: "workspace-a",
+    workspaceTag: "workspace:a",
+  });
+  mocks.request.mockResolvedValue([]);
+  return { canonical, later, owner, key, head, history };
+}
+
+it.each(["before-mount", "after-mount", "newer-server-head"])(
+  "offers explicit canonical handoff recovery after clean hydration %s with full source references",
+  async (timing) => {
+    const fixture = await prepareCanonicalHandoffRecovery();
+    if (timing !== "after-mount")
+      useWorkspaceStore
+        .getState()
+        .loadNote({
+          ...fixture.canonical,
+          version: timing === "newer-server-head" ? 3 : 2,
+        });
+    render(<QuickNotesSection />);
+    if (timing === "after-mount")
+      act(() => {
+        useWorkspaceStore.getState().loadNote(fixture.canonical);
+      });
+    const hydrated = useWorkspaceStore.getState().currentNote;
+    expect(hydrated).toMatchObject({
+      id: noteId,
+      version: timing === "newer-server-head" ? 3 : 2,
+      isDirty: false,
+    });
+    expect(hydrated.pendingNoteWriteKey).toBeUndefined();
+    const resume = await screen.findByRole("button", {
+      name: "Resume local unsaved draft",
+    });
+    expect(useWorkspaceStore.getState().currentNote).toBe(hydrated);
+    fireEvent.click(resume);
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+        id: noteId,
+        version: 2,
+        isDirty: true,
+        content: fixture.later,
+        ...fixture.head,
+      }),
+    );
+    const resumed = useWorkspaceStore.getState().currentNote;
+    expect(resumed.knowledge_provenance?.sources).toEqual(
+      fixture.history.sources,
+    );
+    expect(resumed.knowledge_provenance?.research?.sources[0]).toMatchObject({
+      mediaId: 4,
+      evidence: {
+        snapshot: true,
+        sources: [
+          {
+            originalId: otherId,
+            originalVersion: 1,
+            snapshotMediaId: 4,
+            excerpt: "Full original note text. Source reference ORBIT-742.",
+            title: "Original full note",
+            type: "document",
+            sourceType: "notes",
+            mediaId: null,
+            url: `/notes?source_ref_id=${otherId}`,
+            citationIndex: 1,
+          },
+        ],
+      },
+    });
+    expect(
+      (await readSurfaceOfflineDraftQueue(fixture.owner))[fixture.key],
+    ).toMatchObject({ noteId, baseVersion: 2, content: fixture.later });
+    expect(writes()).toHaveLength(0);
+  },
+);
+
+it.each(["other-note", "account", "workspace"])(
+  "does not offer canonical handoff recovery for a different %s",
+  async (boundary) => {
+    const fixture = await prepareCanonicalHandoffRecovery();
+    useWorkspaceStore
+      .getState()
+      .loadNote({
+        ...fixture.canonical,
+        id: boundary === "other-note" ? otherId : noteId,
+      });
+    if (boundary !== "other-note") changeContext(boundary);
+    const hydrated = useWorkspaceStore.getState().currentNote;
+    await act(async () => {
+      render(<QuickNotesSection />);
+    });
+    expect(
+      screen.queryByRole("button", { name: "Resume local unsaved draft" }),
+    ).toBeNull();
+    expect(useWorkspaceStore.getState().currentNote).toBe(hydrated);
+  },
+);
+
+it.each(["note", "account", "workspace-return", "unmount", "confirm"])(
+  "fences canonical handoff Resume confirmation through %s",
+  async (boundary) => {
+    const fixture = await prepareCanonicalHandoffRecovery();
+    useWorkspaceStore.getState().loadNote(fixture.canonical);
+    let confirmation: Parameters<typeof Modal.confirm>[0] | undefined;
+    vi.spyOn(Modal, "confirm").mockImplementation((config) => {
+      confirmation = config;
+      return { destroy: vi.fn(), update: vi.fn() };
+    });
+    const view = render(<QuickNotesSection />);
+    await screen.findByRole("button", { name: "Resume local unsaved draft" });
+    fireEvent.change(screen.getByLabelText("Note content"), {
+      target: { value: "New unsaved replacement" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Resume local unsaved draft" }),
+    );
+    expect(confirmation).toBeTruthy();
+    if (boundary === "unmount") view.unmount();
+    else if (boundary !== "confirm")
+      act(() => {
+        changeContext(boundary);
+      });
+    const expected = useWorkspaceStore.getState().currentNote;
+    await act(async () => {
+      await confirmation?.onOk?.();
+    });
+    if (boundary === "confirm")
+      expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+        id: noteId,
+        content: fixture.later,
+        version: 2,
+        isDirty: true,
+        ...fixture.head,
+      });
+    else expect(useWorkspaceStore.getState().currentNote).toBe(expected);
+    expect(writes()).toHaveLength(0);
+  },
+);
+
+it("hides canonical handoff recovery when a different canonical note replaces the offered note", async () => {
+  const fixture = await prepareCanonicalHandoffRecovery();
+  useWorkspaceStore.getState().loadNote(fixture.canonical);
+  render(<QuickNotesSection />);
+  await screen.findByRole("button", { name: "Resume local unsaved draft" });
+  act(() => {
+    useWorkspaceStore
+      .getState()
+      .loadNote({ ...fixture.canonical, id: otherId });
+  });
+  expect(
+    screen.queryByRole("button", { name: "Resume local unsaved draft" }),
+  ).toBeNull();
+  expect(
+    (await readSurfaceOfflineDraftQueue(fixture.owner))[fixture.key],
+  ).toMatchObject({ noteId, baseVersion: 2, content: fixture.later });
+});
