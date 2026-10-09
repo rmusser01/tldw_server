@@ -1,7 +1,8 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Modal } from "antd"
 import type {
   AudioGenerationSettings,
   GeneratedArtifact,
@@ -1032,10 +1033,6 @@ describe("StudioPane literature work products", () => {
     expect(query).toContain("Truncated sources: none")
   })
 
-  beforeAll(async () => {
-    await import("../StudioPane/ArtifactModalContent")
-  })
-
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
@@ -1891,6 +1888,10 @@ Proposal
   })
 
   it("exports structured literature tables as CSV and JSON without advertising XLSX", async () => {
+    const modalInfoSpy = vi.spyOn(Modal, "info").mockImplementation(() => ({
+      destroy: vi.fn(),
+      update: vi.fn()
+    }))
     const createObjectUrlSpy = vi
       .spyOn(URL, "createObjectURL")
       .mockReturnValue("blob:literature-table")
@@ -1923,6 +1924,12 @@ Proposal
     renderStudioPane()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
+    expect(modalInfoSpy).toHaveBeenCalledTimes(1)
+    const modal = modalInfoSpy.mock.calls[0][0]
+    expect(modal.title).toBe("Literature Matrix")
+    // Keep the real lazy viewer in the controlled test root, not Modal.info's timer-owned root.
+    render(<>{modal.content}</>)
+
     expect(await screen.findByRole("button", { name: "Export CSV" }))
       .toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Export JSON" }))
@@ -1946,6 +1953,7 @@ Proposal
     createObjectUrlSpy.mockRestore()
     revokeObjectUrlSpy.mockRestore()
     anchorClickSpy.mockRestore()
+    modalInfoSpy.mockRestore()
   })
 
   it("surfaces Deep Research launch links for completed traceable matrix and gap artifacts", () => {

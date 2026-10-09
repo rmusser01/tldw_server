@@ -3332,10 +3332,12 @@ def test_chat_closes_runtime_for_unexpected_setup_baseexception(
     assert runtime_type.instances[0].close_calls == 1
 
 
-def test_chat_closes_runtime_when_billing_exit_fails_after_stream_response_created(
+@pytest.mark.parametrize("stream", [False, True])
+def test_chat_billing_exit_and_runtime_cleanup_respect_stream_ownership(
     authenticated_client,
     mock_chacha_db,
     setup_dependencies,
+    stream,
 ):
     class UnexpectedBillingExit(Exception):
         pass
@@ -3348,7 +3350,7 @@ def test_chat_closes_runtime_when_billing_exit_fails_after_stream_response_creat
         model="gpt-4o-mini",
         api_provider="openai",
         messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
-        stream=True,
+        stream=stream,
     )
 
     async def successful_stream():
@@ -3362,12 +3364,30 @@ def test_chat_closes_runtime_when_billing_exit_fails_after_stream_response_creat
             chat_endpoint,
             "execute_streaming_call",
             AsyncMock(return_value=StreamingResponse(successful_stream())),
-        ),
+        ) as execute_stream,
+        patch.object(
+            chat_endpoint,
+            "execute_non_stream_call",
+            AsyncMock(return_value={"choices": [{"message": {"role": "assistant", "content": "ok"}}]}),
+        ) as execute_non_stream,
         patch.dict(app.dependency_overrides, {chat_endpoint.get_billing_org_id: lambda: 7}),
-        pytest.raises(UnexpectedBillingExit, match="billing exit failed"),
     ):
-        authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+        if stream:
+            response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+            assert response.status_code == 200
+            assert '"content":"ok"' in response.text
+            execute_stream.assert_awaited_once()
+            execute_non_stream.assert_not_awaited()
+            billing_enforcer.__aexit__.assert_not_awaited()
+        else:
+            with pytest.raises(UnexpectedBillingExit, match="billing exit failed"):
+                authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+            execute_non_stream.assert_awaited_once()
+            execute_stream.assert_not_awaited()
+            billing_enforcer.__aexit__.assert_awaited_once_with(None, None, None)
 
+    billing_enforcer.__aenter__.assert_awaited_once()
+    assert len(runtime_type.instances) == 1
     assert runtime_type.instances[0].close_calls == 1
 
 

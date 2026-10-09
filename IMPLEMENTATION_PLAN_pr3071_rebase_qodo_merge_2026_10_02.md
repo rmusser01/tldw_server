@@ -2469,3 +2469,132 @@ review are complete, pending last normal preflight, exact integration commit
 and already-approved explicit-GitHub publication. Actual dev97ea and remote135
 remain independently unchanged. Successor hosted/native acceptance and normal
 PR merge/safe cleanup remain pending.
+
+The fully qualified correction batch is now normally committed and PUBLISHED
+as94bb11b4c04721cc7733f9ba57788f0a098f3fb7, tree verified by GitHub readback,
+with exact parents4a1df76fa585fd813dccac727b693a338394255c and actual
+dev97ea9cd5fa7e3a61ee4e7c56f3d9643b7311d511. Fresh exact135 lease and the
+explicit GitHub URL produced a verified fast-forward135..94bb; normal hooks
+were preserved. Explicit normal979-file preflight passed; the inherited
+pre-commit installation remains absent. All17 unresolved index entries were
+resolved by staging the qualified bytes. All354 staged paths were checked,
+including89 unchanged incoming files bound exactly to dev. Dependency links
+and caches were excluded. No history rewrite or check bypass occurred.
+
+Publication preflight/readback bind all17454 source entries to the committed
+tree and exact actual remote head/dev/parents/body. The original temporary
+canonical summary path is absent; the retained published-body copy has exact
+whole-body9f36b70b and original740-byte human suffix000648a4/content3ad24a.
+Those verified bytes were preserved without rewriting human text. New whole
+body12a558e692e8500d1a8dd346e18b3afa1c0d31a7433d637ab1d37c3c1ae2f76d
+is read back exact. The missing-path and staging-manifest collector failures
+remain distinct, with no test/hosted failure or pre-check publication claim.
+
+At2026-10-09T00:33:09.489Z fresh exact94bb checks are48SUCCESS/29SKIPPED/
+27IN_PROGRESS/11QUEUED/one nonrequired cancelled license audit, no failed
+checks or actual inspected owning jobs. License policy SUCCESS is the only
+qualified required gate at this observation; other gates are missing/running/
+queued, not passed. Actual mainCI37865220750, frontend37865220690 and
+E2ECritical37865220620 job APIs bind94bb; initial owning work is incomplete.
+All15 historical review threads remain resolved, with no new comment changes.
+The completed source-bound MANUAL review substitutes Qodo, not a fabricated
+GitHub approval or fresh Qodo review. Preserve healthy new-head runs; no
+evidence-only push, rerun or reset. Historical135 hosted proof is not94bb proof.
+
+Stage26/TASK13421.1 remain In Progress for actual94bb all-seven/owning hosted
+gates, applicable acceptance, already-approved NORMAL PR merge and safe owned
+cleanup. These post-publication notes stay intentionally UNCOMMITTED and
+UNPUBLISHED. FullUatPassed remains false; no new browser/native/provider/model
+operation, artifact serving or protected-data/service/profile mutation. All
+reviewers and local qualification sessions are complete; monitoring may resume.
+
+## Stage 27: Correct Current-Head Hosted Frontend Failures
+**Goal**: Correct the actual94bb literature-modal fixture and Notes submenu lifetime failures without altering assertions, deadlines, health checks or acceptance limits.
+**Success Criteria**: Actual menu regression proves click-open lifetime and disabled/export dispatch fences; real literature viewer and View/config/export assertions remain; reviewed current source passes owning tests/types/build/unchanged budgets and normal preflight before any publication.
+**Tests**: Existing literature corpus, Notes header desktop/mobile click-open and pointer-leave behavior, disabled Export, print owning corpus, source-bound current frontend/type/build qualification and genuine successor hosted checks.
+**Status**: Complete
+
+Direct job APIs/rawlogs bind the unit shard113610425515, dependent frontend gate113614146897 and Notes UX113610245673 failures to94bb. These are test failures, not download infrastructure. Unchanged local literature33PASS is not a causal fix; Antd static Modal.info schedules a separate asynchronous root, whereas its real viewer can be tested from captured configuration in the controlled React test root. Notes logs show submenu closing/pointer interception; inherited Menu hover/100ms close and closing-popup pointer-events:none support the lifetime hypothesis, not a proven CSS stacking defect. The bounded production correction uses existing click submenu behavior and updates its page-object caller, with real Menu negative controls. No native/browser/protected-service operation or deadline/assertion weakening is authorized. ADR required:no; no durable architecture or public API/persistence/security rule change; ADR059 tracking remains governing.
+
+The first three geometry/visibility fixtures failed before submenu behavior and
+remain invalid causal evidence. The ARIA-only reduction was rejected before any
+patch or runner; all visibility assertions remain. Normal CSS animation events
+reach actual click policy: red8PASS/4FAIL; the one-property correction passes
+opening, pointer-leave, dispatch and disabled controls. Outer-only closure and
+provider-only candidates both43PASS/2FAIL remain failed. Independent review
+identified the omitted separately portaled submenu closing motion. Matching
+the actual AppShell provider and completing BOTH actual closing animations
+while retaining every visibility assertion yields45PASS/2files/zeroFAIL or
+pending. The final exact four-file independent review has no actionable P1/P2;
+it does not establish hosted geometry, real Modal-shell or native acceptance.
+
+Current types8GBexit0 and matched4file lint0errors/8inheritedwarnings/ZEROnew.
+The initial frontend439case run438PASS/1FAIL from sandbox EPERM on an existing
+owned ephemeral-port test remains failed; separate unchanged host-access run
+439PASS/11files. Immutable build/tokens/UNCHANGED budgets each0, NOTSERVED;
+shared557252<614400/heaviest855159<921600. Source bindings7396apps and7398
+frontend inputs exact. Fresh unchanged2productionPython Bandit0 findings;
+TypeScript files are not Bandit scope. Final current UI7769PASS/397files and
+normal980-file actual union preflight PASS, all source bindings exact. These
+qualify the bounded four-file frontend correction, not successor hosted/native
+acceptance or the unresolved backend workflow timeout.
+
+## Stage 28: Inspect Actual Workflow Engine Failure
+**Goal**: Diagnose and correct only an independently established cause of current94bb workflow-engine hosted failure without masking it or changing the deadline.
+**Success Criteria**: Retain original job/full artifact and prove any correction through isolated fixture/causal tests, substantive independent review, security and normal preflight before publication.
+**Tests**: Existing workflow step-type and owning engine contracts using finite adapters and isolated SQLite/official fixtures; original30s terminal wait and canonical attempt assertions unchanged.
+**Status**: In Progress
+
+Fresh exact-head job113610749274 is failed92PASS/1FAIL/6SKIP on actual Ubuntu
+Python3.12: log-only canonical-attempt run remains running after30seconds.
+Raw job output is limited to its last2MB; separately retained static artifact
+provides the full log/XML. No dependency-install or infrastructure cause is
+established. Parent reads actual engine/start/submit flow; independent sidecar
+inspects test-owned scheduler isolation. Unchanged step-type8PASS is not a
+causal correction. First shard invocation66PASS/27FAIL/6SKIP omitted async
+plugins and remains failed. Distinct corrected exact-plugin invocation93PASS,
+6existing stress skips, zeroFAIL/ERROR on unchanged9612 source inputs. The
+hosted timeout has not been reproduced or established as harmless flakiness.
+No production workflow patch, deadline/health/assertion change, hosted rerun or
+shared-service/protected-data operation has occurred. ADR assessment deferred
+until a root is established; existing task/ADR059 tracking remains governing.
+
+## Stage 29: Align Billing Ownership and Credential Cleanup Contracts
+**Goal**: Correct the exact94bb hosted chat billing-exit test without restoring double streaming billing or losing exceptional credential cleanup coverage.
+**Success Criteria**: Unchanged causal assertion failure retained; nonstream billing-exit error still propagates and closes runtime once; streaming never invokes the second billing exit and closes runtime once; existing stream metrics-exit failure and real exactly-once billing regressions remain passing.
+**Tests**: Finite provider/runtime doubles for corrected contract, existing setup/metrics/refund cleanup cases and selected-durable billing/admission owning tests; no model/native/browser operations.
+**Status**: Complete
+
+Hosted113610743285 failed884PASS/1FAIL/30SKIP. Unchanged local single case
+reproduces DID NOT RAISE: reviewed MR4 deliberately skips streaming __aexit__,
+whose only role is duplicate usage recording rather than resource teardown.
+Minimum test-only semantic alignment keeps nonstream error propagation and
+adds explicit streaming no-exit/runtime-release controls. Existing metrics-exit
+and RG-refund failures cover exceptional ownership after stream response
+creation. Production endpoint/service unchanged. ADR required:no; no new
+architecture/accounting rule, existing reviewed MR4 ownership stays governing.
+
+Initial11PASS and281PASS owning are predecessors. Independent review found
+the parameterization could mask an earlier nonstream error or accept the wrong
+executor. Retaining both executor mocks and asserting selected await once,
+opposite not awaited, and nonstream exit(None,None,None) preserves stronger
+contract proof. Final11focusedPASS and final281PASS/17safe paths, zeroFAIL,
+ERROR orSKIP, all9612 runtime/test/config/helper inputs exact. Final completed
+independent review no actionableP1/P2;16 exact source hashes; reviewer did not
+execute tests/security/preflight. Matched Ruff0/baseline0, changed Black range0;
+whole-file current/baseline Black inherited formatting failures retained. Test
+Bandit rawexit1:585B101 versus582baseline plus one identical inheritedB105
+synthetic sentinel, no new non-assert findings/errors/suppressions. Fresh two
+unchanged production files Bandit0. Initial missing Ruff executable/parser,
+incorrect B105 classifier and omitted activation guard failures remain separate
+nonqualification; no dependencies installed or shared runtime changed.
+
+Normal successor publication is for this qualified functional/test correction
+batch only, not evidence-only notes. Original94bb hosted main CI completed
+failure: chat and workflow shards, with aggregate failure due shard status.
+Stage28 workflow timeout remains causally unresolved after three bounded local
+invocations and alternative fixture/engine investigation; no fourth unchanged
+probe, speculative production patch, deadline change or hosted retry. Stage26
+still requires actual successor all7+owning hosted/native applicable acceptance
+before NORMALmerge/safecleanup. No new native/browser/model/protected-service
+operation or artifact serving is established or authorized.
