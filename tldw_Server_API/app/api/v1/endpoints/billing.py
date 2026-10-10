@@ -2,6 +2,10 @@
 billing.py
 
 Admin billing endpoints for subscription management and analytics.
+
+Mounted under /api/v1/admin/billing (admin-guarded). The legacy public
+/api/v1/billing mount stays removed per the OSS billing API removal; no
+deprecation alias resurrects it.
 """
 from __future__ import annotations
 
@@ -18,7 +22,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.billing_repo import AuthnzBillingRepo
-from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
 router = APIRouter(
     prefix="/billing",
@@ -107,14 +110,88 @@ def _compute_at_risk_flags(sub: dict[str, Any], now: datetime) -> dict[str, Any]
     }
 
 
+def _subscription_to_response_item(sub: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Build a subscriptions-list response item from a repo subscription row.
+
+    The row is expected to carry org_name (resolved by the repo's SQL JOIN).
+    """
+    computed = _compute_at_risk_flags(sub, now)
+    org_id = sub.get("org_id")
+    item: dict[str, Any] = {
+        "id": sub.get("id"),
+        "org_id": org_id,
+        "org_name": sub.get("org_name"),
+        "plan_id": sub.get("plan_id"),
+        "plan": {
+            "id": sub.get("plan_id"),
+            "name": sub.get("plan_display_name") or sub.get("plan_name"),
+            "tier": sub.get("plan_name", "free"),
+            "stripe_product_id": None,
+            "stripe_price_id": None,
+            "monthly_price_cents": int((sub.get("price_usd_monthly") or 0) * 100),
+            "included_token_credits": (sub.get("effective_limits") or {}).get(
+                "llm_tokens_month", 0
+            ),
+            "overage_rate_per_1k_tokens_cents": 0,
+            "features": [],
+            "is_default": sub.get("plan_name") == "free",
+            "created_at": sub.get("created_at"),
+            "updated_at": sub.get("created_at"),
+        },
+        "stripe_subscription_id": sub.get("stripe_subscription_id"),
+        "status": sub.get("status"),
+        "current_period_start": sub.get("current_period_start"),
+        "current_period_end": sub.get("current_period_end"),
+        "trial_end": sub.get("trial_end"),
+        "cancel_at": sub.get("current_period_end") if computed["cancel_at_period_end"] else None,
+        "created_at": sub.get("created_at"),
+        "updated_at": sub.get("updated_at"),
+        # Computed lifecycle fields
+        "days_since_created": computed["days_since_created"],
+        "days_past_due": computed["days_past_due"],
+        "days_until_period_end": computed["days_until_period_end"],
+        "usage_pct": computed["usage_pct"],
+        "at_risk": computed["at_risk"],
+        "at_risk_reasons": computed["at_risk_reasons"],
+        "cancel_at_period_end": computed["cancel_at_period_end"],
+        "billing_cycle": sub.get("billing_cycle"),
+    }
+    return item
+
+
+@router.get("/overview")
+async def get_billing_overview(
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> dict[str, Any]:
+    """Subscription counts by status plus monthly recurring revenue.
+
+    Response shape (consumed by the admin BillingDashboardPage):
+    - mrr: sum of active subscriptions' plan monthly price (0 when no cost column applies)
+    - active_subscriptions / canceled_subscriptions / past_due_subscriptions: counts
+    """
+    try:
+        pool = await get_db_pool()
+        billing_repo = AuthnzBillingRepo(db_pool=pool)
+        return await billing_repo.get_overview()
+    except Exception:
+        logger.error("get_billing_overview failed")
+        raise
+
+
 @router.get("/subscriptions")
 async def list_subscriptions(
     status: str | None = Query(None, description="Filter by subscription status"),
+    limit: int = Query(100, ge=1, le=500, description="Page size"),
+    offset: int = Query(0, ge=0, description="Page offset"),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> list[dict[str, Any]]:
-    """List all subscriptions with computed lifecycle and at-risk indicators.
+) -> dict[str, Any]:
+    """Page subscriptions with computed lifecycle and at-risk indicators.
 
-    Returns subscription data enriched with:
+    Status filtering, ordering and paging all happen in SQL; org names are
+    resolved by the repo's LEFT JOIN. Returns ``{"items", "total"}`` where
+    ``total`` is the truthful COUNT(*) of matching rows.
+
+    Each item is enriched with:
     - org_name: resolved organization name
     - days_since_created: days since subscription was created
     - days_past_due: days the subscription has been past due
@@ -126,81 +203,54 @@ async def list_subscriptions(
     try:
         pool = await get_db_pool()
         billing_repo = AuthnzBillingRepo(db_pool=pool)
-        orgs_repo = AuthnzOrgsTeamsRepo(db_pool=pool)
 
-        # Fetch all subscriptions
-        subscriptions = await billing_repo.list_all_subscriptions()
-
-        # Build org name lookup
-        org_ids = list({sub["org_id"] for sub in subscriptions if sub.get("org_id")})
-        org_names: dict[int, str] = {}
-        if org_ids:
-            try:
-                orgs_list, _total = await orgs_repo.list_organizations(limit=len(org_ids) + 50)
-                for org in orgs_list:
-                    org_id = org.get("id")
-                    name = org.get("name")
-                    if org_id is not None and name:
-                        org_names[int(org_id)] = str(name)
-            except Exception:
-                logger.warning("Failed to resolve org names for subscriptions")
+        subscriptions, total = await billing_repo.list_subscriptions(
+            status=status, limit=limit, offset=offset
+        )
 
         now = datetime.now(timezone.utc)
-        result = []
+        result = [
+            _subscription_to_response_item(sub, now) for sub in subscriptions
+        ]
 
-        for sub in subscriptions:
-            # Apply status filter
-            sub_status = str(sub.get("status") or "").lower()
-            if status and sub_status != status.lower():
-                continue
-
-            # Compute at-risk fields
-            computed = _compute_at_risk_flags(sub, now)
-
-            # Build response item
-            org_id = sub.get("org_id")
-            item: dict[str, Any] = {
-                "id": sub.get("id"),
-                "org_id": org_id,
-                "org_name": org_names.get(int(org_id)) if org_id else None,
-                "plan_id": sub.get("plan_id"),
-                "plan": {
-                    "id": sub.get("plan_id"),
-                    "name": sub.get("plan_display_name") or sub.get("plan_name"),
-                    "tier": sub.get("plan_name", "free"),
-                    "stripe_product_id": None,
-                    "stripe_price_id": None,
-                    "monthly_price_cents": int((sub.get("price_usd_monthly") or 0) * 100),
-                    "included_token_credits": (sub.get("effective_limits") or {}).get(
-                        "llm_tokens_month", 0
-                    ),
-                    "overage_rate_per_1k_tokens_cents": 0,
-                    "features": [],
-                    "is_default": sub.get("plan_name") == "free",
-                    "created_at": sub.get("created_at"),
-                    "updated_at": sub.get("created_at"),
-                },
-                "stripe_subscription_id": sub.get("stripe_subscription_id"),
-                "status": sub.get("status"),
-                "current_period_start": sub.get("current_period_start"),
-                "current_period_end": sub.get("current_period_end"),
-                "trial_end": sub.get("trial_end"),
-                "cancel_at": sub.get("current_period_end") if computed["cancel_at_period_end"] else None,
-                "created_at": sub.get("created_at"),
-                "updated_at": sub.get("created_at"),
-                # Computed lifecycle fields
-                "days_since_created": computed["days_since_created"],
-                "days_past_due": computed["days_past_due"],
-                "days_until_period_end": computed["days_until_period_end"],
-                "usage_pct": computed["usage_pct"],
-                "at_risk": computed["at_risk"],
-                "at_risk_reasons": computed["at_risk_reasons"],
-                "cancel_at_period_end": computed["cancel_at_period_end"],
-                "billing_cycle": sub.get("billing_cycle"),
-            }
-            result.append(item)
-
-        return result
+        return {"items": result, "total": total}
     except Exception:
         logger.error("list_subscriptions failed")
+        raise
+
+
+@router.get("/events")
+async def list_billing_events(
+    limit: int = Query(100, ge=1, le=500, description="Page size"),
+    offset: int = Query(0, ge=0, description="Page offset"),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> dict[str, Any]:
+    """Page the billing events ledger (billing audit log).
+
+    Returns ``{"items", "total"}`` where each item carries ``event_type``
+    (the audit action), ``user_id``, ``description`` (audit details) and
+    ``created_at``; ``amount`` is not part of this source and stays absent.
+    """
+    try:
+        pool = await get_db_pool()
+        billing_repo = AuthnzBillingRepo(db_pool=pool)
+        events, total = await billing_repo.list_billing_events(
+            limit=limit, offset=offset
+        )
+        items = [
+            {
+                "id": event.get("id"),
+                "org_id": event.get("org_id"),
+                "org_name": event.get("org_name"),
+                "user_id": event.get("user_id"),
+                "event_type": event.get("action"),
+                "description": event.get("details"),
+                "ip_address": event.get("ip_address"),
+                "created_at": event.get("created_at"),
+            }
+            for event in events
+        ]
+        return {"items": items, "total": total}
+    except Exception:
+        logger.error("list_billing_events failed")
         raise

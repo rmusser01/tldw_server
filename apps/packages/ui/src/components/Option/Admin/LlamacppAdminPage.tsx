@@ -22,6 +22,7 @@ import type {
 } from "@/types/llamacpp-admin"
 import {
   buildLlamacppServerArgs,
+  DEFAULT_LLAMACPP_SERVER_ARGS_INPUT,
   type LlamacppServerArgsInput
 } from "@/utils/build-llamacpp-server-args"
 import { downloadBlob } from "@/utils/download-blob"
@@ -391,23 +392,6 @@ type LlamacppStatus = {
   [key: string]: unknown
 }
 
-const DEFAULT_LLAMACPP_SETTINGS: LlamacppServerArgsInput = {
-  contextSize: 4096,
-  gpuLayers: 0,
-  cacheType: "f16",
-  splitMode: "layer",
-  rowSplit: false,
-  mlock: false,
-  noMmap: false,
-  noKvOffload: false,
-  streamingLlm: false,
-  cpuMoe: false,
-  mmprojAuto: true,
-  mmprojOffload: true,
-  flashAttn: "auto",
-  customArgs: {}
-}
-
 const LLAMACPP_PRESET_FORMAT_VERSION = 1
 const LLAMACPP_PRESET_TYPE = "tldw_llamacpp_settings_preset"
 
@@ -431,7 +415,7 @@ const coerceImportedSettings = (
   if (!isRecord(source)) return null
 
   const merged = {
-    ...DEFAULT_LLAMACPP_SETTINGS,
+    ...DEFAULT_LLAMACPP_SERVER_ARGS_INPUT,
     ...source
   } as LlamacppServerArgsInput
 
@@ -532,9 +516,17 @@ export const LlamacppAdminPage: React.FC = () => {
   const [selectedModelId, setSelectedModelId] = React.useState<
     string | undefined
   >()
-  const [settings, setSettings] = React.useState<LlamacppServerArgsInput>(
-    DEFAULT_LLAMACPP_SETTINGS
+  // The launch form's settings state lives inside LlamacppLaunchPanel so that
+  // keystrokes there do not re-render this page or the sibling panels. The
+  // panel keeps this ref in sync; submit/export read the current value from it.
+  const settingsRef = React.useRef<LlamacppServerArgsInput>(
+    DEFAULT_LLAMACPP_SERVER_ARGS_INPUT
   )
+  const presetImportTokenRef = React.useRef(0)
+  const [appliedPreset, setAppliedPreset] = React.useState<{
+    token: number
+    settings: LlamacppServerArgsInput
+  } | null>(null)
   const [presetNotice, setPresetNotice] = React.useState<string | null>(null)
   const [actionLoading, setActionLoading] = React.useState(false)
   const [chatActionVisible, setChatActionVisible] = React.useState(false)
@@ -762,7 +754,29 @@ export const LlamacppAdminPage: React.FC = () => {
   )
   const selectedModelLabel =
     selectedModel?.display_name || selectedModel?.basename || selectedModelId
-  const hardwareWarnings = hardware?.warnings || []
+  const hardwareWarnings = React.useMemo(
+    () => hardware?.warnings || [],
+    [hardware]
+  )
+  // O(1) runtime joins (admin perf C-S3 / F16): the snapshot section looks its
+  // profile up once per snapshotProfileId/runtimeInstances change instead of
+  // filter+map+find scanning both lists on every page render.
+  const runtimeByProfileId = React.useMemo(
+    () =>
+      new Map(runtimeInstances.map((runtime) => [runtime.profile_id, runtime])),
+    [runtimeInstances]
+  )
+  const snapshotProfile = React.useMemo(
+    () => ({
+      profile: runtimeProfiles.find(
+        (profile) => profile.profile_id === snapshotProfileId
+      ),
+      runtime: snapshotProfileId
+        ? runtimeByProfileId.get(snapshotProfileId)
+        : undefined
+    }),
+    [runtimeProfiles, snapshotProfileId, runtimeByProfileId]
+  )
   const inventoryUnavailable =
     Boolean(inventoryError) || (!loadingInventory && !inventory)
   const inventoryLoadedOrUnavailable =
@@ -781,199 +795,226 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [actionLoading, isRunning, loadingStatus, status])
 
-  const handleRegisterPath = async (path: string): Promise<boolean> => {
-    try {
-      setRegisteringPath(true)
-      setInventoryError(null)
-      await tldwClient.registerLlamacppModelPath(path)
-      await loadInventory()
-      return true
-    } catch (error: unknown) {
-      setInventoryError(
-        sanitizeAdminErrorMessage(
-          error,
-          "Failed to register Llama.cpp model path."
-        )
-      )
-      markAdminGuardFromError(error)
-      return false
-    } finally {
-      setRegisteringPath(false)
-    }
-  }
-
-  const handleRegisterAssetPath = async (path: string): Promise<boolean> => {
-    try {
-      setRegisteringAssetPath(true)
-      setAssetError(null)
-      const asset = await tldwClient.registerLlamacppAssetPath(path)
-      await loadAssets()
-      if (asset.kind === "gguf") {
+  const handleRegisterPath = React.useCallback(
+    async (path: string): Promise<boolean> => {
+      try {
+        setRegisteringPath(true)
+        setInventoryError(null)
+        await tldwClient.registerLlamacppModelPath(path)
         await loadInventory()
+        return true
+      } catch (error: unknown) {
+        setInventoryError(
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to register Llama.cpp model path."
+          )
+        )
+        markAdminGuardFromError(error)
+        return false
+      } finally {
+        setRegisteringPath(false)
       }
-      return true
-    } catch (error: unknown) {
-      setAssetError(
-        sanitizeAdminErrorMessage(
-          error,
-          "Failed to register Llama.cpp asset path."
+    },
+    [loadInventory, markAdminGuardFromError]
+  )
+
+  const handleRegisterAssetPath = React.useCallback(
+    async (path: string): Promise<boolean> => {
+      try {
+        setRegisteringAssetPath(true)
+        setAssetError(null)
+        const asset = await tldwClient.registerLlamacppAssetPath(path)
+        await loadAssets()
+        if (asset.kind === "gguf") {
+          await loadInventory()
+        }
+        return true
+      } catch (error: unknown) {
+        setAssetError(
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to register Llama.cpp asset path."
+          )
         )
-      )
-      return false
-    } finally {
-      setRegisteringAssetPath(false)
-    }
-  }
+        return false
+      } finally {
+        setRegisteringAssetPath(false)
+      }
+    },
+    [loadAssets, loadInventory]
+  )
 
-  const handlePreviewAssetFolder = async (path: string): Promise<boolean> => {
-    try {
-      setPreviewingAssetFolder(true)
-      setAssetError(null)
-      const preview = await tldwClient.previewLlamacppAssetFolder(path)
-      setAssetImportPreview(preview)
-      return true
-    } catch (error: unknown) {
-      setAssetImportPreview(null)
-      setAssetError(
-        sanitizeAdminErrorMessage(
-          error,
-          "Failed to preview Llama.cpp asset folder."
+  const handlePreviewAssetFolder = React.useCallback(
+    async (path: string): Promise<boolean> => {
+      try {
+        setPreviewingAssetFolder(true)
+        setAssetError(null)
+        const preview = await tldwClient.previewLlamacppAssetFolder(path)
+        setAssetImportPreview(preview)
+        return true
+      } catch (error: unknown) {
+        setAssetImportPreview(null)
+        setAssetError(
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to preview Llama.cpp asset folder."
+          )
         )
-      )
-      return false
-    } finally {
-      setPreviewingAssetFolder(false)
-    }
-  }
+        return false
+      } finally {
+        setPreviewingAssetFolder(false)
+      }
+    },
+    []
+  )
 
-  const handleImportAssetFolder = async (path: string): Promise<boolean> => {
-    try {
-      setImportingAssetFolder(true)
-      setAssetError(null)
-      await tldwClient.importLlamacppAssetFolder(path)
-      setAssetImportPreview(null)
-      await loadAssets()
-      return true
-    } catch (error: unknown) {
-      setAssetError(
-        sanitizeAdminErrorMessage(
-          error,
-          "Failed to import Llama.cpp asset folder."
+  const handleImportAssetFolder = React.useCallback(
+    async (path: string): Promise<boolean> => {
+      try {
+        setImportingAssetFolder(true)
+        setAssetError(null)
+        await tldwClient.importLlamacppAssetFolder(path)
+        setAssetImportPreview(null)
+        await loadAssets()
+        return true
+      } catch (error: unknown) {
+        setAssetError(
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to import Llama.cpp asset folder."
+          )
         )
-      )
-      return false
-    } finally {
-      setImportingAssetFolder(false)
-    }
-  }
+        return false
+      } finally {
+        setImportingAssetFolder(false)
+      }
+    },
+    [loadAssets]
+  )
 
-  const handleStartAssetDownload = async (
-    payload: LlamacppAssetDownloadRequest
-  ): Promise<boolean> => {
-    try {
-      setStartingAssetDownload(true)
-      setAssetError(null)
-      await tldwClient.startLlamacppAssetDownload(payload)
-      await loadAssetDownloads()
-      return true
-    } catch (error: unknown) {
-      setAssetError(
-        sanitizeAdminErrorMessage(
-          error,
-          "Failed to queue Llama.cpp asset download."
+  const handleStartAssetDownload = React.useCallback(
+    async (payload: LlamacppAssetDownloadRequest): Promise<boolean> => {
+      try {
+        setStartingAssetDownload(true)
+        setAssetError(null)
+        await tldwClient.startLlamacppAssetDownload(payload)
+        await loadAssetDownloads()
+        return true
+      } catch (error: unknown) {
+        setAssetError(
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to queue Llama.cpp asset download."
+          )
         )
-      )
-      return false
-    } finally {
-      setStartingAssetDownload(false)
-    }
-  }
+        return false
+      } finally {
+        setStartingAssetDownload(false)
+      }
+    },
+    [loadAssetDownloads]
+  )
 
-  const handleCancelAssetDownload = async (jobId: string): Promise<boolean> => {
-    try {
-      setCancelingAssetDownloadId(jobId)
-      setAssetError(null)
-      await tldwClient.cancelLlamacppAssetDownload(jobId)
-      await loadAssetDownloads()
-      return true
-    } catch (error: unknown) {
-      setAssetError(
-        sanitizeAdminErrorMessage(
-          error,
-          "Failed to cancel Llama.cpp asset download."
+  const handleCancelAssetDownload = React.useCallback(
+    async (jobId: string): Promise<boolean> => {
+      try {
+        setCancelingAssetDownloadId(jobId)
+        setAssetError(null)
+        await tldwClient.cancelLlamacppAssetDownload(jobId)
+        await loadAssetDownloads()
+        return true
+      } catch (error: unknown) {
+        setAssetError(
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to cancel Llama.cpp asset download."
+          )
         )
-      )
-      return false
-    } finally {
-      setCancelingAssetDownloadId(null)
-    }
-  }
+        return false
+      } finally {
+        setCancelingAssetDownloadId(null)
+      }
+    },
+    [loadAssetDownloads]
+  )
 
-  const handleCreateProfile = async (
-    payload: LlamacppProfileCreateRequest
-  ): Promise<boolean> => {
-    try {
-      setProfileActionId("__create__")
-      setProfileError(null)
-      await tldwClient.createLlamacppProfile(payload)
-      await loadRuntimePlane()
-      return true
-    } catch (error: unknown) {
-      setProfileError(
-        sanitizeAdminErrorMessage(error, "Failed to create llama.cpp profile.")
-      )
-      markAdminGuardFromError(error)
-      return false
-    } finally {
-      setProfileActionId(null)
-    }
-  }
+  const handleClearImportPreview = React.useCallback(() => {
+    setAssetImportPreview(null)
+  }, [])
 
-  const handleUpdateProfile = async (
-    profileId: string,
-    payload: LlamacppProfileUpdateRequest
-  ): Promise<boolean> => {
-    try {
-      setProfileActionId(profileId)
-      setProfileError(null)
-      await tldwClient.updateLlamacppProfile(profileId, payload)
-      await loadRuntimePlane()
-      return true
-    } catch (error: unknown) {
-      setProfileError(
-        sanitizeAdminErrorMessage(error, "Failed to update llama.cpp profile.")
-      )
-      markAdminGuardFromError(error)
-      return false
-    } finally {
-      setProfileActionId(null)
-    }
-  }
+  const handleCreateProfile = React.useCallback(
+    async (payload: LlamacppProfileCreateRequest): Promise<boolean> => {
+      try {
+        setProfileActionId("__create__")
+        setProfileError(null)
+        await tldwClient.createLlamacppProfile(payload)
+        await loadRuntimePlane()
+        return true
+      } catch (error: unknown) {
+        setProfileError(
+          sanitizeAdminErrorMessage(error, "Failed to create llama.cpp profile.")
+        )
+        markAdminGuardFromError(error)
+        return false
+      } finally {
+        setProfileActionId(null)
+      }
+    },
+    [loadRuntimePlane, markAdminGuardFromError]
+  )
 
-  const handleDeleteProfile = async (profileId: string): Promise<boolean> => {
-    try {
-      setProfileActionId(profileId)
-      setProfileError(null)
-      await tldwClient.deleteLlamacppProfile(profileId)
-      await loadRuntimePlane()
-      return true
-    } catch (error: unknown) {
-      setProfileError(
-        sanitizeAdminErrorMessage(error, "Failed to delete llama.cpp profile.")
-      )
-      markAdminGuardFromError(error)
-      return false
-    } finally {
-      setProfileActionId(null)
-    }
-  }
+  const handleUpdateProfile = React.useCallback(
+    async (
+      profileId: string,
+      payload: LlamacppProfileUpdateRequest
+    ): Promise<boolean> => {
+      try {
+        setProfileActionId(profileId)
+        setProfileError(null)
+        await tldwClient.updateLlamacppProfile(profileId, payload)
+        await loadRuntimePlane()
+        return true
+      } catch (error: unknown) {
+        setProfileError(
+          sanitizeAdminErrorMessage(error, "Failed to update llama.cpp profile.")
+        )
+        markAdminGuardFromError(error)
+        return false
+      } finally {
+        setProfileActionId(null)
+      }
+    },
+    [loadRuntimePlane, markAdminGuardFromError]
+  )
 
-  const handleStart = async () => {
+  const handleDeleteProfile = React.useCallback(
+    async (profileId: string): Promise<boolean> => {
+      try {
+        setProfileActionId(profileId)
+        setProfileError(null)
+        await tldwClient.deleteLlamacppProfile(profileId)
+        await loadRuntimePlane()
+        return true
+      } catch (error: unknown) {
+        setProfileError(
+          sanitizeAdminErrorMessage(error, "Failed to delete llama.cpp profile.")
+        )
+        markAdminGuardFromError(error)
+        return false
+      } finally {
+        setProfileActionId(null)
+      }
+    },
+    [loadRuntimePlane, markAdminGuardFromError]
+  )
+
+  const handleStart = React.useCallback(async () => {
     if (!selectedModelId) return
     try {
       setActionLoading(true)
       setStatusError(null)
-      const serverArgs = buildLlamacppServerArgs(settings)
+      const serverArgs = buildLlamacppServerArgs(settingsRef.current)
       await tldwClient.startLlamacppModel(selectedModelId, serverArgs)
       setChatActionVisible(true)
       await Promise.all([loadStatus(), loadRuntimePlane()])
@@ -985,9 +1026,14 @@ export const LlamacppAdminPage: React.FC = () => {
     } finally {
       setActionLoading(false)
     }
-  }
+  }, [
+    selectedModelId,
+    markAdminGuardFromError,
+    loadStatus,
+    loadRuntimePlane
+  ])
 
-  const handleStartWithDefaults = async () => {
+  const handleStartWithDefaults = React.useCallback(async () => {
     if (!selectedModelId) return
     try {
       setActionLoading(true)
@@ -1003,9 +1049,14 @@ export const LlamacppAdminPage: React.FC = () => {
     } finally {
       setActionLoading(false)
     }
-  }
+  }, [
+    selectedModelId,
+    markAdminGuardFromError,
+    loadStatus,
+    loadRuntimePlane
+  ])
 
-  const handleStop = async () => {
+  const handleStop = React.useCallback(async () => {
     try {
       setActionLoading(true)
       await tldwClient.stopLlamacppServer()
@@ -1019,9 +1070,9 @@ export const LlamacppAdminPage: React.FC = () => {
     } finally {
       setActionLoading(false)
     }
-  }
+  }, [markAdminGuardFromError, loadStatus, loadRuntimePlane])
 
-  const handleUseInChat = async () => {
+  const handleUseInChat = React.useCallback(async () => {
     try {
       setChatActionLoading(true)
       setChatNotice(null)
@@ -1042,87 +1093,134 @@ export const LlamacppAdminPage: React.FC = () => {
     } finally {
       setChatActionLoading(false)
     }
-  }
+  }, [markAdminGuardFromError])
 
-  const runRuntimeAction = async (
-    profileId: string,
-    action: () => Promise<unknown>,
-    fallbackMessage: string
-  ) => {
-    try {
-      setRuntimeActionProfileId(profileId)
-      setRuntimeError(null)
-      await action()
-      await Promise.all([loadStatus(), loadRuntimePlane()])
-    } catch (error: unknown) {
-      setRuntimeError(sanitizeAdminErrorMessage(error, fallbackMessage))
-      markAdminGuardFromError(error)
-    } finally {
-      setRuntimeActionProfileId(null)
-    }
-  }
+  const runRuntimeAction = React.useCallback(
+    async (
+      profileId: string,
+      action: () => Promise<unknown>,
+      fallbackMessage: string
+    ) => {
+      try {
+        setRuntimeActionProfileId(profileId)
+        setRuntimeError(null)
+        await action()
+        await Promise.all([loadStatus(), loadRuntimePlane()])
+      } catch (error: unknown) {
+        setRuntimeError(sanitizeAdminErrorMessage(error, fallbackMessage))
+        markAdminGuardFromError(error)
+      } finally {
+        setRuntimeActionProfileId(null)
+      }
+    },
+    [loadRuntimePlane, loadStatus, markAdminGuardFromError]
+  )
 
-  const handleStartProfile = (profileId: string) => {
-    void runRuntimeAction(
-      profileId,
-      () => tldwClient.startLlamacppProfile(profileId),
-      "Failed to start Llama.cpp runtime profile."
-    )
-  }
-
-  const handleStopProfile = (profileId: string) => {
-    void runRuntimeAction(
-      profileId,
-      () => tldwClient.stopLlamacppProfile(profileId),
-      "Failed to stop Llama.cpp runtime profile."
-    )
-  }
-
-  const handlePauseProfile = (profileId: string) => {
-    void runRuntimeAction(
-      profileId,
-      () => tldwClient.pauseLlamacppProfile(profileId),
-      "Failed to pause Llama.cpp runtime profile."
-    )
-  }
-
-  const handleResumeProfile = (profileId: string) => {
-    void runRuntimeAction(
-      profileId,
-      () => tldwClient.resumeLlamacppProfile(profileId),
-      "Failed to resume Llama.cpp runtime profile."
-    )
-  }
-
-  const handleUseProfileInChat = async (profileId: string) => {
-    try {
-      setRuntimeActionProfileId(profileId)
-      setChatNotice(null)
-      setChatWarnings([])
-      const response = await tldwClient.useLlamacppProfileInChat(profileId)
-      setChatNotice(
-        response.effective
-          ? "Chat provider updated."
-          : "Chat provider setting saved, but an override may still be active."
+  const handleStartProfile = React.useCallback(
+    (profileId: string) => {
+      void runRuntimeAction(
+        profileId,
+        () => tldwClient.startLlamacppProfile(profileId),
+        "Failed to start Llama.cpp runtime profile."
       )
-      setChatWarnings(response.warnings || [])
-    } catch (error: unknown) {
-      setChatNotice(null)
-      setChatWarnings([
-        sanitizeAdminErrorMessage(error, "Failed to wire llama.cpp into Chat.")
-      ])
-      markAdminGuardFromError(error)
-    } finally {
-      setRuntimeActionProfileId(null)
-    }
-  }
+    },
+    [runRuntimeAction]
+  )
 
-  const handleExportPreset = () => {
+  const handleStopProfile = React.useCallback(
+    (profileId: string) => {
+      void runRuntimeAction(
+        profileId,
+        () => tldwClient.stopLlamacppProfile(profileId),
+        "Failed to stop Llama.cpp runtime profile."
+      )
+    },
+    [runRuntimeAction]
+  )
+
+  const handlePauseProfile = React.useCallback(
+    (profileId: string) => {
+      void runRuntimeAction(
+        profileId,
+        () => tldwClient.pauseLlamacppProfile(profileId),
+        "Failed to pause Llama.cpp runtime profile."
+      )
+    },
+    [runRuntimeAction]
+  )
+
+  const handleResumeProfile = React.useCallback(
+    (profileId: string) => {
+      void runRuntimeAction(
+        profileId,
+        () => tldwClient.resumeLlamacppProfile(profileId),
+        "Failed to resume Llama.cpp runtime profile."
+      )
+    },
+    [runRuntimeAction]
+  )
+
+  const handleUseProfileInChat = React.useCallback(
+    async (profileId: string) => {
+      try {
+        setRuntimeActionProfileId(profileId)
+        setChatNotice(null)
+        setChatWarnings([])
+        const response = await tldwClient.useLlamacppProfileInChat(profileId)
+        setChatNotice(
+          response.effective
+            ? "Chat provider updated."
+            : "Chat provider setting saved, but an override may still be active."
+        )
+        setChatWarnings(response.warnings || [])
+      } catch (error: unknown) {
+        setChatNotice(null)
+        setChatWarnings([
+          sanitizeAdminErrorMessage(
+            error,
+            "Failed to wire llama.cpp into Chat."
+          )
+        ])
+        markAdminGuardFromError(error)
+      } finally {
+        setRuntimeActionProfileId(null)
+      }
+    },
+    [markAdminGuardFromError]
+  )
+
+  const handleRuntimeUseInChat = React.useCallback(
+    (profileId: string) => {
+      void handleUseProfileInChat(profileId)
+    },
+    [handleUseProfileInChat]
+  )
+
+  // Stable prop bundle for the memoized launch panel.
+  const launchChatAction = React.useMemo(
+    () => ({
+      visible: chatActionVisible || isRunning,
+      loading: chatActionLoading,
+      notice: chatNotice,
+      warnings: chatWarnings,
+      onUse: handleUseInChat
+    }),
+    [
+      chatActionVisible,
+      isRunning,
+      chatActionLoading,
+      chatNotice,
+      chatWarnings,
+      handleUseInChat
+    ]
+  )
+
+  const handleExportPreset = React.useCallback(() => {
     const payload: LlamacppSettingsPresetV1 = {
       type: LLAMACPP_PRESET_TYPE,
       version: LLAMACPP_PRESET_FORMAT_VERSION,
       createdAt: new Date().toISOString(),
-      settings
+      settings: settingsRef.current
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json"
@@ -1135,57 +1233,64 @@ export const LlamacppAdminPage: React.FC = () => {
         "Exported Llama.cpp settings preset."
       )
     )
-  }
+  }, [t])
 
-  const handleOpenImportPreset = () => {
+  const handleOpenImportPreset = React.useCallback(() => {
     presetFileInputRef.current?.click()
-  }
+  }, [])
 
-  const handleImportPreset = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0]
-    event.target.value = ""
-    if (!file) return
+  const handleImportPreset = React.useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      event.target.value = ""
+      if (!file) return
 
-    try {
-      const text = await file.text()
-      const parsed = JSON.parse(text)
-      const importedSettings = coerceImportedSettings(parsed)
-      if (!importedSettings) {
-        throw new Error("Invalid Llama.cpp preset format.")
-      }
-      setSettings(importedSettings)
-      setStatusError(null)
-      setPresetNotice(
-        t(
-          "settings:admin.llamacppPresetImported",
-          `Imported preset from ${file.name}.`
-        )
-      )
-    } catch (error: unknown) {
-      setPresetNotice(null)
-      setStatusError(
-        sanitizeAdminErrorMessage(
-          error,
+      try {
+        const text = await file.text()
+        const parsed = JSON.parse(text)
+        const importedSettings = coerceImportedSettings(parsed)
+        if (!importedSettings) {
+          throw new Error("Invalid Llama.cpp preset format.")
+        }
+        setAppliedPreset({
+          token: ++presetImportTokenRef.current,
+          settings: importedSettings
+        })
+        setStatusError(null)
+        setPresetNotice(
           t(
-            "settings:admin.llamacppPresetImportFailed",
-            "Failed to import preset."
+            "settings:admin.llamacppPresetImported",
+            `Imported preset from ${file.name}.`
           )
         )
-      )
-    }
-  }
+      } catch (error: unknown) {
+        setPresetNotice(null)
+        setStatusError(
+          sanitizeAdminErrorMessage(
+            error,
+            t(
+              "settings:admin.llamacppPresetImportFailed",
+              "Failed to import preset."
+            )
+          )
+        )
+      }
+    },
+    [t]
+  )
 
-  const importPresetInput = (
-    <input
-      ref={presetFileInputRef}
-      type="file"
-      accept=".json,application/json"
-      onChange={handleImportPreset}
-      className="hidden"
-      aria-label={t("settings:admin.llamacppImportPreset", "Import preset")}
-    />
+  const importPresetInput = React.useMemo(
+    () => (
+      <input
+        ref={presetFileInputRef}
+        type="file"
+        accept=".json,application/json"
+        onChange={handleImportPreset}
+        className="hidden"
+        aria-label={t("settings:admin.llamacppImportPreset", "Import preset")}
+      />
+    ),
+    [handleImportPreset, t]
   )
 
   return (
@@ -1288,7 +1393,7 @@ export const LlamacppAdminPage: React.FC = () => {
               error={assetError}
               onRegisterPath={handleRegisterAssetPath}
               onPreviewImportFolder={handlePreviewAssetFolder}
-              onClearImportPreview={() => setAssetImportPreview(null)}
+              onClearImportPreview={handleClearImportPreview}
               onImportFolder={handleImportAssetFolder}
               onStartDownload={handleStartAssetDownload}
               onCancelDownload={handleCancelAssetDownload}
@@ -1322,30 +1427,26 @@ export const LlamacppAdminPage: React.FC = () => {
                   onStop={handleStopProfile}
                   onPause={handlePauseProfile}
                   onResume={handleResumeProfile}
-                  onUseInChat={(profileId) => {
-                    void handleUseProfileInChat(profileId)
-                  }}
+                  onUseInChat={handleRuntimeUseInChat}
                 />
-                {runtimeProfiles
-                  .filter((profile) => profile.profile_id === snapshotProfileId)
-                  .map((profile) => {
-                    const runtime = runtimeInstances.find(
-                      (item) => item.profile_id === profile.profile_id
-                    )
-                    return (
-                      <div key={profile.profile_id} className="space-y-2">
-                        <h3 className="font-semibold">{profile.name}</h3>
-                        <LlamacppSnapshotsAdmin
-                          profile={profile}
-                          generation={runtime?.launch_generation}
-                          runtimeState={runtime?.state}
-                          onProfileChanged={() => {
-                            void loadRuntimePlane()
-                          }}
-                        />
-                      </div>
-                    )
-                  })}
+                {snapshotProfile.profile && (
+                  <div
+                    key={snapshotProfile.profile.profile_id}
+                    className="space-y-2"
+                  >
+                    <h3 className="font-semibold">
+                      {snapshotProfile.profile.name}
+                    </h3>
+                    <LlamacppSnapshotsAdmin
+                      profile={snapshotProfile.profile}
+                      generation={snapshotProfile.runtime?.launch_generation}
+                      runtimeState={snapshotProfile.runtime?.state}
+                      onProfileChanged={() => {
+                        void loadRuntimePlane()
+                      }}
+                    />
+                  </div>
+                )}
               </>
             )}
 
@@ -1363,8 +1464,9 @@ export const LlamacppAdminPage: React.FC = () => {
 
             {inventoryLoadedOrUnavailable && (
               <LlamacppLaunchPanel
-                settings={settings}
-                onSettingsChange={setSettings}
+                initialSettings={DEFAULT_LLAMACPP_SERVER_ARGS_INPUT}
+                settingsRef={settingsRef}
+                appliedPreset={appliedPreset}
                 selectedModelId={selectedModelId}
                 selectedModelLabel={selectedModelLabel}
                 isRunning={isRunning}
@@ -1378,13 +1480,7 @@ export const LlamacppAdminPage: React.FC = () => {
                 onExportPreset={handleExportPreset}
                 onOpenImportPreset={handleOpenImportPreset}
                 importPresetInput={importPresetInput}
-                chatAction={{
-                  visible: chatActionVisible || isRunning,
-                  loading: chatActionLoading,
-                  notice: chatNotice,
-                  warnings: chatWarnings,
-                  onUse: handleUseInChat
-                }}
+                chatAction={launchChatAction}
               />
             )}
           </>

@@ -145,7 +145,7 @@ const capabilityWarnings = (row: RuntimeRow) =>
     ...(row.runtime?.warnings || [])
   ])
 
-export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
+const LlamacppRuntimePanelImpl: React.FC<LlamacppRuntimePanelProps> = ({
   onSnapshots,
   profiles,
   runtimes,
@@ -375,5 +375,7 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppRuntimePanel = React.memo(LlamacppRuntimePanelImpl)
 
 export default LlamacppRuntimePanel

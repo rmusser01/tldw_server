@@ -29,9 +29,37 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 // ── Backups Tab ──
+
+// Deterministic fallback row keys for records the server sends without an
+// id: a `dataset|created_at|filename|name` composite instead of
+// JSON.stringify, which leaks whole records into the DOM as keys and still
+// collides on identical rows (C-S5).
+const dataOpsRowKey = (r: any): string =>
+  r.id ?? r.backup_id ?? r.schedule_id ?? r.bundle_id ??
+  `${r.dataset ?? "ds"}|${r.created_at ?? ""}|${r.filename ?? r.name ?? ""}`
+
+// Duplicate composites (e.g. two schedules for one dataset before the first
+// run) get a fetch-order suffix (`#2`, `#3`, ...) so every row keeps a
+// stable, unique key across re-renders of the same snapshot.
+const tagDuplicateRowKeys = (records: any[]): any[] => {
+  const seen = new Map<string, number>()
+  let tagged = false
+  const result = records.map((record) => {
+    const base = dataOpsRowKey(record)
+    const nth = (seen.get(base) ?? 0) + 1
+    seen.set(base, nth)
+    if (nth > 1) {
+      tagged = true
+      return { ...record, _rowKey: `${base}#${nth}` }
+    }
+    return record
+  })
+  return tagged ? result : records
+}
 
 // Mirrors the backend's _BACKUP_DATASETS allowlist (#2917): the UI used to
 // offer "chachanotes"/"users", which the API rejects, and missed three valid
@@ -75,7 +103,11 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     setLoading(true)
     try {
       const result = await tldwClient.listBackups()
-      setBackups(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.backups ?? [])
+      setBackups(
+        tagDuplicateRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.backups ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -87,7 +119,11 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     setSchedulesLoading(true)
     try {
       const result = await tldwClient.listBackupSchedules()
-      setSchedules(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.schedules ?? [])
+      setSchedules(
+        tagDuplicateRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.schedules ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -183,7 +219,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       dataIndex: "created_at",
       key: "created_at",
       width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "\u2014")
+      render: (v: string) => (v ? formatAdminDateTime(v) : "\u2014")
     },
     {
       title: t("settings:adminDataOps.colSize", "Size"),
@@ -326,7 +362,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
         <Table
           dataSource={backups}
           columns={backupColumns}
-          rowKey={(r) => r.id ?? r.backup_id ?? JSON.stringify(r)}
+          rowKey={(r) => r._rowKey ?? dataOpsRowKey(r)}
           loading={loading}
           pagination={backups.length > 20 ? { pageSize: 20 } : false}
           size="small"
@@ -476,7 +512,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
         <Table
           dataSource={schedules}
           columns={scheduleColumns}
-          rowKey={(r) => r.id ?? r.schedule_id ?? JSON.stringify(r)}
+          rowKey={(r) => r._rowKey ?? dataOpsRowKey(r)}
           loading={schedulesLoading}
           pagination={false}
           size="small"
@@ -619,7 +655,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
       dataIndex: "created_at",
       key: "created_at",
       width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "\u2014")
+      render: (v: string) => (v ? formatAdminDateTime(v) : "\u2014")
     },
     {
       title: t("settings:adminDataOps.colActions", "Actions"),
@@ -712,6 +748,15 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
               </Space>
             </Form.Item>
           </Form>
+        </div>
+        {/* Bounded snapshot (limit:100) — full server pagination waits on a
+            truthful total; disclose the truncation instead of hiding it. */}
+        <div style={{ marginBottom: 8 }}>
+          <span
+            style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+          >
+            {t("settings:adminDataOps.showingFirst100Dsrs", "Showing first 100 requests")}
+          </span>
         </div>
         <Table
           dataSource={dsrs}
@@ -893,7 +938,11 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     setLoading(true)
     try {
       const result = await tldwClient.listBundles()
-      setBundles(Array.isArray(result) ? result : result?.data ?? result?.bundles ?? [])
+      setBundles(
+        tagDuplicateRowKeys(
+          Array.isArray(result) ? result : result?.data ?? result?.bundles ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -953,7 +1002,7 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       dataIndex: "created_at",
       key: "created_at",
       width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "\u2014")
+      render: (v: string) => (v ? formatAdminDateTime(v) : "\u2014")
     },
     {
       title: t("settings:adminDataOps.colActions", "Actions"),
@@ -1014,7 +1063,7 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       <Table
         dataSource={bundles}
         columns={bundleColumns}
-        rowKey={(r) => r.id ?? r.bundle_id ?? JSON.stringify(r)}
+        rowKey={(r) => r._rowKey ?? dataOpsRowKey(r)}
         loading={loading}
         pagination={bundles.length > 20 ? { pageSize: 20 } : false}
         size="small"

@@ -1233,13 +1233,21 @@ async def get_cost_attribution(
             return {"group_by": group_by, "range_days": range_days, "items": []}
 
         is_pg = _is_postgres_connection(db)
-        group_field = "user_id" if group_by == "user" else "org_id"
+        # llm_usage_log has no org_id column: org attribution/scoping joins org_members
+        # (same pattern as fetch_usage_top / fetch_llm_usage).
+        needs_org_join = org_ids is not None or group_by == "org"
+        group_field = "llm_usage_log.user_id" if group_by == "user" else "om.org_id"
+        org_join = (
+            " JOIN org_members om ON om.user_id = llm_usage_log.user_id"
+            if needs_org_join
+            else ""
+        )
 
         if is_pg:
             pg_org_filter = ""
             pg_params: list[Any] = [int(range_days)]
             if org_ids is not None:
-                pg_org_filter = " AND org_id = ANY($2)"
+                pg_org_filter = " AND om.org_id = ANY($2)"
                 pg_params.append(org_ids)
             pg_query = f"""
                 SELECT
@@ -1248,8 +1256,8 @@ async def get_cost_attribution(
                     COALESCE(SUM(total_tokens), 0) as total_tokens,
                     COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0) as completion_tokens
-                FROM llm_usage_v2
-                WHERE created_at >= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 day')
+                FROM llm_usage_log{org_join}
+                WHERE ts >= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 day')
                 {pg_org_filter}
                 GROUP BY {group_field}
                 ORDER BY total_tokens DESC
@@ -1261,7 +1269,7 @@ async def get_cost_attribution(
             sqlite_params: list[Any] = [f"-{int(range_days)} days"]
             if org_ids is not None:
                 placeholders = ",".join("?" for _ in org_ids)
-                sqlite_org_filter = f" AND org_id IN ({placeholders})"
+                sqlite_org_filter = f" AND om.org_id IN ({placeholders})"
                 sqlite_params.extend(org_ids)
             sqlite_query = f"""
                 SELECT
@@ -1270,8 +1278,8 @@ async def get_cost_attribution(
                     COALESCE(SUM(total_tokens), 0) as total_tokens,
                     COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0) as completion_tokens
-                FROM llm_usage_v2
-                WHERE datetime(created_at) >= datetime('now', ?)
+                FROM llm_usage_log{org_join}
+                WHERE ts >= datetime('now', ?)
                 {sqlite_org_filter}
                 GROUP BY {group_field}
                 ORDER BY total_tokens DESC

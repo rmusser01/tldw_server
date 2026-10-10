@@ -15,6 +15,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
@@ -225,7 +226,7 @@ const WatchlistsPage: React.FC = () => {
       title: t("settings:adminWatchlists.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014"
+      render: (val: string) => val ? formatAdminDateTime(val) : "\u2014"
     },
     {
       title: t("settings:adminWatchlists.colActions", "Actions"),

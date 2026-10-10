@@ -1093,6 +1093,9 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_access_jti ON sessions(access_jti)", ()),
+    # Admin activity summaries filter sessions by a created_at time window
+    # (admin perf plan A, stage 3); keep it an index range scan.
+    ("CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)", ()),
     # password_history
     (
         """
@@ -1249,6 +1252,13 @@ _CREATE_AUTHNZ_CORE_TABLES = [
         (),
     ),
     ("CREATE INDEX IF NOT EXISTS idx_org_members_user ON public.org_members(user_id)", ()),
+    # Org-scoped admin joins filter org_members by org_id and join on user_id
+    # (admin perf plan A, stage 3); the composite index covers both.
+    (
+        "CREATE INDEX IF NOT EXISTS idx_org_members_org_user "
+        "ON public.org_members(org_id, user_id)",
+        (),
+    ),
     (
         """
         CREATE TABLE IF NOT EXISTS public.teams (

@@ -341,7 +341,6 @@ route_map:
     "/api/v1/media*": media.access
     "/api/v1/watchlists/*": watchlists.default
     "/api/v1/watchlists*": watchlists.default
-    "/api/v1/billing*": core.default
     "/api/v1/auth/forgot-password": authnz.forgot_password
     "/api/v1/auth/reset-password": authnz.reset_password
     "/api/v1/auth/resend-verification": authnz.resend_verification

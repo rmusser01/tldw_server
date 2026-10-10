@@ -21,7 +21,9 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { CollapsibleSection } from "./CollapsibleSection"
+import RefreshedAtLabel from "./RefreshedAtLabel"
 import { Alert } from "@/components/ui/primitives"
 import {
   RecoveryCallout,
@@ -33,6 +35,7 @@ import {
   type SandboxAdminRuntimeDiagnosticsItem,
   type SandboxAdminRuntimeDiagnosticsResponse
 } from "@/services/tldw/TldwApiClient"
+import { useSystemStats } from "@/services/tldw/adminQueries"
 import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
@@ -152,16 +155,67 @@ type AlertHistoryRow = {
   triggered_at?: string
 }
 type ActivityEntry = {
+  id?: string | number
   timestamp?: string
+  created_at?: string
   action?: string
   user?: string
   details?: unknown
   [key: string]: unknown
 }
 type ActivityState = { entries?: ActivityEntry[] } | ActivityEntry[]
-type ActivityRow = ActivityEntry & { _key: number }
+type ActivityRow = ActivityEntry & { _key: string }
 type CurrentUserProfile = {
   id?: number | string | null
+}
+
+/**
+ * Replace state only when the payload actually changed (admin perf C-S1/F14).
+ * Poll and refresh cycles routinely deliver byte-identical payloads; swapping
+ * in a fresh-but-equal value would re-render every table for nothing. The
+ * O(payload) `JSON.stringify` comparison here is far cheaper than the full
+ * table reconciliation a state swap triggers, and returning `prev` unchanged
+ * makes React bail out of the re-render entirely.
+ */
+function setIfChanged<T>(setter: (update: (prev: T) => T) => void, next: T): void {
+  setter((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+}
+
+/** Extract the entry list from either activity payload shape. */
+function extractActivityEntries(payload: ActivityState | null): ActivityEntry[] {
+  if (payload && !Array.isArray(payload) && Array.isArray(payload.entries)) {
+    return payload.entries
+  }
+  if (Array.isArray(payload)) return payload
+  return []
+}
+
+/**
+ * Stable composite row key: prefer a real id/timestamp field on the entry so
+ * keys track entities (not positions) when the list shifts; fall back to the
+ * positional index. Callers capture the fallback index once at fetch time in
+ * the loader — never per render — so re-renders can't reshuffle keys.
+ */
+function stableActivityRowKey(entry: ActivityEntry, fallbackIndex: number): string {
+  const natural = entry.id ?? entry.timestamp ?? entry.created_at
+  return natural != null && String(natural) !== ""
+    ? String(natural)
+    : `activity-${fallbackIndex}`
+}
+
+/**
+ * Build activity table rows with stable keys, captured once per fetch.
+ * Duplicate natural keys (e.g. entries sharing a timestamp) get an index
+ * suffix so React keys stay unique without disturbing the others.
+ */
+function buildActivityRows(payload: ActivityState | null): ActivityRow[] {
+  const seen = new Set<string>()
+  return extractActivityEntries(payload).map((entry, idx) => {
+    let key = stableActivityRowKey(entry, idx)
+    if (seen.has(key)) key = `${key}#${idx}`
+    seen.add(key)
+    return { ...entry, _key: key }
+  })
 }
 
 const hasAntdValidationError = (
@@ -180,9 +234,12 @@ const MonitoringDashboardPage: React.FC = () => {
   // Current user ID for alert assignment
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
 
-  // System overview state
-  const [systemStats, setSystemStats] = useState<DashboardRecord | null>(null)
-  const [statsLoading, setStatsLoading] = useState(false)
+  // System overview state. System stats are shared admin reference data
+  // (B-S4/F11): the query hook dedupes fetches with the other admin
+  // surfaces inside the stale window; security status stays page-local.
+  const systemStatsQuery = useSystemStats()
+  const systemStats = (systemStatsQuery.data as DashboardRecord | null) ?? null
+  const statsLoading = systemStatsQuery.isFetching
   const [securityStatus, setSecurityStatus] = useState<DashboardRecord | null>(null)
   const [securityLoading, setSecurityLoading] = useState(false)
   const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
@@ -200,14 +257,22 @@ const MonitoringDashboardPage: React.FC = () => {
   const [alertHistory, setAlertHistory] = useState<AlertHistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
 
-  // Activity state
-  const [activity, setActivity] = useState<ActivityState | null>(null)
+  // Activity state — rows arrive keyed from the loader (stable composite key
+  // captured at fetch time, C-S1) so the dataSource reference never churns
+  // across renders.
+  const [activityRows, setActivityRows] = useState<ActivityRow[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
 
-  // Staleness indicator & auto-refresh
+  // Staleness indicator & auto-refresh. The "Updated Xs ago" text lives in
+  // <RefreshedAtLabel/>, which owns its own 10s tick (C-S1) so the tick never
+  // re-renders this page.
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0)
-  const [timeSinceRefresh, setTimeSinceRefresh] = useState("")
+
+  // Tab visibility — pause polling while hidden (LlamacppAdminPage pattern)
+  const [isTabVisible, setIsTabVisible] = useState(
+    () => document.visibilityState !== "hidden"
+  )
 
   const initialLoadRef = useRef(false)
 
@@ -218,23 +283,19 @@ const MonitoringDashboardPage: React.FC = () => {
 
   // ── System Overview ──
 
-  const loadSystemStats = useCallback(async () => {
-    setStatsLoading(true)
-    try {
-      const stats = await tldwClient.getSystemStats()
-      setSystemStats(stats)
-    } catch (err) {
-      markAdminGuardFromError(err)
-    } finally {
-      setStatsLoading(false)
+  // Query errors surface the admin guard the same way the page-local
+  // loaders do (403/404 map to the guard states instead of an error wall).
+  useEffect(() => {
+    if (systemStatsQuery.error) {
+      markAdminGuardFromError(systemStatsQuery.error)
     }
-  }, [markAdminGuardFromError])
+  }, [systemStatsQuery.error, markAdminGuardFromError])
 
   const loadSecurityStatus = useCallback(async () => {
     setSecurityLoading(true)
     try {
       const status = await tldwClient.getSecurityAlertStatus()
-      setSecurityStatus(status)
+      setIfChanged(setSecurityStatus, status)
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
@@ -246,7 +307,7 @@ const MonitoringDashboardPage: React.FC = () => {
     setSandboxDiagnosticsLoading(true)
     try {
       const diagnostics = await tldwClient.getSandboxRuntimeDiagnostics()
-      setSandboxDiagnostics(diagnostics)
+      setIfChanged(setSandboxDiagnostics, diagnostics)
       setSandboxDiagnosticsError(null)
       setSandboxDiagnosticsMissing(false)
     } catch (err: unknown) {
@@ -286,7 +347,7 @@ const MonitoringDashboardPage: React.FC = () => {
     setRulesLoading(true)
     try {
       const result = await tldwClient.listAlertRules()
-      setAlertRules(Array.isArray(result) ? result : [])
+      setIfChanged(setAlertRules, Array.isArray(result) ? result : [])
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
@@ -317,7 +378,9 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   }
 
-  const handleDeleteRule = async (ruleId: number) => {
+  // Stable handler references: the memoized column arrays below capture these
+  // closures, so they must not change identity every render (C-S1).
+  const handleDeleteRule = useCallback(async (ruleId: number) => {
     try {
       await tldwClient.deleteAlertRule(ruleId)
       message.success(t("settings:adminMonitoring.ruleDeleted", "Alert rule deleted"))
@@ -325,15 +388,15 @@ const MonitoringDashboardPage: React.FC = () => {
     } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.ruleDeleteFailed", "Failed to delete alert rule")))
     }
-  }
+  }, [t, loadAlertRules])
 
   // ── Alert History ──
 
   const loadAlertHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
-      const result = await tldwClient.listAlertHistory()
-      setAlertHistory(Array.isArray(result) ? result : [])
+      const result = await tldwClient.listAlertHistory({ limit: 200 })
+      setIfChanged(setAlertHistory, Array.isArray(result) ? result : [])
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
@@ -341,7 +404,7 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
-  const handleAssignAlert = async (alertId: string, userId: number | null) => {
+  const handleAssignAlert = useCallback(async (alertId: string, userId: number | null) => {
     try {
       await tldwClient.assignAlert(alertId, { assigned_to_user_id: userId })
       message.success(t("settings:adminMonitoring.alertAssigned", "Alert assigned"))
@@ -349,9 +412,9 @@ const MonitoringDashboardPage: React.FC = () => {
     } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.alertAssignFailed", "Failed to assign alert")))
     }
-  }
+  }, [t, loadAlertHistory])
 
-  const handleSnoozeAlert = async (alertId: string, until: string) => {
+  const handleSnoozeAlert = useCallback(async (alertId: string, until: string) => {
     try {
       await tldwClient.snoozeAlert(alertId, { until })
       message.success(t("settings:adminMonitoring.alertSnoozed", "Alert snoozed"))
@@ -359,9 +422,9 @@ const MonitoringDashboardPage: React.FC = () => {
     } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.alertSnoozeFailed", "Failed to snooze alert")))
     }
-  }
+  }, [t, loadAlertHistory])
 
-  const handleEscalateAlert = async (alertId: string) => {
+  const handleEscalateAlert = useCallback(async (alertId: string) => {
     try {
       await tldwClient.escalateAlert(alertId)
       message.success(t("settings:adminMonitoring.alertEscalated", "Alert escalated"))
@@ -369,7 +432,7 @@ const MonitoringDashboardPage: React.FC = () => {
     } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminMonitoring.alertEscalateFailed", "Failed to escalate alert")))
     }
-  }
+  }, [t, loadAlertHistory])
 
   // ── Activity ──
 
@@ -377,7 +440,9 @@ const MonitoringDashboardPage: React.FC = () => {
     setActivityLoading(true)
     try {
       const result = await tldwClient.getDashboardActivity({ days: 7 })
-      setActivity(result)
+      // Rows (and their stable keys) are built once here at fetch time — the
+      // positional fallback index can never be recomputed per render (C-S1).
+      setIfChanged(setActivityRows, buildActivityRows(result))
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
@@ -385,23 +450,39 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
-  // Refresh all sections and update timestamp
-  const refreshAll = useCallback(() => {
-    void loadSystemStats()
+  // Live datasets (system stats + security status) — cheap, polled by auto-refresh.
+  // The stats refetch is forced (it bypasses the shared stale window) so the
+  // B-S2 polling contract keeps seeing fresh numbers on every tick.
+  // `refetch` is observer-stable, so this callback doesn't churn the timers.
+  const refetchSystemStats = systemStatsQuery.refetch
+  const refreshLive = useCallback(() => {
+    void refetchSystemStats()
     void loadSecurityStatus()
+    setLastRefreshedAt(new Date())
+  }, [refetchSystemStats, loadSecurityStatus])
+
+  // Deep datasets (sandbox diagnostics, alert rules, alert history, activity) —
+  // loaded on mount and manual refresh only, never by the poller.
+  const refreshDeep = useCallback(() => {
     void loadSandboxDiagnostics()
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
-    setLastRefreshedAt(new Date())
-  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
+
+  // Refresh every section (manual refresh button)
+  const refreshAll = useCallback(() => {
+    refreshLive()
+    refreshDeep()
+  }, [refreshLive, refreshDeep])
 
   // ── Initial Load ──
 
   useEffect(() => {
     if (initialLoadRef.current) return
     initialLoadRef.current = true
-    void loadSystemStats()
+    // System stats arrive via useSystemStats (mount fetch or shared cache);
+    // only the page-local deep datasets load here.
     void loadSecurityStatus()
     void loadSandboxDiagnostics()
     void loadAlertRules()
@@ -422,28 +503,37 @@ const MonitoringDashboardPage: React.FC = () => {
       },
       () => { /* non-critical */ }
     )
-  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
-  // Auto-refresh timer
+  // Track tab visibility so polling can pause while hidden
+  useEffect(() => {
+    const handleVisibilityChange = () =>
+      setIsTabVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }, [])
+
+  // Auto-refresh timer — polls live datasets only, and skips work while hidden
   useEffect(() => {
     if (autoRefreshInterval <= 0) return
-    const id = setInterval(refreshAll, autoRefreshInterval * 1000)
+    const id = setInterval(() => {
+      if (document.hidden) return
+      refreshLive()
+    }, autoRefreshInterval * 1000)
     return () => clearInterval(id)
-  }, [autoRefreshInterval, refreshAll])
+  }, [autoRefreshInterval, refreshLive])
 
-  // Update "last updated X ago" text every 10 seconds
+  // When the tab becomes visible again, catch up live data if it went stale
   useEffect(() => {
-    const tick = () => {
-      if (!lastRefreshedAt) { setTimeSinceRefresh(""); return }
-      const secs = Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000)
-      if (secs < 10) setTimeSinceRefresh(t("settings:adminMonitoring.justNow", "just now"))
-      else if (secs < 60) setTimeSinceRefresh(`${secs}${t("settings:adminMonitoring.secondsAgoSuffix", "s ago")}`)
-      else setTimeSinceRefresh(`${Math.floor(secs / 60)}${t("settings:adminMonitoring.minutesAgoSuffix", "m ago")}`)
+    if (!isTabVisible || autoRefreshInterval <= 0) return
+    if (!lastRefreshedAt) {
+      refreshLive()
+      return
     }
-    tick()
-    const id = setInterval(tick, 10_000)
-    return () => clearInterval(id)
-  }, [lastRefreshedAt, t])
+    const elapsedMs = Date.now() - lastRefreshedAt.getTime()
+    if (elapsedMs >= autoRefreshInterval * 1000) refreshLive()
+  }, [isTabVisible, autoRefreshInterval, lastRefreshedAt, refreshLive])
 
   // Derive metric name suggestions from system stats keys
   const metricOptions = useMemo(() => {
@@ -478,8 +568,11 @@ const MonitoringDashboardPage: React.FC = () => {
   }
 
   // ── Alert Rules Table Columns ──
+  // Column arrays are memoized (C-S1): antd/rc-table compares column and
+  // data-source references to skip body re-renders, so rebuilding them per
+  // render forced every table to re-reconcile on each page render.
 
-  const ruleColumns: ColumnsType<AlertRuleRow> = [
+  const ruleColumns = useMemo<ColumnsType<AlertRuleRow>>(() => [
     { title: t("settings:adminMonitoring.colMetric", "Metric"), dataIndex: "metric", key: "metric", render: (metric: string) => <code>{metric}</code> },
     { title: t("settings:adminMonitoring.colOperator", "Operator"), dataIndex: "operator", key: "operator" },
     { title: t("settings:adminMonitoring.colThreshold", "Threshold"), dataIndex: "threshold", key: "threshold" },
@@ -503,11 +596,32 @@ const MonitoringDashboardPage: React.FC = () => {
         </Popconfirm>
       )
     }
-  ]
+  ], [t, handleDeleteRule])
 
   // ── Alert History Table Columns ──
 
-  const historyColumns: ColumnsType<AlertHistoryRow> = [
+  // Stable rowKey reference: rc-table memoizes getRowKey on this function, so
+  // an inline arrow would defeat the history table's body memoization.
+  const historyRowKey = useCallback(
+    (record: AlertHistoryRow) =>
+      String(record.id ?? record.alert ?? record.triggered_at ?? "unknown"),
+    []
+  )
+
+  // Stable locale object: an inline literal would churn antd's merged table
+  // locale (and the column transforms derived from it) on every page render,
+  // re-rendering the table body even with identical data (C-S1).
+  const historyLocale = useMemo(
+    () => ({
+      emptyText: t(
+        "settings:adminMonitoring.alertHistoryEmpty",
+        "No alert activity recorded yet. Actions on alerts (acknowledge, snooze, escalate) appear here."
+      )
+    }),
+    [t]
+  )
+
+  const historyColumns = useMemo<ColumnsType<AlertHistoryRow>>(() => [
     { title: t("settings:adminMonitoring.colAlert", "Alert"), dataIndex: "alert", key: "alert", render: (alert: string | undefined, record: AlertHistoryRow) => alert || record.metric || record.id || "\u2014" },
     {
       title: t("settings:adminMonitoring.colSeverity", "Severity"), dataIndex: "severity", key: "severity",
@@ -516,7 +630,7 @@ const MonitoringDashboardPage: React.FC = () => {
         return <Tag color={color}>{severity || "low"}</Tag>
       }
     },
-    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "triggered_at", key: "triggered_at", render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014" },
+    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "triggered_at", key: "triggered_at", render: (val: string) => val ? formatAdminDateTime(val) : "\u2014" },
     {
       title: t("settings:adminMonitoring.colStatus", "Status"), dataIndex: "status", key: "status",
       render: (status: string) => {
@@ -541,9 +655,9 @@ const MonitoringDashboardPage: React.FC = () => {
         )
       }
     }
-  ]
+  ], [t, currentUserId, handleAssignAlert, handleSnoozeAlert, handleEscalateAlert])
 
-  const sandboxRuntimeColumns: ColumnsType<SandboxAdminRuntimeDiagnosticsItem> = [
+  const sandboxRuntimeColumns = useMemo<ColumnsType<SandboxAdminRuntimeDiagnosticsItem>>(() => [
     {
       title: t("settings:adminMonitoring.colRuntime", "Runtime"),
       dataIndex: "name",
@@ -606,7 +720,75 @@ const MonitoringDashboardPage: React.FC = () => {
       key: "recommended_action",
       render: (action: string | undefined) => formatRuntimeCode(action || "none")
     }
-  ]
+  ], [t])
+
+  // ── Activity Table Columns ──
+  // (Declared with the other hooks, above the admin-guard early returns.)
+
+  const activityColumns = useMemo<ColumnsType<ActivityRow>>(() => [
+    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? formatAdminDateTime(val) : "\u2014" },
+    { title: t("settings:adminMonitoring.colAction", "Action"), dataIndex: "action", key: "action" },
+    { title: t("settings:adminMonitoring.colUser", "User"), dataIndex: "user", key: "user", render: (val: string | undefined) => val || "\u2014" },
+    { title: t("settings:adminMonitoring.colDetails", "Details"), dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
+  ], [t])
+
+  // ── Data table elements ──
+  // Memoized as ELEMENTS (C-S1): antd v6 rebuilds its internal column
+  // transforms on every Table render, so even stable `columns`/`dataSource`
+  // references re-render the body when the Table component itself re-renders.
+  // A stable element reference makes React bail out of the whole subtree —
+  // poll-cycle re-renders (timestamp/loading flags) no longer re-diff
+  // unchanged table data. Deps are exactly the props each table receives.
+
+  const sandboxRuntimeRows = useMemo<SandboxAdminRuntimeDiagnosticsItem[]>(
+    () => (Array.isArray(sandboxDiagnostics?.runtimes)
+      ? sandboxDiagnostics.runtimes
+      : []),
+    [sandboxDiagnostics]
+  )
+
+  const sandboxTableElement = useMemo(() => (
+    <Table<SandboxAdminRuntimeDiagnosticsItem>
+      dataSource={sandboxRuntimeRows}
+      columns={sandboxRuntimeColumns}
+      rowKey="name"
+      pagination={false}
+      size="small"
+    />
+  ), [sandboxRuntimeRows, sandboxRuntimeColumns])
+
+  const rulesTableElement = useMemo(() => (
+    <Table
+      dataSource={alertRules}
+      columns={ruleColumns}
+      rowKey="id"
+      loading={rulesLoading}
+      pagination={false}
+      size="small"
+    />
+  ), [alertRules, ruleColumns, rulesLoading])
+
+  const historyTableElement = useMemo(() => (
+    <Table
+      dataSource={alertHistory}
+      columns={historyColumns}
+      rowKey={historyRowKey}
+      loading={historyLoading}
+      pagination={{ pageSize: 20 }}
+      size="small"
+      locale={historyLocale}
+    />
+  ), [alertHistory, historyColumns, historyRowKey, historyLoading, historyLocale])
+
+  const activityTableElement = useMemo(() => (
+    <Table
+      dataSource={activityRows}
+      columns={activityColumns}
+      rowKey="_key"
+      pagination={{ pageSize: 20 }}
+      size="small"
+    />
+  ), [activityRows, activityColumns])
 
   // ── Render ──
 
@@ -631,25 +813,6 @@ const MonitoringDashboardPage: React.FC = () => {
     )
   }
 
-  const activityEntries: ActivityEntry[] =
-    activity && !Array.isArray(activity) && Array.isArray(activity.entries)
-      ? activity.entries
-      : Array.isArray(activity)
-        ? activity
-        : []
-  const activityRows: ActivityRow[] = activityEntries.map((entry, idx) => ({
-    ...entry,
-    _key: idx
-  }))
-  const activityColumns: ColumnsType<ActivityRow> = [
-    { title: t("settings:adminMonitoring.colTime", "Time"), dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? new Date(val).toLocaleString() : "\u2014" },
-    { title: t("settings:adminMonitoring.colAction", "Action"), dataIndex: "action", key: "action" },
-    { title: t("settings:adminMonitoring.colUser", "User"), dataIndex: "user", key: "user", render: (val: string | undefined) => val || "\u2014" },
-    { title: t("settings:adminMonitoring.colDetails", "Details"), dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
-  ]
-  const sandboxRuntimeRows: SandboxAdminRuntimeDiagnosticsItem[] = Array.isArray(sandboxDiagnostics?.runtimes)
-    ? sandboxDiagnostics.runtimes
-    : []
   const hostLocalWarningRuntimes = Array.isArray(sandboxDiagnostics?.summary?.host_local_warning_runtimes)
     ? sandboxDiagnostics.summary.host_local_warning_runtimes
     : []
@@ -673,7 +836,9 @@ const MonitoringDashboardPage: React.FC = () => {
       {/* System Overview Card */}
       <Card title={t("settings:adminMonitoring.systemOverviewTitle", "System Overview")} loading={statsLoading || securityLoading} style={{ marginBottom: 16 }} extra={
         <Space size="small" align="center">
-          {timeSinceRefresh && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t("settings:adminMonitoring.updated", "Updated")} {timeSinceRefresh}</Typography.Text>}
+          {/* Owns its 10s tick internally (C-S1) so staleness updates never
+              re-render the page or its tables. */}
+          <RefreshedAtLabel at={lastRefreshedAt} t={t} />
           <Select size="small" value={autoRefreshInterval} onChange={setAutoRefreshInterval} style={{ width: 90 }} options={[{ value: 0, label: t("settings:adminMonitoring.refreshOff", "Off") }, { value: 30, label: t("settings:adminMonitoring.refresh30s", "30s") }, { value: 60, label: t("settings:adminMonitoring.refresh1min", "1min") }, { value: 300, label: t("settings:adminMonitoring.refresh5min", "5min") }]} />
           <Button size="small" onClick={refreshAll}>{t("common:refresh", "Refresh")}</Button>
         </Space>
@@ -754,13 +919,7 @@ const MonitoringDashboardPage: React.FC = () => {
             </Alert>
           )}
           {sandboxRuntimeRows.length > 0 ? (
-            <Table<SandboxAdminRuntimeDiagnosticsItem>
-              dataSource={sandboxRuntimeRows}
-              columns={sandboxRuntimeColumns}
-              rowKey="name"
-              pagination={false}
-              size="small"
-            />
+            sandboxTableElement
           ) : !sandboxDiagnosticsLoading && !sandboxDiagnosticsError ? (
             <Alert title={t("settings:adminMonitoring.sandboxEmpty", "No sandbox runtime diagnostics available yet.")} />
           ) : null}
@@ -809,13 +968,13 @@ const MonitoringDashboardPage: React.FC = () => {
             </div>
           </Alert>
         ) : (
-          <Table dataSource={alertRules} columns={ruleColumns} rowKey="id" loading={rulesLoading} pagination={false} size="small" />
+          rulesTableElement
         )}
       </Card>
 
       {/* Alert History Card */}
       <Card title={t("settings:adminMonitoring.alertHistoryTitle", "Alert History")} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadAlertHistory()} size="small">{t("common:refresh", "Refresh")}</Button>}>
-        <Table dataSource={alertHistory} columns={historyColumns} rowKey={(record) => String(record.id ?? record.alert ?? record.triggered_at ?? "unknown")} loading={historyLoading} pagination={{ pageSize: 20 }} size="small" locale={{ emptyText: t("settings:adminMonitoring.alertHistoryEmpty", "No alert activity recorded yet. Actions on alerts (acknowledge, snooze, escalate) appear here.") }} />
+        {historyTableElement}
       </Card>
 
       {/* Activity (Collapsible) */}
@@ -823,7 +982,7 @@ const MonitoringDashboardPage: React.FC = () => {
         {activityLoading ? (
           <Card loading={true} />
         ) : activityRows.length > 0 ? (
-          <Table dataSource={activityRows} columns={activityColumns} rowKey="_key" pagination={false} size="small" />
+          activityTableElement
         ) : (
           <Alert title={t("settings:adminMonitoring.activityEmpty", "No recent activity data available.")} />
         )}

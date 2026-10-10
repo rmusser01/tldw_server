@@ -253,4 +253,53 @@ describe("LlamacppSnapshotsPanel", () => {
     expect(props.onEnable).toHaveBeenCalledExactlyOnceWith(true)
     expect(props.onStop).not.toHaveBeenCalled()
   })
+
+  it("test_snapshot_sort_runs_once_per_catalog", () => {
+    const props = fixture()
+    // Deliberately oldest-first so a skipped sort would be visible on screen.
+    const snapshots = [
+      { ...snapshot, snapshot_id: "snapshot-a", commit_sequence: 1 },
+      { ...snapshot, snapshot_id: "snapshot-b", commit_sequence: 2 },
+      { ...snapshot, snapshot_id: "snapshot-c", commit_sequence: 3 }
+    ]
+    const catalog = { ...props.catalog, snapshots, total: 3 }
+    const isCatalogCopy = (value: unknown) =>
+      Array.isArray(value) &&
+      value.some((item) => (item as typeof snapshot).snapshot_id === "snapshot-c")
+
+    let snapshotSortCalls = 0
+    const originalSort = Array.prototype.sort
+    const sortSpy = vi
+      .spyOn(Array.prototype, "sort")
+      .mockImplementation(function (this: unknown[], comparator?: (...args: never[]) => number) {
+        if (comparator && isCatalogCopy(this)) {
+          snapshotSortCalls += 1
+        }
+        return comparator
+          ? originalSort.call(this, comparator)
+          : originalSort.call(this)
+      })
+
+    try {
+      const { container, rerender } = render(
+        <LlamacppSnapshotsPanel {...props} catalog={catalog} />
+      )
+
+      // Newest-first ordering is preserved on screen (behavior parity).
+      const text = container.textContent ?? ""
+      expect(text.indexOf("snapshot-c")).toBeLessThan(text.indexOf("snapshot-b"))
+      expect(text.indexOf("snapshot-b")).toBeLessThan(text.indexOf("snapshot-a"))
+
+      // One sort per catalog reference...
+      expect(snapshotSortCalls).toBe(1)
+
+      // ...and an unrelated prop change re-renders without re-sorting.
+      rerender(
+        <LlamacppSnapshotsPanel {...props} catalog={catalog} mutating={true} />
+      )
+      expect(snapshotSortCalls).toBe(1)
+    } finally {
+      sortSpy.mockRestore()
+    }
+  })
 })

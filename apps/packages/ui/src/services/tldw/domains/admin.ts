@@ -281,8 +281,9 @@ export const adminMethods = {
     })
   },
 
-  async listAlertHistory(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/monitoring/alerts/history", method: "GET" })
+  async listAlertHistory(params?: { limit?: number }): Promise<any[]> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any[]>({ path: `/api/v1/admin/monitoring/alerts/history${query}`, method: "GET" })
   },
 
   async getSecurityAlertStatus(): Promise<any> {
@@ -301,7 +302,15 @@ export const adminMethods = {
     return await bgRequest<any>({ path: `/api/v1/admin/usage/daily${query}`, method: "GET" })
   },
 
-  async getTopUsage(params?: { metric?: string; limit?: number }): Promise<any> {
+  // `start`/`end` pass straight through to the documented backend params:
+  // YYYY-MM-DD inclusive on /usage/top, ISO timestamps on the llm-usage*
+  // endpoints (admin_usage.py).
+  async getTopUsage(params?: {
+    metric?: string
+    limit?: number
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/usage/top${query}`, method: "GET" })
   },
@@ -314,17 +323,31 @@ export const adminMethods = {
     return await bgRequest<string>({ path: "/api/v1/admin/usage/top/export.csv", method: "GET" })
   },
 
-  async getLlmUsage(params?: { provider?: string; model?: string; limit?: number }): Promise<any> {
+  async getLlmUsage(params?: {
+    provider?: string
+    model?: string
+    limit?: number
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/llm-usage${query}`, method: "GET" })
   },
 
-  async getLlmUsageSummary(params?: { group_by?: string }): Promise<any> {
+  async getLlmUsageSummary(params?: {
+    group_by?: string
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/llm-usage/summary${query}`, method: "GET" })
   },
 
-  async getLlmTopSpenders(params?: { limit?: number }): Promise<any> {
+  async getLlmTopSpenders(params?: {
+    limit?: number
+    start?: string
+    end?: string
+  }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/llm-usage/top-spenders${query}`, method: "GET" })
   },
@@ -355,7 +378,13 @@ export const adminMethods = {
     return await bgRequest<any>({ path: `/api/v1/admin/orgs${query}`, method: "GET" })
   },
 
-  async listOrgMembers(orgId: number, params?: { role?: string; status?: string }): Promise<any> {
+  // `limit`/`offset` page server-side; the backend returns a plain array
+  // today, so callers must treat a missing total as "unknown" (see
+  // OrgsTeamsPage's fallback-total paging).
+  async listOrgMembers(
+    orgId: number,
+    params?: { role?: string; status?: string; limit?: number; offset?: number }
+  ): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/members${query}`, method: "GET" })
   },
@@ -394,12 +423,19 @@ export const adminMethods = {
     })
   },
 
-  async listTeams(orgId: number): Promise<any> {
-    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/teams`, method: "GET" })
+  // `limit`/`offset` page server-side; same missing-total caveat as
+  // listOrgMembers above.
+  async listTeams(orgId: number, params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/teams${query}`, method: "GET" })
   },
 
-  async listTeamMembers(teamId: number): Promise<any> {
-    return await bgRequest<any>({ path: `/api/v1/admin/teams/${teamId}/members`, method: "GET" })
+  // The current backend ignores paging params here (returns the full list),
+  // but they are sent so server-side paging works once the endpoint adopts
+  // limit/offset like its siblings.
+  async listTeamMembers(teamId: number, params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({ path: `/api/v1/admin/teams/${teamId}/members${query}`, method: "GET" })
   },
 
   async addTeamMember(teamId: number, payload: { user_id: number; role?: string }): Promise<any> {

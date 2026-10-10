@@ -582,6 +582,165 @@ class AuthnzBillingRepo:
             logger.error(f"AuthnzBillingRepo.list_all_subscriptions failed: {exc}")
             raise
 
+    async def list_subscriptions(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Page org subscriptions with SQL-side filtering.
+
+        Args:
+            status: Only return subscriptions with this status (case-insensitive).
+            limit: Page size.
+            offset: Page offset.
+
+        Returns:
+            Tuple of (subscription dicts with plan details and org name, total
+            matching rows). Filtering, ordering and paging all happen in SQL;
+            org names are resolved via a LEFT JOIN in the same query.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres(conn):
+                    rows = await conn.fetch(
+                        """
+                        SELECT os.id, os.org_id, os.plan_id, os.stripe_customer_id,
+                               os.stripe_subscription_id, os.stripe_subscription_status,
+                               os.billing_cycle, os.current_period_start,
+                               os.current_period_end, os.status, os.trial_end,
+                               os.cancel_at_period_end, os.custom_limits_json,
+                               os.created_at,
+                               sp.name as plan_name, sp.display_name as plan_display_name,
+                               sp.price_usd_monthly, sp.price_usd_yearly,
+                               sp.limits_json as plan_limits_json,
+                               o.name as org_name
+                        FROM org_subscriptions os
+                        JOIN subscription_plans sp ON os.plan_id = sp.id
+                        LEFT JOIN organizations o ON os.org_id = o.id
+                        WHERE ($1::text IS NULL OR lower(os.status) = lower($1))
+                        ORDER BY os.created_at DESC
+                        LIMIT $2 OFFSET $3
+                        """,
+                        status, limit, offset,
+                    )
+                    total = await conn.fetchval(
+                        "SELECT COUNT(*) FROM org_subscriptions os"
+                        " WHERE ($1::text IS NULL OR lower(os.status) = lower($1))",
+                        status,
+                    )
+                    return (
+                        [self._subscription_row_to_dict(dict(r)) for r in rows],
+                        int(total or 0),
+                    )
+                else:
+                    cur = await conn.execute(
+                        """
+                        SELECT os.id, os.org_id, os.plan_id, os.stripe_customer_id,
+                               os.stripe_subscription_id, os.stripe_subscription_status,
+                               os.billing_cycle, os.current_period_start,
+                               os.current_period_end, os.status, os.trial_end,
+                               os.cancel_at_period_end, os.custom_limits_json,
+                               os.created_at,
+                               sp.name as plan_name, sp.display_name as plan_display_name,
+                               sp.price_usd_monthly, sp.price_usd_yearly,
+                               sp.limits_json as plan_limits_json,
+                               o.name as org_name
+                        FROM org_subscriptions os
+                        JOIN subscription_plans sp ON os.plan_id = sp.id
+                        LEFT JOIN organizations o ON os.org_id = o.id
+                        WHERE (? IS NULL OR lower(os.status) = lower(?))
+                        ORDER BY os.created_at DESC
+                        LIMIT ? OFFSET ?
+                        """,
+                        (status, status, limit, offset),
+                    )
+                    rows = await cur.fetchall()
+                    cur2 = await conn.execute(
+                        "SELECT COUNT(*) FROM org_subscriptions os"
+                        " WHERE (? IS NULL OR lower(os.status) = lower(?))",
+                        (status, status),
+                    )
+                    total_row = await cur2.fetchone()
+                    return (
+                        [self._subscription_row_to_dict(rd) for rd in self._rows_to_dicts(cur, rows)],
+                        int(total_row[0]) if total_row else 0,
+                    )
+        except Exception as exc:
+            logger.error(f"AuthnzBillingRepo.list_subscriptions failed: {exc}")
+            raise
+
+    async def get_overview(self) -> dict[str, Any]:
+        """Aggregate subscription counts by status and monthly recurring revenue.
+
+        MRR is the sum of the active subscriptions' plan monthly price
+        (``subscription_plans.price_usd_monthly``, the revenue column the
+        subscription model exposes); ``org_subscriptions`` itself carries no
+        cost column.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres(conn):
+                    row = await conn.fetchrow(
+                        """
+                        SELECT
+                          COALESCE(SUM(CASE WHEN os.status = 'active'
+                                            THEN COALESCE(sp.price_usd_monthly, 0)
+                                            ELSE 0 END), 0) AS mrr,
+                          COUNT(*) FILTER (WHERE os.status = 'active') AS active_subscriptions,
+                          COUNT(*) FILTER (WHERE os.status = 'canceled') AS canceled_subscriptions,
+                          COUNT(*) FILTER (WHERE os.status = 'past_due') AS past_due_subscriptions
+                        FROM org_subscriptions os
+                        LEFT JOIN subscription_plans sp ON os.plan_id = sp.id
+                        """
+                    )
+                    if not row:
+                        return {
+                            "mrr": 0.0,
+                            "active_subscriptions": 0,
+                            "canceled_subscriptions": 0,
+                            "past_due_subscriptions": 0,
+                        }
+                    return {
+                        "mrr": float(row["mrr"] or 0),
+                        "active_subscriptions": int(row["active_subscriptions"] or 0),
+                        "canceled_subscriptions": int(row["canceled_subscriptions"] or 0),
+                        "past_due_subscriptions": int(row["past_due_subscriptions"] or 0),
+                    }
+                else:
+                    cur = await conn.execute(
+                        """
+                        SELECT
+                          COALESCE(SUM(CASE WHEN os.status = 'active'
+                                            THEN COALESCE(sp.price_usd_monthly, 0)
+                                            ELSE 0 END), 0) AS mrr,
+                          SUM(CASE WHEN os.status = 'active' THEN 1 ELSE 0 END) AS active_subscriptions,
+                          SUM(CASE WHEN os.status = 'canceled' THEN 1 ELSE 0 END) AS canceled_subscriptions,
+                          SUM(CASE WHEN os.status = 'past_due' THEN 1 ELSE 0 END) AS past_due_subscriptions
+                        FROM org_subscriptions os
+                        LEFT JOIN subscription_plans sp ON os.plan_id = sp.id
+                        """
+                    )
+                    row = await cur.fetchone()
+                    if not row:
+                        return {
+                            "mrr": 0.0,
+                            "active_subscriptions": 0,
+                            "canceled_subscriptions": 0,
+                            "past_due_subscriptions": 0,
+                        }
+                    rd = self._row_to_dict(cur, row)
+                    return {
+                        "mrr": float(rd.get("mrr") or 0),
+                        "active_subscriptions": int(rd.get("active_subscriptions") or 0),
+                        "canceled_subscriptions": int(rd.get("canceled_subscriptions") or 0),
+                        "past_due_subscriptions": int(rd.get("past_due_subscriptions") or 0),
+                    }
+        except Exception as exc:
+            logger.error(f"AuthnzBillingRepo.get_overview failed: {exc}")
+            raise
+
     # =========================================================================
     # Payment History
     # =========================================================================
@@ -732,6 +891,62 @@ class AuthnzBillingRepo:
                     return self._row_to_dict(cur2, row)
         except Exception as exc:
             logger.error(f"AuthnzBillingRepo.log_billing_action failed: {exc}")
+            raise
+
+    async def list_billing_events(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Page the billing audit log (the billing events ledger).
+
+        Args:
+            limit: Page size.
+            offset: Page offset.
+
+        Returns:
+            Tuple of (event dicts with org name resolved via LEFT JOIN, total rows).
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres(conn):
+                    rows = await conn.fetch(
+                        """
+                        SELECT bal.id, bal.org_id, bal.user_id, bal.action,
+                               bal.details, bal.ip_address, bal.created_at,
+                               o.name as org_name
+                        FROM billing_audit_log bal
+                        LEFT JOIN organizations o ON bal.org_id = o.id
+                        ORDER BY bal.created_at DESC, bal.id DESC
+                        LIMIT $1 OFFSET $2
+                        """,
+                        limit, offset,
+                    )
+                    total = await conn.fetchval("SELECT COUNT(*) FROM billing_audit_log")
+                    return [dict(r) for r in rows], int(total or 0)
+                else:
+                    cur = await conn.execute(
+                        """
+                        SELECT bal.id, bal.org_id, bal.user_id, bal.action,
+                               bal.details, bal.ip_address, bal.created_at,
+                               o.name as org_name
+                        FROM billing_audit_log bal
+                        LEFT JOIN organizations o ON bal.org_id = o.id
+                        ORDER BY bal.created_at DESC, bal.id DESC
+                        LIMIT ? OFFSET ?
+                        """,
+                        (limit, offset),
+                    )
+                    rows = await cur.fetchall()
+                    cur2 = await conn.execute("SELECT COUNT(*) FROM billing_audit_log")
+                    total_row = await cur2.fetchone()
+                    return (
+                        self._rows_to_dicts(cur, rows),
+                        int(total_row[0]) if total_row else 0,
+                    )
+        except Exception as exc:
+            logger.error(f"AuthnzBillingRepo.list_billing_events failed: {exc}")
             raise
 
     # =========================================================================

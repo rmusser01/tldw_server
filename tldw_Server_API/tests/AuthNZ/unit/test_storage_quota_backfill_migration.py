@@ -78,7 +78,10 @@ def test_skips_when_users_table_absent(tmp_path: Path) -> None:
         conn.execute("INSERT INTO schema_migrations VALUES (99, 'synthetic', CURRENT_TIMESTAMP)")
     apply_authnz_migrations(db_path)
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
+        # Later migrations (e.g. 101's admin perf indexes) also run; only the
+        # version-100 step itself is under test here.
+        applied = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
+        assert 100 in applied
 
 
 def test_skips_when_users_table_has_no_quota_column(tmp_path: Path) -> None:
@@ -91,6 +94,7 @@ def test_skips_when_users_table_has_no_quota_column(tmp_path: Path) -> None:
         conn.execute("INSERT INTO users (username) VALUES ('nocol')")
     apply_authnz_migrations(db_path)
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
+        applied = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
+        assert 100 in applied
         # The skip returns before the overrides table is even created, so nothing was written.
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'user_config_overrides'").fetchone() is None
