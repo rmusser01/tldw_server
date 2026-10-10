@@ -42,7 +42,8 @@
     "axe-core": "^4.11.1",
     "jsdom": "^28.1.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.16",
+    "@tldw/api-types": "workspace:*"
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",
