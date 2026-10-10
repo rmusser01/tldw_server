@@ -18,7 +18,7 @@ import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { tagColors } from "@/utils/color"
 import { removeModelSuffix } from "@/db/dexie/models"
 import {
-  parseReasoning, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
+  parseReasoning, isReasoningStarted, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
 } from "@/libs/reasoning"
 import {
   decodeChatErrorPayload,
@@ -1876,12 +1876,9 @@ const PlaygroundMessageImpl = (props: Props) => {
     ]
   )
 
-  const actionRowVisibility = isProMode
+  const actionRowVisibility = isProMode || (props.isBot && isLastMessage)
     ? "flex"
     : "hidden group-hover:flex group-focus-within:flex"
-  const overflowChipVisibility = isProMode
-    ? "hidden"
-    : "inline-flex group-hover:hidden"
   const showInlineActions = !props.isProcessing && !editMode
   const showEmptyAssistantResponse =
     props.isBot &&
@@ -2744,7 +2741,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                     }}
                     recoveryActions={errorRecoveryActions}
                   />
-                ) : shouldRenderStreamingPlainText ? (
+                ) : shouldRenderStreamingPlainText && !isReasoningStarted(props.message) ? (
                   <p
                     data-testid="playground-streaming-plain-text"
                     className={`text-body text-text-muted whitespace-pre-wrap ${assistantTextClass}`}
@@ -2819,6 +2816,18 @@ const PlaygroundMessageImpl = (props: Props) => {
                             t={t}
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
+                        )
+                      }
+
+                      if (shouldRenderStreamingPlainText) {
+                        return (
+                          <p
+                            key={`message-${i}`}
+                            data-testid="playground-streaming-plain-text"
+                            className={`text-body text-text-muted whitespace-pre-wrap ${assistantTextClass}`}
+                          >
+                            {e.content}
+                          </p>
                         )
                       }
 
@@ -3062,7 +3071,6 @@ const PlaygroundMessageImpl = (props: Props) => {
               canSwipeNext={canSwipeNext}
               onSwipePrev={props.onSwipePrev}
               onSwipeNext={props.onSwipeNext}
-              overflowChipVisibility={overflowChipVisibility}
               actionRowVisibility={actionRowVisibility}
               isTtsEnabled={props.isTTSEnabled}
               ttsDisabledReason={ttsDisabledReason}

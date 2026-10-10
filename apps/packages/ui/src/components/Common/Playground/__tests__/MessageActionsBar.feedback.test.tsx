@@ -25,7 +25,6 @@ const baseProps = () =>
     variantCount: 1,
     canSwipePrev: false,
     canSwipeNext: false,
-    overflowChipVisibility: "hidden",
     actionRowVisibility: "flex",
     isTtsEnabled: false,
     isSpeaking: false,

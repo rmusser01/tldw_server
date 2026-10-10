@@ -12,8 +12,13 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import userEvent from "@testing-library/user-event"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import postcss, { type Root } from "postcss"
+import tailwindcss from "tailwindcss"
+import { ConfigProvider, Modal } from "antd"
 import { PageAssistContext } from "@/context"
 import { useComposerEvents } from "@/hooks/useComposerEvents"
 import { useStoreMessageOption } from "@/store/option"
@@ -25,6 +30,7 @@ import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 import { PlaygroundMessage } from "../Message"
 import { SidePanelBody } from "@/components/Sidepanel/Chat/body"
+import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 
 const saveChatKnowledgeMock = vi.hoisted(() => vi.fn(async () => undefined))
 const messageApiMock = vi.hoisted(() => ({
@@ -36,10 +42,12 @@ const messageApiMock = vi.hoisted(() => ({
 const chatState = vi.hoisted(() => ({
   messages: [] as unknown[],
   streaming: false,
+  processing: false,
   deleteMessage: vi.fn(async (_index: number) => true),
   stopStreamingRequest: vi.fn(),
   toggleMessagePinned: vi.fn()
 }))
+const actionPresentation = vi.hoisted(() => ({ mode: "pro", realPopover: false, userBubble: false }))
 const researchState = vi.hoisted(() => ({ runs: [] as unknown[] }))
 // A stable t: a new function per render re-runs effects that depend on it.
 const translate = vi.hoisted(
@@ -64,33 +72,27 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: translate })
 }))
 
-vi.mock("antd", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("antd")>()),
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  // Controlled popover: the trigger toggles it and the content shows only while open.
-  Popover: ({
-    children,
-    content,
-    open,
-    onOpenChange
-  }: {
-    children: React.ReactNode
-    content?: React.ReactNode
-    open?: boolean
-    onOpenChange?: (open: boolean) => void
-  }) => (
-    <>
-      <span onClick={() => onOpenChange?.(!open)}>{children}</span>
-      {open ? content : null}
-    </>
-  ),
-  App: Object.assign(() => null, {
-    useApp: () => ({ message: messageApiMock })
-  })
-}))
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>()
+  return {
+    ...actual,
+    Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    // Existing ownership fixtures use the declared controlled UI double;
+    // TASK-13279 selects the actual library for menu reachability controls.
+    Popover: (props: React.ComponentProps<typeof actual.Popover>) => actionPresentation.realPopover
+      ? <actual.Popover {...props} />
+      : <>
+          <span onClick={() => props.onOpenChange?.(!props.open)}>{props.children}</span>
+          {props.open ? props.content as React.ReactNode : null}
+        </>,
+    App: Object.assign(() => null, { useApp: () => ({ message: messageApiMock }) })
+  }
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
+  useStorage: (key: string, defaultValue: unknown) => [
+    key === "chatShowCharacterPortraits" && actionPresentation.userBubble ? false : defaultValue, vi.fn()
+  ]
 }))
 
 vi.mock("@/components/Common/Markdown", () => ({
@@ -150,7 +152,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (selector: (state: { mode: string }) => unknown) =>
-    selector({ mode: "pro" })
+    selector({ mode: actionPresentation.mode })
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -271,7 +273,7 @@ const loadedChatHookState = () => ({
   setMessages: vi.fn(),
   setHistory: vi.fn(),
   streaming: chatState.streaming,
-  isProcessing: false,
+  isProcessing: chatState.processing,
   isSearchingInternet: false,
   isEmbedding: false,
   regenerateLastMessage: vi.fn(),
@@ -320,17 +322,19 @@ vi.mock("@/hooks/useMessage", () => ({ useMessage: () => loadedChatHookState() }
 const surfaces = [
   {
     surface: "Playground chat",
-    renderChat: () =>
+    renderChat: (wrapper?: React.ComponentType<React.PropsWithChildren<object>>) =>
       render(
         <MemoryRouter>
           <PlaygroundChat />
-        </MemoryRouter>
+        </MemoryRouter>,
+        { wrapper }
       ),
     pinsMessages: true
   },
   {
     surface: "sidepanel chat",
-    renderChat: () => render(<SidePanelBody />),
+    renderChat: (wrapper?: React.ComponentType<React.PropsWithChildren<object>>) =>
+      render(<SidePanelBody />, { wrapper }),
     pinsMessages: false
   }
 ]
@@ -731,3 +735,305 @@ describe.each(surfaces)(
     })
   }
 )
+
+// Actual renderers and AntD menu, with real emitted utility CSS. Geometry and
+// physical touch remain native acceptance; SDK/actions retain the fixture IO.
+describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }, () => {
+  const require = createRequire(import.meta.url)
+  const utilities = new Map<string, Root>()
+  let style: HTMLStyleElement
+
+  beforeAll(async () => {
+    const sources = ["Message.tsx", "MessageActionsBar.tsx", "PlaygroundUserMessage.tsx"]
+      .map(file => readFileSync(require.resolve(`../${file}`), "utf8")).join("\n") +
+      readFileSync(require.resolve("../../IconButton.tsx"), "utf8") +
+      readFileSync(require.resolve("../../../Sidepanel/Chat/FeedbackButtons.tsx"), "utf8")
+    for (const client of ["tldw-frontend", "extension"]) {
+      const config = require(`../../../../../../../${client}/tailwind.config.js`)
+      const result = await postcss([tailwindcss({ ...config, content: [{ raw: sources }] })])
+        .process("@tailwind utilities;", { from: undefined })
+      utilities.set(client, result.root)
+    }
+  })
+  beforeEach(() => {
+    actionPresentation.mode = "standard"
+    actionPresentation.realPopover = true
+    actionPresentation.userBubble = false
+    chatState.streaming = false
+    chatState.processing = false
+    chatState.messages = formatSelectedHistory(loadedServerChatCapture()).messages
+    useStoreMessageOption.setState({ streaming: false, isProcessing: false, isLoading: false })
+    style = document.createElement("style")
+    style.textContent = utilities.get("tldw-frontend")!.toString()
+    document.head.append(style)
+  })
+  afterEach(() => {
+    actionPresentation.mode = "pro"
+    actionPresentation.realPopover = false
+    actionPresentation.userBubble = false
+    chatState.processing = false
+    style.remove()
+  })
+
+  const activeMenu = async () => {
+    let menu: HTMLElement | null = null
+    await waitFor(() => {
+      menu = document.querySelector<HTMLElement>(".ant-popover:not(.ant-popover-hidden)")
+      expect(menu).not.toBeNull()
+      // Actual AntD starts its mounted portal at opacity 0; jsdom completes
+      // this through the library's 1000ms motion deadline rather than CSS animation.
+      expect(menu).toBeVisible()
+    }, { timeout: 2_000 })
+    return menu!
+  }
+  // Mirror AppShell's real portal ordering: later composer controls precede
+  // the Popover portal, so Tab cannot accidentally succeed by DOM adjacency.
+  const OverflowFocusSurface = ({ children }: React.PropsWithChildren<object>) => {
+    const portalRoot = React.useRef<HTMLDivElement>(null)
+    const getPopupContainer = React.useCallback(() => portalRoot.current ?? document.body, [])
+    return (
+      <ConfigProvider getPopupContainer={getPopupContainer}>
+        {children}
+        <textarea aria-label="Later composer input" />
+        <button type="button">Later composer action</button>
+        <div id="tldw-portal-root" ref={portalRoot} />
+      </ConfigProvider>
+    )
+  }
+  const openKeyboardMenu = async (
+    renderChat: (wrapper?: React.ComponentType<React.PropsWithChildren<object>>) => unknown,
+    role: "assistant" | "user"
+  ) => {
+    actionPresentation.userBubble = role === "user"
+    const user = userEvent.setup()
+    renderChat(OverflowFocusSurface)
+    const trigger = within(messageCard(role)).getByRole("button", { name: "More actions" })
+    trigger.focus()
+    await user.keyboard("{Enter}")
+    const menu = await activeMenu()
+    expect(menu.closest("#tldw-portal-root")).not.toBeNull()
+    const actions = within(menu).getAllByRole("button")
+      .filter(button => !(button as HTMLButtonElement).disabled)
+    expect(actions.length).toBeGreaterThanOrEqual(2)
+    return { user, trigger, menu, actions }
+  }
+  const expectClosedMenu = async (menu: HTMLElement) => {
+    await waitFor(() => expect(menu).not.toBeVisible(), { timeout: 2_000 })
+  }
+
+  const targets = (button: HTMLElement, client: string, viewport: number) => {
+    const values = new Map<string, string>()
+    utilities.get(client)!.walkRules(rule => {
+      if (rule.parent?.type === "atrule" && rule.parent.name === "media") {
+        const minimum = rule.parent.params.match(/min-width:\s*(\d+)px/)
+        if (!minimum || viewport < Number(minimum[1])) return
+      }
+      const match = rule.selector.match(/^\.((?:\\.|[\w-])+)$/)
+      if (!match || !button.classList.contains(match[1].replace(/\\/g, ""))) return
+      rule.walkDecls(decl => { values.set(decl.prop, decl.value) })
+    })
+    const pixels = (value?: string) => value?.endsWith("rem")
+      ? parseFloat(value) * 16 : value?.endsWith("px") ? parseFloat(value) : 0
+    return {
+      height: Math.max(pixels(values.get("height")), pixels(values.get("min-height")),
+        pixels(values.get("line-height")) + pixels(values.get("padding-top")) + pixels(values.get("padding-bottom"))),
+      width: Math.max(pixels(values.get("width")), pixels(values.get("min-width")))
+    }
+  }
+
+  for (const compact of [false, true]) {
+    it.each(["Helpful", "Not helpful", "More feedback"])(`keeps real FeedbackButtons compact=${compact} %s at least 44px`, name => {
+      render(<FeedbackButtons compact={compact} />)
+      const button = screen.getByRole("button", { name })
+      for (const client of ["tldw-frontend", "extension"]) {
+        for (const viewport of [320, 1280]) {
+          const size = targets(button, client, viewport)
+          expect(size.height, `${compact}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+          expect(size.width, `${compact}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+        }
+      }
+    })
+  }
+
+  for (const { surface, renderChat } of surfaces) {
+    it(`${surface} exposes Copy and Regenerate on the last assistant without hover`, () => {
+      renderChat()
+      const card = messageCard("assistant")
+      expect(within(card).getByRole("button", { name: "copyToClipboard" })).toBeVisible()
+      expect(within(card).getByRole("button", { name: "regenerate" })).toBeVisible()
+    })
+
+    it(`${surface} preserves the processing lock on persistent actions`, () => {
+      chatState.processing = true
+      useStoreMessageOption.setState({ isProcessing: true })
+      renderChat()
+      const card = messageCard("assistant")
+      expect(within(card).queryByRole("button", { name: "copyToClipboard" })).toBeNull()
+      expect(within(card).queryByRole("button", { name: "regenerate" })).toBeNull()
+      expect(within(card).queryByRole("button", { name: "More actions" })).toBeNull()
+    })
+
+    it(`${surface} retains the existing persistent Pro primary actions`, () => {
+      actionPresentation.mode = "pro"
+      renderChat()
+      const card = messageCard("assistant")
+      expect(within(card).getByRole("button", { name: "copyToClipboard" })).toBeVisible()
+      expect(within(card).getByRole("button", { name: "regenerate" })).toBeVisible()
+    })
+
+    it(`${surface} has exactly one real overflow trigger on a Casual assistant`, async () => {
+      renderChat()
+      const card = messageCard("assistant")
+      expect(within(card).getAllByRole("button", { name: "More actions", hidden: true })).toHaveLength(1)
+      fireEvent.click(within(card).getByRole("button", { name: "More actions" }))
+      expect(within(await activeMenu()).getByRole("button", { name: "Save to Notes" })).toBeVisible()
+    })
+
+    it(`${surface} keeps older assistant overflow reachable while primary actions remain hover-revealed`, async () => {
+      chatState.messages = [...chatState.messages, { id: "later-user", isBot: false, name: "You", message: "Later question", sources: [] },
+        { id: "later-reply", isBot: true, name: "Assistant", message: "Later answer", sources: [] }]
+      renderChat()
+      const older = messageCard("assistant")
+      expect(within(older).queryByRole("button", { name: "copyToClipboard" })).toBeNull()
+      fireEvent.click(within(older).getByRole("button", { name: "More actions" }))
+      expect(within(await activeMenu()).getByRole("button", { name: "Save to Notes" })).toBeVisible()
+    })
+
+    it(`${surface} opens an older user bubble's real actions with the keyboard`, async () => {
+      actionPresentation.userBubble = true
+      renderChat()
+      const user = userEvent.setup()
+      const trigger = within(messageCard("user")).getByRole("button", { name: "More actions" })
+      trigger.focus()
+      await user.keyboard("{Enter}")
+      const menu = await activeMenu()
+      expect(within(menu).getByRole("button", { name: "copyToClipboard" })).toBeVisible()
+      expect(within(menu).getByRole("button", { name: "edit" })).toBeVisible()
+      expect(within(menu).getByRole("button", { name: "Delete" })).toBeVisible()
+    })
+
+    for (const role of ["assistant", "user"] as const) {
+      it(`${surface} ${role} Enter focuses the first enabled real overflow action`, async () => {
+        const { actions } = await openKeyboardMenu(renderChat, role)
+        await waitFor(() => expect(actions[0]).toHaveFocus())
+      })
+
+      it(`${surface} ${role} Tab reaches the next real overflow action before later composer controls`, async () => {
+        const { user, actions } = await openKeyboardMenu(renderChat, role)
+        // Qualify Tab independently of the first-focus assertion above.
+        actions[0].focus()
+        await user.tab()
+        expect(actions[1]).toHaveFocus()
+        expect(screen.getByRole("textbox", { name: "Later composer input" })).not.toHaveFocus()
+      })
+
+      it(`${surface} ${role} Escape closes the real overflow and returns focus to its trigger`, async () => {
+        const { user, trigger, menu, actions } = await openKeyboardMenu(renderChat, role)
+        actions[0].focus()
+        await user.keyboard("{Escape}")
+        await expectClosedMenu(menu)
+        await waitFor(() => expect(trigger).toHaveFocus())
+      })
+
+      it(`${surface} ${role} non-removing overflow action keeps its callback and returns focus`, async () => {
+        saveChatKnowledgeMock.mockClear()
+        const { user, trigger, menu } = await openKeyboardMenu(renderChat, role)
+        const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+        try {
+          const action = within(menu).getByRole("button", {
+            name: role === "assistant" ? "Save to Notes" : "copyToClipboard"
+          })
+          action.focus()
+          await user.keyboard("{Enter}")
+          if (role === "assistant") {
+            await waitFor(() => expect(saveChatKnowledgeMock).toHaveBeenCalledExactlyOnceWith({
+              conversation_id: SERVER_CHAT_ID,
+              message_id: ASSISTANT_ID,
+              snippet: ANSWER,
+              make_flashcard: false
+            }, undefined))
+          } else {
+            expect(copy).toHaveBeenCalledExactlyOnceWith("How do I undo a rebase?")
+          }
+          await expectClosedMenu(menu)
+          await waitFor(() => expect(trigger).toHaveFocus())
+          expect(messageCard(role)).toBeInTheDocument()
+        } finally { copy.mockRestore() }
+      })
+    }
+
+    it(`${surface} user Edit deliberately focuses the editor instead of returning to overflow`, async () => {
+      const { user, menu } = await openKeyboardMenu(renderChat, "user")
+      const edit = within(menu).getByRole("button", { name: "edit" })
+      edit.focus()
+      await user.keyboard("{Enter}")
+      const editor = within(messageCard("user")).getByRole("textbox", { name: "Edit message" })
+      expect(editor).toHaveValue("How do I undo a rebase?")
+      await waitFor(() => expect(editor).toHaveFocus())
+      await expectClosedMenu(menu)
+    })
+
+    it(`${surface} gives an older user one 44px working pointer overflow`, async () => {
+      actionPresentation.userBubble = true
+      renderChat()
+      const card = messageCard("user")
+      const triggers = within(card).getAllByRole("button", { name: "More actions", hidden: true })
+      expect(triggers).toHaveLength(1)
+      const trigger = within(card).getByRole("button", { name: "More actions" })
+      for (const client of ["tldw-frontend", "extension"]) {
+        for (const viewport of [320, 1280]) {
+          const size = targets(trigger, client, viewport)
+          expect(size.height).toBeGreaterThanOrEqual(44)
+          expect(size.width).toBeGreaterThanOrEqual(44)
+        }
+      }
+      fireEvent.click(trigger)
+      expect(within(await activeMenu()).getByRole("button", { name: "copyToClipboard" })).toBeVisible()
+    })
+
+    it.each(["Save to Notes", "Save to Flashcards", "Delete"])(`${surface} gives real secondary action %s a 44px menu row`, async name => {
+      renderChat()
+      fireEvent.click(within(messageCard("assistant")).getByRole("button", { name: "More actions" }))
+      const button = within(await activeMenu()).getByRole("button", { name })
+      expect(button).toBeVisible()
+      for (const client of ["tldw-frontend", "extension"]) {
+        for (const viewport of [320, 1280]) {
+          const row = targets(button, client, viewport)
+          const envelope = targets(button.parentElement!, client, viewport)
+          expect(row.height, `${surface}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+          expect(button).toHaveClass("w-full")
+          expect(envelope.width).toBeGreaterThanOrEqual(44)
+        }
+      }
+    })
+
+    it.each(["Helpful", "Not helpful", "More feedback"])(`${surface} gives real feedback action %s a 44px target`, name => {
+      renderChat()
+      const button = within(messageCard("assistant")).getByRole("button", { name })
+      expect(button).toBeVisible()
+      for (const client of ["tldw-frontend", "extension"]) {
+        for (const viewport of [320, 1280]) {
+          const size = targets(button, client, viewport)
+          expect(size.height, `${surface}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+          expect(size.width, `${surface}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+        }
+      }
+    })
+
+    it(`${surface} keeps persistent last-reply targets at least 44px in both emitted clients`, () => {
+      renderChat()
+      const card = messageCard("assistant")
+      for (const name of ["copyToClipboard", "regenerate", "More actions"]) {
+        const button = within(card).getAllByRole("button", { name, hidden: true })
+          .find(control => control.dataset.testid !== "message-actions-overflow-chip")!
+        for (const client of ["tldw-frontend", "extension"]) {
+          for (const viewport of [320, 1280]) {
+            const size = targets(button, client, viewport)
+            expect(size.height, `${surface}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+            expect(size.width, `${surface}/${name}/${client}/${viewport}`).toBeGreaterThanOrEqual(44)
+          }
+        }
+      }
+    })
+  }
+})

@@ -151,6 +151,7 @@ export function useQueuedRequests({
       if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration) {
         throw new Error("connection_unavailable")
       }
+      if (canCommitDispatchResult?.() === false) throw new Error("chat_source_changed")
     }
     let sendingItem: QueuedRequest | null = null
     setQueue((prev) => {

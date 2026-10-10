@@ -1,4 +1,12 @@
 import React from "react"
+import { createDefaultActorSettings } from "@/types/actor"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
+import { chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import { normalizeChatSubmitResult as toChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import type { HistoryLoadReceipt, HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { State } from "@/store/option/types"
+import type { Message as StoredMessage } from "@/db/dexie/types"
 import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -195,6 +203,7 @@ const mocks = vi.hoisted(() => {
     })
 
   return {
+    getActorScene: vi.fn<typeof import("@/services/actor-settings").getActorSceneForChat>(),
     useRealPageAssist: false,
     controllerReader: null as (() => AbortController | null) | null,
     draftFields: null as (() => Record<string, unknown>) | null,
@@ -259,9 +268,9 @@ vi.mock("@/services/service-prompts", async original => ({
 vi.mock("~/store/option", () => ({
   useStoreMessageOption: Object.assign(
     (selector?: (state: Record<string, unknown>) => unknown) =>
-      selector ? selector(mocks.storeState) : mocks.storeState,
+      selector ? selector({ ...mocks.chatBaseState, ...mocks.storeState, ...mocks.draftFields?.() }) : { ...mocks.chatBaseState, ...mocks.storeState, ...mocks.draftFields?.() },
     {
-      getState: () => ({ ...mocks.storeState, streaming: mocks.chatBaseState.streaming, isProcessing: mocks.chatBaseState.isProcessing, ...mocks.draftFields?.() }),
+      getState: () => ({ ...mocks.chatBaseState, ...mocks.storeState, ...mocks.draftFields?.() }),
       setState: (update: Record<string, unknown> | ((state: typeof mocks.storeState) => Record<string, unknown>)) => {
         Object.assign(mocks.storeState, typeof update === "function" ? update(mocks.storeState) : update)
       },
@@ -293,7 +302,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/hooks/chat/useChatBaseState", () => ({
-  useChatBaseState: () => mocks.chatBaseState
+  useChatBaseState: () => ({ ...mocks.chatBaseState, ...mocks.draftFields?.() })
 }))
 
 vi.mock("@/hooks/chat/useSelectedModel", () => ({
@@ -324,8 +333,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: () => [null, vi.fn()]
 }))
 
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: mocks.getActorScene
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -382,8 +392,9 @@ vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return {
     pageAssistModel: async (options: any) => {
+      mocks.pageAssistModel(options)
       await h1.beforeModel()
-      return new ChatTldw({ ...options, temperature: 0.23 })
+      return new ChatTldw({ ...options, temperature: 0.23, supportsMultimodal: h1.supportsMultimodal })
     }
   }
 })
@@ -400,6 +411,7 @@ vi.mock("@/libs/get-html", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    ensureConfigForRequest: vi.fn(async () => h1.cookieConfig),
     getOpenAPISpec: (...args: unknown[]) => h1.spec(...args),
     getCharacter: h1.live,
     createChat: (...args: any[]) => h1.create(...args),
@@ -443,13 +455,14 @@ vi.mock("@/db/dexie/nickname", () => ({
 }))
 
 vi.mock("@/db/dexie/helpers", async (original) => {
-  const { formatSelectedHistory } = await original<any>()
+  const actual = await original<typeof import("@/db/dexie/helpers")>()
   let id = 0
   return {
-    formatSelectedHistory,
+    ...actual,
+    formatSelectedHistory: actual.formatSelectedHistory,
     formatToChatHistory: (items: any[]) => items,
     formatToMessage: (items: any[]) => items,
-    saveMessage: vi.fn(async () => {}),
+    saveMessage: vi.fn(actual.saveMessage),
     updateLastUsedModel: vi.fn(async () => {}),
     updateLastUsedPrompt: vi.fn(async () => {}),
     updateChatHistoryCreatedAt: vi.fn(async () => {}),
@@ -481,8 +494,10 @@ import {
 
 const h1 = vi.hoisted(() => ({
   spec: vi.fn(),
+  cookieConfig: null as { serverUrl: string; authMode: "single-user"; authSource: "cookie-session" } | null,
   native: false,
   persona: false,
+  supportsMultimodal: false,
   create: vi.fn(),
   live: vi.fn(() => {
     throw new Error("live card deleted")
@@ -572,16 +587,78 @@ const captureFor = (view: any) => {
     storage_context_digest: "storage"
   }
 }
+const makeDraftAccount = (originIsCurrent: () => boolean = () => true): NonNullable<HistorySelectionController["draftAccount"]> => {
+  const auth = h1.auth
+  return {
+    requestScope: mocks.makeSnapshot().requestScope,
+    isCurrent: () => !auth.signal.aborted && originIsCurrent(),
+    retryVerification: vi.fn()
+  }
+}
+const installFixtureReceipt = (
+  receipt: HistoryLoadReceipt,
+  store?: typeof import("@/store/option").useStoreMessageOption,
+  historyId: string | null = receipt.owner.kind === "local" ? receipt.owner.conversation_id : null
+) => {
+  const address = chatDraftAddressForReceipt(receipt)
+  if (!address) throw new Error("fixture requires a qualified original receipt")
+  const serverChatId = receipt.owner.kind === "native" ? receipt.owner.conversation_id : null
+  mocks.chatBaseState.historyId = historyId
+  mocks.storeState.serverChatId = serverChatId
+  delete mocks.storeState.historyId
+  if (store) {
+    store.getState().setChatDraftAddress(address)
+    store.setState({ historyId, serverChatId })
+  } else {
+    mocks.storeState.chatDraftAddress = address
+  }
+}
+const bridgeDraftStore = (store: typeof import("@/store/option").useStoreMessageOption) => {
+  const setHistoryId: State["setHistoryId"] = (id, options) => {
+    store.getState().setHistoryId(id, options)
+    mocks.chatBaseState.historyId = id
+    mocks.chatBaseState.setHistoryId(id, options)
+  }
+  const setServerChatId: State["setServerChatId"] = id => {
+    store.getState().setServerChatId(id)
+    mocks.storeState.serverChatId = id
+    mocks.storeState.setServerChatId(id)
+  }
+  mocks.draftFields = () => {
+    const state = store.getState()
+    return {
+      chatDraftAddress: state.chatDraftAddress,
+      chatDraftRevision: state.chatDraftRevision,
+      chatDraftTransition: state.chatDraftTransition,
+      historyId: state.historyId,
+      serverChatId: state.serverChatId,
+      setChatDraftAddress: state.setChatDraftAddress,
+      startNewChatDraft: state.startNewChatDraft,
+      setHistoryId,
+      setServerChatId
+    }
+  }
+}
+const startFixtureDraft = async (temporary = false) => {
+  const { useStoreMessageOption: store } =
+    await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  store.getState().startNewChatDraft(temporary)
+  store.setState({ historyId: temporary ? "temp" : null, serverChatId: null })
+  mocks.chatBaseState.historyId = temporary ? "temp" : null
+  mocks.storeState.serverChatId = null
+  mocks.storeState.temporaryChat = temporary
+  bridgeDraftStore(store)
+  return store
+}
 const makeController = () => {
+  const draftAccount = makeDraftAccount()
   let current: any = {
     owner: {
       kind: "native",
       conversation_id: nativeChatId,
-      request_scope: {
-        config: { serverUrl: "https://server.test", authMode: "multi-user" },
-        userId: "alice"
-      },
-      validate_lease: () => true
+      request_scope: mocks.makeSnapshot().requestScope,
+      owner_key: "native-key",
+      validate_lease: draftAccount.isCurrent
     },
     view: {
       owner_key: "native-key",
@@ -596,6 +673,7 @@ const makeController = () => {
   }
   current.capture = captureFor(current.view)
   return {
+    draftAccount,
     getCurrent: () => current,
     fence: () => {
       const origin = current
@@ -638,6 +716,7 @@ beforeEach(async () => {
   mocks.storeState.detachedHistoryResponse = null
   mocks.storeState.replyTarget = null
   h1.auth = new AbortController()
+  h1.cookieConfig = null
   const strictAdmission = {
     post: {
       requestBody: {
@@ -667,11 +746,17 @@ beforeEach(async () => {
   h1.native = false
   h1.persona = false
   h1.beforeModel.mockReset()
+  h1.supportsMultimodal = false
   mocks.chatBaseState.historyId = "history-1"
   mocks.storeState.temporaryChat = false
   mocks.storeState.serverChatCharacterId = null
   mocks.storeState.serverChatAssistantKind = null
   h1.controller = makeController()
+  delete mocks.storeState.historyId
+  installFixtureReceipt(h1.controller.getCurrent(), undefined, "history-1")
+  mocks.storeState.chatDraftRevision = 0
+  mocks.storeState.chatDraftTransition = null
+  mocks.getActorScene.mockReset().mockImplementation(async ({ target }) => ({ target: target!, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }))
   mocks.chatBaseState.chatMode = "normal"
   mocks.chatBaseState.useOCR = false
   mocks.chatBaseState.selectedSystemPrompt = ""
@@ -719,6 +804,7 @@ beforeEach(async () => {
 })
 
 it("edits an ordinary local sidepanel message while history selection is idle", async () => {
+  localMutationController()
   const helpers = await import("@/db/dexie/helpers")
   const current = h1.controller.getCurrent()
   current.status = "idle"
@@ -750,6 +836,7 @@ it("edits an ordinary local sidepanel message while history selection is idle", 
 })
 
 it("deletes an ordinary local sidepanel message while history selection is idle", async () => {
+  localMutationController()
   const helpers = await import("@/db/dexie/helpers")
   const current = h1.controller.getCurrent()
   current.status = "idle"
@@ -767,6 +854,7 @@ it("deletes an ordinary local sidepanel message while history selection is idle"
 })
 
 it("routes ordinary sidepanel regeneration while history selection is idle", async () => {
+  await startFixtureDraft()
   const current = h1.controller.getCurrent()
   current.status = "idle"
   current.owner = null
@@ -1332,13 +1420,7 @@ it.each(["asset", "temporary", "local-owner"])(
     h1.native = true
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
-    if (unsupported === "local-owner")
-      h1.controller.getCurrent().owner = {
-        kind: "local",
-        owner_key: "local",
-        conversation_id: "local",
-        profile_id: "profile"
-      }
+    if (unsupported === "local-owner") localMutationController()
     mocks.storeState.temporaryChat = unsupported === "temporary"
     const { result } = renderHook(() => useMessage())
     await act(async () => {
@@ -1358,12 +1440,9 @@ it.each([false, true])(
   async (navigate) => {
     const { useStoreMessageOption: draftStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
     draftStore.getState().startNewChatDraft(false)
+    draftStore.setState({ historyId: null, serverChatId: null })
     const sourceDraft = draftStore.getState().chatDraftAddress
-    mocks.draftFields = () => {
-      const state = draftStore.getState()
-      return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision,
-        setChatDraftAddress: state.setChatDraftAddress }
-    }
+    bridgeDraftStore(draftStore)
     h1.native = true
     mocks.chatBaseState.historyId = null as any
     mocks.storeState.serverChatId = null
@@ -1382,6 +1461,7 @@ it.each([false, true])(
       return true
     })
     h1.controller = {
+      draftAccount: makeDraftAccount(() => origin),
       getCurrent: () => current,
       fence: () => () => origin,
       loadConversation: load,
@@ -1427,17 +1507,23 @@ it.each([false, true])(
 
 it("dispatches first native creation through a real controller epoch and accepted bind", async () => {
   const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
-  actual.useStoreMessageOption.getState().startNewChatDraft()
-  mocks.draftFields = () => {
-    const state = actual.useStoreMessageOption.getState()
-    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
-  }
+  actual.useStoreMessageOption.getState().startNewChatDraft(false)
+  actual.useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+  bridgeDraftStore(actual.useStoreMessageOption)
   const { useHistorySelection } = await import("@/hooks/chat/useHistorySelection")
   const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
   memory.forkOperations.rows.clear()
   const selection = renderHook(() => useHistorySelection())
-  h1.controller = selection.result.current
+  h1.controller = { ...selection.result.current, draftAccount: makeDraftAccount() }
   const sourceCurrent = h1.controller.fence()
+  const service = await vi.importActual<typeof import("@/services/actor-settings")>("@/services/actor-settings")
+  mocks.getActorScene.mockImplementation(service.getActorSceneForChat)
+  const originalScene = { ...createDefaultActorSettings(), isEnabled: false, notes: "SAVED FRESH COMPACT SCENE" }
+  const sourceTarget = captureCurrentActorSceneTarget(h1.controller)
+  expect(sourceTarget).not.toBeNull()
+  expect(await service.saveActorSettingsForChat({ target: sourceTarget!, expectedRecord: null, settings: originalScene })).toBe(true)
+  const sourceRecord = (await service.getActorSceneForChat({ target: sourceTarget! })).originalRecord
+  expect(sourceRecord?.value).toEqual(originalScene)
   h1.native = true
   mocks.chatBaseState.historyId = null
   mocks.storeState.serverChatId = null
@@ -1456,6 +1542,14 @@ it("dispatches first native creation through a real controller epoch and accepte
   expect(h1.create).toHaveBeenCalledOnce()
   expect(h1.wire).toHaveBeenCalledOnce()
   expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
+  const boundTarget = captureCurrentActorSceneTarget(h1.controller)
+  expect(boundTarget).not.toBeNull()
+  expect(boundTarget!.key).not.toBe(sourceTarget!.key)
+  const boundScene = await service.getActorSceneForChat({ target: boundTarget! })
+  expect(boundScene.settings).toEqual(originalScene)
+  expect(boundScene.originalRecord?.value).toEqual(sourceRecord!.value)
+  expect(mocks.getActorScene).toHaveBeenCalledOnce()
+  expect(JSON.stringify(h1.wire.mock.calls[0][0])).not.toContain(originalScene.notes)
   hook.unmount()
   selection.unmount()
 })
@@ -1466,6 +1560,7 @@ it("native dispatch freezes workspace routing independently of the view owner", 
   mocks.storeState.serverChatAssistantKind = "character"
   const workspace = { type: "workspace", workspaceId: "original-workspace" }
   h1.controller.getCurrent().owner.scope = workspace
+  installFixtureReceipt(h1.controller.getCurrent(), undefined, "history-1")
   h1.wire.mockImplementation(async function* (request) {
     workspace.workspaceId = "new-workspace"
     yield { tldw_history_admission_v1: nativeAdmission(request) }
@@ -1567,7 +1662,7 @@ it("native persona limitations remain visible before any owner operation", async
   expect(h1.append).not.toHaveBeenCalled()
   expect(mocks.notification.error).toHaveBeenCalledWith(
     expect.objectContaining({
-      description: "native_history_persona_unsupported"
+      description: expect.stringContaining("Persona conversations are not supported")
     })
   )
 })
@@ -1585,6 +1680,7 @@ const localMutationController = () => {
     owner_key: "local-key",
     conversation_id: "history-1"
   }
+  installFixtureReceipt(current)
 }
 describe("selected-history mutations", () => {
   beforeEach(localMutationController)
@@ -1812,6 +1908,7 @@ it("mounted branch action captures a stable boundary and returns the committed o
     owner_key: "local-key",
     conversation_id: "history-1"
   }
+  installFixtureReceipt(current)
   localForks.capture.mockResolvedValue({
     kind: "normal",
     selection: { conversation_id: "history-1" }
@@ -1857,17 +1954,23 @@ it.each([false, true])(
   "real controller fork -> immediate send -> reopen keeps source unchanged (comparison=%s)",
   async (comparison) => {
     const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
-    actual.useStoreMessageOption.getState().startNewChatDraft()
-    mocks.draftFields = () => {
-      const state = actual.useStoreMessageOption.getState()
-      return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision,
-        setChatDraftAddress: state.setChatDraftAddress }
-    }
+    actual.useStoreMessageOption.getState().startNewChatDraft(false)
+    actual.useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+    bridgeDraftStore(actual.useStoreMessageOption)
     const { memory, seedLocalFork } = await import(
       "@/hooks/chat/__tests__/local-history-fixture"
     )
     const source = await seedLocalFork(comparison)
     const authority = await vi.importActual<any>("@/db/dexie/history-selection")
+    if (comparison) {
+      // Comparison opens for review without a ready-send callback. Start from
+      // its actual profile-owned record; the real controller qualifies the view.
+      const sourceOwner = await authority.getLocalHistoryOwner("history-1")
+      actual.useStoreMessageOption.getState().setChatDraftAddress({
+        kind: "local", id: sourceOwner.conversation_id, profileId: sourceOwner.profile_id
+      })
+      actual.useStoreMessageOption.getState().setHistoryId(sourceOwner.conversation_id)
+    }
     const projector = await vi.importActual<any>("@/db/dexie/branch")
     localForks.capture.mockImplementation(projector.captureLocalForkSelection)
     localForks.prepare.mockImplementation(projector.prepareLocalFork)
@@ -1880,10 +1983,19 @@ it.each([false, true])(
     )
     const controller = renderHook(() => useHistorySelection())
     await act(async () => {
-      await controller.result.current.loadConversation({
-        historyId: "history-1"
-      })
+      await controller.result.current.loadConversation(
+        { historyId: "history-1" },
+        undefined,
+        receipt => installFixtureReceipt(receipt, actual.useStoreMessageOption)
+      )
     })
+    if (comparison)
+      expect(controller.result.current.getCurrent()).toMatchObject({
+        status: "unsupported_history_capability",
+        error: "unsupported_comparison_history",
+        owner: { kind: "local", conversation_id: "history-1", profile_id: "profile" },
+        view: { conversation_id: "history-1", owner_key: "local-history-v1:profile" }
+      })
     if (!comparison)
       await act(async () => {
         await controller.result.current.choose({
@@ -1891,7 +2003,7 @@ it.each([false, true])(
           message_id: "a1"
         })
       })
-    h1.controller = controller.result.current
+    h1.controller = { ...controller.result.current, draftAccount: makeDraftAccount() }
     mocks.storeState.serverChatId = null
     mocks.storeState.fileRetrievalEnabled = false
     mocks.chatBaseState.historyId = "history-1"
@@ -1917,7 +2029,7 @@ it.each([false, true])(
     expect(controller.result.current.getReference()).toMatchObject({
       conversation_id: childId
     })
-    h1.controller = controller.result.current
+    h1.controller = { ...controller.result.current, draftAccount: makeDraftAccount() }
     hook.rerender()
     await act(async () => {
       await hook.result.current.onSubmit({ message: "child next", image: "" })
@@ -2031,6 +2143,633 @@ it("mounted native fork without local history retains an unknown create and neve
 })
 
 
+describe("compact original scene preparation", () => {
+  it("freezes one scene before model discovery and uses its original scope and notes", async () => {
+    const original = { ...createDefaultActorSettings(), isEnabled: true, notes: "ORIGINAL COMPACT SCENE" }
+    let stored = original
+    mocks.getActorScene.mockImplementation(async ({ target }) => ({ target: target!, settings: structuredClone(stored), originalRecord: { value: structuredClone(stored), updatedAt: 1 }, origin: "scene", profileUnavailable: false }))
+    const validation = await import("@/utils/chat-model-validation")
+    let release!: (value: { status: "valid" }) => void
+    const modelRead = vi.spyOn(validation, "validateSelectedChatModelAvailability").mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => useMessage())
+    let send!: ReturnType<typeof view.result.current.onSubmit>
+    try {
+      act(() => { send = view.result.current.onSubmit({ message: "Compact original question", image: "" }) })
+      await waitFor(() => expect(modelRead).toHaveBeenCalled())
+      const readsBeforeModel = mocks.getActorScene.mock.calls.length
+      stored = { ...original, notes: "NEWER COMPACT SCENE" }
+      await act(async () => { release({ status: "valid" }); await send })
+      expect(readsBeforeModel).toBe(1)
+      expect(mocks.getActorScene).toHaveBeenCalledOnce()
+      expect(JSON.stringify(h1.wire.mock.calls[0][0])).toContain("ORIGINAL COMPACT SCENE")
+      expect(JSON.stringify(h1.wire.mock.calls[0][0])).not.toContain("NEWER COMPACT SCENE")
+      expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledWith([], expect.objectContaining({ requestScope: mocks.makeSnapshot().requestScope }))
+    } finally { modelRead.mockRestore(); view.unmount() }
+  })
+
+  it("refuses replacement scene and provider dispatch after New during held model discovery", async () => {
+    const validation = await import("@/utils/chat-model-validation")
+    let release!: (value: { status: "valid" }) => void
+    const modelRead = vi.spyOn(validation, "validateSelectedChatModelAvailability").mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => useMessage())
+    let send!: ReturnType<typeof view.result.current.onSubmit>
+    try {
+      act(() => { send = view.result.current.onSubmit({ message: "Compact original question", image: "" }) })
+      await waitFor(() => expect(modelRead).toHaveBeenCalled())
+      mocks.storeState.chatDraftAddress = freshChatDraftAddress(false)
+      mocks.storeState.chatDraftRevision = 1
+      h1.controller.navigate()
+      await act(async () => { release({ status: "valid" }); await send })
+      expect(mocks.getActorScene).toHaveBeenCalledOnce()
+      expect(h1.append).not.toHaveBeenCalled()
+      expect(h1.wire).not.toHaveBeenCalled()
+      expect(mocks.notification.error).not.toHaveBeenCalled()
+    } finally { modelRead.mockRestore(); view.unmount() }
+  })
+})
+
+describe("compact alternate-mode preparation ownership", () => {
+  type Mode = "preset" | "vision" | "website"
+  const mountMode = async (mode: Mode) => {
+    h1.supportsMultimodal = mode === "vision"
+    const store = await startFixtureDraft()
+    const current = h1.controller.getCurrent()
+    current.owner = null
+    current.view = null
+    current.capture = null
+    current.status = "idle"
+    mocks.storeState.messages = []
+    mocks.chatBaseState.history = []
+    mocks.chatBaseState.chatMode = mode === "vision" ? "vision" : mode === "website" ? "rag" : "normal"
+    mocks.chatBaseState.useOCR = false
+    const originalMessages = mocks.setMessages.getMockImplementation()
+    const originalHistory = mocks.setHistory.getMockImplementation()
+    mocks.setMessages.mockImplementation(update => {
+      mocks.storeState.messages = typeof update === "function" ? update(mocks.storeState.messages) : update
+    })
+    mocks.setHistory.mockImplementation(update => {
+      mocks.chatBaseState.history = typeof update === "function" ? update(mocks.chatBaseState.history) : update
+    })
+    let selection: {
+      unmount: () => void
+      result: { current: HistorySelectionController }
+    } | undefined
+    if (mode === "website") {
+      // The Website wrapper now creates and binds genuine local H1 ownership
+      // before auxiliary preparation. IDs alone cannot stand in for this receipt.
+      const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+      memory.chatHistories.rows.clear()
+      memory.messages.rows.clear()
+      memory.historySelections.rows.clear()
+      await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
+      mocks.chatBaseState.streaming = false
+      mocks.chatBaseState.isProcessing = false
+      mocks.chatBaseState.isEmbedding = false
+      delete mocks.storeState.streaming
+      delete mocks.storeState.isProcessing
+      store.setState({ messages: [], history: [], streaming: false, isProcessing: false, isEmbedding: false })
+      const { useHistorySelection } = await vi.importActual<typeof import("@/hooks/chat/useHistorySelection")>("@/hooks/chat/useHistorySelection")
+      const { formatSelectedHistory } = await vi.importActual<typeof import("@/db/dexie/helpers")>("@/db/dexie/helpers")
+      selection = renderHook(() => useHistorySelection({
+        onCapture: capture => {
+          const projection = formatSelectedHistory(capture)
+          store.setState(projection)
+          mocks.storeState.messages = projection.messages
+          mocks.chatBaseState.history = projection.history
+        }
+      }))
+      h1.controller = { ...selection.result.current, draftAccount: makeDraftAccount() }
+    }
+    const application = await import("@/services/application")
+    const screenshots = await import("@/libs/get-screenshot")
+    const { ChatTldw } = await import("@/models/ChatTldw")
+    const prompt = vi.spyOn(application, "getPrompt").mockResolvedValue("Preset {text}")
+    const screenshot = vi.spyOn(screenshots, "getScreenshotFromCurrentTab").mockResolvedValue({
+      success: true, screenshot: "data:image/png;base64,original-screenshot", error: null
+    })
+    const stream = vi.spyOn(ChatTldw.prototype, "stream")
+    const invoke = vi.spyOn(ChatTldw.prototype, "invoke")
+    mocks.addMedia.mockResolvedValue({ media_id: 37 })
+    mocks.ragSearch.mockResolvedValue({ results: [{ content: "Original website context", metadata: { title: "Source" } }] })
+    mocks.renderServicePromptPart.mockReturnValue("Original website answer prompt")
+    const hook = renderHook(() => useMessage())
+    const input = { message: "Original compact mode question", image: "", ...(mode === "preset" ? { messageType: "summary" } : {}) }
+    return { store, hook, input, prompt, screenshot, stream, invoke, selection,
+      cleanup: () => {
+        hook.unmount()
+        selection?.unmount()
+        prompt.mockRestore(); screenshot.mockRestore(); stream.mockRestore(); invoke.mockRestore()
+        mocks.setMessages.mockReset(); mocks.setHistory.mockReset()
+        if (originalMessages) mocks.setMessages.mockImplementation(originalMessages)
+        if (originalHistory) mocks.setHistory.mockImplementation(originalHistory)
+        mocks.addMedia.mockReset(); mocks.ragSearch.mockReset(); mocks.renderServicePromptPart.mockReset()
+      }
+    }
+  }
+  const mountOwnedEmissionMode = async (mode: Mode) => {
+    const mounted = await mountMode(mode)
+    mounted.hook.unmount()
+    const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+    memory.chatHistories.rows.clear()
+    memory.messages.rows.clear()
+    const originalStreaming = mocks.setStreaming.getMockImplementation()
+    const originalProcessing = mocks.setIsProcessing.getMockImplementation()
+    const originalEmbedding = mocks.setIsEmbedding.getMockImplementation()
+    mocks.setMessages.mockImplementation(update => {
+      const messages = typeof update === "function" ? update(mocks.storeState.messages) : update
+      mocks.storeState.messages = messages
+      mounted.store.setState({ messages })
+    })
+    mocks.setHistory.mockImplementation(update => {
+      const history = typeof update === "function" ? update(mocks.chatBaseState.history) : update
+      mocks.chatBaseState.history = history
+      mounted.store.setState({ history })
+    })
+    mocks.setStreaming.mockImplementation(streaming => {
+      mocks.chatBaseState.streaming = streaming
+      mounted.store.setState({ streaming })
+    })
+    mocks.setIsProcessing.mockImplementation(isProcessing => {
+      mocks.chatBaseState.isProcessing = isProcessing
+      mounted.store.setState({ isProcessing })
+    })
+    mocks.setIsEmbedding.mockImplementation(isEmbedding => {
+      mocks.chatBaseState.isEmbedding = isEmbedding
+      mounted.store.setState({ isEmbedding })
+    })
+    mocks.chatBaseState.streaming = false
+    mocks.chatBaseState.isProcessing = false
+    mounted.store.setState({ messages: [], history: [], streaming: false, isProcessing: false })
+    const account = h1.controller.draftAccount as NonNullable<HistorySelectionController["draftAccount"]>
+    const originalScope = account.requestScope
+    if (!originalScope) throw new Error("fixture requires the original verified account")
+    const service = await vi.importActual<typeof import("@/services/actor-settings")>("@/services/actor-settings")
+    const sourceTarget = captureCurrentActorSceneTarget(h1.controller)
+    if (!sourceTarget) throw new Error("fixture requires the original typed fresh target")
+    const originalScene = { ...createDefaultActorSettings(), isEnabled: false, notes: `Retained original ${mode} scene` }
+    expect(await service.saveActorSettingsForChat({ target: sourceTarget, expectedRecord: null, settings: originalScene })).toBe(true)
+    const sourceRecord = (await service.getActorSceneForChat({ target: sourceTarget })).originalRecord
+    expect(sourceRecord?.value).toEqual(originalScene)
+    mocks.getActorScene.mockImplementation(service.getActorSceneForChat)
+    const { createLocalRegistryBucket } = await import("@/services/settings/local-bucket")
+    const sceneBucket = createLocalRegistryBucket<import("@/types/actor").ActorSettings>({ prefix: "actorSettings:owned:" })
+    const originalScenes = await sceneBucket.list()
+    expect(originalScenes.unavailable).toBe(false)
+    const session = (await import("@/store/playground-session")).usePlaygroundSessionStore.getState()
+    const originalSession = { restoreRevision: session.restoreRevision, sourceSelectionRevision: session.sourceSelectionRevision }
+    mocks.useRealPageAssist = true
+    const hook = renderHook(() => ({ ...useMessage(), context: usePageAssist() }), { wrapper: PageAssistProvider })
+    return { ...mounted, hook, memory, account, originalScope, sourceTarget, originalScene, sceneBucket, originalScenes, originalSession,
+      cleanup: () => {
+        hook.unmount()
+        mounted.cleanup()
+        mocks.useRealPageAssist = false
+        mocks.chatBaseState.streaming = false
+        mocks.chatBaseState.isProcessing = false
+        mocks.chatBaseState.isEmbedding = false
+        mocks.setStreaming.mockReset(); mocks.setIsProcessing.mockReset(); mocks.setIsEmbedding.mockReset()
+        if (originalStreaming) mocks.setStreaming.mockImplementation(originalStreaming)
+        if (originalProcessing) mocks.setIsProcessing.mockImplementation(originalProcessing)
+        if (originalEmbedding) mocks.setIsEmbedding.mockImplementation(originalEmbedding)
+      }
+    }
+  }
+  const boundaries = [
+    { mode: "preset" as const, stage: "nickname" },
+    { mode: "preset" as const, stage: "prompt" },
+    { mode: "vision" as const, stage: "nickname" },
+    { mode: "vision" as const, stage: "prompt" },
+    { mode: "vision" as const, stage: "screenshot" },
+    { mode: "website" as const, stage: "nickname" },
+    { mode: "website" as const, stage: "prompt" },
+    { mode: "website" as const, stage: "retrieval" }
+  ].flatMap(boundary => ["New", "replacement"].map(retirement => ({ ...boundary, retirement })))
+  it.each(boundaries)("compact $mode refuses provider admission after $retirement during held $stage", async ({ mode, stage, retirement }) => {
+    const mounted = await mountMode(mode)
+    let release!: () => void, reached = false
+    const held = new Promise<void>(resolve => { release = resolve })
+    const nickname = vi.mocked((await import("@/db/dexie/nickname")).getModelNicknameByID)
+    const systemPrompt = vi.mocked((await import("~/services/tldw-server")).systemPromptForNonRag)
+    if (stage === "nickname") nickname.mockImplementationOnce(async () => {
+      reached = true; await held
+      return { model_avatar: "avatar.png", model_name: "Model One" } as Awaited<ReturnType<typeof nickname>>
+    })
+    else if (stage === "prompt" && mode === "preset") mounted.prompt.mockImplementationOnce(async () => { reached = true; await held; return "Preset {text}" })
+    else if (stage === "prompt" && mode === "vision") systemPrompt.mockImplementationOnce(async () => { reached = true; await held; return "Original vision system" })
+    else if (stage === "prompt") mocks.loadServicePromptSnapshot.mockImplementationOnce(async () => { reached = true; await held; return mocks.makeSnapshot() })
+    else if (stage === "screenshot") mounted.screenshot.mockImplementationOnce(async () => {
+      reached = true; await held
+      return { success: true, screenshot: "data:image/png;base64,original-screenshot", error: null }
+    })
+    else mocks.ragSearch.mockImplementationOnce(async () => { reached = true; await held; return { results: [{ content: "Original website context" }] } })
+    let pending!: ReturnType<typeof mounted.hook.result.current.onSubmit>
+    const replacement = [{ id: "replacement-row", name: "You", isBot: false, message: "Replacement conversation must stay", sources: [] }]
+    const replacementHistory = [{ role: "user" as const, content: "Replacement conversation must stay" }]
+    try {
+      act(() => { pending = mounted.hook.result.current.onSubmit(mounted.input) })
+      void pending.catch(() => {})
+      await waitFor(() => expect(reached).toBe(true))
+      if (mode === "website" && retirement === "replacement") {
+        const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+        await memory.chatHistories.put({ id: "replacement-history", title: "Replacement conversation", createdAt: 2, is_rag: false, local_owner_key: "local-history-v1:profile" })
+        await memory.messages.put({ id: replacement[0].id, history_id: "replacement-history", role: "user", name: "You", content: replacement[0].message, images: [], createdAt: 2, parent_message_id: null })
+        await act(async () => {
+          expect(await mounted.selection!.result.current.loadConversation(
+            { historyId: "replacement-history" }, undefined,
+            receipt => installFixtureReceipt(receipt, mounted.store)
+          )).toBe(true)
+        })
+      }
+      act(() => {
+        if (retirement === "New") {
+          mounted.store.getState().startNewChatDraft(false)
+          mounted.store.setState({ historyId: null, serverChatId: null })
+        } else if (mode !== "website") {
+          h1.controller.navigate()
+          const destination = makeController()
+          destination.getCurrent().owner.conversation_id = "replacement-chat"
+          destination.getCurrent().view.conversation_id = "replacement-chat"
+          h1.controller = destination
+          installFixtureReceipt(destination.getCurrent(), mounted.store, "replacement-history")
+        }
+        mocks.storeState.messages = replacement
+        mocks.chatBaseState.history = replacementHistory
+        mounted.store.setState({ messages: replacement, history: replacementHistory })
+        mounted.hook.rerender()
+      })
+      await act(async () => { release(); await pending })
+      expect(mounted.stream).not.toHaveBeenCalled()
+      expect(mounted.invoke).not.toHaveBeenCalled()
+      expect(h1.wire).not.toHaveBeenCalled()
+      expect(h1.append).not.toHaveBeenCalled()
+      expect(mocks.storeState.messages).toEqual(replacement)
+      expect(mocks.chatBaseState.history).toEqual(replacementHistory)
+      expect(mounted.store.getState().messages).toEqual(replacement)
+      expect(mounted.store.getState().history).toEqual(replacementHistory)
+      expect(mocks.notification.error).not.toHaveBeenCalled()
+      expect(mocks.notification.warning).not.toHaveBeenCalled()
+      expect(mocks.notification.info).not.toHaveBeenCalled()
+    } finally {
+      release()
+      try { await pending } finally { mounted.cleanup() }
+    }
+  })
+  it("fresh compact H1 Persona refuses its unsupported capability before any dispatch", async () => {
+    h1.persona = true
+    h1.create.mockResolvedValueOnce({ id: "persona-created", assistant_kind: "persona", assistant_id: "12", persona_memory_mode: "read_only" })
+    const mounted = await mountMode("preset")
+    try {
+      let outcome: unknown
+      await act(async () => {
+        outcome = await mounted.hook.result.current.onSubmit({ message: "Keep this exact Persona input", image: "" })
+      })
+      expect(outcome).toMatchObject({ status: "skipped", reason: "native_history_persona_unsupported" })
+      expect(mocks.notification.error).toHaveBeenCalledOnce()
+      const description = mocks.notification.error.mock.calls[0][0].description
+      expect(description).toMatch(/persona/i)
+      expect(description).toMatch(/not supported|unsupported|unavailable/i)
+      expect(description).not.toContain("native_history_persona_unsupported")
+      expect(h1.create).not.toHaveBeenCalled()
+      expect(h1.capture).not.toHaveBeenCalled()
+      expect(h1.append).not.toHaveBeenCalled()
+      expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      expect(mounted.stream).not.toHaveBeenCalled()
+      expect(mounted.invoke).not.toHaveBeenCalled()
+      expect(h1.wire).not.toHaveBeenCalled()
+    } finally { mounted.cleanup() }
+  })
+  it.each(["preset", "vision", "website"] as const)("compact $mode forwards the original scope and explicit model/OCR choices", async mode => {
+    const mounted = await mountMode(mode)
+    const originalScope = h1.controller.draftAccount.requestScope
+    try {
+      await act(async () => {
+        await mounted.hook.result.current.onSubmit({
+          ...mounted.input,
+          requestOverrides: { selectedModel: "explicit-mode-model", useOCR: true }
+        })
+      })
+      expect(mocks.pageAssistModel).toHaveBeenCalledWith(expect.objectContaining({ model: "explicit-mode-model", requestScope: originalScope }))
+      expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(expect.objectContaining({ model: "explicit-mode-model", useOCR: true }))
+      expect(mounted.stream).toHaveBeenCalledOnce()
+      expect(h1.wire).toHaveBeenCalledOnce()
+      expect(h1.wire.mock.calls[0][0].model).toBe("explicit-mode-model")
+    } finally { mounted.cleanup() }
+  })
+  it.each([
+    { mode: "document" as const, retirement: "raw IDs" },
+    { mode: "tab" as const, retirement: "account" }
+  ])("compact $mode late mode emission preserves the replacement after $retirement retirement", async ({ mode, retirement }) => {
+    const mounted = await mountOwnedEmissionMode("preset")
+    const document = await import("../chat-modes/documentChatMode")
+    const tab = await import("../chat-modes/tabChatMode")
+    const modeCall = vi.mocked(mode === "document" ? document.documentChatMode : tab.tabChatMode)
+    const originalRows = [{ id: "original-mode-row", name: "You", isBot: false, message: "Original mode emission", sources: [] }]
+    const originalHistory = [{ role: "user" as const, content: "Original mode emission" }]
+    const replacementRows = [{ id: "replacement-mode-row", name: "You", isBot: false, message: "Keep replacement mode rows", sources: [] }]
+    const replacementHistory = [{ role: "user" as const, content: "Keep replacement mode history" }]
+    let release!: () => void, reached = false, emittedLate = false
+    const held = new Promise<void>(resolve => { release = resolve })
+    modeCall.mockImplementationOnce(async (...args: Parameters<typeof document.documentChatMode> | Parameters<typeof tab.tabChatMode>) => {
+      const params = args.at(-1) as Parameters<typeof document.documentChatMode>[7] | Parameters<typeof tab.tabChatMode>[7]
+      expect(params.actorSceneSend?.requestScope).toEqual(mounted.originalScope)
+      expect(params.actorScene?.target.key).toBe(mounted.sourceTarget.key)
+      expect(params.actorScene?.originalRecord?.value).toEqual(mounted.originalScene)
+      params.setMessages(originalRows)
+      params.setHistory(originalHistory)
+      params.setStreaming(true)
+      params.setIsProcessing(true)
+      reached = true
+      await held
+      emittedLate = true
+      params.setMessages([{ id: "late-mode-row", name: "Assistant", isBot: true, message: "Obsolete mode emission", sources: [] }])
+      params.setHistory([{ role: "assistant", content: "Obsolete mode history" }])
+      params.setHistoryId("late-mode-history")
+      params.setIsProcessing(false)
+      params.setStreaming(false)
+      params.setAbortController(null)
+      return { status: "submitted" as const }
+    })
+    const originalAddress = mounted.store.getState().chatDraftAddress
+    const originalRevision = mounted.store.getState().chatDraftRevision
+    const input: Parameters<typeof mounted.hook.result.current.onSubmit>[0] = {
+      message: "Original raw mode question", image: "",
+      ...(mode === "document"
+        ? { uploadedFiles: [{ id: "original-file", filename: "original.txt", type: "text/plain", content: "Original document", size: 17, uploadedAt: 1, processed: true }] }
+        : { docs: [{ type: "tab" as const, tabId: 1, title: "Original tab", url: "https://original.example" }] })
+    }
+    let pending!: ReturnType<typeof mounted.hook.result.current.onSubmit>
+    try {
+      act(() => { pending = mounted.hook.result.current.onSubmit(input) })
+      await waitFor(() => expect(reached).toBe(true))
+      expect(mounted.store.getState().messages).toEqual(originalRows)
+      expect(mounted.store.getState().history).toEqual(originalHistory)
+      expect(mounted.hook.result.current.context.getController!()).not.toBeNull()
+      act(() => {
+        if (retirement === "raw IDs") {
+          mounted.store.getState().setHistoryId("replacement-local", { preserveServerChatId: true })
+          mounted.store.getState().setServerChatId("replacement-chat")
+        } else h1.auth.abort()
+        mocks.storeState.messages = replacementRows
+        mocks.chatBaseState.history = replacementHistory
+        mounted.store.setState({ messages: replacementRows, history: replacementHistory })
+        mounted.hook.rerender()
+      })
+      expect(mounted.store.getState().chatDraftAddress).toBe(originalAddress)
+      expect(mounted.store.getState().chatDraftRevision).toBe(originalRevision)
+      expect(mounted.account.isCurrent()).toBe(retirement === "raw IDs")
+      await act(async () => { release(); await pending })
+      expect(emittedLate).toBe(true)
+      expect(modeCall).toHaveBeenCalledOnce()
+      expect(mocks.getActorScene).toHaveBeenCalledOnce()
+      expect(mounted.store.getState().messages).toEqual(replacementRows)
+      expect(mounted.store.getState().history).toEqual(replacementHistory)
+      expect(mocks.storeState.messages).toEqual(replacementRows)
+      expect(mocks.chatBaseState.history).toEqual(replacementHistory)
+      expect(mounted.store.getState().historyId).toBe(retirement === "raw IDs" ? "replacement-local" : null)
+      expect(mounted.store.getState().serverChatId).toBe(retirement === "raw IDs" ? "replacement-chat" : null)
+      expect((await import("@/store/playground-session")).usePlaygroundSessionStore.getState()).toMatchObject(mounted.originalSession)
+      expect(mocks.notification.error).not.toHaveBeenCalled()
+    } finally {
+      release()
+      try { await pending } finally { modeCall.mockReset(); mounted.cleanup() }
+    }
+  })
+
+  it.each(["New", "cookie principal"] as const)("compact Website's real admitted snapshot distinguishes %s retirement", async boundary => {
+    const originalSnapshotFactory = mocks.makeSnapshot
+    const cookieConfig = { serverUrl: "https://cookie-website.example", authMode: "single-user" as const, authSource: "cookie-session" as const }
+    h1.cookieConfig = cookieConfig
+    const { deriveSingleUserApiKeyCredentialScope } = await import("@/services/chat-surface-scope")
+    const requestConfig = { ...cookieConfig,
+      expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(cookieConfig.authMode, undefined)! }
+    mocks.makeSnapshot = ((...args: Parameters<typeof originalSnapshotFactory>) => ({
+      ...originalSnapshotFactory(...args), requestScope: { config: requestConfig, userId: null }
+    })) as typeof originalSnapshotFactory
+    const deploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "self_host")
+    let mounted: Awaited<ReturnType<typeof mountOwnedEmissionMode>> | undefined
+    let actualSnapshot: import("@/services/service-prompts").ServicePromptSnapshot | undefined
+    let release!: () => void, entered = false, enter!: () => void
+    const opened = new Promise<void>(resolve => { enter = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    let pending: ReturnType<ReturnType<typeof useMessage>["onSubmit"]> | undefined
+    try {
+      const service = await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts")
+      const { createSafeStorage } = await import("@/utils/safe-storage")
+      const storage = createSafeStorage({ area: "local" })
+      await storage.set("tldwCookieSessionConfig", cookieConfig)
+      mounted = await mountOwnedEmissionMode("website")
+      mocks.loadServicePromptSnapshot.mockImplementationOnce(async (_ids, options) => {
+        // Keep the existing declared catalog definitions, but use the real
+        // service's retained request/account signals and release lifecycle.
+        actualSnapshot = await service.loadServicePromptSnapshot([], options)
+        return { ...mocks.makeSnapshot(), ...actualSnapshot, definitions: mocks.makeSnapshot().definitions }
+      })
+      h1.wire.mockImplementationOnce(async function* () {
+        yield { choices: [{ delta: { content: "Partial cookie-owned answer" } }] }
+        entered = true
+        enter()
+        await held
+        yield { choices: [{ delta: { content: " completed" } }] }
+      })
+      act(() => { pending = mounted!.hook.result.current.onSubmit(mounted!.input) })
+      void pending!.catch(() => {})
+      await Promise.race([opened, pending!.then(outcome => { throw new Error(`Cookie Website settled before admission/provider: ${JSON.stringify(outcome)}`) })])
+      expect(entered).toBe(true)
+      expect(actualSnapshot!.requestScope.config).toMatchObject(requestConfig)
+      expect(actualSnapshot!.requestScope.userId).toBeNull()
+      const accepted = mounted.selection!.result.current.getCurrent()
+      expect(accepted.status).toBe("ready")
+      expect(accepted.owner).toMatchObject({ kind: "local", profile_id: "profile" })
+      const historyId = accepted.owner!.conversation_id
+      expect((await mounted.memory.messages.where("history_id").equals(historyId).toArray()).map((row: StoredMessage) => [row.role, row.content]))
+        .toEqual([["user", mounted.input.message]])
+      expect(actualSnapshot?.scopeInvalidatedSignal.aborted).toBe(false)
+      const response = mounted.hook.result.current.context.getController!()!
+      if (boundary === "cookie principal") {
+        h1.cookieConfig = null
+        await storage.remove("tldwCookieSessionConfig")
+        act(() => { window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })) })
+      } else act(() => {
+        mounted!.store.getState().startNewChatDraft()
+        mounted!.store.setState({ messages: [{ id: "new-cookie-draft", isBot: false, message: "Keep same-account New", sources: [] }] })
+        mounted!.hook.rerender()
+      })
+      expect(response.signal.aborted).toBe(false)
+      let outcome: unknown
+      await act(async () => { release(); outcome = toChatSubmitResult(await pending!) })
+      expect(outcome).toEqual(boundary === "New" ? { status: "submitted" } : { status: "failed", errorMessage: "The server or authenticated account changed." })
+      const retained = await mounted.memory.messages.where("history_id").equals(historyId).toArray()
+      expect(retained.map((row: StoredMessage) => [row.role, row.content])).toEqual(boundary === "New"
+        ? [["user", mounted.input.message], ["assistant", "Partial cookie-owned answer completed"]]
+        : [["user", mounted.input.message]])
+      expect(mounted.hook.result.current.context.getController!()).toBeNull()
+      expect(h1.wire).toHaveBeenCalledOnce()
+    } finally {
+      release?.()
+      try { await pending?.catch(() => {}) } finally {
+        actualSnapshot?.release()
+        mounted?.cleanup()
+        mocks.makeSnapshot = originalSnapshotFactory
+        h1.cookieConfig = null
+        vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", deploymentMode)
+      }
+    }
+  })
+
+  it("compact Website refuses local settlement after the admitted provider's original account retires", async () => {
+    const mounted = await mountOwnedEmissionMode("website")
+    let release!: () => void, entered = false
+    const held = new Promise<void>(resolve => { release = resolve })
+    h1.wire.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { content: "Partial original answer" } }] }
+      entered = true
+      await held
+      yield { choices: [{ delta: { content: " completed" } }] }
+    })
+    let pending!: ReturnType<typeof mounted.hook.result.current.onSubmit>
+    try {
+      act(() => { pending = mounted.hook.result.current.onSubmit(mounted.input) })
+      void pending.catch(() => {})
+      await waitFor(() => expect(entered).toBe(true))
+      const accepted = mounted.selection!.result.current.getCurrent()
+      expect(accepted.status).toBe("ready")
+      expect(accepted.owner).toMatchObject({ kind: "local", profile_id: "profile" })
+      const historyId = accepted.owner!.conversation_id
+      const admitted = await mounted.memory.messages.where("history_id").equals(historyId).toArray()
+      expect(admitted.map((row: StoredMessage) => [row.role, row.content])).toEqual([["user", mounted.input.message]])
+      expect(mounted.account.isCurrent()).toBe(true)
+      // Retire the actual captured snapshot/account without replacing the
+      // local profile or aborting the response signal as if Stop were pressed.
+      act(() => { h1.auth.abort(); mounted.hook.rerender() })
+      expect(mounted.account.isCurrent()).toBe(false)
+      await act(async () => {
+        release()
+        expect(toChatSubmitResult(await pending)).toEqual({ status: "failed", errorMessage: "The server or authenticated account changed." })
+      })
+      expect(h1.wire).toHaveBeenCalledOnce()
+      const retained = await mounted.memory.messages.where("history_id").equals(historyId).toArray()
+      expect(retained.map((row: StoredMessage) => [row.role, row.content])).toEqual([["user", mounted.input.message]])
+      expect(mounted.hook.result.current.context.getController!()).toBeNull()
+      expect(mocks.chatBaseState.streaming).toBe(false)
+      expect((await mounted.sceneBucket.list()).records[mounted.sourceTarget.key]).toEqual(mounted.originalScenes.records[mounted.sourceTarget.key])
+    } finally {
+      release()
+      try { await pending } finally { mounted.cleanup() }
+    }
+  })
+
+  it.each(["preset", "vision", "website"] as const)("compact $mode keeps original scoped persistence and releases its controller after New during an admitted provider", async mode => {
+    const mounted = await mountOwnedEmissionMode(mode)
+    const helpers = await import("@/db/dexie/helpers")
+    const saveHistory = vi.spyOn(helpers, "saveHistory")
+    const title = vi.spyOn(await import("@/services/title"), "generateTitle").mockResolvedValue(`Original ${mode} history`)
+    const syncSettings = vi.spyOn(await import("@/services/chat-settings"), "syncChatSettingsForServerChat")
+    const replacementRows = [{ id: "replacement-provider-row", name: "You", isBot: false, message: "Keep replacement provider rows", sources: [] }]
+    const replacementHistory = [{ role: "user" as const, content: "Keep replacement provider history" }]
+    const replacementSettings = { selectedModel: "replacement-model", selectedSystemPrompt: "replacement-prompt", useOCR: false, toolChoice: "none" as const }
+    let release!: () => void, entered = false, emittedLate = false
+    const held = new Promise<void>(resolve => { release = resolve })
+    h1.wire.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { content: "Partial " } }] }
+      entered = true
+      await held
+      emittedLate = true
+      yield { choices: [{ delta: { content: "original final answer" } }] }
+    })
+    let pending!: ReturnType<typeof mounted.hook.result.current.onSubmit>
+    let replacementAddress: State["chatDraftAddress"]
+    let acceptedWebsiteSceneKey: string | undefined
+    let acceptedWebsiteScenes: typeof mounted.originalScenes.records | undefined
+    try {
+      act(() => { pending = mounted.hook.result.current.onSubmit({ ...mounted.input, requestOverrides: { selectedModel: "original-finish-model", useOCR: true } }) })
+      void pending.catch(() => {})
+      await waitFor(() => expect(entered).toBe(true))
+      expect(mounted.stream).toHaveBeenCalledOnce()
+      expect(h1.wire).toHaveBeenCalledOnce()
+      expect(mocks.chatBaseState.streaming).toBe(true)
+      expect(mocks.chatBaseState.isProcessing).toBe(true)
+      const ownedController = mounted.hook.result.current.context.getController!()
+      expect(ownedController).not.toBeNull()
+      if (mode === "website") {
+        const accepted = mounted.selection!.result.current.getCurrent()
+        expect(accepted.status).toBe("ready")
+        expect(accepted.owner).toMatchObject({ kind: "local", profile_id: "profile" })
+        expect(mounted.store.getState().chatDraftAddress).toMatchObject({ kind: "local", id: accepted.owner!.conversation_id, profileId: "profile" })
+        expect(saveHistory).toHaveBeenCalledExactlyOnceWith(mounted.input.message, false, "web-ui", undefined, undefined, mounted.originalScope)
+        const boundTarget = captureCurrentActorSceneTarget(h1.controller)
+        expect(boundTarget).not.toBeNull()
+        acceptedWebsiteSceneKey = boundTarget!.key
+        expect(acceptedWebsiteSceneKey).not.toBe(mounted.sourceTarget.key)
+        const actorService = await vi.importActual<typeof import("@/services/actor-settings")>("@/services/actor-settings")
+        const boundScene = await actorService.getActorSceneForChat({ target: boundTarget! })
+        expect(boundScene.settings).toEqual(mounted.originalScene)
+        expect(boundScene.originalRecord?.value).toEqual(mounted.originalScene)
+        acceptedWebsiteScenes = (await mounted.sceneBucket.list()).records
+      } else expect(saveHistory).not.toHaveBeenCalled()
+      act(() => {
+        mounted.store.getState().startNewChatDraft(false)
+        replacementAddress = mounted.store.getState().chatDraftAddress
+        mounted.store.setState({ historyId: null, serverChatId: null, messages: replacementRows, history: replacementHistory, ...replacementSettings })
+        mocks.storeState.messages = replacementRows
+        mocks.chatBaseState.history = replacementHistory
+        mocks.storeState.selectedModel = replacementSettings.selectedModel
+        mocks.storeState.toolChoice = replacementSettings.toolChoice
+        mocks.chatBaseState.selectedSystemPrompt = replacementSettings.selectedSystemPrompt
+        mocks.chatBaseState.useOCR = replacementSettings.useOCR
+        mounted.hook.rerender()
+      })
+      expect(mounted.hook.result.current.context.getController!()).toBe(ownedController)
+      expect(ownedController!.signal.aborted).toBe(false)
+      await act(async () => { release(); expect(toChatSubmitResult(await pending)).toEqual({ status: "submitted" }) })
+      expect(emittedLate).toBe(true)
+      expect(mocks.pageAssistModel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: "original-finish-model", requestScope: mounted.originalScope }))
+      expect(h1.wire).toHaveBeenCalledOnce()
+      expect(h1.wire.mock.calls[0][1]).toMatchObject({ requestScope: mounted.originalScope })
+      expect(mounted.invoke).not.toHaveBeenCalled()
+      expect(mocks.getActorScene).toHaveBeenCalledOnce()
+      if (mode === "website") {
+        expect(saveHistory).toHaveBeenCalledExactlyOnceWith(mounted.input.message, false, "web-ui", undefined, undefined, mounted.originalScope)
+      } else expect(saveHistory).toHaveBeenCalledExactlyOnceWith(`Original ${mode} history`, false, "copilot", undefined, undefined, mounted.originalScope)
+      const histories = [...mounted.memory.chatHistories.rows.values()]
+      expect(histories).toHaveLength(1)
+      const { serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror")
+      expect(histories[0].server_scope_key).toBe(serverChatMirrorOwnerKey({ requestScope: mounted.originalScope }))
+      const rows = await mounted.memory.messages.where("history_id").equals(histories[0].id).toArray()
+      expect(rows.map((row: StoredMessage) => [row.role, row.content])).toEqual([["user", mounted.input.message], ["assistant", "Partial original final answer"]])
+      expect(mounted.store.getState()).toMatchObject({ messages: replacementRows, history: replacementHistory, historyId: null, serverChatId: null, ...replacementSettings })
+      expect(mounted.store.getState().chatDraftAddress).toBe(replacementAddress!)
+      expect(mocks.storeState.messages).toEqual(replacementRows)
+      expect(mocks.chatBaseState.history).toEqual(replacementHistory)
+      expect(mocks.storeState.selectedModel).toBe(replacementSettings.selectedModel)
+      expect(mocks.chatBaseState.selectedSystemPrompt).toBe(replacementSettings.selectedSystemPrompt)
+      expect(mocks.chatBaseState.useOCR).toBe(replacementSettings.useOCR)
+      const retainedScenes = (await mounted.sceneBucket.list()).records
+      if (mode === "website") {
+        expect(retainedScenes).toEqual(acceptedWebsiteScenes)
+        expect(retainedScenes[mounted.sourceTarget.key]).toEqual(mounted.originalScenes.records[mounted.sourceTarget.key])
+        expect(retainedScenes[acceptedWebsiteSceneKey!]?.value).toEqual(mounted.originalScene)
+      } else expect(retainedScenes).toEqual(mounted.originalScenes.records)
+      expect(syncSettings).not.toHaveBeenCalled()
+      expect(mocks.chatBaseState.streaming).toBe(false)
+      expect(mocks.chatBaseState.isProcessing).toBe(false)
+      expect(mounted.store.getState().streaming).toBe(false)
+      expect(mounted.store.getState().isProcessing).toBe(false)
+      expect(mounted.hook.result.current.context.getController!()).toBeNull()
+      expect(mounted.hook.result.current.context.embeddingController).toBeNull()
+      expect(mocks.notification.error).not.toHaveBeenCalled()
+      expect(mocks.notification.warning).not.toHaveBeenCalled()
+    } finally {
+      release()
+      try { await pending } finally {
+        saveHistory.mockRestore(); title.mockRestore(); syncSettings.mockRestore()
+        mounted.cleanup()
+      }
+    }
+  })
+
+})
+
 describe("compact submission outcomes", () => {
   it("returns the normal helper's completed result", async () => {
     const { result } = renderHook(() => useMessage())
@@ -2141,17 +2880,15 @@ describe("compact submission outcomes", () => {
 
 it.each(["default", "alternate_index"] as const)("actual compact submit binds the %s opening without adding or generating a turn", async strategy => {
   const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
-  actual.useStoreMessageOption.getState().startNewChatDraft()
-  mocks.draftFields = () => {
-    const state = actual.useStoreMessageOption.getState()
-    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
-  }
+  actual.useStoreMessageOption.getState().startNewChatDraft(false)
+  actual.useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+  bridgeDraftStore(actual.useStoreMessageOption)
   const { useHistorySelection } = await import("@/hooks/chat/useHistorySelection")
   const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
   memory.forkOperations.rows.clear(); memory.historySelections.rows.clear()
   const onCapture = vi.fn()
   const selection = renderHook(() => useHistorySelection({ onCapture }))
-  h1.controller = selection.result.current
+  h1.controller = { ...selection.result.current, draftAccount: makeDraftAccount() }
   h1.native = true
   mocks.chatBaseState.historyId = null
   mocks.storeState.serverChatId = null
@@ -2193,7 +2930,7 @@ describe("side-panel send gate (XP-08)", () => {
 
   it("holds a send the gate refuses before anything reaches the server", async () => {
     const gate = vi.fn<SidepanelSendGate>(async () => ({ proceed: false, refreshed: false }))
-    h1.controller.getCurrent().owner = { kind: "local" }
+    localMutationController()
     const current = {}
     mocks.storeState.detachedHistoryResponse = current
     const { result } = renderHook(() => useMessage(), { wrapper: withGate(gate) })
@@ -2228,6 +2965,7 @@ describe("side-panel send gate (XP-08)", () => {
   })
 
   it("does not ask the gate before regenerating an answer", async () => {
+    await startFixtureDraft()
     const gate = vi.fn<SidepanelSendGate>(async () => ({ proceed: false, refreshed: false }))
     const current = h1.controller.getCurrent()
     current.status = "idle"
@@ -2248,10 +2986,9 @@ it("keeps a failed actual scene read ahead of compact native admission and shows
   const service = await vi.importActual<
     typeof import("@/services/actor-settings")
   >("@/services/actor-settings")
-  const reader = vi.mocked(
-    (await import("@/services/actor-settings")).getActorSettingsForChat
-  )
-  reader.mockImplementationOnce(service.getActorSettingsForChat)
+  mocks.getActorScene.mockImplementationOnce(service.getActorSceneForChat)
+  const target = captureCurrentActorSceneTarget(h1.controller)
+  expect(target).not.toBeNull()
   const read = vi
     .spyOn(Storage.prototype, "get")
     .mockRejectedValueOnce(new Error("scene read unavailable"))
@@ -2276,6 +3013,7 @@ it("keeps a failed actual scene read ahead of compact native admission and shows
         "Scene settings could not be loaded. Existing chat setup was left unchanged."
     })
   )
+  expect(read).toHaveBeenCalledWith(`actorSettings:owned:${target!.key}`)
   expect(h1.create).not.toHaveBeenCalled()
   expect(h1.capture).not.toHaveBeenCalled()
   expect(h1.append).not.toHaveBeenCalled()
@@ -2288,6 +3026,7 @@ it("keeps a failed actual scene read ahead of compact native admission and shows
 it.each(["history-epoch", "new-draft", "same-id-restore"])(
   "a retained compact idle edit refuses %s before another render",
   async (retirement) => {
+    localMutationController()
     const helpers = await import("@/db/dexie/helpers")
     const sessions = await import("@/store/playground-session")
     const state = h1.controller.getCurrent()
@@ -2583,14 +3322,7 @@ const mountNativePlainSave = async (
     )
   const { useStoreMessageOption: draftStore } =
     await vi.importActual<typeof import("@/store/option")>("@/store/option")
-  mocks.draftFields = () => {
-    const state = draftStore.getState()
-    return {
-      chatDraftAddress: state.chatDraftAddress,
-      chatDraftRevision: state.chatDraftRevision,
-      setChatDraftAddress: state.setChatDraftAddress
-    }
-  }
+  bridgeDraftStore(draftStore)
   const messageId = role === "user" ? "u-old" : "a1"
   const server = { version: 1, text: "Original {{char}}  \n" }
   h1.capture.mockImplementation(async (_id, request) => {
@@ -2635,12 +3367,14 @@ const mountNativePlainSave = async (
   )
   await act(async () => {
     expect(
-      await selection.result.current.loadConversation({
-        serverChatId: nativeChatId
-      })
+      await selection.result.current.loadConversation(
+        { serverChatId: nativeChatId },
+        undefined,
+        receipt => installFixtureReceipt(receipt, draftStore, mocks.chatBaseState.historyId)
+      )
     ).toBe(true)
   })
-  h1.controller = selection.result.current
+  h1.controller = { ...selection.result.current, draftAccount: makeDraftAccount() }
   await act(async () => {
     expect(
       await selection.result.current.choose({
@@ -3282,6 +4016,7 @@ it.each([false, true])(
     mocks.useRealPageAssist = true
     mocks.storeState.temporaryChat = temporary
     if (temporary) {
+      await startFixtureDraft(true)
       const current = h1.controller.getCurrent()
       current.status = "idle"
       current.owner = null
@@ -3753,14 +4488,12 @@ describe("rendered Delete ownership", () => {
     vi.mocked(helpers.removeMessageById).mockResolvedValue(undefined)
     const store =
       await vi.importActual<typeof import("@/store/option")>("@/store/option")
-    store.useStoreMessageOption.getState().startNewChatDraft()
-    mocks.draftFields = () => {
-      const state = store.useStoreMessageOption.getState()
-      return {
-        chatDraftRevision: state.chatDraftRevision,
-        chatDraftAddress: state.chatDraftAddress
-      }
-    }
+    localMutationController()
+    const localReceipt = h1.controller.getCurrent()
+    localReceipt.owner.conversation_id = "local-delete"
+    localReceipt.view.conversation_id = "local-delete"
+    installFixtureReceipt(localReceipt, store.useStoreMessageOption)
+    bridgeDraftStore(store.useStoreMessageOption)
     store.useStoreMessageOption.setState({
       streaming: false,
       isProcessing: false
@@ -3877,6 +4610,7 @@ describe("rendered Delete ownership", () => {
     const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
     const mounted = await localDelete()
     mocks.storeState.serverChatId = nativeChatId
+    mounted.store.useStoreMessageOption.setState({ serverChatId: nativeChatId })
     mocks.storeState.messages[0].serverMessageId = "server-leaf"
     mounted.rerender()
     await expect(mounted.result.current.deleteMessage(0)).rejects.toThrow(
@@ -3904,6 +4638,8 @@ describe("rendered Delete ownership", () => {
     h1.controller = null
     mocks.storeState.temporaryChat = true
     mocks.chatBaseState.historyId = "temp"
+    mounted.store.useStoreMessageOption.getState().startNewChatDraft(true)
+    mounted.store.useStoreMessageOption.setState({ historyId: "temp", serverChatId: null })
     mounted.rerender()
     expect(await mounted.result.current.deleteMessage(0)).toBe(true)
     expect(helpers.removeMessageById).not.toHaveBeenCalled()
@@ -4029,6 +4765,8 @@ describe("rendered Delete ownership", () => {
         h1.controller = null
         mocks.storeState.temporaryChat = true
         mocks.chatBaseState.historyId = "temp"
+        mounted.store.useStoreMessageOption.getState().startNewChatDraft(true)
+        mounted.store.useStoreMessageOption.setState({ historyId: "temp", serverChatId: null })
       }
       mounted.rerender()
       expect(await mounted.result.current.deleteMessage(3)).toBe(true)
@@ -4172,13 +4910,8 @@ it.each(["H1", "account", "draft", "journal failure"])(
     mocks.storeState.serverChatAssistantKind = "character"
     const actualStore =
       await vi.importActual<typeof import("@/store/option")>("@/store/option")
-    mocks.draftFields = () => {
-      const state = actualStore.useStoreMessageOption.getState()
-      return {
-        chatDraftAddress: state.chatDraftAddress,
-        chatDraftRevision: state.chatDraftRevision
-      }
-    }
+    installFixtureReceipt(h1.controller.getCurrent(), actualStore.useStoreMessageOption, "history-1")
+    bridgeDraftStore(actualStore.useStoreMessageOption)
     h1.controller.holdStaleSend = vi.fn(() => true)
     if (boundary === "journal failure")
       h1.recover
@@ -4288,13 +5021,8 @@ it.each(["H1", "account", "New", "unmount"])(
     h1.controller.holdStaleSend = vi.fn(() => true)
     const actualStore =
       await vi.importActual<typeof import("@/store/option")>("@/store/option")
-    mocks.draftFields = () => {
-      const state = actualStore.useStoreMessageOption.getState()
-      return {
-        chatDraftAddress: state.chatDraftAddress,
-        chatDraftRevision: state.chatDraftRevision
-      }
-    }
+    installFixtureReceipt(h1.controller.getCurrent(), actualStore.useStoreMessageOption, "history-1")
+    bridgeDraftStore(actualStore.useStoreMessageOption)
     let release!: () => void
     const held = new Promise<void>((resolve) => {
       release = resolve

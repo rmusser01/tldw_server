@@ -5,8 +5,10 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createSafeStorage } from "@/utils/safe-storage"
 
-import { useChatActions } from "../useChatActions"
-import type { ChatHistory, Message } from "@/store/option"
+import { useChatActions as useRawChatActions } from "../useChatActions"
+import type { ChatHistory, Message, State } from "@/store/option"
+import { createCoreSlice } from "@/store/option/slices/core-slice"
+import { createServerChatSlice } from "@/store/option/slices/server-chat-slice"
 import { useStoreChatModelSettings } from "@/store/model"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { generateID } from "@/db/dexie/helpers"
@@ -135,7 +137,8 @@ vi.mock("@/services/service-prompts", () => ({
   }
 }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: normalChatModeMock
 }))
 
@@ -222,7 +225,8 @@ vi.mock("@/db/dexie/branch", () => ({
 }))
 
 vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+  getActorSettingsForChat: vi.fn(async () => null),
+  getActorSceneForChat: vi.fn(async ({ target }) => ({ target, settings: (await import("@/types/actor")).createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }))
 }))
 
 vi.mock("@/utils/character-mood", () => ({
@@ -283,6 +287,92 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { freshChatDraftAddress, type ChatDraftAddress } from "@/utils/chat-draft-address"
+import { captureActorSceneSendForTarget } from "../actor-scene-source"
+import { captureChatDraftSource, chatDraftAddressForReceipt } from "../chat-draft-transition"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+
+let fixtureSceneSnapshot: ServicePromptSnapshot | null = null
+
+// The SDK fixtures declare a private scene locator and original account. They
+// deliberately do not install an H1 controller or native mutation capability.
+const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
+  const lifetime = React.useRef({ active: true, accountRetired: false })
+  const fixture = React.useRef<{ requestScope: ServicePromptSnapshot["requestScope"]; accountIsCurrent: () => boolean } | null>(null)
+  if (!fixture.current) {
+    const custom = fixtureSceneSnapshot
+    const config = actualAuthority.config
+    const actualAccount = actualAuthority.enabled
+    const requestScope: ServicePromptSnapshot["requestScope"] = custom?.requestScope ?? (actualAccount && config ? {
+      config: { serverUrl: String(config.serverUrl), authMode: config.authMode as "single-user" | "multi-user", authSource: config.authSource as "manual" | "cookie-session" | undefined,
+        orgId: config.orgId as number | undefined,
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(String(config.authMode), config.apiKey as string | undefined) ?? undefined },
+      userId: null
+    } : { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null })
+    const authority = recoveryAuthority.controller
+    const accountIsCurrent = () => !lifetime.current.accountRetired && !authority.signal.aborted &&
+      !custom?.scopeInvalidatedSignal.aborted && (!actualAccount || !actualAuthority.snapshot?.scopeInvalidatedSignal.aborted)
+    const state = messageStoreState.value as typeof messageStoreState.value & Record<string, unknown>
+    const serverId = state.serverChatId || options.serverChatId
+    const historyId = options.historyId
+    const owner = serverId ? { kind: "native" as const, conversation_id: serverId, owner_key: "legacy-character-scene-owner",
+      request_scope: requestScope, scope: options.scope, validate_lease: accountIsCurrent } : historyId && historyId !== "temp" ? {
+      kind: "local" as const, conversation_id: historyId, owner_key: "legacy-character-local-owner", profile_id: "legacy-character-profile",
+      validate_lease: accountIsCurrent
+    } : null
+    const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-character-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
+    Object.assign(state, { historyId, serverChatId: serverId, chatDraftRevision: state.chatDraftRevision ?? 0,
+      chatDraftAddress: state.chatDraftAddress ?? (owner && view ? chatDraftAddressForReceipt({ owner, view }) : freshChatDraftAddress(options.temporaryChat)),
+      selectedModel: options.selectedModel, selectedModelRevision: state.selectedModelRevision ?? 0, toolChoice: options.toolChoice,
+      temporaryChat: options.temporaryChat })
+    fixture.current = { requestScope: structuredClone(requestScope), accountIsCurrent }
+  }
+  React.useLayoutEffect(() => {
+    const original = lifetime.current
+    original.active = true
+    const release = watchChatAccountChanges(invalidated => { if (invalidated) original.accountRetired = true })
+    return () => { original.active = false; release() }
+  }, [])
+  const state = messageStoreState.value as typeof messageStoreState.value & Record<string, unknown>
+  state.messages = options.messages
+  const address = state.chatDraftAddress as ChatDraftAddress
+  const source = captureChatDraftSource(() => lifetime.current.active)
+  const { requestScope, accountIsCurrent } = fixture.current
+  const owner = address.kind === "native" ? { kind: "native" as const, conversation_id: address.id, owner_key: address.ownerKey,
+    request_scope: requestScope, scope: address.scope, validate_lease: accountIsCurrent } : address.kind === "local" ? {
+    kind: "local" as const, conversation_id: address.id, owner_key: "legacy-character-local-owner", profile_id: address.profileId,
+    validate_lease: accountIsCurrent
+  } : null
+  const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-character-scene-view",
+    selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
+  const target = captureActorSettingsTarget({ address, owner, view, requestScope, accountIsCurrent, isCurrent: source.isCurrent })
+  const capture = captureActorSceneSendForTarget(target, { requestScope, isCurrent: accountIsCurrent }, source.isCurrent)
+  const actions = useRawChatActions(options)
+  const read = async () => {
+    if (!capture) throw new Error("Legacy Character fixture has no qualified original scene")
+    return capture.read()
+  }
+  return { ...actions,
+    onSubmit: async (input: Parameters<typeof actions.onSubmit>[0]) => actions.onSubmit({ ...input, actorSceneSend: input.actorSceneSend ?? await read() }),
+    regenerateLastMessage: async (input?: Parameters<typeof actions.regenerateLastMessage>[0]) => actions.regenerateLastMessage({ ...input,
+      actorSceneSend: input?.actorSceneSend ?? await read() }) }
+}
+
+// These legacy SDK fixtures have no H1 controller. Their passed identity and
+// metadata setters must still publish the real slice semantics synchronously;
+// recording an issued ID alone is not a physical publication acknowledgement.
+const publishFixtureState: Parameters<typeof createCoreSlice>[0] = (update) => {
+  Object.assign(messageStoreState.value, typeof update === "function"
+    ? update(messageStoreState.value as unknown as State) : update)
+}
+const getFixtureState = () => messageStoreState.value as unknown as State
+const fixtureCore = createCoreSlice(publishFixtureState, getFixtureState)
+const fixtureServerChat = createServerChatSlice(publishFixtureState, getFixtureState)
+
 const createHookOptions = () => ({
   t: (_key: string, fallback?: string) => fallback || _key,
   notification: {
@@ -298,7 +388,7 @@ const createHookOptions = () => ({
   history: [],
   setHistory: vi.fn(),
   historyId: "history-character",
-  setHistoryId: vi.fn(),
+  setHistoryId: vi.fn(fixtureCore.setHistoryId),
   temporaryChat: false,
   selectedModel: "deepseek-chat",
   useOCR: false,
@@ -333,19 +423,19 @@ const createHookOptions = () => ({
   serverChatClusterId: null,
   serverChatSource: null,
   serverChatExternalRef: null,
-  setServerChatId: vi.fn(),
-  setServerChatTitle: vi.fn(),
-  setServerChatCharacterId: vi.fn(),
-  setServerChatAssistantKind: vi.fn(),
-  setServerChatAssistantId: vi.fn(),
-  setServerChatPersonaMemoryMode: vi.fn(),
-  setServerChatMetaLoaded: vi.fn(),
-  setServerChatState: vi.fn(),
-  setServerChatVersion: vi.fn(),
-  setServerChatTopic: vi.fn(),
-  setServerChatClusterId: vi.fn(),
-  setServerChatSource: vi.fn(),
-  setServerChatExternalRef: vi.fn(),
+  setServerChatId: vi.fn(fixtureServerChat.setServerChatId),
+  setServerChatTitle: vi.fn(fixtureServerChat.setServerChatTitle),
+  setServerChatCharacterId: vi.fn(fixtureServerChat.setServerChatCharacterId),
+  setServerChatAssistantKind: vi.fn(fixtureServerChat.setServerChatAssistantKind),
+  setServerChatAssistantId: vi.fn(fixtureServerChat.setServerChatAssistantId),
+  setServerChatPersonaMemoryMode: vi.fn(fixtureServerChat.setServerChatPersonaMemoryMode),
+  setServerChatMetaLoaded: vi.fn(fixtureServerChat.setServerChatMetaLoaded),
+  setServerChatState: vi.fn(fixtureServerChat.setServerChatState),
+  setServerChatVersion: vi.fn(fixtureServerChat.setServerChatVersion),
+  setServerChatTopic: vi.fn(fixtureServerChat.setServerChatTopic),
+  setServerChatClusterId: vi.fn(fixtureServerChat.setServerChatClusterId),
+  setServerChatSource: vi.fn(fixtureServerChat.setServerChatSource),
+  setServerChatExternalRef: vi.fn(fixtureServerChat.setServerChatExternalRef),
   ensureServerChatHistoryId: vi.fn(async () => "history-character"),
   contextFiles: [],
   setContextFiles: vi.fn(),
@@ -426,6 +516,7 @@ describe("useChatActions character integration", () => {
     actualAuthority.enabled = false
     actualAuthority.config = null
     actualAuthority.snapshot = null
+    fixtureSceneSnapshot = null
     safeStorage.values.clear()
     safeStorage.watchers.clear()
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
@@ -470,6 +561,69 @@ describe("useChatActions character integration", () => {
   })
 
 
+
+  it("publishes full-page legacy Thinking progress before any answer or persistence", async () => {
+    let release!: () => void, entered = false, enter!: () => void
+    const opened = new Promise<void>(resolve => { enter = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { reasoning_content: "Plan the full reply" } }] }
+      entered = true
+      enter()
+      await held
+      yield { choices: [{ delta: { content: "Full answer" } }] }
+    })
+    const { captureActorSettingsTarget } = await import("@/utils/actor-settings-target")
+    const { captureActorSceneSendForTarget } = await import("../actor-scene-source")
+    const { captureChatDraftSource, chatDraftAddressForReceipt } = await import("../chat-draft-transition")
+    const requestScope = { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" as const }, userId: null }
+    const owner = { kind: "native" as const, conversation_id: "tracked-chat-1", owner_key: "legacy-scene-owner", request_scope: requestScope,
+      validate_lease: () => true }
+    const selection = { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } }
+    // The legacy SDK caller supplies a prepared scoped scene. This private
+    // scene receipt does not install a native sender/H1 mutation capability.
+    Object.assign(messageStoreState.value, { chatDraftAddress: chatDraftAddressForReceipt({ owner, view: selection }), chatDraftRevision: 0,
+      historyId: "history-character", serverChatId: "tracked-chat-1", serverChatCharacterId: "char-tracked", toolChoice: "auto", temporaryChat: false })
+    const source = captureChatDraftSource()
+    const target = captureActorSettingsTarget({ address: (messageStoreState.value as unknown as { chatDraftAddress: import("@/utils/chat-draft-address").ChatDraftAddress }).chatDraftAddress,
+      owner, view: selection, requestScope, accountIsCurrent: owner.validate_lease, isCurrent: source.isCurrent })
+    expect(target).not.toBeNull()
+    const actorSceneSend = await captureActorSceneSendForTarget(target, target!.account, source.isCurrent)!.read()
+    const options = createHookOptions()
+    const controller = new AbortController()
+    let generatedId = 0
+    vi.mocked(generateID).mockImplementation(() => `reasoning-row-${++generatedId}`)
+    const view = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([])
+      const [history, setHistory] = React.useState<ChatHistory>([])
+      return { ...useChatActions({ ...options, messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages }
+    })
+    let settled = false
+    let pending!: ReturnType<typeof view.result.current.onSubmit>
+    try {
+      act(() => { pending = view.result.current.onSubmit({ message: "One full question", image: "", controller, actorSceneSend }) })
+      void pending.then(() => { settled = true }, () => { settled = true })
+      await Promise.race([opened, pending.then(outcome => { throw new Error(`Legacy turn settled before its declared provider: ${JSON.stringify(outcome)}`) })])
+      expect(entered).toBe(true)
+      expect(controller.signal.aborted).toBe(false)
+      expect(recoveryAuthority.controller.signal.aborted).toBe(false)
+      expect(actorSceneSend.isCurrent()).toBe(true)
+      expect(settled).toBe(false)
+      expect(options.notification.error).not.toHaveBeenCalled()
+      await waitFor(() => expect(view.result.current.messages.find(row => !row.isBot)?.serverMessageId).toBe("user-server-1"))
+      expect(view.result.current.messages.find(row => row.isBot)?.id).not.toBe(view.result.current.messages.find(row => !row.isBot)?.id)
+      await waitFor(() => expect(view.result.current.messages.find(row => row.isBot)?.message).toContain("<think>Plan the full reply"))
+      expect(settled).toBe(false)
+      expect(controller.signal.aborted).toBe(false)
+      expect(options.notification.error).not.toHaveBeenCalled()
+      expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+      expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+      await act(async () => { release(); await pending })
+      expect(view.result.current.messages.find(row => row.isBot)?.message).toBe("<think>Plan the full reply</think>Full answer")
+      expect(persistCharacterCompletionMock).toHaveBeenCalledOnce()
+    } finally { release?.(); await pending?.catch(() => {}); view.unmount() }
+  })
 
   it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("keeps existing transcript greeting provenance for %s", async kind => {
     const greeting = "Welcome from the Character default"
@@ -1211,7 +1365,11 @@ describe("useChatActions character integration", () => {
         visible = typeof next === "function" ? next(visible) : next
       }
     }
-    const retire = () => usePlaygroundSessionStore.setState(state => ({ restoreRevision: state.restoreRevision + 1 }))
+    const retire = (event: Event) => {
+      usePlaygroundSessionStore.getState().cancelPendingRestore()
+      const detail = (event as CustomEvent<import("@/utils/character-chat-mode-intent").ChatRouteReplacementDetail>).detail
+      detail.onRestoreCancelled?.(usePlaygroundSessionStore.getState().restoreRevision)
+    }
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, retire)
     const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
     try {
@@ -1358,6 +1516,7 @@ describe("useChatActions character integration", () => {
     }
     const snapshots = vi.spyOn(await import("@/services/service-prompts"), "loadServicePromptSnapshot")
     snapshots.mockResolvedValueOnce(owner)
+    fixtureSceneSnapshot = owner
     getChatMock.mockRejectedValueOnce(Object.assign(new Error("Source not authorized"), { status }))
     const rows: Message[] = [
       { id: "alice-user", serverMessageId: "alice-user", role: "user", isBot: false,

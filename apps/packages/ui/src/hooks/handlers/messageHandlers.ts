@@ -22,6 +22,7 @@ import {
   updateMessageById
 } from "@/db/dexie/helpers"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import {
   nativeHistoryMessagePayload,
   nativeRegenerateView,
@@ -100,20 +101,33 @@ export const createRegenerateLastMessage = ({
     userMessageType: Message["messageType"] | undefined
     newHistory: ChatHistory
     nextMessages: Message[]
+    dispatch?: { controller?: AbortController; assertCurrent?: () => void; actorSceneSend?: ActorSceneSend }
   }) => Promise<
     | {
         memory?: ChatHistory
         messages?: Message[]
         submitExtras?: Record<string, unknown>
+        actorSceneSend?: ActorSceneSend
+        assertCurrent?: () => void
       }
     | void
   >
 }) => {
   const current = captureViewFence?.() ?? historySelection?.fence?.() ?? (() => true)
   const sourceCurrent = captureSourceFence?.() ?? (() => true)
-  return async (dispatch?: { controller?: AbortController; assertCurrent?: () => void }) => {
+  return async (dispatch?: { controller?: AbortController; assertCurrent?: () => void; actorSceneSend?: ActorSceneSend }) => {
+    let actorSceneSend = dispatch?.actorSceneSend
+    let assertCurrent = dispatch?.assertCurrent
+    const originalSceneIsCurrent = () => {
+      if (!actorSceneSend) return true
+      try {
+        assertCurrent?.()
+        return !dispatch?.controller?.signal.aborted && actorSceneSend.isCurrent()
+      } catch { return false }
+    }
     dispatch?.controller?.signal.throwIfAborted()
     dispatch?.assertCurrent?.()
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
     if (!current() || !sourceCurrent()) return chatSubmitSkipped("stale_selection")
     const busy = useStoreMessageOption.getState()
     if (busy.streaming || busy.isProcessing) return chatSubmitSkipped("response_in_progress")
@@ -150,6 +164,7 @@ export const createRegenerateLastMessage = ({
       if (!validateBeforeSubmitFn()) return chatSubmitSkipped("validation_failed")
       return await onSubmit({ message: inputContent!.message, image: inputContent!.images[0] ?? "", isRegenerate: true,
         historyRegenerate: intent, controller: dispatch?.controller ?? new AbortController(),
+        actorSceneSend,
         assertCurrent: () => { if (!intent.isOriginCurrent()) throw new Error("stale_selection") } })
     }
     if (!allowOrdinaryRetry || historySelection) {
@@ -223,16 +238,23 @@ export const createRegenerateLastMessage = ({
         userImage,
         userMessageType,
         newHistory,
-        nextMessages
+        nextMessages,
+        dispatch
       })) || {}
+    actorSceneSend = beforeSubmitResult.actorSceneSend ?? actorSceneSend
+    assertCurrent = beforeSubmitResult.assertCurrent ?? assertCurrent
     dispatch?.controller?.signal.throwIfAborted()
-    dispatch?.assertCurrent?.()
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
+    assertCurrent?.()
     const submitHistory = beforeSubmitResult.memory ?? newHistory
     const submitMessages = beforeSubmitResult.messages ?? nextMessages
     const submitExtras = beforeSubmitResult.submitExtras ?? {}
 
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
     setHistory(submitHistory)
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
     setMessages(submitMessages)
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
 
     const newController = dispatch?.controller ?? new AbortController()
     return await onSubmit({
@@ -245,7 +267,8 @@ export const createRegenerateLastMessage = ({
       messageType: userMessageType,
       regenerateFromMessage: submitExtras.serverChatIdOverride ? undefined : lastAssistant,
       ...submitExtras,
-      assertCurrent: dispatch?.assertCurrent
+      ...(actorSceneSend ? { actorSceneSend } : {}),
+      assertCurrent
     })
   }
 }

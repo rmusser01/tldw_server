@@ -4,9 +4,10 @@ import {
   type ActorSettingsTarget
 } from "@/utils/actor-settings-target"
 import type { ActorSceneRead } from "@/services/actor-settings"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { useActorStore } from "@/store/actor"
 import { buildActorPrompt, estimateActorTokens } from "@/utils/actor"
-import { chatDraftAddressForReceipt } from "./chat-draft-transition"
+import { captureChatDraftSource, chatDraftAddressForReceipt } from "./chat-draft-transition"
 import type {
   HistorySelectionController,
   HistoryLoadReceipt
@@ -15,7 +16,8 @@ import type {
 /** Destination ownership is independent of an editor's panel, model and cursor. */
 export const captureCurrentActorSceneTarget = (
   controller: HistorySelectionController | null,
-  commandIsCurrent: () => boolean = () => true
+  commandIsCurrent: () => boolean = () => true,
+  isHistoryIdCurrent: (current: string | null, original: string | null) => boolean = (current, original) => current === original
 ) => {
   const source = useStoreMessageOption.getState()
   const address = source.chatDraftAddress
@@ -47,7 +49,7 @@ export const captureCurrentActorSceneTarget = (
       !commandIsCurrent() ||
       current.chatDraftAddress !== address ||
       current.chatDraftRevision !== source.chatDraftRevision ||
-      current.historyId !== source.historyId ||
+      !isHistoryIdCurrent(current.historyId, source.historyId) ||
       current.serverChatId !== source.serverChatId
     )
       return false
@@ -78,6 +80,67 @@ export const readActorSceneForSend = async (
   if (!target) throw new Error("actor_settings_unavailable")
   const { getActorSceneForChat } = await import("@/services/actor-settings")
   return getActorSceneForChat({ target })
+}
+
+export type ActorSceneSend = Readonly<{
+  scene: ActorSceneRead
+  requestScope: ServicePromptRequestScope
+  isCurrent: () => boolean
+  /** Original command intent, independent of the scene record locator. */
+  commandIsCurrent?: () => boolean
+  acceptHistoryMirror?: (id: string) => boolean
+}>
+
+/** Capture before any gate/preparation await; read only once that command is admitted. */
+export const captureActorSceneSend = (
+  controller: HistorySelectionController | null,
+  commandIsCurrent: () => boolean = () => true
+) => {
+  const historyIsCurrent = controller?.fence()
+  const nativeSource = useStoreMessageOption.getState().chatDraftAddress?.kind === "native"
+  let acceptedMirror: string | undefined
+  const isHistoryIdCurrent = (current: string | null, original: string | null) => current === original || (nativeSource && acceptedMirror !== undefined && current === acceptedMirror)
+  const source = captureChatDraftSource(() => commandIsCurrent() && historyIsCurrent?.() === true, isHistoryIdCurrent)
+  const target = captureCurrentActorSceneTarget(controller, source.isCurrent, isHistoryIdCurrent)
+  const capture = captureActorSceneSendForTarget(target, target?.account ?? controller?.draftAccount, source.isCurrent, () => commandIsCurrent() && historyIsCurrent?.() === true)
+  if (!capture) return null
+  // Only the scoped mirror helper can acknowledge this exact alias for this command.
+  const acceptHistoryMirror = (id: string) => {
+    if (!nativeSource || !id || (acceptedMirror !== undefined && acceptedMirror !== id)) return false
+    const previous = acceptedMirror
+    acceptedMirror = id
+    if (capture.isCurrent()) return true
+    acceptedMirror = previous
+    return false
+  }
+  return Object.freeze({
+    isCurrent: capture.isCurrent,
+    read: async (): Promise<ActorSceneSend> => Object.freeze({ ...await capture.read(), ...(nativeSource ? { acceptHistoryMirror } : {}) })
+  })
+}
+
+/** A popup supplies its own qualified address and account, independent of the main composer. */
+export const captureActorSceneSendForTarget = (
+  target: ActorSettingsTarget | null,
+  account: ActorSettingsTarget["account"],
+  commandIsCurrent: () => boolean = () => true,
+  originalCommandIsCurrent?: () => boolean
+) => {
+  if (!target || !account?.requestScope || !account.isCurrent()) return null
+  const requestScope = structuredClone(account.requestScope)
+  const isCurrent = () => target.isCurrent() && account.isCurrent() && commandIsCurrent()
+  const originalIntentIsCurrent = originalCommandIsCurrent ? () => account.isCurrent() && originalCommandIsCurrent() : isCurrent
+  return Object.freeze({
+    isCurrent,
+    read: async (): Promise<ActorSceneSend> => {
+      if (!isCurrent()) throw new Error("actor_settings_scope_changed")
+      const { getActorSceneForChat } = await import("@/services/actor-settings")
+      if (!isCurrent()) throw new Error("actor_settings_scope_changed")
+      const scene = await getActorSceneForChat({ target, validate_lease: isCurrent })
+      if (!isCurrent()) throw new Error("actor_settings_scope_changed")
+      return Object.freeze({ scene, requestScope, isCurrent, commandIsCurrent: originalIntentIsCurrent })
+    }
+  })
 }
 
 /** The caller retains this receipt only after its bind was actually accepted. */

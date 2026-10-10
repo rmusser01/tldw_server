@@ -1779,3 +1779,108 @@ describe("acknowledged recovery dismissal", () => {
     ])
   })
 })
+
+// Production ownership/admission/settlement run against the serialized rollback
+// table-engine double above. These cases do not qualify native IndexedDB commits.
+describe("local assistant settlement with captured document files", () => {
+  const file = (id = "new-file") => ({
+    id, filename: `${id}.txt`, type: "text/plain", content: "  Original file\n",
+    size: 16, uploadedAt: 7, processed: true
+  })
+  const accepted = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const captured = await history.captureLocalHistorySnapshot(owner, view(owner), "send")
+    const admission = await history.appendLocalSelectedUser(owner, selection(captured), row("file-user"))
+    const result = { ...row("file-reply"), role: "assistant", content: "Original answer" }
+    const originalSession = {
+      sessionId: "chat", files: [file("existing-file")], retrievalEnabled: true, createdAt: 3
+    }
+    await memory.sessionFiles.put(originalSession)
+    return { owner, admission, result, originalSession }
+  }
+
+  it("reuses the exact assistant and file ID without duplicating files or changing session metadata", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    const capturedFile = file()
+    await service.settleAcceptedAssistant(owner, admission, result, undefined, [capturedFile])
+    const first = await memory.sessionFiles.get("chat")
+    await service.settleAcceptedAssistant(owner, admission, result, undefined, [capturedFile])
+    expect(await memory.sessionFiles.get("chat")).toEqual(first)
+    expect(first).toEqual({ ...originalSession, files: [...originalSession.files, capturedFile] })
+    expect(await memory.messages.where("history_id").equals("chat").toArray()).toHaveLength(2)
+    expect(await memory.messages.get("file-reply")).toMatchObject({
+      content: result.content, parent_message_id: "file-user"
+    })
+  })
+
+  it("refuses a differing duplicate file ID and retains the original session and accepted assistant", async () => {
+    const { owner, admission, result } = await accepted()
+    await service.settleAcceptedAssistant(owner, admission, result, undefined, [file()])
+    const before = await memory.sessionFiles.get("chat")
+    await expect(service.settleAcceptedAssistant(owner, admission,
+      { ...result, id: "conflicting-file-reply" }, undefined,
+      [{ ...file(), content: "Changed file" }]
+    )).rejects.toMatchObject({ code: "local_file_id_conflict" })
+    expect(await memory.sessionFiles.get("chat")).toEqual(before)
+    expect(await memory.messages.get("conflicting-file-reply")).toBeUndefined()
+    expect(await memory.messages.get("file-reply")).toMatchObject({ content: result.content })
+  })
+
+  it("rolls back both files and assistant when the original owner lease retires after file put", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    let current = true
+    const qualifiedOwner = { ...owner, validate_lease: () => current }
+    const put = memory.sessionFiles.put.bind(memory.sessionFiles)
+    const spy = vi.spyOn(memory.sessionFiles, "put").mockImplementationOnce(async value => {
+      await put(value)
+      current = false
+    })
+    try {
+      await expect(service.settleAcceptedAssistant(qualifiedOwner, admission, result, undefined, [file()]))
+        .rejects.toMatchObject({ code: "request_config_scope_changed" })
+    } finally { spy.mockRestore() }
+    expect(await memory.sessionFiles.get("chat")).toEqual(originalSession)
+    expect(await memory.messages.get("file-reply")).toBeUndefined()
+    expect(await memory.messages.get("file-user")).toMatchObject({ content: "file-user" })
+  })
+
+  it("rolls back the new files if the assistant write fails", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    const write = vi.spyOn(memory.messages, "add").mockRejectedValueOnce(new Error("assistant write unavailable"))
+    try {
+      await expect(service.settleAcceptedAssistant(owner, admission, result, undefined, [file()]))
+        .rejects.toThrow("assistant write unavailable")
+    } finally { write.mockRestore() }
+    expect(await memory.sessionFiles.get("chat")).toEqual(originalSession)
+    expect(await memory.messages.get("file-reply")).toBeUndefined()
+    expect(await memory.messages.get("file-user")).toMatchObject({ content: "file-user" })
+  })
+
+  it("settles the original captured file proposal when its caller mutates it during a held read", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    const proposal = [file()]
+    const originalProposal = structuredClone(proposal)
+    let entered!: () => void
+    let release!: () => void
+    const reading = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    const get = memory.sessionFiles.get.bind(memory.sessionFiles)
+    const spy = vi.spyOn(memory.sessionFiles, "get").mockImplementationOnce(async id => {
+      const value = await get(id)
+      entered()
+      await held
+      return value
+    })
+    const pending = service.settleAcceptedAssistant(owner, admission, result, undefined, proposal)
+    try {
+      await reading
+      proposal[0].content = "Newer caller file"
+      proposal.push(file("later-file"))
+      release()
+      await expect(pending).resolves.toMatchObject({ id: "file-reply" })
+    } finally { release(); spy.mockRestore() }
+    expect(await memory.sessionFiles.get("chat")).toEqual({
+      ...originalSession, files: [...originalSession.files, ...originalProposal]
+    })
+  })
+})

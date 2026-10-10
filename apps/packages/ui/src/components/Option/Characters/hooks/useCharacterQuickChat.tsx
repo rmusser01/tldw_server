@@ -5,6 +5,9 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import { useDraftPersistence, type DraftMetadataObject } from "@/hooks/useDraftPersistence"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { captureActorSceneSendForTarget } from "@/hooks/chat/actor-scene-source"
+import { chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { sendNativeHistoryCharacter } from "@/hooks/chat/native-history-character-send"
 import { nativeCharacterPreflightMessage, validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
@@ -237,7 +240,21 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
     setQuickChatSending(true)
     setQuickChatError(null)
     try {
-      validateNativeCharacterConfiguration({ temporary: false, settings, model: activeQuickChatModel!, toolChoice: "none", clientToolCount: 0 })
+      const selected = controller.getCurrent()
+      const privateNative = sessionId.current && selected.status === "ready" && selected.owner?.kind === "native" &&
+        selected.owner.conversation_id === sessionId.current && selected.view?.conversation_id === sessionId.current
+        ? { owner: selected.owner, view: selected.view } : null
+      const sceneAddress = sessionId.current ? privateNative && chatDraftAddressForReceipt(privateNative)
+        : selected.status === "idle" && !selected.owner && !selected.view ? handle.address : null
+      const historyIsCurrent = controller.fence()
+      const target = captureActorSettingsTarget({ address: sceneAddress, owner: privateNative?.owner, view: privateNative?.view,
+        requestScope: owner.requestScope, accountIsCurrent: owner.isCurrent, isCurrent: () => preparing() && historyIsCurrent() })
+      const capture = captureActorSceneSendForTarget(target, target?.account, () => preparing() && historyIsCurrent())
+      if (!capture) throw new Error("actor_settings_unavailable")
+      const actorSceneSend = await capture.read()
+      if (!preparing()) return
+      validateNativeCharacterConfiguration({ temporary: false, settings, model: activeQuickChatModel!, toolChoice: "none", clientToolCount: 0,
+        actorEnabled: actorSceneSend.scene.settings.isEnabled })
       if (!(await retain(preparing))) throw new Error("native_history_draft_not_retained")
       const outstanding = await listChatCreationRecovery(handle.ownerHash, { type: "global" })
       if (!preparing()) return
@@ -246,7 +263,7 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
         markReview()
         throw new Error(t("settings:manageCharacters.quickChat.previousAttempt", { defaultValue: "An earlier attempt may have saved this character chat. Review retained drafts in full chat before starting another conversation." }))
       }
-      await sendNativeHistoryCharacter({ controller, privateDraft: { handle, isCurrent: popupCurrent }, surface: "playground",
+      await sendNativeHistoryCharacter({ controller, actorSceneSend, privateDraft: { handle, requestScope: owner.requestScope!, isCurrent: popupCurrent }, surface: "playground",
         originIsCurrent: preparing, signal: operation.abort.signal, temporary: false,
         serverChatId: sessionId.current, scope: { type: "global" }, characterId: numericId(quickChatCharacter),
         model: activeQuickChatModel!, settings, toolChoice: "none", message: raw, image: "", t,

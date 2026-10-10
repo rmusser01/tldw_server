@@ -43,7 +43,8 @@ const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
     compareMode: false, compareSelectedModels: [], compareSelectionByCluster: {},
     compareActiveModelsByCluster: {}, compareParentByHistory: {},
     compareCanonicalByCluster: {}, compareContinuationModeByCluster: {}, compareSplitChats: {},
-    replyTarget: null, messageSteeringMode: "none", messageSteeringForceNarrate: false
+    replyTarget: null, messageSteeringMode: "none", messageSteeringForceNarrate: false,
+    messageSteeringRevision: state.messageSteeringRevision + 1
   }))
   updatePageTitle()
 })

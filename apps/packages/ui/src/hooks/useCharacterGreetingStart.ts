@@ -1,4 +1,5 @@
 import React from "react"
+import { captureActorSceneSend, type ActorSceneSend } from "./chat/actor-scene-source"
 import { useTranslation } from "react-i18next"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -14,7 +15,7 @@ import type { ChatSubmitResult } from "./chat/chat-action-utils"
 type Options = {
   form: UseComposerTextResult["form"]
   retainCurrentDraft: () => Promise<boolean>
-  submit: (input: { message: string; image: string; greetingSeed: GreetingSeed; greetingIsCurrent: () => boolean }) => Promise<ChatSubmitResult>
+  submit: (input: { message: string; image: string; greetingSeed: GreetingSeed; greetingIsCurrent: () => boolean; actorSceneSend: ActorSceneSend }) => Promise<ChatSubmitResult>
   ready: boolean
   isConnectionReady: boolean
   busy: boolean
@@ -57,7 +58,7 @@ export const useCharacterGreetingStart = (options: Options) => {
     const seed = option.seed ? structuredClone(option.seed) : undefined
     const inputKeys = ["selectedModel", "toolChoice", "temporaryChat", "webSearch", "selectedSystemPrompt", "uploadedFiles",
       "contextFiles", "documentContext", "selectedKnowledge", "ragMediaIds", "ragPinnedResults", "replyTarget",
-      "messageSteeringMode", "messageSteeringForceNarrate"] as const
+      "messageSteeringMode", "messageSteeringForceNarrate", "messageSteeringRevision"] as const
     const inputs = options.readContext()
     const navigationCurrent = () => {
       const now = usePlaygroundSessionStore.getState()
@@ -100,12 +101,16 @@ export const useCharacterGreetingStart = (options: Options) => {
           !controller || selection?.status !== "idle" || selection.owner || !sourceFence?.() || !current())
         throw new Error("native_history_greeting_requires_fresh")
       if (values.image) throw new Error("native_history_assets_unsupported")
+      const sceneCapture = captureActorSceneSend(controller, () => mounted.current && navigationCurrent())
+      if (!sceneCapture) throw new Error("actor_settings_unavailable")
       options.preflight()
       setActivity(operation)
+      const actorSceneSend = await sceneCapture.read()
+      if (!sourceFence() || !current()) throw new Error("stale_selection")
       if (!(await options.retainCurrentDraft())) throw new Error("native_history_draft_not_retained")
       if (!sourceFence() || !current() || controller.getCurrent().status !== "idle" || controller.getCurrent().owner)
         throw new Error("stale_selection")
-      const result = await options.submit({ message: "", image: "", greetingSeed: seed, greetingIsCurrent: current })
+      const result = await options.submit({ message: "", image: "", greetingSeed: seed, greetingIsCurrent: current, actorSceneSend })
       if (result.status !== "submitted") throw new Error(result.status === "failed" ? result.errorMessage : result.reason)
       if (ownsBind() && focusOwned && initiator && (document.activeElement === initiator ||
           (!initiator.isConnected && document.activeElement === document.body))) options.focusComposer()

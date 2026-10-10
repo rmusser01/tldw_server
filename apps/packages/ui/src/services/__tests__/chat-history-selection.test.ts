@@ -1334,3 +1334,27 @@ it.each([false, true])(
     expect(calls.append).not.toHaveBeenCalled()
   }
 )
+
+it("refuses local document files for a qualified native settlement before any server write", async () => {
+  const native = owner()
+  await service.captureHistorySnapshot(native, view, "send")
+  const reference = {
+    version: 1 as const, owner_key: "native-key", conversation_id: "chat",
+    input_message_id: "u", input_message_revision: "1", selection_digest: "digest"
+  }
+  const result = {
+    id: "file-reply", history_id: "chat", role: "assistant", name: "Assistant",
+    content: "Original answer", createdAt: 1
+  }
+  const file = {
+    id: "file", filename: "file.txt", type: "text/plain", content: "Original file",
+    size: 13, uploadedAt: 1, processed: true
+  }
+  await expect(service.settleAcceptedAssistant(native, reference, result, undefined, [file]))
+    .rejects.toMatchObject({ code: "unsupported_history_message_assets" })
+  expect(calls.append).not.toHaveBeenCalled()
+  calls.append.mockResolvedValueOnce({ id: result.id })
+  await expect(service.settleAcceptedAssistant(native, reference, result, undefined, []))
+    .resolves.toEqual({ id: result.id })
+  expect(calls.append).toHaveBeenCalledOnce()
+})

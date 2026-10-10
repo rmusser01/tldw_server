@@ -1,4 +1,8 @@
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import React from "react"
+import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
 import { useStoreMessageOption } from "@/store/option"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import { getIsSimpleInternetSearch } from "@/services/search"
@@ -70,6 +74,7 @@ export type UsePlaygroundSubmitDeps = {
   researchContext?: ChatResearchContext
   importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   clearImportedSidepanelContext?: () => void
+  historySelection?: HistorySelectionController | null
   captureCompletionGuard?: () => () => boolean
   sendMessage: (args: any) => Promise<any>
   clearOpenUIRequestMode: () => void
@@ -167,6 +172,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
+    historySelection,
     captureCompletionGuard,
     clearOpenUIRequestMode,
     clearSelectedDocuments,
@@ -191,6 +197,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   }, [isConnectionReady])
   const draftReadyRef = React.useRef(draftReady)
   draftReadyRef.current = draftReady
+  const sourceDraftRevision = useStoreMessageOption(state => state.chatDraftRevision)
 
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
@@ -204,15 +211,20 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const activeDocumentPreparationRef = React.useRef<{
     controller: AbortController
     selectionKey: string
+    isCurrent: () => boolean
   } | null>(null)
   currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey
 
   React.useEffect(() => {
     const active = activeDocumentPreparationRef.current
-    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady)) {
+    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady || !active.isCurrent())) {
       active.controller.abort()
+      if (activeDocumentPreparationRef.current === active) {
+        activeDocumentPreparationRef.current = null
+        setIsPreparingDocuments(false)
+      }
     }
-  }, [currentDocumentSelectionKey, isConnectionReady])
+  }, [currentDocumentSelectionKey, isConnectionReady, sourceDraftRevision, historySelection])
 
   React.useEffect(
     () => () => activeDocumentPreparationRef.current?.controller.abort(),
@@ -248,10 +260,19 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       const connectionGeneration = connectionGenerationRef.current
       const draftRevision = useStoreMessageOption.getState().chatDraftRevision
       const currentDraft = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && draftReadyRef.current && useStoreMessageOption.getState().chatDraftRevision === draftRevision
-      if (activeDocumentPreparationRef.current) return
+      const activePreparation = activeDocumentPreparationRef.current
+      if (activePreparation) {
+        if (activePreparation.isCurrent()) return
+        activePreparation.controller.abort()
+        if (activeDocumentPreparationRef.current === activePreparation) {
+          activeDocumentPreparationRef.current = null
+          setIsPreparingDocuments(false)
+        }
+      }
       let documentPreparation: {
         controller: AbortController
         selectionKey: string
+        isCurrent: () => boolean
       } | null = null
       try {
       const intent = resolveSubmissionIntent(value.message)
@@ -390,18 +411,37 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         return
       }
 
-      if (!intent.isImageCommand && uploadedFiles.length > 0) {
+      const completionIsCurrent = captureCompletionGuard?.() ?? (() => true)
+      const inputRevision = form.getRevision?.()
+      const dispatchIsCurrent = captureChatDispatchSource({ selectedModel: selectedModel ?? "", selectionSource: { model: "global", toolChoice: "global" } })
+      const preparationIsCurrent = () => currentDraft() && completionIsCurrent() && form.getRevision?.() === inputRevision && dispatchIsCurrent() &&
+        (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
+      const sceneCapture = intent.isImageCommand ? null : captureActorSceneSend(historySelection ?? null, () => currentDraft() && dispatchIsCurrent())
+      let actorSceneSend: ActorSceneSend | undefined
+      if (!intent.isImageCommand) {
         documentPreparation = {
           controller: new AbortController(),
-          selectionKey: currentDocumentSelectionKeyRef.current
+          selectionKey: currentDocumentSelectionKeyRef.current,
+          isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
         }
         activeDocumentPreparationRef.current = documentPreparation
-        setIsPreparingDocuments(true)
+        if (uploadedFiles.length > 0) setIsPreparingDocuments(true)
+
+        try {
+          if (!sceneCapture) throw new Error("actor_settings_unavailable")
+          actorSceneSend = await sceneCapture.read()
+        } catch (error) {
+          if (preparationIsCurrent() && sceneCapture?.isCurrent() !== false) notificationApi.error({ message: t("error", { defaultValue: "Error" }),
+            description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.sceneLoadError", "Scene settings could not be loaded. Existing chat setup was left unchanged.") })
+          return
+        }
+        if (!currentDraft() || !preparationIsCurrent() || documentPreparation.controller.signal.aborted) return
       }
 
       if (!intent.isImageCommand && webSearch) {
         const defaultEM = await defaultEmbeddingModelForRag()
         const simpleSearch = await getIsSimpleInternetSearch()
+        if (!currentDraft() || !preparationIsCurrent()) return
         if (!defaultEM && !simpleSearch) {
           form.setFieldError("message", t("formError.noEmbeddingModel"))
           return
@@ -461,6 +501,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
           return
         }
+        if (!currentDraft() || !preparationIsCurrent()) return
         const firstBlockedOrFailed =
           preparedDocuments.blockedFiles[0] || preparedDocuments.failedFiles[0]
         if (
@@ -539,6 +580,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       let promptAssistAttemptId!: number
 
       const payload = {
+        actorSceneSend,
         image: intent.isImageCommand ? "" : value.image,
         message: visiblePrompt,
         docs: intent.isImageCommand
@@ -569,8 +611,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
       }
 
-      const completionIsCurrent = captureCompletionGuard?.() ?? (() => true)
-      if (!completionIsCurrent()) return
+      if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
+      if (documentPreparation && activeDocumentPreparationRef.current === documentPreparation) {
+        activeDocumentPreparationRef.current = null
+        setIsPreparingDocuments(false)
+      }
       const result = await dispatch(payload, {
         beforeSend: () => {
           promptAssistAttemptId = beginPromptAssistReset()

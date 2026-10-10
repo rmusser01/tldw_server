@@ -331,6 +331,7 @@ export const prepareChatCompletionRequest = (
 }
 
 export interface TldwChatOptions {
+  onDispatch?: () => void
   preparedRequest?: ChatCompletionRequest
   model: string
   routing?: ChatCompletionRequest["routing"]
@@ -374,6 +375,7 @@ export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
 
 export interface ChatStreamChunk {
+  additional_kwargs?: { reasoning_content?: string }
   id?: string
   object?: string
   created?: number
@@ -383,6 +385,7 @@ export interface ChatStreamChunk {
     delta: {
       role?: string
       content?: string
+      reasoning_content?: string
       tool_calls?: Array<{
         index?: number
         id?: string
@@ -520,11 +523,23 @@ export class TldwChatService {
   /**
    * Send a streaming chat completion request
    */
-  async *streamMessage(
+  streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
     onChunk?: (chunk: ChatStreamChunk) => void
-  ): AsyncGenerator<string, void, unknown> {
+  ): AsyncGenerator<string, void, unknown>
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk: ((chunk: ChatStreamChunk) => void) | undefined,
+    includeReasoning: true
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown>
+  async *streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk?: (chunk: ChatStreamChunk) => void,
+    includeReasoning = false
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown> {
     // Per-call abort controller: concurrent streams must not cancel each other.
     const controller = new AbortController()
     this.activeControllers.add(controller)
@@ -582,6 +597,7 @@ export class TldwChatService {
       // at least the startup budget or it cuts off a slow first token (#3107).
       const transportIdleTimeoutMs = Math.max(startupTimeoutMs, streamIdleTimeoutMs)
       const stream = tldwClient.streamChatCompletion(request, {
+        onDispatch: options.onDispatch,
         signal: controller.signal,
         streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
@@ -646,9 +662,11 @@ export class TldwChatService {
               onChunk(chunk)
             }
 
-            const token = extractTokenFromChunk(chunk)
-            if (token) {
-              yield token
+            if (includeReasoning && hasReasoningProgress(chunk)) {
+              yield chunk
+            } else {
+              const token = extractTokenFromChunk(chunk)
+              if (token) yield token
             }
           }
         } catch (error) {

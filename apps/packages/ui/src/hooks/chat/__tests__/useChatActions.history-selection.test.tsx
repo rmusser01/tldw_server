@@ -5,6 +5,10 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
+import { captureChatDraftSource, chatDraftAddressForReceipt } from "../chat-draft-transition"
+import type { HistoryLoadReceipt } from "../useHistorySelection"
+import { captureActorSceneSend, captureActorSceneSendForTarget } from "../actor-scene-source"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
 import { usePageAssist } from "@/context"
 
@@ -119,9 +123,13 @@ vi.mock("@/db/dexie/nickname", () => ({
   getModelNicknameByID: vi.fn(async () => null)
 }))
 
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
-}))
+vi.mock("@/services/actor-settings", async original => {
+  const actual = await original<typeof import("@/services/actor-settings")>()
+  return {
+    ...actual,
+    getActorSceneForChat: vi.fn(actual.getActorSceneForChat)
+  }
+})
 
 vi.mock("@/utils/character-mood", () => ({
   detectCharacterMood: detectCharacterMoodMock
@@ -238,7 +246,9 @@ const createHookOptions = () => ({
   history: [],
   setHistory: vi.fn(),
   historyId: "history-character",
-  setHistoryId: vi.fn(),
+  setHistoryId: vi.fn((...args: Parameters<ReturnType<typeof actualDraftStore.getState>["setHistoryId"]>) =>
+    actualDraftStore.getState().setHistoryId(...args)
+  ),
   temporaryChat: false,
   selectedModel: "deepseek-chat",
   useOCR: false,
@@ -273,7 +283,9 @@ const createHookOptions = () => ({
   serverChatClusterId: null,
   serverChatSource: null,
   serverChatExternalRef: null,
-  setServerChatId: vi.fn(),
+  setServerChatId: vi.fn((id: string | null) =>
+    actualDraftStore.getState().setServerChatId(id)
+  ),
   setServerChatTitle: vi.fn(),
   setServerChatCharacterId: vi.fn(),
   setServerChatAssistantKind: vi.fn(),
@@ -466,7 +478,79 @@ const captureFor = (view: any) => {
     storage_context_digest: "storage"
   }
 }
+let actualDraftStore: typeof import("@/store/option").useStoreMessageOption
+
+const declaredDraftAccount = (originIsCurrent: () => boolean = () => true) => {
+  const signal = h1.auth.signal
+  return {
+    requestScope: {
+      config: { serverUrl: "https://server.test", authMode: "multi-user" as const },
+      userId: "alice"
+    },
+    isCurrent: () => !signal.aborted && originIsCurrent(),
+    retryVerification: vi.fn()
+  }
+}
+
+const installFreshSource = (model = "deepseek-chat") => {
+  actualDraftStore.getState().startNewChatDraft(false)
+  actualDraftStore.setState({ historyId: null, serverChatId: null })
+  messageStoreState.value.selectedModel = model
+}
+
+const installAcceptedSource = (
+  receipt: HistoryLoadReceipt,
+  historyId: string | null = receipt.owner.kind === "local"
+    ? receipt.owner.conversation_id
+    : "history-character"
+) => {
+  const address = chatDraftAddressForReceipt(receipt)
+  if (!address || !actualDraftStore.getState().setChatDraftAddress(address))
+    throw new Error("fixture requires an accepted draft address")
+  actualDraftStore.setState({
+    historyId,
+    serverChatId: address.kind === "native" ? address.id : null
+  })
+}
+
+const installLocalSource = (id: string, profileId = "profile") => {
+  if (!actualDraftStore.getState().setChatDraftAddress({ kind: "local", id, profileId }))
+    throw new Error("fixture requires an accepted local draft address")
+  actualDraftStore.setState({ historyId: id, serverChatId: null })
+}
+
+const readPrivateActorScene = async (
+  handle: import("@/utils/chat-draft-address").ChatDraftHandle,
+  snapshot: import("@/services/service-prompts").ServicePromptSnapshot
+) => {
+  const accountIsCurrent = () => !snapshot.scopeInvalidatedSignal.aborted
+  const target = captureActorSettingsTarget({
+    address: handle.address,
+    requestScope: snapshot.requestScope,
+    accountIsCurrent,
+    isCurrent: accountIsCurrent
+  })
+  const captured = captureActorSceneSendForTarget(target, target?.account)
+  if (!captured) throw new Error("fixture requires a qualified private scene")
+  return captured.read()
+}
+
+const bridgeDraftFields = () => {
+  const state = actualDraftStore.getState()
+  return {
+    chatDraftAddress: state.chatDraftAddress,
+    chatDraftRevision: state.chatDraftRevision,
+    chatDraftTransition: state.chatDraftTransition,
+    setChatDraftAddress: state.setChatDraftAddress,
+    historyId: state.historyId,
+    serverChatId: state.serverChatId,
+    setHistoryId: state.setHistoryId,
+    setServerChatId: state.setServerChatId
+  }
+}
+
 const makeController = () => {
+  const account = declaredDraftAccount()
   let current: any = {
     owner: {
       kind: "native",
@@ -475,7 +559,7 @@ const makeController = () => {
         config: { serverUrl: "https://server.test", authMode: "multi-user" },
         userId: "alice"
       },
-      validate_lease: () => true
+      validate_lease: account.isCurrent
     },
     view: {
       owner_key: "native-key",
@@ -490,6 +574,7 @@ const makeController = () => {
   }
   current.capture = captureFor(current.view)
   return {
+    draftAccount: account,
     getCurrent: () => current,
     fence: () => {
       const origin = current
@@ -563,11 +648,14 @@ beforeEach(async () => {
     }
   } })
   const { useStoreMessageOption: draftStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
-  draftStore.getState().startNewChatDraft()
-  messageStoreState.draftFields = () => {
-    const state = draftStore.getState()
-    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
-  }
+  actualDraftStore = draftStore
+  draftStore.getState().startNewChatDraft(false)
+  messageStoreState.draftFields = bridgeDraftFields
+  const { memory } = await import("./local-history-fixture")
+  await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
+  const actualScenes = await vi.importActual<typeof import("@/services/actor-settings")>("@/services/actor-settings")
+  vi.mocked((await import("@/services/actor-settings")).getActorSceneForChat)
+    .mockReset().mockImplementation(actualScenes.getActorSceneForChat)
   h1.beforeModel.mockReset()
   messageStoreState.value.selectedModel = "deepseek-chat"
   messageStoreState.value.toolChoice = "auto"
@@ -575,6 +663,7 @@ beforeEach(async () => {
   const actual = await vi.importActual<any>("@/hooks/chat-modes/normalChatMode")
   normalChatModeMock.mockImplementation(actual.normalChatMode)
   h1.controller = makeController()
+  installAcceptedSource(h1.controller.getCurrent())
   h1.capture.mockImplementation(async (_id, request) =>
     captureFor(request.view)
   )
@@ -620,6 +709,7 @@ it("edits an ordinary local message while the mounted history controller is idle
   current.status = "idle"
   current.owner = null
   current.view = null
+  installLocalSource("history-character")
   const options = {
     ...ordinaryOptions(),
     serverChatId: null,
@@ -655,6 +745,7 @@ it("deletes an ordinary local message while the mounted history controller is id
   current.status = "idle"
   current.owner = null
   current.view = null
+  installLocalSource("history-character")
   const options = {
     ...ordinaryOptions(),
     serverChatId: null,
@@ -689,15 +780,35 @@ it("refuses legacy server deletion without canonical owner authority", async () 
 })
 
 it("routes ordinary regeneration while the mounted history controller is idle", async () => {
-  const current = h1.controller.getCurrent()
+  const controller = h1.controller
+  const current = controller.getCurrent()
+  // Retain the saved scene's locator without granting this idle controller H1 authority.
+  const receipt: HistoryLoadReceipt = { owner: current.owner, view: current.view }
+  if (receipt.owner.kind !== "native")
+    throw new Error("fixture requires the original native receipt")
   current.status = "idle"
   current.owner = null
   current.view = null
+  current.capture = null
+  const historyIsCurrent = controller.fence()
+  const source = captureChatDraftSource(() =>
+    h1.controller === controller && historyIsCurrent()
+  )
+  const target = captureActorSettingsTarget({
+    address: actualDraftStore.getState().chatDraftAddress,
+    ...receipt,
+    requestScope: receipt.owner.request_scope,
+    accountIsCurrent: receipt.owner.validate_lease,
+    isCurrent: source.isCurrent
+  })
+  const captured = captureActorSceneSendForTarget(target, target?.account, source.isCurrent)
+  if (!captured) throw new Error("fixture requires the original saved scene")
+  const actorSceneSend = await captured.read()
   normalChatModeMock.mockResolvedValue({ state: "submitted" } as any)
   const options = ordinaryOptions()
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => {
-    await result.current.onSubmit({ message: "again", image: "", isRegenerate: true })
+    await result.current.onSubmit({ message: "again", image: "", isRegenerate: true, actorSceneSend })
   })
   expect(options.notification.error).not.toHaveBeenCalled()
   expect(normalChatModeMock).toHaveBeenCalled()
@@ -779,7 +890,8 @@ it.each([
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   vi.mocked(api.getChatSettings).mockResolvedValueOnce({ conversation_id: nativeChatId, settings: saved })
   const options = { ...createHookOptions(), currentChatModelSettings: { apiProvider: "openai", temperature: 0.23, topP: 0.9 } }
-  h1.controller.getCurrent().owner.scope = { workspace_id: "workspace-a" }
+  h1.controller.getCurrent().owner.scope = { type: "workspace", workspaceId: "workspace-a" }
+  installAcceptedSource(h1.controller.getCurrent())
   const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
   await act(async () => { await result.current.onSubmit({ message: "saved sampler", image: "" }) })
   expect(h1.wire).toHaveBeenCalledOnce()
@@ -793,7 +905,7 @@ it.each([
   const { historyDigest } = await import("@/db/dexie/history-selection")
   expect(selection.request_context_digest).toBe(historyDigest(preparedPayload))
   expect(api.getChatSettings).toHaveBeenCalledWith(nativeChatId, expect.objectContaining({
-    scope: { workspace_id: "workspace-a" },
+    scope: { type: "workspace", workspaceId: "workspace-a" },
     requestScope: h1.controller.getCurrent().owner.request_scope,
     signal: expect.any(AbortSignal)
   }))
@@ -1004,9 +1116,11 @@ it("unknown admission after navigation retains immutable original intent and dis
 
 it.each(["direct", "clear cached target"])("connected fresh saved normal send adopts a verified native owner before admission (%s)", async target => {
   h1.connected = true
+  installFreshSource()
   const options = { ...ordinaryOptions(), historyId: target === "clear cached target" ? "cached-history" : null, serverChatId: null, messages: [], history: [] }
   let current: any = { owner: null, view: null, status: "idle" }
   h1.controller = {
+    draftAccount: declaredDraftAccount(),
     getCurrent: () => current,
     fence: () => { const origin = current; return () => current === origin },
     loadConversation: vi.fn(async (target, _reference, onLoaded) => {
@@ -1023,6 +1137,7 @@ it.each(["direct", "clear cached target"])("connected fresh saved normal send ad
   createChatMock.mockImplementation(createdNativeChat)
   options.setServerChatId.mockImplementation(() => {
     expect(current.owner.kind).toBe("native")
+    actualDraftStore.getState().setServerChatId(nativeChatId)
   })
   h1.wire.mockImplementation(async function* (request) {
     expect(addChatMessageMock).toHaveBeenCalledOnce()
@@ -1040,7 +1155,66 @@ it.each(["direct", "clear cached target"])("connected fresh saved normal send ad
   expect(h1.wire).toHaveBeenCalledOnce()
 })
 
+it("fresh H1 tracked Persona refuses before creation, mirror, admission, or provider dispatch", async () => {
+  installFreshSource()
+  const originalAddress = actualDraftStore.getState().chatDraftAddress
+  const current = { owner: null, view: null, capture: null, bookmarkScope: null, status: "idle" }
+  h1.controller = {
+    draftAccount: declaredDraftAccount(),
+    getCurrent: () => current,
+    fence: () => () => true,
+    loadConversation: vi.fn(),
+    followResult: vi.fn()
+  }
+  const options = {
+    ...ordinaryOptions(),
+    historyId: null,
+    serverChatId: null,
+    messages: [],
+    history: [],
+    selectedAssistant: {
+      kind: "persona" as const,
+      id: "garden-helper",
+      name: "Garden Helper",
+      metadata: { selectionMode: "tracked" as const }
+    }
+  }
+  createChatMock.mockResolvedValue({
+    id: "persona-created",
+    title: "Garden Helper",
+    assistant_kind: "persona",
+    assistant_id: "garden-helper",
+    persona_memory_mode: "read_only"
+  })
+  normalChatModeMock.mockResolvedValue({ status: "submitted" })
+  const hook = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+  let outcome: unknown
+  await act(async () => {
+    outcome = await hook.result.current.onSubmit({ message: "Keep this Persona input", image: "" })
+  })
+  expect(outcome).toMatchObject({ status: "failed", errorMessage: "native_history_persona_unsupported" })
+  expect(options.notification.error).toHaveBeenCalledWith(expect.objectContaining({
+    description: expect.stringMatching(/persona/i)
+  }))
+  expect(options.notification.error.mock.lastCall?.[0].description).not.toContain("native_history_persona_unsupported")
+  expect(createChatMock).not.toHaveBeenCalled()
+  expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+  expect(h1.saveHistory).not.toHaveBeenCalled()
+  expect(h1.controller.loadConversation).not.toHaveBeenCalled()
+  expect(h1.capture).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  expect(h1.localAppend).not.toHaveBeenCalled()
+  expect(normalChatModeMock).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(options.setHistoryId).not.toHaveBeenCalled()
+  expect(options.setServerChatId).not.toHaveBeenCalled()
+  expect(actualDraftStore.getState()).toMatchObject({ historyId: null, serverChatId: null })
+  expect(actualDraftStore.getState().chatDraftAddress).toBe(originalAddress)
+  hook.unmount()
+})
+
 it("first durable ordinary send creates its local owner and admits before inference without a server conversation", async () => {
+  installFreshSource()
   const options = {
     ...ordinaryOptions(),
     historyId: null,
@@ -1086,6 +1260,7 @@ it("first durable ordinary send creates its local owner and admits before infere
     }
   )
   h1.controller = {
+    draftAccount: declaredDraftAccount(),
     getCurrent: () => current,
     fence: () => () => true,
     loadConversation: load,
@@ -1122,13 +1297,16 @@ it("first durable ordinary send creates its local owner and admits before infere
 })
 
 describe("fresh-chat submit with a selection another conversation left behind (CS-01, #3106)", () => {
-  const freshOptions = () => ({
-    ...ordinaryOptions(),
-    historyId: null,
-    serverChatId: null,
-    messages: [],
-    history: []
-  })
+  const freshOptions = () => {
+    installFreshSource()
+    return {
+      ...ordinaryOptions(),
+      historyId: null,
+      serverChatId: null,
+      messages: [],
+      history: []
+    }
+  }
   const renderActions = (options: object) =>
     renderHook(() =>
       useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
@@ -1168,6 +1346,7 @@ describe("fresh-chat submit with a selection another conversation left behind (C
       return true
     })
     h1.controller = {
+      draftAccount: declaredDraftAccount(),
       getCurrent: () => current,
       reset: vi.fn(() => {
         order.push("reset")
@@ -1220,6 +1399,7 @@ describe("fresh-chat submit with a selection another conversation left behind (C
     const loading = { ...h1.controller.getCurrent(), capture: null, status: "loading" }
     const reset = vi.fn()
     h1.controller = {
+      draftAccount: declaredDraftAccount(),
       getCurrent: () => loading,
       reset,
       fence: () => () => true,
@@ -1251,6 +1431,7 @@ describe("fresh-chat submit with a selection another conversation left behind (C
 })
 
 it("a first-create acknowledgement after navigation never installs or dispatches into the new view", async () => {
+  installFreshSource()
   const options = {
     ...ordinaryOptions(),
     historyId: null,
@@ -1261,6 +1442,7 @@ it("a first-create acknowledgement after navigation never installs or dispatches
   let current = true
   const load = vi.fn()
   h1.controller = {
+    draftAccount: declaredDraftAccount(() => current),
     getCurrent: () => ({ owner: null, view: null, status: "idle" }),
     fence: () => () => current,
     loadConversation: load
@@ -1393,6 +1575,7 @@ it("a settings change during owner admission retains accepted input without prov
 it.each([false, true])(
   "a deferred first owner load cannot adopt another ready conversation (load result %s)",
   async (loadResult) => {
+    installFreshSource()
     const options = {
       ...ordinaryOptions(),
       historyId: null,
@@ -1418,6 +1601,7 @@ it.each([false, true])(
       })
     })
     h1.controller = {
+      draftAccount: declaredDraftAccount(),
       getCurrent: () => current,
       fence: () => () => true,
       loadConversation: load,
@@ -2164,6 +2348,7 @@ it.each([
 ])(
   "native first creation captures setup and fences its ACK (model=$model, navigation=$navigate)",
   async ({ navigate, model, provider, modelId, defaults }) => {
+    installFreshSource(model)
     const options = {
       ...createHookOptions(),
       historyId: null,
@@ -2189,6 +2374,7 @@ it.each([
       return true
     })
     h1.controller = {
+      draftAccount: declaredDraftAccount(() => origin),
       getCurrent: () => current,
       fence: () => () => origin,
       loadConversation: load,
@@ -2240,6 +2426,7 @@ it("native dispatch freezes workspace routing independently of the view owner", 
   const options = createHookOptions()
   const workspace = { type: "workspace", workspaceId: "original-workspace" }
   h1.controller.getCurrent().owner.scope = workspace
+  installAcceptedSource(h1.controller.getCurrent())
   h1.wire.mockImplementation(async function* (request) {
     workspace.workspaceId = "new-workspace"
     yield { tldw_history_admission_v1: nativeAdmission(request) }
@@ -2315,6 +2502,7 @@ it("an older native completion cannot release a newer operation's Stop control",
 })
 
 it("native required client tools are explicitly gated rather than silently discarded", async () => {
+  messageStoreState.value.toolChoice = "required"
   const options = { ...createHookOptions(), toolChoice: "required" as const }
   const { result } = renderHook(() => useChatActions(options as any))
   await act(async () => {
@@ -2341,6 +2529,7 @@ const localMutationController = () => {
     owner_key: "local-key",
     conversation_id: "history-1"
   }
+  installAcceptedSource(current)
 }
 describe("selected-history mutations", () => {
   beforeEach(localMutationController)
@@ -2572,6 +2761,7 @@ it("mounted branch action captures a stable boundary and returns the committed o
     owner_key: "local-key",
     conversation_id: "history-1"
   }
+  installAcceptedSource(current)
   localForks.capture.mockResolvedValue({
     kind: "normal",
     selection: { conversation_id: "history-1" }
@@ -2622,10 +2812,7 @@ it.each(["normal", "bubble", "cluster"])(
   async (entry) => {
     const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
     actual.useStoreMessageOption.getState().startNewChatDraft()
-    messageStoreState.draftFields = () => {
-      const state = actual.useStoreMessageOption.getState()
-      return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
-    }
+    messageStoreState.draftFields = bridgeDraftFields
     const comparison = entry !== "normal"
     const { memory, seedLocalFork } = await import(
       "@/hooks/chat/__tests__/local-history-fixture"
@@ -2657,7 +2844,8 @@ it.each(["normal", "bubble", "cluster"])(
           message_id: "a1"
         })
       })
-    h1.controller = controller.result.current
+    h1.controller = Object.assign(controller.result.current, { draftAccount: declaredDraftAccount() })
+    installAcceptedSource(controller.result.current.getCurrent() as HistoryLoadReceipt)
     const options: any = {
       ...ordinaryOptions(),
       serverChatId: null,
@@ -2667,6 +2855,7 @@ it.each(["normal", "bubble", "cluster"])(
     }
     options.setHistoryId.mockImplementation((id: string) => {
       options.historyId = id
+      actualDraftStore.getState().setHistoryId(id)
     })
     const hook = renderHook(() => useChatActions(options))
     let outcome: any
@@ -2699,7 +2888,7 @@ it.each(["normal", "bubble", "cluster"])(
     expect(controller.result.current.getReference()).toMatchObject({
       conversation_id: childId
     })
-    h1.controller = controller.result.current
+    h1.controller = Object.assign(controller.result.current, { draftAccount: declaredDraftAccount() })
     hook.rerender()
     await act(async () => {
       await hook.result.current.onSubmit({ message: "child next", image: "" })
@@ -2805,6 +2994,7 @@ it("mounted native fork without local history retains an unknown create and neve
   h1.capture.mockImplementation(async (_id, request) => ({...captureFor(request.view), purpose: request.purpose,
     snapshot: {...captureFor(request.view).snapshot, native_fork_context: {policy: "plain_v1", supported: true, storage_context_digest: "storage"}}}))
   createChatMock.mockRejectedValue(new Error("creation response lost"))
+  installAcceptedSource(h1.controller.getCurrent(), null)
   const {result} = renderHook(() => useChatActions({...ordinaryOptions(), historyId: null} as any))
   let first: any, second: any
   await act(async () => {first = await result.current.createChatBranch("a1")})
@@ -2832,18 +3022,15 @@ const mountedNativeOpening = async () => {
   const { useStoreChatModelSettings: modelStore } = await import("@/store/model")
   const { useMcpToolsStore: toolsStore } = await import("@/store/mcp-tools")
   toolsStore.getState().setTools([])
-  draftStore.getState().startNewChatDraft()
+  installFreshSource()
   const sourceDraft = draftStore.getState().chatDraftAddress
-  messageStoreState.draftFields = () => {
-    const state = draftStore.getState()
-    return { chatDraftAddress: state.chatDraftAddress, chatDraftRevision: state.chatDraftRevision, setChatDraftAddress: state.setChatDraftAddress }
-  }
+  messageStoreState.draftFields = bridgeDraftFields
   const { memory } = await import("./local-history-fixture")
   for (const name of ["forkOperations", "historySelections"]) memory[name].rows.clear()
   const { useHistorySelection } = await import("../useHistorySelection")
   const onCapture = vi.fn()
   const selection = renderHook(() => useHistorySelection({ onCapture }))
-  h1.controller = selection.result.current
+  h1.controller = Object.assign(selection.result.current, { draftAccount: declaredDraftAccount() })
   const options = { ...createHookOptions(), historyId: null, serverChatId: null, serverChatCharacterId: null,
     selectedAssistant: { kind: "character", id: "12", name: "Saved", metadata: { selectionMode: "tracked" } } }
   createChatMock.mockImplementation(createdNativeChat)
@@ -3264,10 +3451,12 @@ it.each(["scope", "actor"].flatMap(stage => ["model", "settings", "tools", "new"
     const modelStore = (await import("@/store/model")).useStoreChatModelSettings
     modelStore.getState().reset()
     const draftStore = (await vi.importActual<typeof import("@/store/option")>("@/store/option")).useStoreMessageOption
+    installFreshSource()
     const source = draftStore.getState().chatDraftAddress
     const options = { ...ordinaryOptions(), historyId: null, serverChatId: null, messages: [], history: [] }
     let current: ReturnType<ReturnType<typeof makeController>["getCurrent"]> | { owner: null; view: null; status: "idle" } = { owner: null, view: null, status: "idle" }
     h1.controller = {
+      draftAccount: declaredDraftAccount(),
       getCurrent: () => current,
       fence: () => { const origin = current; return () => current === origin },
       loadConversation: vi.fn(async (_target, _reference, onLoaded) => {
@@ -3288,8 +3477,9 @@ it.each(["scope", "actor"].flatMap(stage => ["model", "settings", "tools", "new"
       const original = scope.getMockImplementation()!
       scope.mockImplementationOnce(async (...args) => { enter(); await held; return original(...args) })
     } else {
-      const actor = vi.mocked((await import("@/services/actor-settings")).getActorSettingsForChat)
-      actor.mockImplementationOnce(async () => { enter(); await held; return null })
+      const actor = vi.mocked((await import("@/services/actor-settings")).getActorSceneForChat)
+      const original = actor.getMockImplementation()!
+      actor.mockImplementationOnce(async (...args) => { enter(); await held; return original(...args) })
     }
     const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
     let pending!: Promise<unknown>
@@ -3328,9 +3518,12 @@ it.each(["scope", "actor"].flatMap(stage => ["model", "settings", "tools", "new"
 
 
 const startGreetingOnMountedNative = async (mounted: Awaited<ReturnType<typeof mountedNativeOpening>>, seed: import("@/utils/character-greetings").GreetingSeed, surface: "playground" | "sidepanel" = "playground", greetingIsCurrent?: () => boolean) => {
+  const captured = captureActorSceneSend(h1.controller)
+  if (!captured) throw new Error("fixture requires a qualified greeting scene")
+  const actorSceneSend = await captured.read()
   const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
   const controller = mounted.selection.result.current
-  const args = { controller, surface, originIsCurrent: controller.fence(), signal: new AbortController().signal,
+  const args = { controller, actorSceneSend, surface, originIsCurrent: controller.fence(), signal: new AbortController().signal,
     temporary: false, historyId: null, serverChatId: null, characterId: "12", model: "deepseek:deepseek-chat", currentModel: "deepseek:deepseek-chat",
     settings: { apiProvider: "deepseek", temperature: 0, topP: 0 }, message: "", image: "", greetingSeed: seed, greetingIsCurrent,
     t: mounted.options.t, setServerChatId: mounted.options.setServerChatId, setMessages: mounted.options.setMessages, releaseActivity: vi.fn() }
@@ -3494,6 +3687,7 @@ it.each(["bound-record", "send-capture"])("private native popup %s retires chang
   const { Storage } = await import("@plasmohq/storage")
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  const actorSceneSend = await readPrivateActorScene(handle, snapshot)
   const before = mounted.draftStore.getState()
   let preparationCurrent = true
   let enter!: () => void, release!: () => void
@@ -3515,7 +3709,7 @@ it.each(["bound-record", "send-capture"])("private native popup %s retires chang
   let pending!: Promise<unknown>
   await act(async () => {
     pending = sendNativeHistoryCharacter({ controller: mounted.selection.result.current,
-      privateDraft: { handle, isCurrent: () => true }, surface: "playground",
+      privateDraft: { handle, requestScope: snapshot.requestScope, isCurrent: () => true }, actorSceneSend, surface: "playground",
       originIsCurrent: () => preparationCurrent, signal: new AbortController().signal,
       temporary: false, scope: { type: "global" }, characterId: "12", model: "deepseek:deepseek-chat",
       settings: {}, toolChoice: "none", message: "private popup input", image: "", t: ((key: string) => key) as import("i18next").TFunction,
@@ -3627,13 +3821,14 @@ it.each([false, true])("private bound retry settles only the exact original inpu
   const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  const actorSceneSend = await readPrivateActorScene(handle, snapshot)
   let preparationCurrent = true
   h1.capture.mockImplementation(async (id, request) => {
     if (h1.capture.mock.calls.length === 3) preparationCurrent = false
     return openingCapture(id, request)
   })
   const send = (message: string, serverChatId?: string) => sendNativeHistoryCharacter({
-    controller: mounted.selection.result.current, privateDraft: { handle, isCurrent: () => true }, surface: "playground",
+    controller: mounted.selection.result.current, privateDraft: { handle, requestScope: snapshot.requestScope, isCurrent: () => true }, actorSceneSend, surface: "playground",
     originIsCurrent: () => preparationCurrent, signal: new AbortController().signal, temporary: false,
     scope: { type: "global" }, characterId: "12", model: "deepseek:deepseek-chat", settings: {}, toolChoice: "none",
     message, image: "", serverChatId, t: ((key: string) => key) as import("i18next").TFunction,
@@ -3661,10 +3856,11 @@ it("private first-create reports the actual qualification read failure and keeps
   const { readChatCreationRecovery } = await import("@/services/pending-chat-promotion")
   const snapshot = await loadServicePromptSnapshot([])
   const handle = { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+  const actorSceneSend = await readPrivateActorScene(handle, snapshot)
   h1.capture.mockRejectedValue(new Error("owned_read_unavailable"))
   let error: unknown
   await act(async () => { error = await sendNativeHistoryCharacter({ controller: mounted.selection.result.current,
-    privateDraft: { handle, isCurrent: () => true }, surface: "playground", originIsCurrent: () => true,
+    privateDraft: { handle, requestScope: snapshot.requestScope, isCurrent: () => true }, actorSceneSend, surface: "playground", originIsCurrent: () => true,
     signal: new AbortController().signal, temporary: false, scope: { type: "global" }, characterId: "12",
     model: "deepseek:deepseek-chat", settings: {}, toolChoice: "none", message: "  KEPT EXACT INPUT  ", image: "",
     t: ((key: string) => key) as import("i18next").TFunction, setServerChatId: vi.fn(), setMessages: vi.fn(), releaseActivity: vi.fn()
@@ -3692,8 +3888,9 @@ const mountInterruptedRetry = async (local = false, invalidCompare = false) => {
   }
   const selection = renderHook(() => useHistorySelection())
   await act(async () => { expect(await selection.result.current.loadConversation(local ? { historyId: "history-1" } : { serverChatId: nativeChatId })).toBe(true) })
-  h1.controller = selection.result.current
+  h1.controller = Object.assign(selection.result.current, { draftAccount: declaredDraftAccount() })
   const current = selection.result.current.getCurrent()
+  installAcceptedSource(current as HistoryLoadReceipt)
   const admission = { version: 1, owner_key: current.view!.owner_key, conversation_id: current.view!.conversation_id, input_message_id: "u-old", input_message_revision: "r1", selection_digest: "accepted", messages: [], originating_selection_revision: 1 }
   const entry = { scope: current.bookmarkScope!, turn: { version: 1, operation_id: "interrupted-retry", owner_key: current.view!.owner_key, conversation_id: current.view!.conversation_id, origin_view: current.view, input_id: "u-old", input_text: "old question", result_text: "partial", state: "generated_unsaved", persistence: "server", admission } }
   const options = { ...ordinaryOptions(), ...(invalidCompare ? { compareModeActive: true, compareFeatureEnabled: true, compareSelectedModels: [] } : {}), ...(local ? { serverChatId: null, historyId: "history-1" } : {}), messages: [ { id: "u-old", isBot: false, message: "old question", sources: [] }, { id: "a1", isBot: true, message: "partial", generationInfo: { interrupted: true }, sources: [] } ] }
@@ -3929,15 +4126,24 @@ it.each([false, true])(
       typeof import("@/services/actor-settings")
     >("@/services/actor-settings")
     const reader = vi.mocked(
-      (await import("@/services/actor-settings")).getActorSettingsForChat
+      (await import("@/services/actor-settings")).getActorSceneForChat
     )
-    reader.mockImplementationOnce(service.getActorSettingsForChat)
-    const read = vi
-      .spyOn(Storage.prototype, "get")
-      .mockRejectedValueOnce(new Error("scene read unavailable"))
-    let outcome: unknown
-    await act(async () => {
-      outcome = await mounted.hook.result.current.onSubmit({
+    reader.mockImplementationOnce(service.getActorSceneForChat)
+    const originalRead = Storage.prototype.get
+    let enteredRead!: () => void, releaseRead!: () => void
+    const entered = new Promise<void>(resolve => { enteredRead = resolve })
+    const held = new Promise<void>(resolve => { releaseRead = resolve })
+    const read = vi.spyOn(Storage.prototype, "get").mockImplementation(async function (this: Storage, key) {
+      if (key.startsWith("actorSettings:owned:")) {
+        enteredRead()
+        await held
+        throw new Error("scene read unavailable")
+      }
+      return originalRead.call(this, key)
+    })
+    let outcome: unknown, pending!: Promise<unknown>
+    act(() => {
+      pending = mounted.hook.result.current.onSubmit({
         message: greeting ? "" : "Keep this exact input",
         image: "",
         ...(greeting
@@ -3951,6 +4157,15 @@ it.each([false, true])(
           : {})
       })
     })
+    await act(async () => {
+      await Promise.race([entered, pending.then(() => {
+        throw new Error("Sender finished before the qualified scene storage read")
+      })])
+      releaseRead()
+      outcome = await pending
+    })
+    expect(read).toHaveBeenCalledWith(`actorSettings:owned:${reader.mock.calls[0][0].target.key}`)
+    expect(reader.mock.calls[0][0].target.address).toEqual(mounted.sourceDraft)
     expect(outcome).toMatchObject({
       status: "failed",
       errorMessage: "actor_settings_unavailable"
@@ -4476,6 +4691,7 @@ it.each(["history-epoch", "new-draft", "same-id-restore"])(
         }
       ]
     }
+    installLocalSource("history-character")
     messageStoreState.editRows = () => options.messages
     const hook = renderHook(() => useChatActions(options as any))
     const retained = hook.result.current.editMessage
@@ -4828,7 +5044,7 @@ const mountNativePlainSave = async (
       })
     ).toBe(true)
   })
-  h1.controller = selection.result.current
+  h1.controller = Object.assign(selection.result.current, { draftAccount: declaredDraftAccount() })
   await act(async () => {
     expect(
       await selection.result.current.choose({
@@ -4838,6 +5054,7 @@ const mountNativePlainSave = async (
     ).toBe(true)
   })
   const origin = selection.result.current.getCurrent().capture!
+  installAcceptedSource(selection.result.current.getCurrent() as HistoryLoadReceipt)
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   const read = vi.mocked(api.getMessage),
     write = vi.mocked(api.editMessage)
@@ -5841,13 +6058,7 @@ describe("rendered Delete ownership", () => {
     const store =
       await vi.importActual<typeof import("@/store/option")>("@/store/option")
     store.useStoreMessageOption.getState().startNewChatDraft()
-    messageStoreState.draftFields = () => {
-      const state = store.useStoreMessageOption.getState()
-      return {
-        chatDraftRevision: state.chatDraftRevision,
-        chatDraftAddress: state.chatDraftAddress
-      }
-    }
+    messageStoreState.draftFields = bridgeDraftFields
     store.useStoreMessageOption.setState({
       streaming: false,
       isProcessing: false
@@ -5871,6 +6082,7 @@ describe("rendered Delete ownership", () => {
         }
       ]
     }
+    installLocalSource("local-delete")
     messageStoreState.editRows = () => options.messages
     const mounted = renderHook(() =>
       useChatActions(options as unknown as Parameters<typeof useChatActions>[0])

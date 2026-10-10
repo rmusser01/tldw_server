@@ -3,21 +3,27 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useCharacterQuickChat } from "../useCharacterQuickChat"
 import { useStoreChatModelSettings } from "@/store/model"
+import { useStoreMessageOption } from "@/store/option"
+import { useActorStore } from "@/store/actor"
+import { createDefaultActorSettings } from "@/types/actor"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(), complete: vi.fn(), deleteChat: vi.fn(), nativeSend: vi.fn(),
   navigate: vi.fn(), selectCharacter: vi.fn(), retain: vi.fn(),
-  ownerGeneration: 0, ownerReady: true, retryOwner: vi.fn(), getCharacter: vi.fn(), preparePath: vi.fn(), requestScope: {}, accountClear: undefined as undefined | (() => void),
+  ownerGeneration: 0, ownerReady: true, retryOwner: vi.fn(), getCharacter: vi.fn(), preparePath: vi.fn(), requestScope: { config: { serverUrl: "https://private-scene-command.example", authMode: "single-user" as const }, userId: 1 }, scene: vi.fn<typeof import("@/services/actor-settings").getActorSceneForChat>(), accountClear: undefined as undefined | (() => void),
   selection: null as null | Record<string, unknown>, reset: vi.fn(), getReference: vi.fn(), copy: vi.fn(), requestNavigation: vi.fn(),
 }))
 vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate }))
 vi.mock("@/hooks/useSelectedCharacter", () => ({ useSelectedCharacter: () => [null, mocks.selectCharacter] }))
 vi.mock("@/hooks/useComposerFocus", () => ({ focusComposer: vi.fn() }))
-vi.mock("@/hooks/useChatDraftOwner", () => ({
+vi.mock("@/services/actor-settings", () => ({ getActorSceneForChat: mocks.scene }))
+vi.mock("@/hooks/useChatDraftOwner", async original => ({
+  ...await original<typeof import("@/hooks/useChatDraftOwner")>(),
   useChatDraftOwner: (clear: () => void) => {
     mocks.accountClear = clear
     const generation = mocks.ownerGeneration
-    return { ownerKey: mocks.ownerReady ? "a".repeat(64) : null, requestScope: mocks.ownerReady ? mocks.requestScope : null, serverScopeKey: "owner-a",
+    return { ownerKey: mocks.ownerReady ? chatDraftOwnerKey(mocks.requestScope) : null, requestScope: mocks.ownerReady ? mocks.requestScope : null, serverScopeKey: "owner-a",
       isCurrent: () => mocks.ownerReady && generation === mocks.ownerGeneration, verificationState: mocks.ownerReady ? "ready" : "pending", retryVerification: mocks.retryOwner }
   }
 }))
@@ -29,7 +35,7 @@ vi.mock("@/hooks/useDraftPersistence", () => ({ useDraftPersistence: () => ({
 }) }))
 vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelection: () => ({
   reset: mocks.reset, getReference: mocks.getReference,
-  getCurrent: () => mocks.selection ?? ({ status: "ready", owner: { kind: "native", conversation_id: "quick-session", validate_lease: () => true }, capture: { status: "captured" } }),
+  getCurrent: () => mocks.selection ?? ({ status: "idle", owner: null, view: null }),
   getSignal: () => undefined, fence: () => () => true, prepareExpansionPath: mocks.preparePath, loadConversation: vi.fn(), recoveries: [], recoveryError: null
 }) }))
 vi.mock("@/hooks/chat/native-history-character-send", () => ({ sendNativeHistoryCharacter: mocks.nativeSend }))
@@ -49,6 +55,11 @@ beforeEach(() => {
   useStoreChatModelSettings.getState().reset()
   mocks.ownerGeneration = 0
   mocks.selection = null
+  mocks.reset.mockImplementation(() => { mocks.selection = null })
+  useStoreMessageOption.getState().startNewChatDraft()
+  useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+  useActorStore.getState().reset()
+  mocks.scene.mockReset().mockImplementation(async ({ target }) => ({ target: target!, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }))
   mocks.ownerReady = true
   mocks.getCharacter.mockReset().mockImplementation(async (id: string) => ({ id, name: "Guide" }))
   mocks.preparePath.mockResolvedValue("/chat?chatId=quick-session&client_session_id=qualified-popup-view")
@@ -62,6 +73,8 @@ beforeEach(() => {
   mocks.nativeSend.mockImplementation(async (params) => {
     try {
       const created = await mocks.create()
+      mocks.selection = { status: "ready", owner: { kind: "native", conversation_id: created.id, owner_key: "popup-owner", request_scope: mocks.requestScope, validate_lease: () => true },
+        view: { owner_key: "popup-owner", conversation_id: created.id }, capture: { status: "captured" } }
       params.setServerChatId(created.id)
       const response = await mocks.complete()
       params.setMessages([{ id: "assistant-result", isBot: true, name: "Assistant", message: response.assistant_content, createdAt: 1, sources: [] }])
@@ -75,6 +88,40 @@ const start = async (result: ReturnType<typeof renderHook<ReturnType<typeof useC
 }
 
 describe("Character Quick Chat owned lifetime", () => {
+  it("freezes the popup's own scene before retention while main New remains irrelevant", async () => {
+    const original = { ...createDefaultActorSettings(), notes: "Private original scene" }
+    let stored = original
+    mocks.scene.mockImplementation(async ({ target }) => ({ target: target!, settings: structuredClone(stored), originalRecord: { value: structuredClone(stored), updatedAt: 1 }, origin: "scene", profileUnavailable: false }))
+    const pending = held<boolean>()
+    mocks.retain.mockReturnValueOnce(pending.promise)
+    const view = renderHook(() => useCharacterQuickChat(deps))
+    await start(view.result)
+    let send!: ReturnType<typeof view.result.current.sendQuickChatMessage>
+    act(() => { send = view.result.current.sendQuickChatMessage() })
+    await waitFor(() => expect(mocks.retain).toHaveBeenCalledOnce())
+    const readsBeforeRetention = mocks.scene.mock.calls.length
+    const mainAddress = useStoreMessageOption.getState().chatDraftAddress!
+    act(() => { useStoreMessageOption.getState().startNewChatDraft() })
+    stored = { ...original, notes: "Private newer scene" }
+    await act(async () => { pending.resolve(true); await send })
+    expect(readsBeforeRetention).toBe(1)
+    expect(mocks.nativeSend).toHaveBeenCalledWith(expect.objectContaining({ actorSceneSend: expect.objectContaining({ requestScope: mocks.requestScope,
+      scene: expect.objectContaining({ settings: original, target: expect.objectContaining({ address: expect.objectContaining({ kind: "fresh" }) }) }) }) }))
+    expect(mocks.nativeSend.mock.calls[0][0].actorSceneSend.scene.target.address.id).not.toBe(mainAddress.kind === "fresh" ? mainAddress.id : null)
+    expect(useActorStore.getState().applied).toBeNull()
+  })
+
+  it("reads a later popup turn from its accepted native owner instead of its retained creation handle", async () => {
+    const view = renderHook(() => useCharacterQuickChat(deps))
+    await start(view.result)
+    await act(async () => { await view.result.current.sendQuickChatMessage() })
+    act(() => view.result.current.setQuickChatDraft("Second private question"))
+    await act(async () => { await view.result.current.sendQuickChatMessage() })
+    expect(mocks.scene.mock.calls.map(([args]) => args.target!.address?.kind)).toEqual(["fresh", "native"])
+    expect(mocks.scene.mock.calls[1][0].target?.address).toMatchObject({ kind: "native", id: "quick-session", ownerKey: "popup-owner" })
+    expect(mocks.nativeSend.mock.calls[1][0].privateDraft.handle.address.kind).toBe("fresh")
+  })
+
   it("shows pending account verification and retries the owned card without silently dropping the intent", async () => {
     mocks.ownerReady = false
     const { result, rerender } = renderHook(() => useCharacterQuickChat(deps))
@@ -224,13 +271,13 @@ describe("Character Quick Chat owned lifetime", () => {
   it.each(["refused", "unknown", "dispatching"])(
     "Quick retains exact input and classifies %s send recovery without automatic replay",
     async (state) => {
-      mocks.selection = {
+      const acceptedSelection = {
         status: "ready",
         bookmarkScope: { profile_id: "p", client_session_id: "client" },
-        view: { conversation_id: "quick-session" },
+        view: { conversation_id: "quick-session", owner_key: "popup-owner" },
         owner: {
           kind: "native",
-          conversation_id: "quick-session",
+          conversation_id: "quick-session", owner_key: "popup-owner", request_scope: mocks.requestScope,
           validate_lease: () => true
         },
         capture: { status: "captured" }
@@ -261,6 +308,7 @@ describe("Character Quick Chat owned lifetime", () => {
       const { NativeHistoryContextRefusal } =
         await import("@/hooks/chat/native-character-preflight")
       mocks.nativeSend.mockImplementationOnce(async (params) => {
+        mocks.selection = acceptedSelection
         params.setServerChatId("quick-session")
         throw new NativeHistoryContextRefusal(new Error("HTTP 409"), () => true)
       })
@@ -348,7 +396,7 @@ describe("Character Quick Chat owned lifetime", () => {
     await start(result)
     await act(async () => { await result.current.sendQuickChatMessage() })
     expect(mocks.nativeSend).toHaveBeenCalledWith(expect.objectContaining({
-      privateDraft: { handle: { ownerHash: "a".repeat(64), address: expect.objectContaining({ kind: "fresh", temporary: false }) }, isCurrent: expect.any(Function) },
+      privateDraft: { handle: { ownerHash: chatDraftOwnerKey(mocks.requestScope), address: expect.objectContaining({ kind: "fresh", temporary: false }) }, requestScope: mocks.requestScope, isCurrent: expect.any(Function) },
       toolChoice: "none", model: "openai:fixture-model"
     }))
     expect(mocks.selectCharacter).not.toHaveBeenCalled()
@@ -400,7 +448,7 @@ it("permits a deliberate new popup after an earlier preparation never dispatched
   const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
   vi.mocked(listChatCreationRecovery).mockResolvedValueOnce({ unavailable: false, attempts: [{
     version: 1, operationId: "old-prepared", state: "prepared", characterId: "4", inputText: "OLD UNSENT",
-    surface: "playground", createdAt: 1, handle: { address: freshChatDraftAddress(false), ownerHash: "a".repeat(64) }
+    surface: "playground", createdAt: 1, handle: { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(mocks.requestScope) }
   }] })
   const { result } = renderHook(() => useCharacterQuickChat(deps))
   await start(result)
@@ -415,7 +463,7 @@ it("requires created-chat Review when a native owner exists without qualified hi
   const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
   vi.mocked(readChatCreationRecovery).mockResolvedValueOnce({ version: 1, operationId: "known-id", state: "acknowledged", chatId: "quick-session",
     characterId: "4", inputText: "ORIGINAL", surface: "playground", createdAt: 1,
-    handle: { address: freshChatDraftAddress(false), ownerHash: "a".repeat(64) } })
+    handle: { address: freshChatDraftAddress(false), ownerHash: chatDraftOwnerKey(mocks.requestScope) } })
   mocks.nativeSend.mockRejectedValueOnce(new Error("history_selection_not_ready"))
   const { result } = renderHook(() => useCharacterQuickChat(deps))
   await start(result)

@@ -1,3 +1,5 @@
+import { useStoreMessageOption } from "@/store/option"
+import type { ActorSceneSend } from "./actor-scene-source"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import type { ChatScope } from "@/types/chat-scope"
@@ -38,6 +40,7 @@ export const useServerChatHistoryId = ({
     chatId: string | null
     historyId: string | null
     ownerKey?: string
+    scopeKey?: string
   }>({ chatId: null, historyId: null })
 
   React.useEffect(() => {
@@ -58,7 +61,8 @@ export const useServerChatHistoryId = ({
       chatId: string,
       title?: string,
       scopeInvalidatedSignal?: AbortSignal,
-      ownerOrSnapshot?: VerifiedHistoryMirrorOwner | ServicePromptSnapshot
+      ownerOrSnapshot?: VerifiedHistoryMirrorOwner | ServicePromptSnapshot,
+      sceneSend?: ActorSceneSend
     ) => {
       if (!chatId || temporaryChat) return null
       const snapshot = ownerOrSnapshot && "requestScope" in ownerOrSnapshot ? ownerOrSnapshot : undefined
@@ -111,16 +115,35 @@ export const useServerChatHistoryId = ({
         // the exact mirror while this request was awaiting storage.
         if (historyIdRef.current !== currentHistoryId && historyIdRef.current !== localId)
           throw createServicePromptScopeChangedError()
+        if (sceneSend && sceneSend.acceptHistoryMirror?.(localId) !== true)
+          throw createServicePromptScopeChangedError()
         scopedCache.current.set(key, localId)
         if (
           historyIdRef.current === currentHistoryId &&
           currentHistoryId !== localId
         )
           setHistoryId(localId, { preserveServerChatId: true })
+        assertCurrent()
+        if (sceneSend && (!sceneSend.isCurrent() || useStoreMessageOption.getState().historyId !== localId))
+          throw createServicePromptScopeChangedError()
         return localId
       }
       if (!snapshot) throw createServicePromptScopeChangedError()
+      const assertLegacyCurrent = () => {
+        throwIfScopeInvalidated()
+        if (sceneSend && !sceneSend.isCurrent()) throw createServicePromptScopeChangedError()
+      }
+      const publishLegacyMirror = (localId: string) => {
+        assertLegacyCurrent()
+        if (sceneSend && sceneSend.acceptHistoryMirror?.(localId) !== true) throw createServicePromptScopeChangedError()
+        if (currentHistoryId !== localId) setHistoryId(localId, { preserveServerChatId: true })
+        assertLegacyCurrent()
+        if (sceneSend && useStoreMessageOption.getState().historyId !== localId) throw createServicePromptScopeChangedError()
+      }
+      assertLegacyCurrent()
       const ownerKey = serverChatMirrorOwnerKey(snapshot)
+      const mirrorScope = sceneSend?.scene.target.address?.kind === "local" ? undefined : sceneSend?.scene.target.address?.scope
+      const mirrorScopeKey = JSON.stringify(mirrorScope ?? { type: "global" })
       const session = usePlaygroundSessionStore.getState()
       const legacyHistoryId = session.isSessionValid(snapshot.scopeKey) &&
         session.historyId === currentHistoryId &&
@@ -129,12 +152,11 @@ export const useServerChatHistoryId = ({
       if (
         serverChatHistoryIdRef.current.chatId === chatId &&
         serverChatHistoryIdRef.current.ownerKey === ownerKey &&
+        serverChatHistoryIdRef.current.scopeKey === mirrorScopeKey &&
         serverChatHistoryIdRef.current.historyId
       ) {
         const existingId = serverChatHistoryIdRef.current.historyId
-        if (currentHistoryId !== existingId) {
-          setHistoryId(existingId, { preserveServerChatId: true })
-        }
+        publishLegacyMirror(existingId)
         return existingId
       }
 
@@ -144,6 +166,7 @@ export const useServerChatHistoryId = ({
           chatId,
           title: title?.trim() || t("common:untitled", { defaultValue: "Untitled" }),
           ownerKey,
+          scope: mirrorScope,
           currentHistoryId,
           legacyHistoryId,
           signal: scopeInvalidatedSignal
@@ -158,14 +181,13 @@ export const useServerChatHistoryId = ({
         throw createServicePromptScopeChangedError()
       }
 
-      throwIfScopeInvalidated()
+      assertLegacyCurrent()
+      publishLegacyMirror(linkedHistoryId)
       serverChatHistoryIdRef.current = {
         chatId,
         historyId: linkedHistoryId,
-        ownerKey
-      }
-      if (currentHistoryId !== linkedHistoryId) {
-        setHistoryId(linkedHistoryId, { preserveServerChatId: true })
+        ownerKey,
+        scopeKey: mirrorScopeKey
       }
       return linkedHistoryId
     },

@@ -15,7 +15,7 @@ import {
 import type { ToolCall } from "@/types/tool-calls"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
-import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
@@ -141,7 +141,7 @@ export class ChatTldw {
    * Streaming API used by existing chat modes.
    *
    * This intentionally mirrors the previous `ollama.stream(...)` contract:
-   * - yields plain string tokens
+   * - yields text tokens and optional reasoning frames
    * - optionally calls `callbacks[i].handleLLMEnd(result)` once at the end
    */
   async stream(
@@ -149,6 +149,7 @@ export class ChatTldw {
     options?: {
       signal?: AbortSignal
       preparedRequest?: ChatCompletionRequest
+      onDispatch?: () => void
       // Matches the shape used in normalChatMode/search/rag, where
       // callbacks: [{ handleLLMEnd(output) { ... } }]
       callbacks?: Array<{ handleLLMEnd?: (output: any) => any }>
@@ -249,6 +250,7 @@ export class ChatTldw {
         // all modes (not just polling `signal.aborted` at the loop top).
         signal,
         preparedRequest: options?.preparedRequest,
+        onDispatch: options?.onDispatch,
         model: this.model,
         temperature: this.temperature,
         maxTokens: this.maxTokens,
@@ -276,7 +278,8 @@ export class ChatTldw {
         chatDebugMetadata: this.chatDebugMetadata,
         requestScope: this.requestScope
       },
-      handleChunk
+      handleChunk,
+      true
     )
 
     // A completion the server persists into an existing server chat is a
@@ -295,15 +298,12 @@ export class ChatTldw {
       let serverWriteOutcome: ServerChatWriteOutcome = "unknown"
       let fullText = ""
       try {
+        signal?.throwIfAborted()
         for await (const token of stream) {
           if (signal?.aborted) {
             break
           }
-          if (typeof token !== "string") continue
-          fullText += token
-          // Downstream chat-modes treat chunks as strings or objects with
-          // `content` / `choices[0].delta.content`. Yielding the plain
-          // string keeps the simple path working (`typeof chunk === 'string'`).
+          fullText += extractTokenFromChunk(token)
           yield token
         }
         // The extension port can drop after the first byte; TldwChat surfaces a

@@ -7,7 +7,8 @@ import type {
   Message,
   HistoryBookmark,
   HistoryTurnRecovery,
-  HistoryBookmarkScope
+  HistoryBookmarkScope,
+  UploadedFile
 } from "./types"
 import type {
   HistoryAdmissionReferenceV1,
@@ -829,12 +830,28 @@ export const confirmLocalHistoryProjection = (
     return projection!
   })
 }
+/** Captured document references are display metadata, never mutable context authority. */
+const validDocumentPresentation = (documents: unknown): boolean => {
+  if (!Array.isArray(documents)) return false
+  const fields = new Set(["type", "title", "url", "tabId", "favIconUrl", "filename", "fileSize", "processed"])
+  return Array.from(documents).every(document => {
+    if (!document || typeof document !== "object" || Array.isArray(document) ||
+        (document.type !== "file" && document.type !== "tab") ||
+        Object.keys(document).some(key => !fields.has(key))) return false
+    return Object.entries(document).every(([key, value]) => value === undefined ||
+      (key === "fileSize" ? typeof value === "number" && Number.isFinite(value) && value >= 0 :
+       key === "tabId" ? typeof value === "number" && Number.isSafeInteger(value) && value >= 0 :
+       key === "processed" ? typeof value === "boolean" : typeof value === "string"))
+  })
+}
+
 const normalizeMessage = (
   owner: LocalHistoryOwnerV1,
   input: Message,
   role: "user" | "assistant",
   parent: string | null,
-  projection_id?: string
+  projection_id?: string,
+  documentPresentation = false
 ): Message => {
   if (
     !input.id ||
@@ -848,7 +865,9 @@ const normalizeMessage = (
   )
     fail("parent_mismatch")
   if (
-    input.documents?.length ||
+    (input.documents !== undefined &&
+      (!Array.isArray(input.documents) ||
+        (input.documents.length > 0 && (!documentPresentation || !validDocumentPresentation(input.documents))))) ||
     localImages(input).some((image) => !/^data:[^,]+,/.test(image))
   )
     fail("unsupported_local_message_assets")
@@ -867,10 +886,11 @@ export const appendLocalSelectedUser = (
   owner: LocalHistoryOwnerV1,
   selection: HistorySelectionV1,
   input: Message,
-  opts?: HistoryOperationOptions
+  opts?: HistoryOperationOptions & { documentPresentation?: boolean }
 ): Promise<HistoryAdmissionV1> => {
   selection = structuredClone(selection)
   input = structuredClone(input)
+  const documentPresentation = opts?.documentPresentation === true
   return transaction("rw", opts, async () => {
     if (
       selection.version !== 1 ||
@@ -889,7 +909,8 @@ export const appendLocalSelectedUser = (
       parent,
       selection.interpretation.kind === "legacy_linear_v1"
         ? selection.interpretation.projection_id
-        : undefined
+        : undefined,
+      documentPresentation
     )
     const admission: HistoryAdmissionV1 = {
       version: 1,
@@ -970,10 +991,12 @@ export const settleLocalAcceptedAssistant = (
   owner: LocalHistoryOwnerV1,
   admission: HistoryAdmissionReferenceV1,
   input: Message,
-  opts?: HistoryOperationOptions
+  opts?: HistoryOperationOptions,
+  sessionFilesToAdd: UploadedFile[] = []
 ): Promise<Message> => {
   admission = structuredClone(admission)
   input = structuredClone(input)
+  sessionFilesToAdd = structuredClone(sessionFilesToAdd)
   return transaction("rw", opts, async () => {
     await ownedHistory(owner)
     const parent = await db.messages.get(admission.input_message_id)
@@ -1001,6 +1024,30 @@ export const settleLocalAcceptedAssistant = (
       parent.id,
       parent.history_provenance?.projection_id ?? undefined
     )
+    if (sessionFilesToAdd.length) {
+      const session = await db.sessionFiles.get(owner.conversation_id)
+      if (session && (session.sessionId !== owner.conversation_id || !Array.isArray(session.files)))
+        fail("unsupported_local_message_assets")
+      const files = [...(session?.files ?? [])]
+      if (files.some(file => !file || typeof file !== "object" || Array.isArray(file) ||
+          typeof file.id !== "string" || !file.id)) fail("unsupported_local_message_assets")
+      for (const file of sessionFilesToAdd) {
+        if (!file || typeof file !== "object" || Array.isArray(file) ||
+            typeof file.id !== "string" || !file.id || typeof file.filename !== "string" ||
+            typeof file.type !== "string" || typeof file.content !== "string" ||
+            typeof file.processed !== "boolean" || !Number.isFinite(file.size) || file.size < 0 ||
+            !Number.isFinite(file.uploadedAt)) fail("unsupported_local_message_assets")
+        const previous = files.find(candidate => candidate.id === file.id)
+        if (previous && canonicalHistoryJson(previous) !== canonicalHistoryJson(file))
+          fail("local_file_id_conflict")
+        if (!previous) files.push(file)
+      }
+      await db.sessionFiles.put({
+        ...session, sessionId: owner.conversation_id, files,
+        retrievalEnabled: session?.retrievalEnabled ?? false,
+        createdAt: session?.createdAt ?? Date.now()
+      })
+    }
     const existing = await db.messages.get(message.id)
     const settlement = {
       input_message_id: parent.id,

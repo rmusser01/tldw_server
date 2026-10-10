@@ -1710,7 +1710,7 @@ export const PlaygroundForm = ({
         usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
         usePlaygroundSessionStore.getState().sourceSelectionRevision === sourceSelectionRevision &&
         current.chatDraftAddress === draftAddress &&
-        current.serverChatId === targetId && current.historyId === historyId && current.chatDraftRevision === draftRevision;
+        current.serverChatId === targetId && (draftAddress?.kind === "native" || current.historyId === historyId) && current.chatDraftRevision === draftRevision;
     };
   }, [captureSelectionFence, assistantOwnerIsCurrent]);
   const captureAssistantPreparationGuard = React.useCallback(() => {
@@ -1725,7 +1725,7 @@ export const PlaygroundForm = ({
     const view = assistantPreparationViewRef.current;
     return [chat.selectedModel, chat.toolChoice, chat.temporaryChat, chat.history, chat.messages, chat.webSearch,
       chat.selectedSystemPrompt, chat.uploadedFiles, chat.contextFiles, chat.documentContext, chat.selectedKnowledge,
-      chat.ragMediaIds, chat.ragPinnedResults, chat.replyTarget, chat.messageSteeringMode, chat.messageSteeringForceNarrate,
+      chat.ragMediaIds, chat.ragPinnedResults, chat.replyTarget, chat.messageSteeringMode, chat.messageSteeringForceNarrate, chat.messageSteeringRevision,
       chat.isProcessing, chat.isLoading, chat.streaming, composerImageRef.current, view.researchContext, view.openUIRequestMode,
       view.appendFormattingGuidePrompt, view.isConnectionReady, view.composerModels, view.composerModelsLoading];
   }, []);
@@ -3584,6 +3584,7 @@ export const PlaygroundForm = ({
 
   const queuedCompletionIsCurrent = React.useMemo(captureCompletionGuard, [captureCompletionGuard]);
   const queueMgmt = usePlaygroundQueueManagement({
+    historySelection,
     canCommitDispatchResult: queuedCompletionIsCurrent,
     getDispatchDisabledReason: getSubmitDisabledReason,
     captureDispatchFence: captureAssistantActionGuard,
@@ -3740,6 +3741,7 @@ export const PlaygroundForm = ({
   );
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
+    historySelection,
     captureCompletionGuard,
     form,
     draftReady,

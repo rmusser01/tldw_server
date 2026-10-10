@@ -1099,6 +1099,7 @@ export type ChatCompletionRequestOptions = {
 }
 
 export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
+  onDispatch?: () => void
   streamIdleTimeoutMs?: number
 }
 
@@ -3698,6 +3699,7 @@ export class TldwApiClientBase {
       },
       body: request,
       abortSignal: options?.signal,
+      onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
@@ -6468,33 +6470,19 @@ export class TldwApiClientBase {
   async *streamCharacterChatCompletion(
     chat_id: string | number,
     payload?: Record<string, any>,
-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope }
-  ): AsyncGenerator<any> {
-    const cid = String(chat_id)
-    const body = { ...(payload || {}), stream: true }
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    captureChatRequestDebugSnapshot({
-      endpoint: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
-      method: "POST",
-      mode: "stream",
-      body
-    })
-    for await (const line of bgStream({
-      path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      abortSignal: options?.signal,
-      streamIdleTimeoutMs: options?.streamIdleTimeoutMs
-    })) {
-      if (!line) continue
-      try {
-        const parsed = JSON.parse(line)
-        yield parsed
-      } catch {
-        yield line
-      }
+    options?: {
+      signal?: AbortSignal
+      streamIdleTimeoutMs?: number
+      scope?: ChatScope
+      requestScope?: ServicePromptRequestScope
+      onDispatch?: () => void
     }
+  ): AsyncGenerator<any> {
+    yield* chatRagMethods.streamCharacterChatCompletion(
+      chat_id,
+      payload,
+      options
+    )
   }
 
   async searchChatMessages(chat_id: string | number, query: string, limit?: number): Promise<any> {
@@ -7927,46 +7915,11 @@ export class TldwApiClientBase {
   // File Artifacts
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async createImageArtifact(request: ImageArtifactRequest): Promise<FileCreateResponse> {
-    const payload: Record<string, unknown> = {
-      backend: request.backend,
-      prompt: request.prompt
-    }
-    if (request.negativePrompt) payload.negative_prompt = request.negativePrompt
-    if (typeof request.referenceFileId === "number") {
-      payload.reference_file_id = request.referenceFileId
-    }
-    if (typeof request.width === "number") payload.width = request.width
-    if (typeof request.height === "number") payload.height = request.height
-    if (typeof request.steps === "number") payload.steps = request.steps
-    if (typeof request.cfgScale === "number") payload.cfg_scale = request.cfgScale
-    if (typeof request.seed === "number") payload.seed = request.seed
-    if (request.sampler) payload.sampler = request.sampler
-    if (request.model) payload.model = request.model
-    if (request.extraParams) payload.extra_params = request.extraParams
-
-    const body: Record<string, unknown> = {
-      file_type: "image",
-      payload,
-      export: {
-        format: request.format || "png",
-        mode: "inline",
-        async_mode: "sync"
-      },
-      options: {
-        persist: typeof request.persist === "boolean" ? request.persist : true
-      }
-    }
-    if (request.title) {
-      body.title = request.title
-    }
-
-    return await this.request<FileCreateResponse>({
-      path: "/api/v1/files/create",
-      method: "POST",
-      body,
-      timeoutMs: request.timeoutMs
-    })
+  async createImageArtifact(
+    request: ImageArtifactRequest,
+    options?: ScopedRequestOptions & { onDispatch?: () => void }
+  ): Promise<FileCreateResponse> {
+    return await mediaMethods.createImageArtifact(request, options)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

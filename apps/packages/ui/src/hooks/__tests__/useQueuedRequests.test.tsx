@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
+import { useStoreMessageOption } from "@/store/option"
 import { useQueuedRequests } from "@/hooks/chat/useQueuedRequests"
 import { buildQueuedRequest, type QueuedRequest } from "@/utils/chat-request-queue"
 
@@ -108,6 +109,33 @@ describe("useQueuedRequests", () => {
       }),
       expect.any(Function)
     )
+  })
+
+  it("refuses source recapture after a synchronous New subscriber sees sending publication", async () => {
+    const store = useStoreMessageOption
+    store.getState().startNewChatDraft()
+    const first = buildQueuedRequest({ promptText: "Original source question" })
+    store.getState().setQueuedMessages([first])
+    const source = store.getState()
+    const originalSourceIsCurrent = () => store.getState().chatDraftAddress === source.chatDraftAddress &&
+      store.getState().chatDraftRevision === source.chatDraftRevision
+    const sendQueuedRequest = vi.fn(async (_item: QueuedRequest, assertReady: () => void) => { assertReady() })
+    let replaced = false
+    const unsubscribe = store.subscribe(state => {
+      if (!replaced && state.queuedMessages[0]?.status === "sending") {
+        replaced = true
+        state.startNewChatDraft()
+        store.getState().setQueuedMessages([buildQueuedRequest({ promptText: "Replacement source question" })])
+      }
+    })
+    const view = renderHook(() => useQueuedRequests({ isConnectionReady: true, isStreaming: false,
+      queue: source.queuedMessages, setQueue: source.setQueuedMessages, sendQueuedRequest,
+      canCommitDispatchResult: originalSourceIsCurrent, stopStreamingRequest: vi.fn() }))
+    try {
+      await act(async () => { expect(await view.result.current.flushNext()).toBeNull() })
+      expect(sendQueuedRequest).not.toHaveBeenCalled()
+      expect(store.getState().queuedMessages.map(item => item.promptText)).toEqual(["Replacement source question"])
+    } finally { unsubscribe(); view.unmount() }
   })
 
   it("removes the flushed request after a successful send", async () => {

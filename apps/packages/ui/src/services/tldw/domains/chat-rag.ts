@@ -471,6 +471,7 @@ export const chatRagMethods = {
       },
       body: request,
       abortSignal: options?.signal,
+      onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
@@ -1544,10 +1545,15 @@ export const chatRagMethods = {
   },
 
   async *streamCharacterChatCompletion(
-    this: TldwApiClientCore,
     chat_id: string | number,
     payload?: Record<string, any>,
-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
+    options?: {
+      signal?: AbortSignal
+      streamIdleTimeoutMs?: number
+      scope?: ChatScope
+      requestScope?: ServicePromptRequestScope
+      onDispatch?: () => void
+    }
   ): AsyncGenerator<any> {
     const cid = String(chat_id)
     const body = { ...(payload || {}), stream: true }
@@ -1566,7 +1572,10 @@ export const chatRagMethods = {
       body,
       abortSignal: options?.signal,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
-      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
+      onDispatch: options?.onDispatch,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })) {
       if (!line) continue
       try {

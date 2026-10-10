@@ -1,4 +1,10 @@
 import React from "react"
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import { useStoreChatModelSettings } from "@/store/model"
+import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
+import { captureActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
@@ -52,6 +58,7 @@ export interface UsePlaygroundQueueManagementDeps {
   isSending: boolean
   getDispatchDisabledReason?: () => string | null
   captureDispatchFence?: () => () => boolean
+  historySelection?: HistorySelectionController | null
   selectedModel: string | null
   chatMode: string
   webSearch: boolean
@@ -162,6 +169,7 @@ export function usePlaygroundQueueManagement(
     isSending,
     getDispatchDisabledReason,
     captureDispatchFence,
+    historySelection,
     selectedModel,
     chatMode,
     webSearch,
@@ -346,11 +354,13 @@ export function usePlaygroundQueueManagement(
 
   const sendQueuedRequest = React.useCallback(
     async (item: QueuedRequest, assertDispatchReady: () => void) => {
-      const sourceIsCurrent = captureDispatchFence?.()
+      let sceneCapture: ReturnType<typeof captureActorSceneSend> = null
+      let dispatchIsCurrent: (() => boolean) | null = null
+      const sourceIsCurrent = captureDispatchFence?.() ?? captureChatDraftSource().isCurrent
       const assertReady = () => {
         assertDispatchReady()
         const reason = getDispatchDisabledReason?.()
-        if (reason || sourceIsCurrent?.() === false) throw new Error(reason || t(
+        if (reason || sourceIsCurrent?.() === false || dispatchIsCurrent?.() === false || sceneCapture?.isCurrent() === false) throw new Error(reason || t(
           "playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again."
         ))
       }
@@ -370,6 +380,29 @@ export function usePlaygroundQueueManagement(
         ? sourceContext.uploadedFiles
         : []
 
+      const modelSettings = useStoreChatModelSettings.getState()
+      const queuedModelSelection = resolveModelSelectorSelection((composerModels ?? []) as ModelSelectorDescriptor[], item.snapshot.selectedModel, modelSettings.apiProvider, {
+        scope: modelSettings.activeSettingsScope,
+        providerOverride: modelSettings.activeSettingsScope ? modelSettings.scopedSettingsByModelKey[modelSettings.activeSettingsScope]?.apiProvider : undefined
+      })
+      setSelectedModel(item.snapshot.selectedModel)
+      assertReady()
+      modelSettings.setActiveSettingsScope(queuedModelSelection.settingsScope ?? null)
+      assertReady()
+      if (useStoreChatModelSettings.getState().activeSettingsScope !== (queuedModelSelection.settingsScope ?? undefined)) throw new Error(t(
+        "playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again."
+      ))
+      dispatchIsCurrent = captureChatDispatchSource({
+        selectedModel: item.snapshot.selectedModel ?? "",
+        toolChoice: item.snapshot.toolChoice === "auto" || item.snapshot.toolChoice === "required" || item.snapshot.toolChoice === "none" ? item.snapshot.toolChoice : undefined,
+        selectionSource: { model: "explicit", toolChoice: "explicit" }
+      })
+
+      sceneCapture = sourceContext?.isImageCommand ? null : captureActorSceneSend(historySelection ?? null, () => sourceIsCurrent?.() !== false && dispatchIsCurrent?.() !== false)
+      if (!sourceContext?.isImageCommand && !sceneCapture) throw new Error("actor_settings_unavailable")
+      const actorSceneSend = sceneCapture ? await sceneCapture.read() : undefined
+      assertReady()
+
       let queuedRequestOverrides: Record<string, unknown> = {
         ...(sourceContext?.requestOverrides ?? {})
       }
@@ -379,6 +412,7 @@ export function usePlaygroundQueueManagement(
           historyId: historyId ?? undefined,
           sessionId: serverChatId ?? undefined
         })
+        assertReady()
         const firstBlockedOrFailed =
           preparedDocuments.blockedFiles[0] || preparedDocuments.failedFiles[0]
         if (firstBlockedOrFailed || !preparedDocuments.requestOverrides) {
@@ -406,20 +440,26 @@ export function usePlaygroundQueueManagement(
       }
 
       assertReady()
-      setSelectedModel(item.snapshot.selectedModel)
       setChatMode(item.snapshot.chatMode)
+      assertReady()
       setWebSearch(item.snapshot.webSearch)
+      assertReady()
       setCompareMode(item.snapshot.compareMode)
+      assertReady()
       setCompareSelectedModels(item.snapshot.compareSelectedModels)
+      assertReady()
       setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
+      assertReady()
       if (
         item.snapshot.toolChoice === "auto" ||
         item.snapshot.toolChoice === "required" ||
         item.snapshot.toolChoice === "none"
       ) {
         setToolChoice(item.snapshot.toolChoice)
+        assertReady()
       }
       setUseOCR(item.snapshot.useOCR)
+      assertReady()
 
       const projectedForSubmission = projectTokenBudget({
         conversationTokens: conversationTokenCount,
@@ -448,7 +488,9 @@ export function usePlaygroundQueueManagement(
       }
 
       setLastSubmittedContext(currentContextSnapshot)
+      assertReady()
       const submitResult = await sendMessage({
+        actorSceneSend,
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
         docs: sourceContext?.isImageCommand ? [] : documents,
@@ -482,6 +524,8 @@ export function usePlaygroundQueueManagement(
     },
     [
       captureDispatchFence,
+      composerModels,
+      historySelection,
       getDispatchDisabledReason,
       conversationTokenCount,
       currentContextSnapshot,

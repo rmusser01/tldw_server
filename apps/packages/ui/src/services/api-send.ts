@@ -3,7 +3,7 @@ import {
   directRecipeRequestAuthority,
   hasRecipeExtensionRuntime
 } from "@/services/recipe-persistence-uncertainty"
-import { resolveDirectBrowserConfig as resolveDirectConfig } from "@/services/tldw/direct-browser-config"
+import { createDirectRuntime } from "@/services/background-proxy"
 import type {
   AllowedMethodFor,
   PathOrUrl,
@@ -228,7 +228,6 @@ async function apiSendImpl<
         assertCurrent()
       }
     }
-    const { createDirectRuntime } = await import("@/services/background-proxy")
     const runtime = createDirectRuntime(guardedStorage, {
       ...readiness.config,
       expectedUserId: deriveScopedUserId(readiness.config).replace(/^user:/, "")
@@ -244,9 +243,7 @@ async function apiSendImpl<
     })
   }
   return await tldwRequest(payload, {
-    ...directRecipeRequestAuthority,
-    // IMPORTANT: getConfig must fetch fresh config each time it's called
-    // (not pre-fetch once), because the config may change or not be seeded yet.
-    getConfig: () => resolveDirectConfig(storage)
+    ...createDirectRuntime(storage),
+    ...directRecipeRequestAuthority
   })
 }

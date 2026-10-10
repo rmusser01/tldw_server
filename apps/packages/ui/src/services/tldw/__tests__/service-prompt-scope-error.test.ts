@@ -12,6 +12,19 @@ import {
 } from "../service-prompt-scope-error"
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/files/create", "POST", true],
+    ["/api/v1/files/create", "GET", false],
+    ["/api/v1/files/create", "PUT", false],
+    ["/api/v1/files/create/extra", "POST", false],
+    ["/api/v1/files/create/", "POST", false],
+    ["/api/v1/files/../create", "POST", false],
+    ["/api/v1/files%2fcreate", "POST", false],
+    ["https://other.test/api/v1/files/create", "POST", false]
+  ])("bounds captured image creation %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/media/389", "PUT", true],
     ["/api/v1/media/389/metadata", "PATCH", true],
     ["/api/v1/media/389/reprocess", "POST", true],

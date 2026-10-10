@@ -5,8 +5,26 @@ import { chatDraftAddressKey, isChatDraftHandle, type ChatDraftHandle } from "@/
 import type { ChatScope } from "@/types/chat-scope"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 
-type PendingPromotion = {
+export type ChatPromotionPublication = Readonly<{
   historyId: string | null
+  chatId: string
+  scopeKey: string
+  requestScope: ServicePromptSnapshot["requestScope"]
+}>
+
+/** A command retains this exact operation before any preparation await. */
+export type CapturedChatPromotion = Readonly<{
+  isCurrent: () => boolean
+  getPublication: () => ChatPromotionPublication | undefined
+}>
+
+type PendingPromotion = {
+  owner: object
+  attempt: object
+  historyId: string | null
+  cancelled: boolean
+  publication?: ChatPromotionPublication
+  isSourceCurrent?: () => boolean
   scope: Promise<ServicePromptSnapshot>
   snapshot?: ServicePromptSnapshot
   completion: Promise<void>
@@ -14,13 +32,38 @@ type PendingPromotion = {
   finishWaiting: () => void
   failed: boolean
   error?: unknown
-  promote: (snapshot: ServicePromptSnapshot) => Promise<void>
+  promote: (
+    snapshot: ServicePromptSnapshot,
+    acknowledgePublication: (chatId: string) => void
+  ) => Promise<void>
   abort: () => void
   onFailure: (error: unknown, retrying: boolean) => void
   onComplete: () => void
 }
 
 const pendingPromotions = new WeakMap<object, PendingPromotion>()
+const promotionAttempts = new WeakMap<object, object>()
+const capturedPromotions = new WeakMap<CapturedChatPromotion, PendingPromotion>()
+const promotionIsCurrent = (pending: PendingPromotion) =>
+  !pending.cancelled && promotionAttempts.get(pending.owner) === pending.attempt &&
+  !pending.snapshot?.scopeSignal.aborted &&
+  !pending.snapshot?.scopeInvalidatedSignal.aborted &&
+  (pending.isSourceCurrent?.() ?? true)
+const promotionChanged = () => new DOMException("The saving chat changed", "AbortError")
+
+export const captureChatPromotion = (
+  owner: object,
+  historyId: string | null
+): CapturedChatPromotion | null => {
+  const pending = pendingPromotions.get(owner)
+  if (!pending || pending.historyId !== historyId || !promotionIsCurrent(pending)) return null
+  const capture = Object.freeze({
+    isCurrent: () => promotionIsCurrent(pending),
+    getPublication: () => promotionIsCurrent(pending) ? pending.publication : undefined
+  })
+  capturedPromotions.set(capture, pending)
+  return capture
+}
 const INCOMPLETE = "chat_promotion_incomplete"
 const incompleteError = () =>
   Object.assign(
@@ -41,6 +84,8 @@ export const clearChatPromotion = (owner: object, historyId: string | null) => {
   const pending = pendingPromotions.get(owner)
   if (!pending || pending.historyId !== historyId) return
   pendingPromotions.delete(owner)
+  pending.cancelled = true
+  if (promotionAttempts.get(owner) === pending.attempt) promotionAttempts.delete(owner)
   pending.abort()
   pending.finishWaiting()
   pending.snapshot?.release()
@@ -56,8 +101,18 @@ const runPromotion = (
     .then(async (snapshot) => {
       pending.snapshot = snapshot
       snapshot.scopeSignal.throwIfAborted()
-      await pending.promote(snapshot)
+      if (!promotionIsCurrent(pending)) throw promotionChanged()
+      await pending.promote(snapshot, (chatId) => {
+        if (!chatId || !promotionIsCurrent(pending) ||
+          (pending.publication && pending.publication.chatId !== chatId))
+          throw promotionChanged()
+        pending.publication = Object.freeze({
+          historyId: pending.historyId, chatId, scopeKey: snapshot.scopeKey,
+          requestScope: snapshot.requestScope
+        })
+      })
       snapshot.scopeSignal.throwIfAborted()
+      if (!promotionIsCurrent(pending)) throw promotionChanged()
       if (pendingPromotions.get(owner) === pending)
         pendingPromotions.delete(owner)
       snapshot.release()
@@ -65,9 +120,14 @@ const runPromotion = (
       pending.onComplete()
     })
     .catch((error) => {
-      if (!pending.snapshot || pending.snapshot.scopeSignal.aborted) {
-        if (pendingPromotions.get(owner) === pending)
+      if (!pending.snapshot || pending.snapshot.scopeSignal.aborted || !promotionIsCurrent(pending)) {
+        pending.cancelled = true
+        if (promotionAttempts.get(owner) === pending.attempt) promotionAttempts.delete(owner)
+        if (pendingPromotions.get(owner) === pending) {
           pendingPromotions.delete(owner)
+          pending.onComplete()
+        }
+        pending.abort()
         pending.snapshot?.release()
         pending.finishWaiting()
         throw error
@@ -85,7 +145,7 @@ export const trackChatPromotion = (
   historyId: string | null,
   scope: Promise<ServicePromptSnapshot>,
   promote: PendingPromotion["promote"],
-  options: Pick<PendingPromotion, "abort" | "onFailure" | "onComplete">
+  options: Pick<PendingPromotion, "abort" | "onFailure" | "onComplete" | "isSourceCurrent">
 ): Promise<void> => {
   const previous = pendingPromotions.get(owner)
   if (previous) clearChatPromotion(owner, previous.historyId)
@@ -94,7 +154,10 @@ export const trackChatPromotion = (
   const pending: PendingPromotion = {
     saved,
     finishWaiting,
+    owner,
+    attempt: {},
     historyId,
+    cancelled: false,
     scope,
     promote,
     ...options,
@@ -102,6 +165,7 @@ export const trackChatPromotion = (
     completion: Promise.resolve()
   }
   pendingPromotions.set(owner, pending)
+  promotionAttempts.set(owner, pending.attempt)
   void scope.then(
     (snapshot) => {
       snapshot.scopeSignal.addEventListener(
@@ -147,11 +211,17 @@ export const waitForChatPromotion = async (
   owner: object,
   historyId: string | null,
   snapshot: ServicePromptSnapshot,
-  options?: { waitUntilSaved?: boolean }
-): Promise<void> => {
+  options?: { waitUntilSaved?: boolean; captured?: CapturedChatPromotion | null }
+): Promise<ChatPromotionPublication | void> => {
   snapshot.scopeSignal.throwIfAborted()
-  const pending = pendingPromotions.get(owner)
-  if (!pending || pending.historyId !== historyId) return
+  const captured = options?.captured
+  const pending = captured ? capturedPromotions.get(captured) :
+    options && "captured" in options ? undefined : pendingPromotions.get(owner)
+  if (!pending || pending.historyId !== historyId || pending.owner !== owner) {
+    if (captured) throw promotionChanged()
+    return
+  }
+  if (captured && !promotionIsCurrent(pending)) throw promotionChanged()
   let ownerScope: ServicePromptSnapshot
   try {
     ownerScope = await waitWithoutCancellingOwner(
@@ -160,18 +230,25 @@ export const waitForChatPromotion = async (
     )
   } catch (error) {
     snapshot.scopeSignal.throwIfAborted()
-    if (error instanceof Error && error.name === "AbortError") return
+    if (!captured && error instanceof Error && error.name === "AbortError") return
     throw error
   }
+  if (captured && !promotionIsCurrent(pending)) throw promotionChanged()
   if (
     ownerScope.scopeInvalidatedSignal.aborted ||
     ownerScope.scopeKey !== snapshot.scopeKey
-  )
+  ) {
+    if (captured) throw promotionChanged()
     return
+  }
   if (pending.failed && !options?.waitUntilSaved) pending.onFailure(pending.error, false)
   await waitWithoutCancellingOwner(options?.waitUntilSaved ? pending.saved : pending.completion, snapshot.scopeSignal)
   if (options?.waitUntilSaved) ownerScope.scopeSignal.throwIfAborted()
   snapshot.scopeSignal.throwIfAborted()
+  if (captured) {
+    if (!promotionIsCurrent(pending)) throw promotionChanged()
+    return pending.publication
+  }
 }
 
 

@@ -1598,8 +1598,9 @@ export const mediaMethods = {
 
   async createImageArtifact(
     request: ImageArtifactRequest,
-    ensureAndRequest: <T>(init: any, requireAuth?: boolean) => Promise<T>
+    options?: ScopedRequestOptions & { onDispatch?: () => void }
   ): Promise<FileCreateResponse> {
+    options?.signal?.throwIfAborted()
     const payload: Record<string, unknown> = {
       backend: request.backend,
       prompt: request.prompt
@@ -1633,11 +1634,14 @@ export const mediaMethods = {
       body.title = request.title
     }
 
-    return await ensureAndRequest<FileCreateResponse>({
+    return await bgRequest<FileCreateResponse>({
       path: "/api/v1/files/create",
       method: "POST",
       body,
-      timeoutMs: request.timeoutMs
+      timeoutMs: request.timeoutMs,
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      onDispatch: options?.onDispatch
     })
   }
 }

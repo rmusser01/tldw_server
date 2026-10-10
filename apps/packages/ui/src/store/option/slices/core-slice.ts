@@ -48,6 +48,7 @@ export const createCoreSlice: StoreSlice<
     | "selectedQuickPrompt"
     | "quickPromptRevision"
     | "setSelectedQuickPrompt"
+    | "messageSteeringRevision"
     | "messageSteeringMode"
     | "setMessageSteeringMode"
     | "messageSteeringForceNarrate"
@@ -220,16 +221,26 @@ export const createCoreSlice: StoreSlice<
     })
     return accepted
   },
+  messageSteeringRevision: 0,
   messageSteeringMode: "none",
-  setMessageSteeringMode: (mode) => set({ messageSteeringMode: mode }),
+  setMessageSteeringMode: (mode) => set((state) => ({
+    messageSteeringMode: mode,
+    messageSteeringRevision: state.messageSteeringRevision + 1
+  })),
   messageSteeringForceNarrate: false,
-  setMessageSteeringForceNarrate: (enabled) =>
-    set({ messageSteeringForceNarrate: enabled }),
-  clearMessageSteering: () =>
-    set({
+  setMessageSteeringForceNarrate: (enabled) => set((state) => ({
+    messageSteeringForceNarrate: enabled,
+    messageSteeringRevision: state.messageSteeringRevision + 1
+  })),
+  clearMessageSteering: (options) => set((state) => {
+    if (options?.expectedRevision !== undefined &&
+      options.expectedRevision !== state.messageSteeringRevision) return state
+    return {
       messageSteeringMode: "none",
-      messageSteeringForceNarrate: false
-    }),
+      messageSteeringForceNarrate: false,
+      messageSteeringRevision: state.messageSteeringRevision + 1
+    }
+  }),
   queuedMessages: [],
   addQueuedMessage: (payload) =>
     set((state) => ({

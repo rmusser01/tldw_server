@@ -25,7 +25,9 @@ import {
   dismissHistoryTurnRecovery
 } from "@/db/dexie/history-selection"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
-import { getActorSettingsForChat } from "@/services/actor-settings"
+import { copyActorSceneToBoundChat } from "@/services/actor-settings"
+import { captureActorSceneSend, captureBoundActorSceneTarget, bindActorSceneAfterLoad, type ActorSceneSend } from "./actor-scene-source"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import {
   assertHistoryConversationTarget,
@@ -49,11 +51,13 @@ import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 
 export type NativeHistoryCharacterSendParams = {
   controller: HistorySelectionController
   /** An independent popup owns its draft and never binds the full composer. */
-  privateDraft?: { handle: ChatDraftHandle; isCurrent: () => boolean }
+  privateDraft?: { handle: ChatDraftHandle; requestScope: ServicePromptRequestScope; isCurrent: () => boolean }
+  actorSceneSend?: ActorSceneSend
   surface: "playground" | "sidepanel"
   originIsCurrent: () => boolean
   sourceIsCurrent?: () => boolean
@@ -161,30 +165,31 @@ export const sendNativeHistoryCharacter = async (
   const settingsState = useStoreChatModelSettings.getState()
   const toolsState = useMcpToolsStore.getState()
   const capturedSettings = { ...params.settings }
-  const actor = privateHandle ? null : await getActorSettingsForChat({
-    historyId: params.historyId ?? null,
-    serverChatId: params.serverChatId ?? null
-  })
+  const initialOwner = controller.getCurrent().owner
+  const sceneCapture = params.actorSceneSend || privateHandle ? null : captureActorSceneSend(controller, () => params.originIsCurrent() && draftIsCurrent())
+  const actorSceneSend = params.actorSceneSend ?? await sceneCapture?.read()
+  if (!actorSceneSend) throw new Error("actor_settings_unavailable")
+  if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
   const { model, provider, settings } = validateNativeCharacterConfiguration({
     ...params,
     image: regenerate ? "" : params.image,
     settings: capturedSettings,
     temporary: params.temporary || params.historyId === "temp",
     clientToolCount: toolsState.tools.length,
-    actorEnabled: actor?.isEnabled
+    actorEnabled: actorSceneSend.scene.settings.isEnabled
   })
   if (!params.originIsCurrent()) throw new Error("stale_selection")
-  const initialOwner = controller.getCurrent().owner
   if (initialOwner?.kind === "local")
     throw new Error("native_history_requires_server_owner")
   if (initialOwner?.kind === "unavailable") throw new Error(initialOwner.code)
   const snapshot = await loadServicePromptSnapshot([], {
     signal,
-    requestScope:
-      initialOwner?.kind === "native" ? initialOwner.request_scope : undefined
+    requestScope: actorSceneSend.requestScope
   })
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
-  if (privateHandle && privateHandle.ownerHash !== chatDraftOwnerKey(snapshot.requestScope)) {
+  if (!actorSceneSend.isCurrent() || chatDraftOwnerKey(actorSceneSend.requestScope) !== chatDraftOwnerKey(snapshot.requestScope) ||
+      (privateHandle && (privateHandle.ownerHash !== chatDraftOwnerKey(snapshot.requestScope) ||
+        chatDraftOwnerKey(params.privateDraft!.requestScope) !== chatDraftOwnerKey(snapshot.requestScope)))) {
     snapshot.release()
     throw new Error("request_config_scope_changed")
   }
@@ -271,6 +276,7 @@ export const sendNativeHistoryCharacter = async (
           throw new Error("owner_conversation_mismatch")
       }
       let receipt: HistoryLoadReceipt | undefined
+      let adoptionIsCurrent: (() => boolean) | undefined
       let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
       const loaded = await controller.loadConversation(
         {
@@ -314,6 +320,7 @@ export const sendNativeHistoryCharacter = async (
           }
           receipt = value
           loadPhase = "accepted"
+          adoptionIsCurrent = controller.fence()
           if (chatId) params.setServerChatId(chatId)
           if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
         }
@@ -344,6 +351,24 @@ export const sendNativeHistoryCharacter = async (
       selectionCurrent = controller.fence()
       if (creationHandle && chatId) await markChatCreationBound(creationHandle, chatId)
       if (!leaseValid() || !selectionCurrent() || controller.getCurrent().owner !== receipt.owner || controller.getCurrent().view !== receipt.view) throw new Error("stale_selection")
+      if ((acceptDraftBind || privateHandle) && actorSceneSend.scene.target.address?.kind === "fresh") {
+        const acceptedReceipt = receipt
+        const bindingIsCurrent = () => (privateHandle ? privateCurrent() : acceptDraftBind!.isCurrent()) &&
+          actorSceneSend.scene.target.account?.isCurrent() === true &&
+          controller.getCurrent().owner === acceptedReceipt.owner &&
+          controller.getCurrent().view?.owner_key === acceptedReceipt.view.owner_key &&
+          controller.getCurrent().view?.conversation_id === acceptedReceipt.view.conversation_id
+        const scenePreparationIsCurrent = () => bindingIsCurrent() && leaseValid() &&
+          adoptionIsCurrent?.() === true && controller.getCurrent().view === acceptedReceipt.view
+        let copied: boolean
+        if (privateHandle) {
+          const destination = captureBoundActorSceneTarget(actorSceneSend.scene.target, acceptedReceipt, bindingIsCurrent)
+          copied = Boolean(destination && scenePreparationIsCurrent() &&
+            (actorSceneSend.scene.originalRecord === null ||
+              await copyActorSceneToBoundChat(actorSceneSend.scene, destination, scenePreparationIsCurrent)))
+        } else copied = await bindActorSceneAfterLoad(actorSceneSend.scene, acceptedReceipt, bindingIsCurrent, scenePreparationIsCurrent)
+        if (!copied || !scenePreparationIsCurrent()) throw new Error("actor_settings_bind_not_committed")
+      }
       targetChatId = chatId
     }
     if (current.owner?.kind !== "native")
@@ -519,6 +544,7 @@ export const sendNativeHistoryCharacter = async (
     let admission: HistoryAdmissionV1 | undefined
     let resultId: string | undefined
     let content = ""
+    let apiReasoning = false
     let dispatched = false
     let streamStarted = false
     let followAttempted = false
@@ -653,8 +679,12 @@ export const sendNativeHistoryCharacter = async (
             throw new Error("invalid_history_settlement")
           resultId = chunk.tldw_message_id
         }
-        const delta = chunk?.choices?.[0]?.delta?.content
-        if (typeof delta === "string") content += delta
+        const accumulated = consumeStreamingChunk(
+          { fullText: content, contentToSave: content, apiReasoning },
+          chunk
+        )
+        content = accumulated.fullText
+        apiReasoning = accumulated.apiReasoning
         if (!explicitAction && sameView() && admission && content)
           params.setMessages([
             ...base.messages,

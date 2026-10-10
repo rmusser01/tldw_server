@@ -33,6 +33,8 @@ export interface HistorySendTurn {
   currentView: () => HistoryViewSelectionV1 | null
   validateLease: () => boolean
   canUpdateView: () => boolean
+  /** Original command or its accepted bind, required until user admission. */
+  preparationIsCurrent?: () => boolean
   admission?: HistoryAdmissionReferenceV1
   /**
    * Retry of a reply that ended early (CS-04): the question was admitted when

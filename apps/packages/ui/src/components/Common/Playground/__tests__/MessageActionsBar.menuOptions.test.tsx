@@ -29,7 +29,6 @@ const baseProps = () =>
     variantCount: 1,
     canSwipePrev: false,
     canSwipeNext: false,
-    overflowChipVisibility: "hidden",
     actionRowVisibility: "flex",
     isTtsEnabled: false,
     isSpeaking: false,
@@ -131,7 +130,8 @@ describe("MessageActionsBar menu options", () => {
     expect(onQuickMessageAction).toHaveBeenNthCalledWith(4, "explain")
   })
 
-  it("uses touch-sized controls for variant pager and overflow chip on compact layouts", () => {
+  it("uses touch-sized controls for variant pager and working overflow at every width", () => {
+    const onDelete = vi.fn()
     render(
       <MessageActionsBar
         {...baseProps()}
@@ -139,21 +139,23 @@ describe("MessageActionsBar menu options", () => {
         variantCount={3}
         canSwipePrev
         canSwipeNext
-        overflowChipVisibility="inline-flex"
+        onDelete={onDelete}
       />
     )
 
     const prevButton = screen.getByTestId("variant-prev-button")
     const nextButton = screen.getByTestId("variant-next-button")
     const countLabel = screen.getByTestId("variant-count-label")
-    const overflowChip = screen.getByTestId("message-actions-overflow-chip")
+    const overflowTrigger = screen.getByRole("button", { name: "More actions" })
 
     expect(countLabel).toHaveTextContent("1 of 3")
     expect(prevButton.className).toContain("min-h-[44px]")
     expect(prevButton.className).toContain("min-w-[44px]")
     expect(nextButton.className).toContain("min-h-[44px]")
     expect(nextButton.className).toContain("min-w-[44px]")
-    expect(overflowChip.className).toContain("min-h-[44px]")
-    expect(overflowChip.className).toContain("min-w-[44px]")
+    expect(overflowTrigger.className).toContain("min-h-[44px]")
+    expect(overflowTrigger.className).toContain("min-w-[44px]")
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 })

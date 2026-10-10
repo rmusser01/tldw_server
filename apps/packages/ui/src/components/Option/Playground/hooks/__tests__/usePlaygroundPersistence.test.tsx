@@ -7,9 +7,15 @@ import {
   getServerChatSaveStatus,
   resetServerChatSaveStatus
 } from "@/store/server-chat-save-status"
-import { usePlaygroundPersistence } from "../usePlaygroundPersistence"
+import {
+  usePlaygroundPersistence as useActualPlaygroundPersistence,
+  type UsePlaygroundPersistenceDeps
+} from "../usePlaygroundPersistence"
+import { useStoreMessageOption, type ChatHistory } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { getPersistenceModeLabel } from "@/hooks/playground/usePersistenceMode"
+import { normalizeConversationState } from "@/utils/conversation-state"
 
 const selectedHistory = vi.hoisted(() => ({ value: null as any }))
 vi.mock('@/hooks/chat/useHistorySelection', () => ({ useHistorySelectionContext: () => selectedHistory.value }))
@@ -51,10 +57,11 @@ const translate = (
 }
 
 vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: async () => {
+  loadServicePromptSnapshot: async (_ids: string[], options?: { signal?: AbortSignal }) => {
     await mocks.initialize()
     return {
-      scopeSignal: new AbortController().signal,
+      scopeKey: "scope:chat",
+      scopeSignal: options?.signal ?? new AbortController().signal,
       scopeInvalidatedSignal: new AbortController().signal,
       requestScope: { config: await mocks.getConfig(), userId: null },
       release: vi.fn()
@@ -80,16 +87,9 @@ vi.mock("@/db/dexie/chat-promotion", () => ({
     (mocks.getChatPromotionBlocker as (...args: unknown[]) => unknown)(...args)
 }))
 
-vi.mock("@/services/chat-surface-scope", () => ({
+vi.mock("@/services/chat-surface-scope", async () => ({
+  ...await vi.importActual<typeof import("@/services/chat-surface-scope")>("@/services/chat-surface-scope"),
   buildChatSurfaceScopeKeyFromConfig: mocks.buildChatSurfaceScopeKeyFromConfig
-}))
-
-vi.mock("@/store/playground-session", () => ({
-  usePlaygroundSessionStore: {
-    getState: () => ({
-      saveSession: mocks.savePlaygroundSession
-    })
-  }
 }))
 
 vi.mock("@/hooks/playground", () => ({
@@ -97,41 +97,74 @@ vi.mock("@/hooks/playground", () => ({
     (mocks.usePersistenceMode as (...args: unknown[]) => unknown)(...args)
 }))
 
-const buildDeps = (overrides: Record<string, unknown> = {}) => ({
-  isFireFoxPrivateMode: false,
-  isConnectionReady: true,
-  temporaryChat: false,
-  setTemporaryChat: vi.fn(),
-  serverChatId: null,
-  setServerChatId: vi.fn(),
-  historyId: null,
-  serverChatState: null,
-  setServerChatState: vi.fn(),
-  serverChatSource: null,
-  setServerChatSource: vi.fn(),
-  setServerChatVersion: vi.fn(),
-  setServerChatCharacterId: vi.fn(),
-  setServerChatAssistantKind: vi.fn(),
-  setServerChatAssistantId: vi.fn(),
-  setServerChatPersonaMemoryMode: vi.fn(),
-  history: [{ role: "user", content: "Hello" }],
-  clearChat: vi.fn(),
-  selectedCharacter: null,
-  selectedAssistantMode: null,
-  assistantOverlayActive: false,
-  serverPersistenceHintSeen: false,
-  setServerPersistenceHintSeen: vi.fn(),
-  invalidateServerChatHistory: vi.fn(),
-  navigate: vi.fn(),
-  notificationApi: {
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-    success: vi.fn()
-  },
-  t: translate,
-  ...overrides
-})
+// Declare the original store source once, before mounting. Setter spies record
+// calls while the actual setters publish the issued ID and metadata.
+const buildDeps = (overrides: Partial<UsePlaygroundPersistenceDeps> = {}) => {
+  const state = useStoreMessageOption.getState()
+  const deps: UsePlaygroundPersistenceDeps = {
+    isFireFoxPrivateMode: false,
+    isConnectionReady: true,
+    temporaryChat: false,
+    setTemporaryChat: vi.fn(state.setTemporaryChat),
+    serverChatId: null,
+    setServerChatId: vi.fn(state.setServerChatId),
+    historyId: null,
+    serverChatState: null,
+    setServerChatState: vi.fn((value: string) =>
+      state.setServerChatState(normalizeConversationState(value))),
+    serverChatSource: null,
+    setServerChatSource: vi.fn(state.setServerChatSource),
+    setServerChatVersion: vi.fn(state.setServerChatVersion),
+    setServerChatCharacterId: vi.fn(state.setServerChatCharacterId),
+    setServerChatAssistantKind: vi.fn(state.setServerChatAssistantKind),
+    setServerChatAssistantId: vi.fn((id: string | number | null) =>
+      state.setServerChatAssistantId(id === null ? null : String(id))),
+    setServerChatPersonaMemoryMode: vi.fn(state.setServerChatPersonaMemoryMode),
+    history: [{ role: "user", content: "Hello" }],
+    clearChat: vi.fn(),
+    selectedCharacter: null,
+    selectedAssistantMode: null,
+    assistantOverlayActive: false,
+    serverPersistenceHintSeen: false,
+    setServerPersistenceHintSeen: vi.fn(),
+    invalidateServerChatHistory: vi.fn(),
+    navigate: vi.fn(),
+    notificationApi: {
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn()
+    },
+    t: translate,
+    ...overrides
+  }
+  state.setTemporaryChat(deps.temporaryChat)
+  useStoreMessageOption.setState({
+    historyId: deps.historyId,
+    serverChatId: deps.serverChatId,
+    serverChatState: deps.serverChatState === null
+      ? null : normalizeConversationState(deps.serverChatState),
+    serverChatSource: deps.serverChatSource,
+    history: deps.history.map<ChatHistory[number]>(row => ({
+      role: row.role === "assistant" || row.role === "system" ? row.role : "user",
+      content: row.content ?? "",
+      image: row.image
+    }))
+  })
+  return deps
+}
+
+// Reflect acknowledged publication on subsequent renders, as the real caller
+// does, while keeping each test's history/input and notification controls.
+const usePlaygroundPersistence = (deps: UsePlaygroundPersistenceDeps) => {
+  const state = useStoreMessageOption()
+  return useActualPlaygroundPersistence({
+    ...deps,
+    serverChatId: state.serverChatId,
+    serverChatState: state.serverChatState,
+    serverChatSource: state.serverChatSource
+  })
+}
 
 describe("usePlaygroundPersistence", () => {
   beforeEach(() => {
@@ -150,6 +183,18 @@ describe("usePlaygroundPersistence", () => {
     mocks.buildChatSurfaceScopeKeyFromConfig.mockReset()
     mocks.usePersistenceMode.mockReset()
     resetServerChatSaveStatus()
+    useStoreMessageOption.setState(
+      { ...useStoreMessageOption.getInitialState(), temporaryChat: false }, true
+    )
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    const session = usePlaygroundSessionStore.getInitialState()
+    usePlaygroundSessionStore.setState({
+      ...session,
+      saveSession: (data) => {
+        mocks.savePlaygroundSession(data)
+        session.saveSession(data)
+      }
+    }, true)
 
     mocks.initialize.mockResolvedValue(undefined)
     mocks.searchCharacters.mockRejectedValue(new Error("search failed"))
@@ -399,6 +444,82 @@ describe("usePlaygroundPersistence", () => {
     expect(notificationApi.error).not.toHaveBeenCalled()
   })
 
+  it("autosaves genuinely new transcript work after the original rendered and canonical histories retire", async () => {
+    const renderedOriginal = [{ role: "user", content: "Old transcript belongs to the retired draft" }]
+    const destroyed = vi.fn()
+    const deps = buildDeps({
+      historyId: "same-local-history",
+      history: renderedOriginal,
+      notificationApi: {
+        destroy: destroyed, error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn()
+      }
+    })
+    const canonicalOriginal = useStoreMessageOption.getState().history
+    const originalAddress = useStoreMessageOption.getState().chatDraftAddress
+    expect(canonicalOriginal).not.toBe(renderedOriginal)
+    let release!: (value: { id: string }) => void
+    mocks.createChat.mockResolvedValue({ id: "new-transcript-chat", version: 2 })
+    mocks.createChat.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(
+      ({ history, ready }: { history: UsePlaygroundPersistenceDeps["history"]; ready: boolean }) => {
+        const state = useStoreMessageOption()
+        return useActualPlaygroundPersistence({
+          ...deps, history, isConnectionReady: ready,
+          historyId: state.historyId, temporaryChat: state.temporaryChat,
+          serverChatId: state.serverChatId, serverChatState: state.serverChatState,
+          serverChatSource: state.serverChatSource
+        })
+      },
+      { initialProps: { history: renderedOriginal, ready: true } }
+    )
+    try {
+      await waitFor(() => expect(mocks.createChat).toHaveBeenCalledOnce())
+      act(() => {
+        useStoreMessageOption.getState().startNewChatDraft(false)
+        useStoreMessageOption.setState({ serverChatSource: "Keep replacement source", serverChatVersion: 77 })
+      })
+      const replacementAddress = useStoreMessageOption.getState().chatDraftAddress
+      expect(replacementAddress).not.toBe(originalAddress)
+      view.rerender({ history: canonicalOriginal, ready: false })
+      await act(async () => { release({ id: "retired-transcript-chat" }) })
+      await waitFor(() => expect(destroyed).toHaveBeenCalledWith("chat-promotion-same-local-history"))
+      view.rerender({ history: canonicalOriginal, ready: true })
+      await act(async () => {})
+      expect(mocks.createChat).toHaveBeenCalledOnce()
+      expect(mocks.addChatMessage).not.toHaveBeenCalled()
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        serverChatId: null, serverChatSource: "Keep replacement source", serverChatVersion: 77
+      })
+
+      const newHistory: ChatHistory = [
+        { role: "user", content: "A genuinely new question" },
+        { role: "assistant", content: "A genuinely new answer" }
+      ]
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setMessages([
+          { id: "new-user", isBot: false, name: "You", message: newHistory[0].content, sources: [] },
+          { id: "new-assistant", isBot: true, name: "Assistant", message: newHistory[1].content, sources: [] }
+        ])
+        state.setHistory(newHistory)
+      })
+      view.rerender({ history: newHistory, ready: true })
+      await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledTimes(2))
+      expect(mocks.createChat).toHaveBeenCalledTimes(2)
+      expect(mocks.createChat.mock.calls[1][0].title).toBe("A genuinely new question")
+      expect(mocks.addChatMessage.mock.calls.map(([chatId, row]) => [chatId, row.content])).toEqual([
+        ["new-transcript-chat", "A genuinely new question"],
+        ["new-transcript-chat", "A genuinely new answer"]
+      ])
+      expect(useStoreMessageOption.getState().chatDraftAddress).toBe(replacementAddress)
+      expect(useStoreMessageOption.getState().history).toBe(newHistory)
+      expect(useStoreMessageOption.getState().serverChatId).toBe("new-transcript-chat")
+    } finally {
+      release?.({ id: "retired-transcript-chat" })
+      view.unmount()
+    }
+  })
+
   it("does not autosave tracked character turns because character sends own persistence", async () => {
     const notificationApi = {
       error: vi.fn(),
@@ -582,7 +703,8 @@ describe("usePlaygroundPersistence", () => {
   })
   it.each(['loading', 'ready'])('does not upload an H1 %s selection through legacy save', async status => {
     selectedHistory.value = { getCurrent: () => ({ status, owner: status === 'ready' ? { kind: 'local' } : null }), fence: () => () => true }
-    const { result } = renderHook(() => usePlaygroundPersistence(buildDeps()))
+    const deps = buildDeps()
+    const { result } = renderHook(() => usePlaygroundPersistence(deps))
     await act(async () => { await result.current.handleSaveChatToServer() })
     expect(mocks.createChat).not.toHaveBeenCalled()
     expect(mocks.addChatMessage).not.toHaveBeenCalled()
@@ -690,11 +812,8 @@ describe("usePlaygroundPersistence", () => {
       focusConnectionCard: vi.fn()
     })
 
-    const { result } = renderHook(() =>
-      usePlaygroundPersistence(
-        buildDeps({ history: [{ role: "user", content: "Persist this chat" }] })
-      )
-    )
+    const deps = buildDeps({ history: [{ role: "user", content: "Persist this chat" }] })
+    const { result } = renderHook(() => usePlaygroundPersistence(deps))
 
     await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalled())
     await waitFor(() => expect(getServerChatSaveStatus("chat-1")).toBe("saved"))
@@ -730,16 +849,9 @@ describe("usePlaygroundPersistence", () => {
         info: vi.fn(),
         success: vi.fn()
       }
-      const { result } = renderHook(() =>
-        usePlaygroundPersistence(
-          buildDeps({
-            notificationApi,
-            temporaryChat: true,
-            serverChatId,
-            history: []
-          })
-        )
-      )
+      const deps = buildDeps({ notificationApi, temporaryChat: true,
+        serverChatId, history: [] })
+      const { result } = renderHook(() => usePlaygroundPersistence(deps))
 
       act(() => result.current.handleToggleTemporaryChat(false))
 

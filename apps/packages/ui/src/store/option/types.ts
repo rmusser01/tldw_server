@@ -186,11 +186,12 @@ export type State = {
     selectedQuickPrompt: string | null | undefined,
     options?: { expectedRevision?: number }
   ) => boolean
+  messageSteeringRevision: number
   messageSteeringMode: MessageSteeringMode
   setMessageSteeringMode: (mode: MessageSteeringMode) => void
   messageSteeringForceNarrate: boolean
   setMessageSteeringForceNarrate: (enabled: boolean) => void
-  clearMessageSteering: () => void
+  clearMessageSteering: (options?: { expectedRevision?: number }) => void
   queuedMessages: QueuedRequest[]
   addQueuedMessage: (payload: QueuedRequestInput) => void
   setQueuedMessages: (

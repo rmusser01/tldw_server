@@ -1,3 +1,6 @@
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
+import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
 import type { AssistantSelection } from "@/types/assistant-selection"
@@ -522,14 +525,16 @@ export const SidepanelForm = ({
   const sidepanelDocumentPreparationRef = React.useRef<{
     controller: AbortController
     selectionKey: string
+    isCurrent: () => boolean
   } | null>(null)
   currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey
   React.useEffect(() => {
     const active = sidepanelDocumentPreparationRef.current
-    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady)) {
+    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady || !active.isCurrent())) {
       active.controller.abort()
+      if (sidepanelDocumentPreparationRef.current === active) sidepanelDocumentPreparationRef.current = null
     }
-  }, [currentDocumentSelectionKey, isConnectionReady])
+  }, [currentDocumentSelectionKey, isConnectionReady, sourceDraftRevision])
   React.useEffect(
     () => () => sidepanelDocumentPreparationRef.current?.controller.abort(),
     []
@@ -1039,6 +1044,7 @@ export const SidepanelForm = ({
           chat.replyTarget,
           chat.messageSteeringMode,
           chat.messageSteeringForceNarrate,
+          chat.messageSteeringRevision,
           chat.isProcessing,
           chat.streaming
         ]
@@ -2004,7 +2010,13 @@ export const SidepanelForm = ({
     image: string,
     options?: { ignorePinnedResults?: boolean }
   ): Promise<void> {
-    if (!connectionReadyRef.current || sidepanelDocumentPreparationRef.current) return
+    if (!connectionReadyRef.current) return
+    const activePreparation = sidepanelDocumentPreparationRef.current
+    if (activePreparation) {
+      if (activePreparation.isCurrent()) return
+      activePreparation.controller.abort()
+      if (sidepanelDocumentPreparationRef.current === activePreparation) sidepanelDocumentPreparationRef.current = null
+    }
     const connectionGeneration = connectionGenerationRef.current
     const submittedKnowledgeMentionRevision = knowledgeMentionRevision.current
     const intent = resolveSubmissionIntent(rawMessage, options)
@@ -2043,19 +2055,40 @@ export const SidepanelForm = ({
       })
       return
     }
+    const completionIsCurrent = captureCompletionGuard()
+    const inputRevision = form.getRevision()
+    const dispatchIsCurrent = captureChatDispatchSource({ selectedModel: selectedModel ?? "", selectionSource: { model: "global", toolChoice: "global" } })
+    const preparationIsCurrent = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
+      (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
+    const sceneCapture = intent.isImageCommand ? null : captureActorSceneSend(greetingHistorySelection, () => completionIsCurrent() && dispatchIsCurrent())
+    let actorSceneSend: ActorSceneSend | undefined
     let documentPreparation: {
       controller: AbortController
       selectionKey: string
+      isCurrent: () => boolean
     } | null = null
-    if (!intent.isImageCommand && contextFiles.length > 0) {
+    if (!intent.isImageCommand) {
       documentPreparation = {
         controller: new AbortController(),
-        selectionKey: currentDocumentSelectionKeyRef.current
+        selectionKey: currentDocumentSelectionKeyRef.current,
+        isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
       }
       sidepanelDocumentPreparationRef.current = documentPreparation
     }
     try {
+      if (!intent.isImageCommand) {
+        try {
+          if (!sceneCapture) throw new Error("actor_settings_unavailable")
+          actorSceneSend = await sceneCapture.read()
+        } catch (error) {
+          if (preparationIsCurrent() && sceneCapture?.isCurrent() !== false) notification.error({ message: t("error", { defaultValue: "Error" }),
+            description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.sceneLoadError", "Scene settings could not be loaded. Existing chat setup was left unchanged.") })
+          return
+        }
+      }
+      if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
       await stopListening()
+      if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
       if (!intent.isImageCommand) {
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
@@ -2080,6 +2113,7 @@ export const SidepanelForm = ({
       }
       if (!intent.isImageCommand) {
         const hasEmbedding = await ensureEmbeddingModelAvailable()
+        if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
         if (!hasEmbedding) {
           return
         }
@@ -2090,6 +2124,7 @@ export const SidepanelForm = ({
             message: trimmed,
             history
           })
+      if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
       let documentUploadedFiles = contextFiles
       let documentRequestOverrides: SidepanelRequestOverrides =
         contextSend?.requestOverrides
@@ -2115,6 +2150,7 @@ export const SidepanelForm = ({
           throw error
         }
         if (
+          !preparationIsCurrent() || actorSceneSend?.isCurrent() === false ||
           documentPreparation.controller.signal.aborted ||
           currentDocumentSelectionKeyRef.current !==
             documentPreparation.selectionKey
@@ -2189,10 +2225,12 @@ export const SidepanelForm = ({
         : preparedDocumentAttachments.contextFiles
       }
 
-      if (!connectionReadyRef.current || connectionGenerationRef.current !== connectionGeneration || !captureCompletionGuard()()) return
+      if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
+      if (sidepanelDocumentPreparationRef.current === documentPreparation) sidepanelDocumentPreparationRef.current = null
       let promptAssistAttemptId: number | null = null
       await submitDispatch(
       {
+        actorSceneSend,
         image: intent.isImageCommand ? "" : image,
         message: trimmed,
         docs: intent.isImageCommand
@@ -2836,31 +2874,66 @@ export const SidepanelForm = ({
         throw new Error(validationError)
       }
 
+      const sourceContext = (item.sourceContext ?? null) as SidepanelQueuedSourceContext | null
+      let sceneCapture: ReturnType<typeof captureActorSceneSend> = null
+      let dispatchIsCurrent: (() => boolean) | null = null
+      const assertPreparationCurrent = () => {
+        assertQueuedDispatchCurrent()
+        assertDispatchReady()
+        if (dispatchIsCurrent?.() === false || sceneCapture?.isCurrent() === false) throw new Error(t(
+          "playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again."
+        ))
+      }
+      const modelSettings = useStoreChatModelSettings.getState()
+      const queuedModelSelection = resolveModelSelectorSelection((chatModels ?? []) as ModelSelectorDescriptor[], item.snapshot.selectedModel, modelSettings.apiProvider, {
+        scope: modelSettings.activeSettingsScope,
+        providerOverride: modelSettings.activeSettingsScope ? modelSettings.scopedSettingsByModelKey[modelSettings.activeSettingsScope]?.apiProvider : undefined
+      })
       setSelectedModel(item.snapshot.selectedModel)
+      assertPreparationCurrent()
+      modelSettings.setActiveSettingsScope(queuedModelSelection.settingsScope ?? null)
+      assertPreparationCurrent()
+      if (useStoreChatModelSettings.getState().activeSettingsScope !== (queuedModelSelection.settingsScope ?? undefined)) throw new Error(t(
+        "playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again."
+      ))
+      dispatchIsCurrent = captureChatDispatchSource({
+        selectedModel: item.snapshot.selectedModel ?? "",
+        toolChoice: item.snapshot.toolChoice === "auto" || item.snapshot.toolChoice === "required" || item.snapshot.toolChoice === "none" ? item.snapshot.toolChoice : undefined,
+        selectionSource: { model: "explicit", toolChoice: "explicit" }
+      })
+
+      sceneCapture = sourceContext?.isImageCommand ? null : captureActorSceneSend(greetingHistorySelection, () => assertQueuedDispatchCurrent.isSourceCurrent() && dispatchIsCurrent?.() !== false)
+      if (!sourceContext?.isImageCommand && !sceneCapture) throw new Error("actor_settings_unavailable")
+      const actorSceneSend = sceneCapture ? await sceneCapture.read() : undefined
+      assertPreparationCurrent()
+      await stopListening()
+      assertPreparationCurrent()
+      stopServerDictation()
+
       setChatMode(item.snapshot.chatMode)
+      assertPreparationCurrent()
       setWebSearch(item.snapshot.webSearch)
+      assertPreparationCurrent()
       setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
+      assertPreparationCurrent()
       if (
         item.snapshot.toolChoice === "auto" ||
         item.snapshot.toolChoice === "required" ||
         item.snapshot.toolChoice === "none"
       ) {
         setToolChoice(item.snapshot.toolChoice)
+        assertPreparationCurrent()
       }
       setUseOCR(item.snapshot.useOCR)
+      assertPreparationCurrent()
 
-      await stopListening()
-      assertQueuedDispatchCurrent()
-      assertDispatchReady()
-      stopServerDictation()
-
-      const sourceContext = (item.sourceContext ??
-        null) as SidepanelQueuedSourceContext | null
       const documents = Array.isArray(sourceContext?.documents)
         ? sourceContext.documents
         : []
 
+      assertPreparationCurrent()
       const result = await sendMessage({
+        actorSceneSend,
         assertQueuedDispatchCurrent,
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
@@ -2886,6 +2959,8 @@ export const SidepanelForm = ({
     },
     [
       captureQueuedDispatchGuard,
+      chatModels,
+      greetingHistorySelection,
       form,
       sendMessage,
       setChatMode,
@@ -2896,6 +2971,7 @@ export const SidepanelForm = ({
       setWebSearch,
       stopListening,
       stopServerDictation,
+      t,
       validateQueuedRequest
     ]
   )

@@ -1,3 +1,5 @@
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import type {
   HistoryLoadReceipt,
   HistorySelectionController
@@ -32,7 +34,6 @@ import {
   beginChatTurnSettlement,
   wasChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
-import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
@@ -49,6 +50,7 @@ import {
   formatSelectedHistory
 } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { createImageDataUrl } from "@/utils/image-utils"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { systemPromptFormatter } from "@/utils/system-message"
@@ -75,7 +77,8 @@ import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   getRequiredServicePrompt,
   runChatPipeline,
-  type ChatModeDefinition
+  type ChatModeDefinition,
+  type ChatModeParamsBase
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import { chatSubmitFailed, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
@@ -190,6 +193,7 @@ type NormalChatModeParams = {
     controller: HistorySelectionController
     originIsCurrent: () => boolean
     sourceIsCurrent?: () => boolean
+    onResultFollow?: () => void
     temporary?: boolean
     createServerChat?: boolean
     /**
@@ -239,6 +243,7 @@ type NormalChatModeParams = {
   scope?: ChatScope
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
+  actorSceneSend?: ActorSceneSend
   actorSettings?: ActorSettings
   actorScene?: ActorSceneRead
   systemPromptAppendix?: string
@@ -257,7 +262,15 @@ type NormalChatModeParams = {
   messageForModel?: string
   regenerateFromMessage?: Message
   servicePromptSnapshot?: ServicePromptSnapshot
+  onResponseDispatch?: () => void
 }
+
+/** Existing H1 ownership and preparation shared by the local context modes. */
+export type HistoryChatModeParams = Pick<NormalChatModeParams,
+  | "surface" | "historyPreparation" | "historySelection" | "historyTurn"
+  | "selectionSource" | "serverChatId" | "setServerChatId" | "scope"
+  | "actorScene" | "webSearch" | "uploadedFiles" | "onResponseDispatch"
+>
 
 const isBackendUnavailableError = (error: unknown): boolean => {
   if (!error) return false
@@ -335,6 +348,13 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
             ctx.selectedModel
           )
     if (imageBackendCandidates.length > 0) {
+      const assertImagePreparationCurrent = () => {
+        ctx.assertPreparationCurrent?.()
+        if (ctx.actorSceneSend?.isCurrent() === false)
+          throw new Error("actor_settings_scope_changed")
+        ctx.signal?.throwIfAborted()
+      }
+      assertImagePreparationCurrent()
       const promptSource =
         typeof requestOverride.prompt === "string"
           ? requestOverride.prompt
@@ -344,10 +364,12 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       let lastError: unknown = null
 
       const backendConfigs = await getImageBackendConfigs().catch(() => ({}))
+      assertImagePreparationCurrent()
 
       await tldwClient.initialize()
+      assertImagePreparationCurrent()
       for (const backend of imageBackendCandidates) {
-        if (ctx.signal?.aborted) break
+        assertImagePreparationCurrent()
         try {
           if (!prompt) {
             throw new Error("Image prompt is required.")
@@ -403,6 +425,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
             model,
             extraParams
           }
+          assertImagePreparationCurrent()
           const response = await tldwClient.createImageArtifact({
             backend,
             prompt,
@@ -417,6 +440,10 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
             sampler,
             model,
             extraParams
+          }, {
+            requestScope: ctx.servicePromptSnapshot?.requestScope ?? ctx.actorSceneSend?.requestScope,
+            signal: ctx.signal,
+            onDispatch: ctx.onResponseDispatch
           })
           const exportInfo = response?.artifact?.export
           const contentB64 = exportInfo?.content_b64
@@ -468,6 +495,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     return null
   },
   preparePrompt: async (ctx) => {
+    ctx.assertPreparationCurrent?.()
     const webSearchPrompt = ctx.webSearch
       ? getRequiredServicePrompt(
           ctx.servicePromptSnapshot,
@@ -475,7 +503,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         )
       : null
     const prompt = await systemPromptForNonRagOption()
+    ctx.assertPreparationCurrent?.()
     const selectedPrompt = await getPromptById(ctx.selectedSystemPrompt)
+    ctx.assertPreparationCurrent?.()
     const promptId = ctx.selectedSystemPrompt
     let promptContent: string | undefined = undefined
     let webSearchSources: any[] = []
@@ -493,6 +523,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
+    ctx.assertPreparationCurrent?.()
     if (ctx.image.length > 0) {
       humanMessage = await humanMessageFormatter({
         content: [
@@ -508,6 +539,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         model: ctx.selectedModel,
         useOCR: ctx.useOCR
       })
+      ctx.assertPreparationCurrent?.()
     }
 
     if (ctx.webSearch) {
@@ -516,7 +548,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         ctx.setIsSearchingInternet(true)
       }
       try {
+        ctx.assertPreparationCurrent?.()
         await tldwClient.initialize()
+        ctx.assertPreparationCurrent?.()
         const {
           searchProvider,
           totalSearchResults,
@@ -524,6 +558,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           searxngJSONMode,
           googleDomain
         } = await getSearchSettings()
+        ctx.assertPreparationCurrent?.()
 
         const engineMap: Record<string, string> = {
           google: "google",
@@ -563,11 +598,13 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           payload.google_domain = googleDomain
         }
 
+        ctx.assertPreparationCurrent?.()
         const res = await tldwClient.webSearch({
           ...payload,
           signal: ctx.signal,
           requestScope: ctx.servicePromptSnapshot?.requestScope
         })
+        ctx.assertPreparationCurrent?.()
 
         if (res?.error) {
           throw new Error(
@@ -580,6 +617,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         webSearchResults = res?.web_search_results_dict?.results || []
         webSearchSources = buildWebSearchSources(webSearchResults)
       } catch (error) {
+        ctx.assertPreparationCurrent?.()
         if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
           throw error
         }
@@ -600,6 +638,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         webSearchSystemMessage = await systemPromptFormatter({
           content: renderedWebSearchPrompt
         })
+        ctx.assertPreparationCurrent?.()
       }
     }
 
@@ -658,6 +697,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           })
         )
       )
+      ctx.assertPreparationCurrent?.()
       applicationChatHistory = [...promptMessages, ...applicationChatHistory]
     }
 
@@ -667,6 +707,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       ctx.actorSettings || null,
       templatesActive
     )
+    ctx.assertPreparationCurrent?.()
 
     if (webSearchSystemMessage) {
       applicationChatHistory.push(webSearchSystemMessage)
@@ -694,39 +735,10 @@ export const captureNormalChatPreparation = (
     | "toolChoice"
     | "historyId"
     | "serverChatId"
-  >
+  >,
+  nativeSourceIsCurrent?: () => boolean
 ) => {
-  // A Zustand publication replaces the store object even for loading flags or
-  // settings for another model. Bind the lease to dispatch inputs instead.
-  const dispatchSettings = () => {
-    const settings = useStoreChatModelSettings.getState()
-    const selection = useStoreMessageOption.getState()
-    const tools = useMcpToolsStore.getState()
-    const effectiveToolChoice =
-      params.selectionSource?.toolChoice === "global"
-        ? selection.toolChoice
-        : params.toolChoice ?? selection.toolChoice
-    const toolRequest = resolveChatToolRequest({
-      tools: tools.chatTools ?? tools.tools,
-      toolChoice: effectiveToolChoice,
-      mcpHealthState: tools.healthState,
-      hasMcp: tools.healthState !== "unavailable"
-    })
-    return JSON.stringify({
-      settings: settings.getEffectiveSettings(),
-      settingsScope: settings.activeSettingsScope,
-      model:
-        params.selectionSource?.model === "global"
-          ? selection.selectedModel
-          : params.selectedModel,
-      toolChoice: effectiveToolChoice,
-      tools: toolRequest.tools,
-      requestToolChoice: toolRequest.toolChoice
-    })
-  }
-  const capturedDispatchSettings = dispatchSettings()
-  const dispatchIsCurrent = () =>
-    dispatchSettings() === capturedDispatchSettings
+  const dispatchIsCurrent = captureChatDispatchSource(params)
   const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
   const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
   const acceptDraftBind =
@@ -734,13 +746,13 @@ export const captureNormalChatPreparation = (
       ? captureChatDraftLoad("bind")
       : null
   const draftIsCurrent =
-    acceptDraftBind?.isCurrent ?? captureChatDraftSource().isCurrent
+    acceptDraftBind?.isCurrent ?? (sourceAddress?.kind === "native" && nativeSourceIsCurrent ? nativeSourceIsCurrent : captureChatDraftSource().isCurrent)
   return { dispatchIsCurrent, draftIsCurrent, acceptDraftBind, sourceDraft }
 }
 
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
 const captureNormalHistoryTurn = async (
-  params: NormalChatModeParams,
+  params: ChatModeParamsBase & HistoryChatModeParams,
   message: string,
   snapshot: ServicePromptSnapshot,
   signal: AbortSignal,
@@ -855,6 +867,18 @@ const captureNormalHistoryTurn = async (
         loadPhase = "accepted"
         adoptionIsCurrent = controller.fence()
         if (serverId) params.setServerChatId?.(serverId)
+        if (acceptDraftBind) {
+          const bindingIsCurrent = params.historyPreparation!.draftIsCurrent
+          let metadataRetired = false
+          // Raw display IDs guard this command, independently of the accepted H1 load.
+          params.historyPreparation!.draftIsCurrent = () => {
+            const state = useStoreMessageOption.getState()
+            const valid = !metadataRetired && bindingIsCurrent() &&
+              state.historyId === (localId ?? null) && state.serverChatId === (serverId ?? null)
+            if (!valid) metadataRetired = true
+            return valid
+          }
+        }
       })
       current = controller.getCurrent()
       if (!loaded || !receipt || current.owner !== receipt.owner || current.view !== receipt.view ||
@@ -936,14 +960,19 @@ const captureNormalHistoryTurn = async (
           request_scope: snapshot.requestScope,
           validate_lease: authValid
         }
-      : current.owner
+      : {
+          ...current.owner,
+          // The accepted local question settles under its original account,
+          // independently of the controller's retired display/load lease.
+          validate_lease: authValid
+        }
   const validateLease = () =>
     authValid() &&
     dispatchIsCurrent() && (owner.kind !== "native" || !!turn.admission || editPreparationIsCurrent())
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
-      draftIsCurrent() && selectionCurrent() && controller.getCurrent().owner === originalOwner &&
+      draftIsCurrent() && acceptDraftBind?.isCurrent() !== false && selectionCurrent() && controller.getCurrent().owner === originalOwner &&
       !!now &&
       now.owner_key === originView.owner_key &&
       now.conversation_id === originView.conversation_id &&
@@ -1055,6 +1084,7 @@ const captureNormalHistoryTurn = async (
         : controller.getCurrent().view,
     validateLease,
     canUpdateView,
+    preparationIsCurrent: editPreparationIsCurrent,
     beforeDispatch: async () => {
       if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
@@ -1172,24 +1202,36 @@ const captureNormalHistoryTurn = async (
       stopCheckpoints()
       endReplyWrite?.("saved")
       await recoveryWrites
-      if (editResend)
-        await saveRecord(
-          record(
-            turn,
-            content ?? lastRecord?.result_text ?? "",
-            "generated_unsaved",
-            {
-              outcome: "complete",
-              settled_message_id: turn.resultId
-            }
-          )
+      await saveRecord(
+        record(
+          turn,
+          content ?? lastRecord?.result_text ?? "",
+          "generated_unsaved",
+          {
+            outcome: "complete",
+            settled_message_id: turn.resultId
+          }
         )
+      )
       if (creationHandle && owner.kind === "native")
         await markChatCreationSettled(creationHandle, owner.conversation_id)
     },
     followResult: async (id) => {
-      if (editResend && !editOriginIsCurrent()) return false
-      return controller.followResult(originView, id, editResend?.isCurrent)
+      if (!canUpdateView() || (editResend && !editOriginIsCurrent())) return false
+      // Following owns its H1 advancement, while draft publication stays fenced.
+      const commandIsCurrent = captureChatDraftSource(authValid).isCurrent
+      const followed = await controller.followResult(
+        originView,
+        id,
+        () => commandIsCurrent() && editResend?.isCurrent() !== false
+      )
+      if (
+        followed &&
+        commandIsCurrent() &&
+        params.historySelection?.sourceIsCurrent?.() !== false
+      )
+        params.historySelection?.onResultFollow?.()
+      return followed
     },
     finish: async (followed) => {
       await recoveryWrites
@@ -1235,41 +1277,16 @@ const captureNormalHistoryTurn = async (
   return turn
 }
 
-export const normalChatMode = async (
-  message: string,
-  image: string,
-  isRegenerate: boolean,
-  messages: Message[],
-  history: ChatHistory,
-  signal: AbortSignal,
-  params: NormalChatModeParams
+/** Reuse the accepted H1 bind and operation-lived settlement for each real mode. */
+export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
+  mode: ChatModeDefinition<TParams>,
+  message: string, image: string, isRegenerate: boolean,
+  messages: Message[], history: ChatHistory, signal: AbortSignal, params: TParams
 ): Promise<ChatSubmitResult> => {
-  console.log("Using normalChatMode")
   const preparation = params.historySelection
     ? params.historyPreparation ?? captureNormalChatPreparation(params)
     : undefined
-  const ownsServicePromptSnapshot =
-    !params.servicePromptSnapshot &&
-    (params.webSearch || !!params.historySelection)
-  const servicePromptSnapshot =
-    params.servicePromptSnapshot ??
-    (params.webSearch || params.historySelection
-      ? await loadServicePromptSnapshot(
-          params.webSearch ? ["chat.web_search.answer"] : [],
-          {
-            signal,
-            requestScope:
-              params.actorScene?.target.account?.requestScope ??
-              (params.historySelection?.controller.getCurrent().owner?.kind ===
-              "native"
-                ? (
-                    params.historySelection.controller.getCurrent()
-                      .owner as import("@/services/chat-history-selection").NativeHistoryOwnerV1
-                  ).request_scope
-                : undefined)
-          }
-        )
-      : undefined)
+  const servicePromptSnapshot = params.servicePromptSnapshot
   const executionSignal = servicePromptSnapshot
     ? servicePromptSnapshot.scopeSignal
     : signal
@@ -1280,15 +1297,16 @@ export const normalChatMode = async (
   try {
     if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
       return chatSubmitFailed("Request cancelled")
-    if (params.webSearch) {
-      getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
-    }
     if (params.historySelection) {
       if (isRegenerate) throw new Error("unsupported_history_action")
-      if (params.uploadedFiles?.length)
+      const originalOwner = params.historySelection.controller.getCurrent().owner
+      if (originalOwner?.kind === "native" && mode.id !== "normal")
+        throw new Error("unsupported_history_action_context")
+      if (params.uploadedFiles?.length && mode.id === "normal")
         throw new Error("unsupported_history_message_assets")
+      if (!servicePromptSnapshot) throw new Error("history_scope_unavailable")
       const historyTurn = await captureNormalHistoryTurn(
-        params,
+        { ...params, historyPreparation: preparation },
         message,
         servicePromptSnapshot!,
         executionSignal,
@@ -1300,6 +1318,10 @@ export const normalChatMode = async (
       )
       createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
+      const displayMessages = formatSelectedHistory(historyTurn.capture).messages
+      const inferenceIds = historyTurn.owner.kind === "local"
+        ? new Set(excludeLocalRagDiagnostics(displayMessages).map(row => row.id))
+        : undefined
       const selected = historyTurn.capture.rows.map((node, index) => {
         const content = historyTurn.capture.selected_content[index]
         const metadata = content.extra_metadata ?? {}
@@ -1321,7 +1343,7 @@ export const normalChatMode = async (
             | undefined,
           messageType: local?.messageType as string | undefined
         }
-      })
+      }).filter(row => !inferenceIds || inferenceIds.has(row.id))
       generateHistory(selected, params.selectedModel, { versioned: true })
       if (
         historyTurn.owner.kind === "native" &&
@@ -1334,7 +1356,7 @@ export const normalChatMode = async (
         params.userParentMessageId !== selectedParent
       )
         throw new Error("unsupported_history_reply_target")
-      messages = formatSelectedHistory(historyTurn.capture).messages
+      messages = displayMessages
       params = {
         ...params,
         historyTurn,
@@ -1361,7 +1383,7 @@ export const normalChatMode = async (
         : ""
 
     const result = await runChatPipeline(
-      normalChatModeDefinition,
+      mode,
       message,
       resolvedImage,
       isRegenerate,
@@ -1394,9 +1416,51 @@ export const normalChatMode = async (
     return result
   } finally {
     createdTurn?.release?.()
-    if (ownsServicePromptSnapshot && servicePromptSnapshot) {
-      servicePromptSnapshot.release()
-    }
     settlement?.finish()
+  }
+}
+
+export const normalChatMode = async (
+  message: string,
+  image: string,
+  isRegenerate: boolean,
+  messages: Message[],
+  history: ChatHistory,
+  signal: AbortSignal,
+  params: NormalChatModeParams
+): Promise<ChatSubmitResult> => {
+  console.log("Using normalChatMode")
+  const preparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
+  const ownsServicePromptSnapshot =
+    !params.servicePromptSnapshot &&
+    (params.webSearch || !!params.historySelection || !!params.actorSceneSend)
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (params.webSearch || params.historySelection || params.actorSceneSend
+      ? await loadServicePromptSnapshot(
+          params.webSearch ? ["chat.web_search.answer"] : [],
+          {
+            signal,
+            requestScope:
+              params.actorSceneSend?.requestScope ?? params.actorScene?.target.account?.requestScope ??
+              (params.historySelection?.controller.getCurrent().owner?.kind ===
+              "native"
+                ? (
+                    params.historySelection.controller.getCurrent()
+                      .owner as import("@/services/chat-history-selection").NativeHistoryOwnerV1
+                  ).request_scope
+                : undefined)
+          }
+        )
+      : undefined)
+  try {
+    if (params.webSearch) getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
+    return await runChatModeWithHistory(normalChatModeDefinition, message, image,
+      isRegenerate, messages, history, signal,
+      { ...params, historyPreparation: preparation, servicePromptSnapshot })
+  } finally {
+    if (ownsServicePromptSnapshot && servicePromptSnapshot) servicePromptSnapshot.release()
   }
 }

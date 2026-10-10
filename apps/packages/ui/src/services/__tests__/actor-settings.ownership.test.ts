@@ -36,6 +36,7 @@ import {
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import {
   bindActorSceneAfterLoad,
+  captureActorSceneSend,
   readActorSceneForSend
 } from "@/hooks/chat/actor-scene-source"
 import { useActorStore } from "@/store/actor"
@@ -589,6 +590,63 @@ describe("qualified scene and character-default records", () => {
       release()
       expect(await copying).toBe(false)
       expect(io.values.get(sceneKey(bound.fresh))).toEqual(bound.record)
+    })
+  })
+
+  describe("original scene command capture before asynchronous preparation", () => {
+    const requestScope = { config: { serverUrl: "https://original-command.example", authMode: "single-user" as const }, userId: 1 }
+    const arrangeCommand = () => {
+      useStoreMessageOption.getState().startNewChatDraft()
+      useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+      let accountCurrent = true, epoch = 1, commandCurrent = true
+      const controller = { getCurrent: () => ({ status: "idle", owner: null, view: null }),
+        fence: () => { const original = epoch; return () => epoch === original },
+        draftAccount: { requestScope, isCurrent: () => accountCurrent } } as unknown as HistorySelectionController
+      return { controller, capture: () => captureActorSceneSend(controller, () => commandCurrent),
+        retireAccount: () => { accountCurrent = false }, reload: () => { epoch++ },
+        retireCommand: () => { commandCurrent = false } }
+    }
+    it.each(["New", "account", "H1 epoch", "command"] as const)("refuses the originally captured %s retirement without reading a replacement", async changed => {
+      const original = arrangeCommand(), captured = original.capture()!
+      expect(captured.isCurrent()).toBe(true)
+      if (changed === "New") useStoreMessageOption.getState().startNewChatDraft()
+      if (changed === "account") {
+        original.retireAccount()
+        original.controller.draftAccount = { requestScope: { ...requestScope, userId: 2 }, isCurrent: () => true, retryVerification: () => {} }
+      }
+      if (changed === "H1 epoch") original.reload()
+      if (changed === "command") original.retireCommand()
+      expect(captured.isCurrent()).toBe(false)
+      await expect(captured.read()).rejects.toThrow("actor_settings_scope_changed")
+      expect(io.get).not.toHaveBeenCalled()
+    })
+    it("retains a cloned original backend scope and one saved scene receipt through later preparation", async () => {
+      const original = arrangeCommand()
+      const target = captureActorSettingsTarget({ address: useStoreMessageOption.getState().chatDraftAddress,
+        requestScope, accountIsCurrent: () => true, isCurrent: () => true })!
+      const record = { value: sceneA, updatedAt: 11 }
+      io.values.set(sceneKey(target), record)
+      const captured = original.capture()!
+      const send = await captured.read()
+      original.controller.draftAccount = { requestScope: { ...requestScope, userId: 2 }, isCurrent: () => true, retryVerification: () => {} }
+      io.values.set(sceneKey(target), { value: sceneB, updatedAt: 12 })
+      expect(send.requestScope).toEqual(requestScope)
+      expect(send.requestScope).not.toBe(requestScope)
+      expect(send.scene.originalRecord).toEqual(record)
+      expect(send.scene.settings).toEqual(sceneA)
+      expect(send.isCurrent()).toBe(true)
+      expect(io.get).toHaveBeenCalledOnce()
+    })
+    it("uses accepted native transport ownership despite an unavailable unrelated fresh-account verifier", async () => {
+      const original = arrangeCommand()
+      const receipt: HistoryLoadReceipt = { owner: { kind: "native", conversation_id: "native-command", owner_key: "native-owner",
+        request_scope: requestScope, validate_lease: () => true },
+        view: { conversation_id: "native-command", owner_key: "native-owner" } as HistoryLoadReceipt["view"] }
+      expect(captureChatDraftLoad("switch")(receipt)).toBe(true)
+      useStoreMessageOption.setState({ historyId: null, serverChatId: "native-command" })
+      original.controller.getCurrent = () => ({ status: "ready", ...receipt }) as ReturnType<HistorySelectionController["getCurrent"]>
+      original.retireAccount()
+      expect((await original.capture()!.read()).requestScope).toEqual(requestScope)
     })
   })
 

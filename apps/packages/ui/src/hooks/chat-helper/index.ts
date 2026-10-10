@@ -584,7 +584,7 @@ export const saveMessageOnSuccess = async ({
       native &&
       (source?.length ||
         assistantMetadataExtra ||
-        generationInfo)
+        generationInfo || sessionFilesToAdd.length)
     ) {
       throw new Error("unsupported_history_native_result_metadata")
     }
@@ -619,7 +619,9 @@ export const saveMessageOnSuccess = async ({
     await settleAcceptedAssistant(
       historyTurn.owner,
       historyTurn.admission,
-      assistant
+      assistant,
+      undefined,
+      sessionFilesToAdd
     )
     historyTurn.resultId = assistant.id
     await historyTurn.complete?.(assistant.content)

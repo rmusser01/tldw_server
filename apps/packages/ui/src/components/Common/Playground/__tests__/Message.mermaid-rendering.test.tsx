@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundMessage } from "../Message"
 import { CompactMessage } from "../CompactMessage"
@@ -9,6 +9,7 @@ import { ReasoningBlock } from "../ReasoningBlock"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 
+const reasoningPresentation = vi.hoisted(() => ({ actual: false }))
 const markdownCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
 const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>()
@@ -24,7 +25,8 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("antd", () => {
+vi.mock("antd", async importOriginal => {
+  const actual = await importOriginal<typeof import("antd")>()
   const ModalMock = ({
     open,
     children
@@ -48,22 +50,16 @@ vi.mock("antd", () => {
       <img src={src || ""} alt={alt || ""} />
     ),
     Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    Collapse: ({
-      children,
-      items
-    }: {
-      children?: React.ReactNode
-      items?: Array<{ children?: React.ReactNode; label?: React.ReactNode }>
-    }) => (
-      <div>
-        {items?.map((item, index) => (
-          <section key={index}>
-            <div>{item.label}</div>
-            {item.children}
-          </section>
-        )) ?? children}
-      </div>
-    ),
+    Collapse: (props: React.ComponentProps<typeof actual.Collapse>) => reasoningPresentation.actual
+      ? <actual.Collapse {...props} />
+      : <div>
+          {props.items?.map((item, index) => (
+            <section key={index}>
+              <div>{item.label}</div>
+              {item.children}
+            </section>
+          )) ?? props.children}
+        </div>,
     Avatar: ({ src, alt }: { src?: string; alt?: string }) => (
       <img src={src || ""} alt={alt || ""} />
     ),
@@ -552,5 +548,65 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
       })
     )
     expect(markdownCalls[0]?.artifactContextId).toBeUndefined()
+  })
+})
+
+
+describe("TASK-13274 actual streaming reasoning disclosure", () => {
+  beforeEach(async () => {
+    reasoningPresentation.actual = true
+    markdownCalls.length = 0
+    storageState.values.clear()
+    const actual = await vi.importActual<typeof import("@/libs/reasoning")>("@/libs/reasoning")
+    parseReasoningMock.mockImplementation(actual.parseReasoning)
+  })
+  afterEach(() => { reasoningPresentation.actual = false })
+
+  it("shows Thinking before the first answer with actual Collapse closed by default", async () => {
+    render(<PlaygroundMessage {...baseProps} message="<think>Original thought" isStreaming />)
+    const disclosure = await screen.findByRole("button", { name: /Thinking…$/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("Original thought")).toBeNull()
+    expect(screen.queryByTestId("playground-streaming-plain-text")).toBeNull()
+    expect(markdownCalls).toHaveLength(0)
+  })
+
+  it("keeps the user's disclosure choice while reasoning grows and answer streaming starts", async () => {
+    const mounted = render(<PlaygroundMessage {...baseProps} message="<think>Original thought" isStreaming />)
+    const disclosure = await screen.findByRole("button", { name: /Thinking…$/ })
+    fireEvent.click(disclosure)
+    await screen.findByText("Original thought")
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(markdownCalls.every(call => call.enableMermaidDiagrams !== true)).toBe(true)
+    mounted.rerender(<PlaygroundMessage {...baseProps} message="<think>Original thought then more" isStreaming />)
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(disclosure)
+    mounted.rerender(<PlaygroundMessage {...baseProps} message="<think>Original thought then more</think>Final answer" isStreaming />)
+    const completedDisclosure = screen.getByRole("button", { name: /Model's reasoning \(optional\)$/ })
+    expect(completedDisclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("playground-streaming-plain-text")).toHaveTextContent("Final answer")
+    expect(screen.getByTestId("playground-streaming-plain-text").textContent).toBe("Final answer")
+    expect(markdownCalls.every(call => call.message !== "Final answer")).toBe(true)
+  })
+
+  it("respects opt-in open reasoning and still lets the user collapse active progress", async () => {
+    const props = { content: "Original thought", isStreaming: true, reasoningRunning: true,
+      openReasoning: true, assistantTextClass: "", markdownBaseClasses: "",
+      t: ((_key: string, fallback?: string) => fallback || _key) as React.ComponentProps<typeof ReasoningBlock>["t"] }
+    const mounted = render(<ReasoningBlock {...props} />)
+    const disclosure = screen.getByRole("button", { name: /Thinking…$/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(disclosure)
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    mounted.rerender(<ReasoningBlock {...props} content="Original thought then more" />)
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("keeps a plain answer's exact lightweight renderer without an empty disclosure", () => {
+    render(<PlaygroundMessage {...baseProps} message={"  Plain answer\n"} isStreaming />)
+    expect(screen.getByTestId("playground-streaming-plain-text").textContent).toBe("  Plain answer\n")
+    expect(screen.queryByRole("button", { name: /Thinking…$/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Model's reasoning \(optional\)$/ })).toBeNull()
+    expect(markdownCalls).toHaveLength(0)
   })
 })

@@ -14,7 +14,7 @@ import type {
   LegacyHistoryProjectionV1,
   PreparedHistoryContextV1
 } from "@/types/history-selection"
-import type { HistoryBookmarkScope, Message } from "@/db/dexie/types"
+import type { HistoryBookmarkScope, Message, UploadedFile } from "@/db/dexie/types"
 import type { ServicePromptRequestScope } from "./tldw/domains/service-prompts"
 import { tldwClient, type ChatMessage } from "./tldw/TldwApiClient"
 import {
@@ -1153,7 +1153,7 @@ export const appendSelectedUser = async (
   owner: HistoryOwnerV1,
   selection: HistorySelectionV1,
   input: Message,
-  opts?: HistoryOperationOptions & { historyBranch?: boolean }
+  opts?: HistoryOperationOptions & { historyBranch?: boolean; documentPresentation?: boolean }
 ): Promise<HistoryAdmissionV1> => {
   selection = structuredClone(selection)
   input = structuredClone(input)
@@ -1162,7 +1162,9 @@ export const appendSelectedUser = async (
   if (opts?.historyBranch !== undefined && owner.kind !== "native")
     fail("native_history_requires_server_owner")
   if (owner.kind === "local")
-    return appendLocalSelectedUser(owner, selection, input, localOptions(owner, opts))
+    return appendLocalSelectedUser(owner, selection, input, {
+      ...localOptions(owner, opts), documentPresentation: opts?.documentPresentation
+    })
   assertNativeBinding(owner, selection, true)
   if (
     input.history_id !== owner.conversation_id ||
@@ -1204,14 +1206,16 @@ export const settleAcceptedAssistant = async (
   owner: HistoryOwnerV1,
   admission: HistoryAdmissionReferenceV1,
   input: Message,
-  opts?: HistoryOperationOptions
+  opts?: HistoryOperationOptions,
+  sessionFilesToAdd: UploadedFile[] = []
 ): Promise<Message | { id: string }> => {
   admission = structuredClone(admission)
   input = structuredClone(input)
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
   if (owner.kind === "local")
-    return settleLocalAcceptedAssistant(owner, admission, input, localOptions(owner, opts))
+    return settleLocalAcceptedAssistant(owner, admission, input, localOptions(owner, opts), sessionFilesToAdd)
+  if (sessionFilesToAdd.length) fail("unsupported_history_message_assets")
   // Every versioned write requires the live endpoint handshake, including settlement.
   assertNativeBinding(owner, admission, true)
   if (

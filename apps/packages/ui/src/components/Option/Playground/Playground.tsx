@@ -966,6 +966,9 @@ const PlaygroundContent = () => {
       routeCharacterIntentAppliedRef.current = null;
       setRouteCharacterRecovery(null);
       session.cancelPendingRestore();
+      if (detail.onRestoreCancelled && !detail.onRestoreCancelled(
+        usePlaygroundSessionStore.getState().restoreRevision,
+      )) return;
       if (detail.characterId === undefined) return;
       const replaceSearch = (search: string) => {
         const next = updateCharacterChatRouteSearch(

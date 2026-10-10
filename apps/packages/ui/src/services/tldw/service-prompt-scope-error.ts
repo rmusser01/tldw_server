@@ -132,6 +132,7 @@ export const isServicePromptRequestPath = (
   }
   if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
   if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
+  if (pathname === "/api/v1/files/create") return requestMethod === "POST"
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))
     return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
@@ -220,11 +221,13 @@ export const isServicePromptRequestPath = (
 )
 }
 
-export const createServicePromptScopeChangedError = () =>
-  Object.assign(new Error(SCOPE_CHANGED_MESSAGE), {
+export const createServicePromptScopeChangedError = (
+  message = SCOPE_CHANGED_MESSAGE
+) =>
+  Object.assign(new Error(message), {
     status: 412,
     details: {
-      detail: { code: SCOPE_CHANGED_CODE, message: SCOPE_CHANGED_MESSAGE }
+      detail: { code: SCOPE_CHANGED_CODE, message }
     }
   })
 

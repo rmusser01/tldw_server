@@ -158,6 +158,8 @@ export const nativeCharacterPreflightMessage = (
     );
   }
   const messages: Record<string, string> = {
+    native_history_persona_unsupported:
+      'Persona conversations are not supported with saved history on this server yet. Your message has not been sent. Use the persona as a prompt overlay or choose a character; your chat and draft are still here.',
     assistant_selection_restore_failed:
       'Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again.',
     native_history_greeting_requires_fresh:

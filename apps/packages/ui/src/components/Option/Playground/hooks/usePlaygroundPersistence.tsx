@@ -1,7 +1,7 @@
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import React from "react"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
-import type { Message } from "@/store/option"
+import { useStoreMessageOption, type Message } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { acknowledgePromotedChatMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { getChatPromotionBlocker } from "@/db/dexie/chat-promotion"
@@ -106,6 +106,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   const [showServerPersistenceHint, setShowServerPersistenceHint] =
     React.useState(false)
   const serverSaveInFlightRef = React.useRef(false)
+  const retiredAutoSaveHistoriesRef = React.useRef(new WeakSet<UsePlaygroundPersistenceDeps["history"]>())
   const activeSaveControllerRef = React.useRef<AbortController | null>(null)
   const latestDepsRef = React.useRef(deps)
   latestDepsRef.current = deps
@@ -251,22 +252,38 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     const controller = new AbortController()
     activeSaveControllerRef.current = controller
     const capturedHistoryId = latestDepsRef.current.historyId
-    const capturedRestoreRevision = usePlaygroundSessionStore.getState().restoreRevision
+    const capturedHistory = latestDepsRef.current.history
+    const capturedSource = useStoreMessageOption.getState()
+    const capturedSession = usePlaygroundSessionStore.getState()
     let createdChatId: string | null = null
     const acknowledgedIds: string[] = []
     let requestSnapshot: ServicePromptSnapshot | undefined
     const isCurrentSave = () => {
       const current = latestDepsRef.current
-      return (
+      const source = useStoreMessageOption.getState()
+      const session = usePlaygroundSessionStore.getState()
+      const currentSave = (
         !controller.signal.aborted &&
         canContinue() &&
         !requestSnapshot?.scopeSignal.aborted &&
-        !current.temporaryChat &&
-        current.historyId === capturedHistoryId &&
-        usePlaygroundSessionStore.getState().restoreRevision === capturedRestoreRevision &&
+        !current.temporaryChat && !source.temporaryChat &&
+        current.historyId === capturedHistoryId && source.historyId === capturedHistoryId &&
+        source.chatDraftAddress === capturedSource.chatDraftAddress &&
+        source.chatDraftRevision === capturedSource.chatDraftRevision &&
+        session.restoreRevision === capturedSession.restoreRevision &&
+        session.sourceSelectionRevision === capturedSession.sourceSelectionRevision &&
+        (source.serverChatId === capturedSource.serverChatId ||
+          (createdChatId !== null && source.serverChatId === createdChatId)) &&
         current.history.length > 0 &&
         (!current.serverChatId || current.serverChatId === createdChatId)
       )
+      if (!currentSave) {
+        // History reconstruction can publish a canonical array before the
+        // original render updates. Both belong to this retired transcript.
+        retiredAutoSaveHistoriesRef.current.add(capturedHistory)
+        retiredAutoSaveHistoriesRef.current.add(capturedSource.history)
+      }
+      return currentSave
     }
     const requireConnectionReady = () => {
       if (!latestDepsRef.current.isConnectionReady) {
@@ -324,7 +341,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         setServerChatId,
         capturedHistoryId,
         loadServicePromptSnapshot([], { signal: controller.signal }),
-        async (scopeSnapshot) => {
+        async (scopeSnapshot, acknowledgePublication) => {
           requestSnapshot = scopeSnapshot
           if (!isCurrentSave()) return
           requireConnectionReady()
@@ -413,17 +430,24 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
               createdChatId = cid
               endPromotionWrite = beginServerChatWrite(cid)
               setServerChatId(cid)
+              if (!isCurrentSave() || useStoreMessageOption.getState().serverChatId !== cid) return
+              acknowledgePublication(cid)
+              if (!isCurrentSave()) return
               setServerChatState(
                 (created as any)?.state ??
                   (created as any)?.conversation_state ??
                   serverChatStateRef.current ??
                   "in-progress"
               )
+              if (!isCurrentSave()) return
               setServerChatSource(
                 (created as any)?.source ?? serverChatSourceRef.current ?? null
               )
+              if (!isCurrentSave()) return
               setServerChatVersion((created as any)?.version ?? null)
+              if (!isCurrentSave()) return
               invalidateServerChatHistory()
+              if (!isCurrentSave()) return
             }
 
             const cid = createdChatId
@@ -509,13 +533,19 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           if (!serverPersistenceHintSeenRef.current) {
             serverPersistenceHintSeenRef.current = true
             setServerPersistenceHintSeen(true)
+            if (!isCurrentSave()) return
             setShowServerPersistenceHint(true)
           }
         },
         {
-          abort: () => controller.abort(),
-          onComplete: () =>
-            notificationApi.destroy?.(`chat-promotion-${capturedHistoryId}`),
+          abort: () => {
+            controller.abort()
+            isCurrentSave()
+          },
+          isSourceCurrent: isCurrentSave,
+          onComplete: () => {
+            notificationApi.destroy?.(`chat-promotion-${capturedHistoryId}`)
+          },
           onFailure: (error, retrying) => {
             if (!isCurrentSave()) return
             notificationApi.error({
@@ -587,14 +617,15 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       !isConnectionReady ||
       temporaryChat ||
       serverChatId ||
-      history.length === 0
+      history.length === 0 ||
+      retiredAutoSaveHistoriesRef.current.has(history)
     ) {
       return
     }
     void handleSaveChatToServer()
   }, [
     handleSaveChatToServer,
-    history.length,
+    history,
     isConnectionReady,
     characterWorkflowActive,
     serverChatId,

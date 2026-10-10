@@ -38,11 +38,8 @@ vi.mock("@/services/tldw/request-core", async () => {
   }
 })
 
-vi.mock("@/utils/safe-storage", () => ({
-  safeStorageSerde: {
-    serializer: JSON.stringify,
-    deserializer: (value: unknown) => value
-  },
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/utils/safe-storage")>(),
   createSafeStorage: (options?: { area?: string }) => ({
     get: async (...args: unknown[]) =>
       await (options?.area === "session"
@@ -62,6 +59,34 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
 }))
 
 const importProxy = async () => import("@/services/background-proxy")
+
+// Credentials and their original principal are declared at the storage boundary;
+// a captured target alone does not stand in for a current connection.
+const declareManualScope = (serverUrl: string, userId: string | number) => {
+  const config = {
+    serverUrl,
+    authMode: "multi-user" as const,
+    authSource: "manual" as const,
+    accessToken: `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`,
+    refreshToken: `fixture-refresh-${userId}`
+  }
+  mocks.storageGet.mockImplementation(async (key?: string) =>
+    key === "tldwConfig" ? config : null
+  )
+  return {
+    serverUrl: config.serverUrl,
+    authMode: config.authMode,
+    authSource: config.authSource,
+    expectedUserId: userId
+  }
+}
+
+const useActualRequestCore = async () => {
+  const actual = await vi.importActual<typeof import("@/services/tldw/request-core")>(
+    "@/services/tldw/request-core"
+  )
+  mocks.tldwRequest.mockImplementation(actual.tldwRequest)
+}
 
 describe("background proxy fallback safety", () => {
   beforeEach(() => {
@@ -157,6 +182,7 @@ describe("background proxy fallback safety", () => {
   })
 
   it("preserves native projection non-commit details through the real domain and proxy", async () => {
+    declareManualScope("https://server.test", "alice")
     mocks.sendMessage.mockResolvedValue({
       ok: false,
       status: 409,
@@ -183,7 +209,7 @@ describe("background proxy fallback safety", () => {
         confirmation,
         {
           requestScope: {
-            config: { serverUrl: "https://server.test", authMode: "multi-user" },
+            config: { serverUrl: "https://server.test", authMode: "multi-user", authSource: "manual" },
             userId: "alice"
           }
         }
@@ -454,6 +480,7 @@ describe("background proxy fallback safety", () => {
   })
 
   it("does not replay a scoped POST when the response port closes ambiguously", async () => {
+    const servicePromptConfig = declareManualScope("https://api.example.com", 7)
     mocks.sendMessage.mockRejectedValue(
       new Error("The message port closed before a response was received.")
     )
@@ -468,11 +495,7 @@ describe("background proxy fallback safety", () => {
       path: "/api/v1/chats/",
       method: "POST",
       body: { title: "One chat" },
-      servicePromptConfig: {
-        serverUrl: "https://api.example.com",
-        authMode: "multi-user",
-        expectedUserId: 7
-      }
+      servicePromptConfig
     })).rejects.toThrow(/message port closed/i)
 
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
@@ -1615,6 +1638,9 @@ describe("background proxy fallback safety", () => {
   })
 
   it("cancels a scoped worker request when the caller aborts after dispatch", async () => {
+    const servicePromptConfig = declareManualScope("https://api.example.com", 7)
+    let enterWorker!: () => void
+    const dispatched = new Promise<void>((resolve) => { enterWorker = resolve })
     let resolveWorkerRequest!: (value: unknown) => void
     mocks.sendMessage.mockImplementation((message: { type?: string }) => {
       if (message.type === "tldw:cancel-request") {
@@ -1622,6 +1648,7 @@ describe("background proxy fallback safety", () => {
       }
       return new Promise((resolve) => {
         resolveWorkerRequest = resolve
+        enterWorker()
       })
     })
     const controller = new AbortController()
@@ -1631,17 +1658,14 @@ describe("background proxy fallback safety", () => {
       method: "PUT",
       body: { parts: {}, expected_revision: null },
       abortSignal: controller.signal,
-      servicePromptConfig: {
-        serverUrl: "https://api.example.com",
-        authMode: "multi-user"
-      }
+      servicePromptConfig
     })
     const rejection = expect(pending).rejects.toMatchObject({
       name: "AbortError",
       code: "REQUEST_ABORTED"
     })
 
-    await Promise.resolve()
+    await dispatched
     const requestMessage = mocks.sendMessage.mock.calls.find(
       ([message]) => message?.type === "tldw:request"
     )?.[0]
@@ -1661,11 +1685,16 @@ describe("background proxy fallback safety", () => {
 
   it("cancels a scoped worker request when its runtime response times out", async () => {
     vi.useFakeTimers()
-    mocks.sendMessage.mockImplementation((message: { type?: string }) =>
-      message.type === "tldw:cancel-request"
-        ? Promise.resolve({ ok: true, cancelled: true })
-        : new Promise(() => undefined)
-    )
+    const servicePromptConfig = declareManualScope("https://api.example.com", 7)
+    let enterWorker!: () => void
+    const dispatched = new Promise<void>((resolve) => { enterWorker = resolve })
+    mocks.sendMessage.mockImplementation((message: { type?: string }) => {
+      if (message.type === "tldw:cancel-request") {
+        return Promise.resolve({ ok: true, cancelled: true })
+      }
+      enterWorker()
+      return new Promise(() => undefined)
+    })
     const controller = new AbortController()
     const { bgRequest } = await importProxy()
     const pending = bgRequest({
@@ -1674,15 +1703,12 @@ describe("background proxy fallback safety", () => {
       body: { parts: {}, expected_revision: null },
       timeoutMs: 100,
       abortSignal: controller.signal,
-      servicePromptConfig: {
-        serverUrl: "https://api.example.com",
-        authMode: "multi-user"
-      }
+      servicePromptConfig
     })
     const rejection = expect(pending).rejects.toThrow(
       "Extension messaging timeout"
     )
-    await Promise.resolve()
+    await dispatched
     const requestMessage = mocks.sendMessage.mock.calls.find(
       ([message]) => message?.type === "tldw:request"
     )?.[0]
@@ -3707,12 +3733,12 @@ describe("background proxy fallback safety", () => {
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     process.env.NEXT_PUBLIC_API_URL = "https://api.example.test"
     Object.defineProperty(globalThis, "window", {
-      value: {
+      value: Object.assign(new EventTarget(), {
         location: {
           origin: "https://webui.example.test",
           protocol: "https:"
         }
-      },
+      }),
       configurable: true
     })
     mocks.sendMessage.mockResolvedValue(null)
@@ -3721,6 +3747,7 @@ describe("background proxy fallback safety", () => {
       if (key === "tldwConfig") {
         return {
           authMode: "multi-user",
+          authSource: "manual",
           accessToken: "expired-access",
           refreshToken: "refresh-token"
         }
@@ -3767,6 +3794,7 @@ describe("background proxy fallback safety", () => {
 
     vi.stubGlobal("fetch", fetchSpy as any)
 
+    await useActualRequestCore()
     const { bgStream } = await importProxy()
     const chunks: string[] = []
 
@@ -3864,6 +3892,7 @@ describe("background proxy fallback safety", () => {
     const storedConfig = {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "multi-user",
+      authSource: "manual",
       accessToken: "expired-access",
       refreshToken: "old-refresh",
       orgId: 1,
@@ -3909,6 +3938,7 @@ describe("background proxy fallback safety", () => {
     })
     vi.stubGlobal("fetch", fetchSpy as any)
 
+    await useActualRequestCore()
     const { bgStream } = await importProxy()
     const chunks: string[] = []
 
@@ -3955,6 +3985,7 @@ describe("background proxy fallback safety", () => {
     let storedConfig = {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "multi-user",
+      authSource: "manual",
       accessToken: "expired-access",
       refreshToken: "old-refresh"
     }
@@ -3992,6 +4023,7 @@ describe("background proxy fallback safety", () => {
     })
     vi.stubGlobal("fetch", fetchSpy as any)
 
+    await useActualRequestCore()
     const { bgStream } = await importProxy()
     const consume = async () => {
       for await (const _chunk of bgStream({
@@ -4002,24 +4034,34 @@ describe("background proxy fallback safety", () => {
         // no-op
       }
     }
-    const result = expect(consume()).rejects.toMatchObject({
+    const consumption = consume()
+    const result = expect(consumption).rejects.toMatchObject({
       status: 412,
       details: { detail: { code: "request_config_scope_changed" } }
     })
+    try {
+      await Promise.race([
+        refreshStarted,
+        result.then(() => { throw new Error("fixture_refresh_not_entered") })
+      ])
+      const replacement = {
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "multi-user",
+        authSource: "manual",
+        accessToken: "other-account-access",
+        refreshToken: "other-account-refresh"
+      }
+      storedConfig = replacement
+      releaseRefresh()
+      await result
 
-    await refreshStarted
-    const replacement = {
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "multi-user",
-      accessToken: "other-account-access",
-      refreshToken: "other-account-refresh"
+      expect(storedConfig).toEqual(replacement)
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseRefresh()
+      await consumption.catch(() => undefined)
+      vi.unstubAllGlobals()
     }
-    storedConfig = replacement
-    releaseRefresh()
-    await result
-
-    expect(storedConfig).toEqual(replacement)
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
   it("falls back directly when runtime ping preflight times out", async () => {
@@ -4844,13 +4886,19 @@ it.each([
   ["/api/v1/chats/child/settings?scope_type=workspace&workspace_id=original", "GET"],
   ["/api/v1/chats/child/settings?scope_type=workspace&workspace_id=original", "PUT"]
 ])("forwards scoped fork inspection/settings through actual proxy: %s %s", async (path, method) => {
+  vi.resetModules()
+  vi.useRealTimers()
   mocks.runtimeId = "test-extension"
   mocks.sendMessage.mockReset()
-  mocks.storageGet.mockResolvedValue(null)
+  mocks.connect.mockReset()
+  mocks.tldwRequest.mockReset()
+  mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
+  mocks.storageSet.mockReset().mockResolvedValue(undefined)
+  mocks.storageRemove.mockReset().mockResolvedValue(undefined)
   mocks.sessionStorageGet.mockResolvedValue(null)
+  const servicePromptConfig = declareManualScope("https://api.example.com", 7)
   mocks.sendMessage.mockResolvedValue({ok: true, status: 200, data: {conversation_id: "child", settings: {}}})
   const {bgRequest} = await importProxy()
-  const servicePromptConfig = {serverUrl: "https://api.example.com", authMode: "multi-user" as const, expectedUserId: 7}
   await bgRequest({path: path as `/api/v1/${string}`, method: method as "GET" | "PUT", servicePromptConfig, headers: {"X-TLDW-Expected-User-ID": "7"}, ...(method === "PUT" ? {body: {settings: {authorNote: "explicit"}}} : {})})
   expect(mocks.sendMessage).toHaveBeenCalledWith(expect.objectContaining({payload: expect.objectContaining({path, method, servicePromptConfig})}))
 })
