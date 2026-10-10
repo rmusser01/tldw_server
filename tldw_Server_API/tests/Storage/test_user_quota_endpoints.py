@@ -3,10 +3,12 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventCategory, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.main import app
+from tldw_Server_API.app.services import admin_audit_service
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 from tldw_Server_API.tests.UserProfile._storage_quota_helpers import me, patch_quota, quota
 
@@ -80,3 +82,38 @@ def test_admin_storage_quotas_put_maps_storage_error_to_sanitized_500(auth_heade
         resp = client.put("/api/v1/admin/storage-quotas/users/1", headers=auth_headers, json={"quota_mb": 5})
     assert calls == [(1, 5)]
     assert resp.status_code == 500 and resp.json()["detail"] == "Failed to update storage quota"
+
+
+@pytest.mark.parametrize(
+    "url_fmt",
+    ["/api/v1/storage/admin/quotas/user/{}", "/api/v1/admin/storage-quotas/users/{}"],
+    ids=["storage-admin", "admin-storage-quotas"],
+)
+def test_user_quota_endpoints_emit_the_admin_user_update_audit_event(
+    auth_headers: dict, monkeypatch: pytest.MonkeyPatch, url_fmt: str
+) -> None:
+    """Both endpoints audit a quota change the way PUT /admin/users/{id} does: acting admin, target user, new value."""
+    events: list[dict] = []
+
+    async def _fake_emit(**kwargs) -> None:
+        """Record the audit event instead of persisting it."""
+        events.append(kwargs)
+
+    monkeypatch.setattr(admin_audit_service, "emit_admin_account_audit_event", _fake_emit)
+    with TestClient(app) as client:
+        user_id = me(client, auth_headers)
+        try:
+            assert client.put(url_fmt.format(user_id), headers=auth_headers, json={"quota_mb": 300}).status_code == 200
+            assert client.put(url_fmt.format(user_id), headers=auth_headers, json={"quota_mb": None}).status_code == 200
+            assert client.put(url_fmt.format(987654321), headers=auth_headers, json={"quota_mb": 5}).status_code == 404
+        finally:
+            patch_quota(client, auth_headers, user_id, None)
+
+    assert [event["metadata"] for event in events] == [{"storage_quota_mb": 300}, {"storage_quota_mb": None}]
+    for event in events:
+        assert event["event_type"] == AuditEventType.USER_UPDATED
+        assert event["category"] == AuditEventCategory.AUTHORIZATION
+        assert event["action"] == "admin.user.update"
+        assert event["resource_type"] == "user_account" and event["resource_id"] == str(user_id)
+        assert event["target_user_id"] == user_id
+        assert event["actor_id"] == user_id  # the test admin edits its own quota
