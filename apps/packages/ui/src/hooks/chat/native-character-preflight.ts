@@ -92,6 +92,14 @@ export class NativeHistoryContextRefusal extends Error {
   }
 }
 
+/** A changed original Edit target retains input without granting a generic Branch action. */
+export class NativeHistoryEditRefusal extends NativeHistoryContextRefusal {
+  constructor(cause: unknown, isCurrent: () => boolean) {
+    super(cause, isCurrent)
+    this.message = "native_history_edit_target_changed"
+  }
+}
+
 /** A confirmed no-admission outcome; feedback still belongs to its source. */
 export class NativeHistoryBranchRefusal extends Error {
   constructor(
@@ -131,6 +139,17 @@ export const nativeCharacterPreflightMessage = (
       'playground:composer.native_history_settings_unverified',
       'Conversation settings could not be verified. Your message has not been sent. Reload this saved chat or try again.'
     );
+  if (code === "native_history_edit_unsupported")
+    return t(
+      "playground:composer.native_history_edit_unsupported",
+      "This server does not support protected Edit and resend yet. Your edit was not sent and your edited text is kept. Copy it before cancelling, or upgrade the server."
+    )
+  if (code === "native_history_edit_target_changed")
+    return t(
+      "playground:composer.native_history_edit_target_changed",
+      "The original message changed. Your edit was not sent and your edited text is kept. Copy it, then cancel and reload this conversation to review the latest version."
+    )
+
   if (error instanceof NativeHistoryBranchChoice)
     return t(
       "playground:composer.native_history_branch_choice_required",

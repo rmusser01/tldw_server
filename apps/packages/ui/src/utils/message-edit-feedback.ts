@@ -59,6 +59,9 @@ const feedback = {
 } as const
 const codes: Readonly<Record<string, keyof typeof feedback>> = {
   message_changed: "changed",
+  native_history_edit_target_changed: "changed",
+  history_edit_target_changed: "changed",
+  native_history_edit_unsupported: "unsupported",
   version_conflict: "changed",
   stale_snapshot: "changed",
   stale_projection: "changed",

@@ -1358,3 +1358,69 @@ it("refuses local document files for a qualified native settlement before any se
     .resolves.toEqual({ id: result.id })
   expect(calls.append).toHaveBeenCalledOnce()
 })
+
+
+it.each(["messages", "completion"] as const)(
+  "requires protected %s discovery on the captured owner, without an older fallback",
+  async (operation) => {
+    const { protectedEditRequestSchema } = await import(
+      "./history-edit-fixture"
+    )
+    const native = owner(),
+      signal = new AbortController().signal
+    const result = await service.captureHistorySnapshot(native, view, "send")
+    if (result.status !== "captured") throw new Error(result.status)
+    const spec = strictAdmissionSpec(operation)
+    Object.assign(
+      spec.paths[Object.keys(spec.paths)[0]].post.requestBody.content[
+        "application/json"
+      ].schema,
+      protectedEditRequestSchema()
+    )
+    calls.spec.mockResolvedValue(spec)
+    await service.requireNativeHistoryEditAdmission(native, result, operation, {
+      signal
+    })
+    expect(calls.spec).toHaveBeenCalledExactlyOnceWith({
+      requestScope: native.request_scope,
+      scope: undefined,
+      signal
+    })
+    calls.spec.mockRejectedValueOnce(new Error("discovery unavailable"))
+    await expect(
+      service.requireNativeHistoryEditAdmission(native, result, operation)
+    ).rejects.toThrow("native_history_edit_unsupported")
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+it("retired protected discovery never adopts a capable server as new authority", async () => {
+  const { protectedEditRequestSchema } = await import("./history-edit-fixture")
+  let current = true,
+    release!: () => void
+  const native = { ...owner(), validate_lease: () => current }
+  const result = await service.captureHistorySnapshot(native, view, "send")
+  if (result.status !== "captured") throw new Error(result.status)
+  const spec = strictAdmissionSpec("messages")
+  Object.assign(
+    spec.paths[Object.keys(spec.paths)[0]].post.requestBody.content[
+      "application/json"
+    ].schema,
+    protectedEditRequestSchema()
+  )
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  calls.spec.mockImplementationOnce(async () => {
+    await held
+    return spec
+  })
+  const pending = service.requireNativeHistoryEditAdmission(
+    native,
+    result,
+    "messages"
+  )
+  current = false
+  release()
+  await expect(pending).rejects.toThrow("request_config_scope_changed")
+  expect(calls.append).not.toHaveBeenCalled()
+})

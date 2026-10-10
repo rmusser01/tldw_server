@@ -336,7 +336,8 @@ const schemaHasProperty = (
   spec: any,
   seen: Set<string> = new Set(),
   propertyType?: string,
-  depth = 0
+  depth = 0,
+  allowedBoolean = false
 ): boolean => {
   if (!schema || typeof schema !== "object" || depth >= 64) return false
   const ref = typeof schema.$ref === "string" ? schema.$ref : null
@@ -349,7 +350,8 @@ const schemaHasProperty = (
       spec,
       seen,
       propertyType,
-      depth + 1
+      depth + 1,
+      allowedBoolean
     )
   }
   // Unsupported request constraints cannot grant strict admission authority.
@@ -391,32 +393,32 @@ const schemaHasProperty = (
       Object.keys(entry ?? {}).every((key) => fieldKeys.includes(key)) &&
       entry?.anyOf === undefined &&
       entry?.oneOf === undefined
-    const allowsFalse = (entry: Record<string, unknown> | null | undefined) =>
+    const allowsBoolean = (entry: Record<string, unknown> | null | undefined) =>
       isSimple(entry) &&
       entry?.type === propertyType &&
-      (entry.const === undefined || entry.const === false) &&
+      (entry.const === undefined || entry.const === allowedBoolean) &&
       (entry.enum === undefined ||
-        (Array.isArray(entry.enum) && entry.enum.includes(false)))
+        (Array.isArray(entry.enum) && entry.enum.includes(allowedBoolean)))
     if (
       Array.isArray(variants) &&
       variants.length > 0 &&
       variants.length <= 64 &&
       !(field.anyOf !== undefined && field.oneOf !== undefined) &&
       (field.type === undefined || field.type === propertyType) &&
-      (field.const === undefined || field.const === false) &&
+      (field.const === undefined || field.const === allowedBoolean) &&
       (field.enum === undefined ||
-        (Array.isArray(field.enum) && field.enum.includes(false)))
+        (Array.isArray(field.enum) && field.enum.includes(allowedBoolean)))
     ) {
       const resolved = variants.map((entry) =>
         resolveSchemaRef(entry, spec, new Set(), true)
       )
       if (
         (field.oneOf !== undefined
-          ? resolved.filter(allowsFalse).length === 1
-          : resolved.some(allowsFalse)) &&
+          ? resolved.filter(allowsBoolean).length === 1
+          : resolved.some(allowsBoolean)) &&
         resolved.every(
           (entry) =>
-            allowsFalse(entry) || (isSimple(entry) && entry?.type === "null")
+            allowsBoolean(entry) || (isSimple(entry) && entry?.type === "null")
         )
       )
         return true
@@ -429,7 +431,7 @@ const schemaHasProperty = (
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : [])
   ]
   for (const entry of combos) {
-    if (schemaHasProperty(entry, property, spec, seen, propertyType, depth + 1))
+    if (schemaHasProperty(entry, property, spec, seen, propertyType, depth + 1, allowedBoolean))
       return true
   }
   return false
@@ -457,6 +459,120 @@ export const detectNativeHistoryBranchAdmission = (
     new Set(),
     "boolean"
   )
+}
+
+/** Require the primary operation's exact versioned excluded-target contract. */
+export const detectNativeHistoryEditAdmission = (
+  spec: unknown,
+  operation: "messages" | "completion"
+): boolean => {
+  const path =
+    operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"
+  const paths = resolveSchemaRef(spec, spec)?.paths
+  const content = (paths?.[path]?.post ?? paths?.[`${path}/`]?.post)
+    ?.requestBody?.content
+  const request = resolveSchemaRef(
+    content?.["application/json"]?.schema ??
+      content?.["application/json;charset=utf-8"]?.schema,
+    spec,
+    new Set(),
+    true
+  )
+  if (
+    !schemaHasProperty(
+      request,
+      "tldw_history_branch",
+      spec,
+      new Set(),
+      "boolean",
+      0,
+      true
+    )
+  )
+    return false
+  const field = resolveSchemaRef(
+    request?.properties?.tldw_history_edit_v1,
+    spec,
+    new Set(),
+    true
+  )
+  if (!field || typeof field !== "object") return false
+  const keysAre = (value: unknown, allowed: string[]) =>
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every((key) =>
+      [...allowed, ...schemaAnnotationKeys].includes(key)
+    )
+  const union = field.anyOf ?? field.oneOf
+  let target = field
+  if (union !== undefined) {
+    if (
+      !keysAre(field, ["anyOf", "oneOf"]) ||
+      (field.anyOf !== undefined && field.oneOf !== undefined) ||
+      !Array.isArray(union) ||
+      union.length !== 2
+    )
+      return false
+    const variants = union.map((entry) =>
+      resolveSchemaRef(entry, spec, new Set(), true)
+    )
+    const objects = variants.filter((entry) => entry?.type === "object")
+    if (
+      objects.length !== 1 ||
+      variants.filter(
+        (entry) => keysAre(entry, ["type"]) && entry.type === "null"
+      ).length !== 1
+    )
+      return false
+    target = objects[0]
+  }
+  const members = ["version", "message_id", "message_revision"]
+  if (
+    !keysAre(target, [
+      "type",
+      "properties",
+      "required",
+      "additionalProperties"
+    ]) ||
+    target.type !== "object" ||
+    target.additionalProperties !== false ||
+    !Array.isArray(target.required) ||
+    target.required.length !== members.length ||
+    !members.every((key) => target.required.includes(key)) ||
+    !target.properties ||
+    Object.keys(target.properties).length !== members.length ||
+    !members.every((key) => Object.hasOwn(target.properties, key))
+  )
+    return false
+  const version = resolveSchemaRef(
+    target.properties.version,
+    spec,
+    new Set(),
+    true
+  )
+  if (
+    !keysAre(version, ["type", "const"]) ||
+    version.type !== "integer" ||
+    version.const !== 1
+  )
+    return false
+  return members.slice(1).every((key) => {
+    const value = resolveSchemaRef(
+      target.properties[key],
+      spec,
+      new Set(),
+      true
+    )
+    return (
+      keysAre(value, ["type", "minLength"]) &&
+      value.type === "string" &&
+      Number.isSafeInteger(value.minLength) &&
+      value.minLength >= 1
+    )
+  })
 }
 
 const detectChatSaveToDb = (spec: any): boolean => {

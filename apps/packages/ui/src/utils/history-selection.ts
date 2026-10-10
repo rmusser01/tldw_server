@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type {
-  CompareHistorySelectionV1, HistoryCursorV1, HistoryNodeV1, HistoryResolutionV1,
+  CompareHistorySelectionV1, HistoryEditTargetV1, HistoryCursorV1, HistoryNodeV1, HistoryResolutionV1,
   HistorySelectedContentV1, HistorySelectionSnapshotV1, HistorySelectionV1, HistoryViewSelectionV1
 } from "@/types/history-selection"
 
@@ -254,5 +254,52 @@ export const isDefinitiveNativeBranchRejection = (
     typeof detail.history_version === "number" &&
     Number.isSafeInteger(detail.history_version) &&
     detail.history_version >= 0
+  )
+}
+
+/** Only the original excluded-target refusal proves a protected Edit was not admitted. */
+export const isDefinitiveNativeEditRejection = (
+  error: unknown,
+  selection: Pick<
+    HistorySelectionV1,
+    "conversation_id" | "cursor" | "selection_digest"
+  >,
+  target: HistoryEditTargetV1
+): boolean => {
+  const response = error as {
+    status?: unknown
+    details?: { detail?: unknown }
+    detail?: unknown
+  } | null
+  if (
+    response?.status !== 409 ||
+    target.version !== 1 ||
+    !target.message_id ||
+    !target.message_revision ||
+    !selection.conversation_id ||
+    !selection.selection_digest ||
+    selection.cursor.kind !== "before_message" ||
+    selection.cursor.message_id !== target.message_id
+  )
+    return false
+  const nested = response.details?.detail
+  const direct = response.detail
+  const matches = (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return false
+    const detail = value as Record<string, unknown>
+    return (
+      detail.status === "stale_selection" &&
+      detail.code === "history_edit_target_changed" &&
+      detail.conversation_id === selection.conversation_id &&
+      detail.message_id === target.message_id &&
+      detail.message_revision === target.message_revision &&
+      detail.selection_digest === selection.selection_digest
+    )
+  }
+  return (
+    (nested !== undefined || direct !== undefined) &&
+    (nested === undefined || matches(nested)) &&
+    (direct === undefined || matches(direct))
   )
 }

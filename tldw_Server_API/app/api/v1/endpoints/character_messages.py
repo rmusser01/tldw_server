@@ -405,7 +405,7 @@ async def send_message(
             ) from e
 
         # Validate parent message if provided
-        if message_data.parent_message_id:
+        if message_data.parent_message_id and message_data.tldw_history_selection_v1 is None:
             parent_msg = _verify_message_access(db, message_data.parent_message_id, current_user.id, scope)
             if parent_msg.get('conversation_id') != chat_id:
                 raise HTTPException(
@@ -511,8 +511,18 @@ async def send_message(
 
                 def history_write() -> tuple[str, dict[str, Any] | None]:
                     admission = db.append_selected_history_input(
-                        chat_id, selection, data, owner_client_id=owner_id, owner_key=owner,
-                        history_branch=message_data.tldw_history_branch)
+                        chat_id,
+                        selection,
+                        data,
+                        owner_client_id=owner_id,
+                        owner_key=owner,
+                        history_branch=message_data.tldw_history_branch,
+                        history_edit=(
+                            message_data.tldw_history_edit_v1.model_dump(mode="json")
+                            if message_data.tldw_history_edit_v1 is not None
+                            else None
+                        ),
+                    )
                     return admission["input_message_id"], admission
             else:
                 reference = message_data.tldw_history_admission_v1.model_dump(mode="json")

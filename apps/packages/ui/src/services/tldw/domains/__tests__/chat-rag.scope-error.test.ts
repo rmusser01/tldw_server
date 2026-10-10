@@ -330,3 +330,98 @@ describe("definite native no-admission observer", () => {
     expect(getServerChatSaveStatus("owned")).toBe("failed")
   })
 })
+
+
+describe("protected Edit save-status evidence", () => {
+  it.each([
+    "original",
+    "foreign",
+    "transport",
+    "malformed",
+    "missing precondition",
+    "retired intent"
+  ])("qualifies only its captured %s no-admission receipt", async (outcome) => {
+    const {
+      resetServerChatSaveStatus,
+      beginServerChatWrite,
+      getServerChatSaveStatus
+    } = await import("@/store/server-chat-save-status")
+    resetServerChatSaveStatus()
+    beginServerChatWrite("owned")("saved")
+    const target = {
+      version: 1,
+      message_id: "target",
+      message_revision: "original"
+    }
+    const selection = {
+      conversation_id: "owned",
+      cursor: { kind: "before_message", message_id: "target" },
+      selection_digest: "selection",
+      messages: [{ id: "parent" }]
+    }
+    const refusal =
+      outcome === "transport"
+        ? new Error("disconnected")
+        : {
+            status: 409,
+            details: {
+              detail: {
+                status: "stale_selection",
+                code: "history_edit_target_changed",
+                conversation_id: "owned",
+                message_id: "target",
+                message_revision: outcome === "foreign" ? "later" : "original",
+                selection_digest: "selection"
+              }
+            }
+          }
+    let release!: () => void, entered!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    mocks.bgRequest.mockImplementationOnce(async () => {
+      entered()
+      await held
+      throw refusal
+    })
+    const client = {
+      invalidateChatMessagesCache: vi.fn()
+    } as unknown as TldwApiClientCore
+    const pending = chatRagMethods.addChatMessage.call(
+      client,
+      "owned",
+      {
+        role: "user",
+        content: "Edited input",
+        tldw_history_branch: true,
+        tldw_history_selection_v1: selection,
+        ...(outcome === "missing precondition"
+          ? {}
+          : {
+              tldw_history_edit_v1:
+                outcome === "malformed" ? { ...target, version: true } : target
+            })
+      },
+      {
+        requestScope: {
+          config: { serverUrl: "https://original.test", authMode: "multi-user" },
+          userId: "alice"
+        }
+      }
+    )
+    void pending.catch(() => {})
+    await ready
+    if (outcome === "retired intent") {
+      target.message_revision = "later"
+      selection.selection_digest = "later"
+    }
+    release()
+    await expect(pending).rejects.toBe(refusal)
+    expect(getServerChatSaveStatus("owned")).toBe(
+      outcome === "original" || outcome === "retired intent" ? "saved" : "failed"
+    )
+  })
+})

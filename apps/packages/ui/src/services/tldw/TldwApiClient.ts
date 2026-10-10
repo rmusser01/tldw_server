@@ -1047,6 +1047,8 @@ export interface ResearchRunResponse {
 
 export interface ChatCompletionRequest {
   tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
+  tldw_history_branch?: boolean
+  tldw_history_edit_v1?: import("@/types/history-selection").HistoryEditTargetV1
   messages: ChatMessage[]
   model: string
   routing?: {

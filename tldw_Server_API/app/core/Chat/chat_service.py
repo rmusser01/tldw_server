@@ -2776,6 +2776,7 @@ def build_call_params_from_request(
             "save_to_db",
             "tldw_history_selection_v1",
             "tldw_history_branch",
+            "tldw_history_edit_v1",
             "tldw_history_admission_v1",
             "history_message_limit",
             "history_message_order",
@@ -2887,8 +2888,17 @@ def build_call_params_from_request(
     )["extra_body"]
     for extension in ("extra_body", "extra_headers"):
         if isinstance(call_params.get(extension), dict):
-            call_params[extension] = {key: value for key, value in call_params[extension].items()
-                if key.lower().replace("-", "_") not in {"tldw_history_selection_v1", "tldw_history_admission_v1"}}
+            call_params[extension] = {
+                key: value
+                for key, value in call_params[extension].items()
+                if key.lower().replace("-", "_")
+                not in {
+                    "tldw_history_selection_v1",
+                    "tldw_history_branch",
+                    "tldw_history_edit_v1",
+                    "tldw_history_admission_v1",
+                }
+            }
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
     if billing_prompt_cache_intent is not None:
         call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
@@ -4174,6 +4184,8 @@ async def build_context_and_messages(
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
         selection = history_selection.model_dump(mode="json")
+        edit_target = getattr(request_data, "tldw_history_edit_v1", None)
+        edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
@@ -4195,6 +4207,7 @@ async def build_context_and_messages(
                     owner_client_id=history_runtime["history_owner_client_id"],
                     owner_key=owner,
                     conn=conn,
+                    history_edit=edit_target,
                 )
                 context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
                 for item in content:
@@ -4257,6 +4270,7 @@ async def build_context_and_messages(
                         owner_key=owner,
                         conn=conn,
                         history_branch=getattr(request_data, "tldw_history_branch", None),
+                        history_edit=edit_target,
                     )
                 return snap, content, accepted, state["conversation"], context
         try:

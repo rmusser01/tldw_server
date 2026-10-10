@@ -33,11 +33,13 @@ import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
   nativeHistoryNeedsBranchChoice,
+  requireNativeHistoryEditAdmission,
   prepareHistoryContext,
   finalizeHistorySelection,
   parseNativeHistoryAdmission,
   historyAdmissionReference,
   isDefinitiveNativeBranchRejection,
+  isDefinitiveNativeEditRejection,
   nativeEditResendView,
   nativeRegenerateView,
   nativeRegenerationMessage,
@@ -49,7 +51,7 @@ import {
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
-import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistoryEditRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 
@@ -396,6 +398,7 @@ export const sendNativeHistoryCharacter = async (
     const originalCapture = current.capture
     const originView = current.view
     const historyBranch = Boolean(explicitAction || controller.takeBranchIntent?.(originView))
+    const historyEdit = editResend ? Object.freeze({ version: 1 as const, message_id: editResend.message_id, message_revision: editResend.message_revision }) : undefined
     const view = editResend
       ? nativeEditResendView(
           current.owner,
@@ -616,6 +619,9 @@ export const sendNativeHistoryCharacter = async (
     }
     try {
       if (!preparingIsCurrent()) throw new Error("stale_selection")
+      if (historyEdit) await requireNativeHistoryEditAdmission(owner, capture, "completion", {
+        signal: snapshot.scopeSignal, validate_lease: preparingIsCurrent
+      })
       if (
         !historyBranch &&
         (await nativeHistoryNeedsBranchChoice(owner, capture, "completion", {
@@ -639,7 +645,8 @@ export const sendNativeHistoryCharacter = async (
       const wire = {
         ...(structuredClone(prepared.payload) as ChatCompletionRequest),
         tldw_history_selection_v1: structuredClone(selection),
-        tldw_history_branch: historyBranch
+        tldw_history_branch: historyBranch,
+        ...(historyEdit ? { tldw_history_edit_v1: historyEdit } : {})
       }
       for await (const chunk of tldwClient.streamChatCompletion(wire, {
         signal: snapshot.scopeSignal,
@@ -723,16 +730,17 @@ export const sendNativeHistoryCharacter = async (
         content === "" &&
         (error instanceof NativeHistoryBranchChoice ||
           isSavedContextRefusal(error) ||
-          (!historyBranch && isDefinitiveNativeBranchRejection(error, selection)))
+          (!historyBranch && isDefinitiveNativeBranchRejection(error, selection)) ||
+          (historyEdit && isDefinitiveNativeEditRejection(error, selection, historyEdit)))
       ) {
         const acceptedOwner = current.owner
         const branchRefusal =
           !historyBranch &&
           (error instanceof NativeHistoryBranchChoice ||
             isDefinitiveNativeBranchRejection(error, selection))
-        const Refusal = branchRefusal
-          ? NativeHistoryBranchRefusal
-          : NativeHistoryContextRefusal
+        const Refusal = historyEdit && isDefinitiveNativeEditRejection(error, selection, historyEdit)
+          ? NativeHistoryEditRefusal
+          : branchRefusal ? NativeHistoryBranchRefusal : NativeHistoryContextRefusal
         const refusal =
           error instanceof NativeHistoryBranchChoice
             ? error

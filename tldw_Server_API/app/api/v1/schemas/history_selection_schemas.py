@@ -19,6 +19,33 @@ class HistoryWireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
+class HistoryEditTargetV1(HistoryWireModel):
+    """Original excluded user row that a protected Edit admission must still match."""
+
+    version: Literal[1]
+    message_id: str = Field(min_length=1)
+    message_revision: str = Field(min_length=1)
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _strict_version(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("Edit target version must be the integer 1")
+        return value
+
+
+HISTORY_EDIT_FIELD_DESCRIPTION = (
+    "[Extension] Original excluded user row for protected Edit and resend. Requires "
+    "tldw_history_branch=true and a send selection with a matching before_message cursor. "
+    "The owner checks the live settled user and original opaque message_revision inside "
+    "admission before inserting input or calling a provider. A changed or missing target "
+    "refuses with 409 {status: 'stale_selection', code: 'history_edit_target_changed', "
+    "conversation_id, message_id, message_revision, selection_digest}; all echoes identify "
+    "the original request and nothing is written. Committed same-ID replay compares the "
+    "original precondition with immutable input intent before rechecking old source history."
+)
+
+
 class AfterMessageCursorV1(HistoryWireModel):
     kind: Literal["after_message"]
     message_id: str = Field(min_length=1)

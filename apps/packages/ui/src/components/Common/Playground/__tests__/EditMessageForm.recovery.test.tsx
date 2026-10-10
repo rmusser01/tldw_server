@@ -117,6 +117,22 @@ describe("current message edit recovery", () => {
       expected: /sync setup does not support editing/i
     },
     {
+      name: "protected Edit source changed",
+      outcome: {
+        status: "failed",
+        errorMessage: "native_history_edit_target_changed"
+      },
+      expected: /saved message has changed/i
+    },
+    {
+      name: "protected Edit old server",
+      outcome: {
+        status: "failed",
+        errorMessage: "native_history_edit_unsupported"
+      },
+      expected: /does not support this edit action/i
+    },
+    {
       name: "changed edit",
       outcome: { status: "skipped", reason: "stale_selection" },
       expected: /conversation or edited text changed/i

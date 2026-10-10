@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.history_selection import (
     HistoryBranchChangedError,
+    HistoryEditTargetChangedError,
     HistoryFencesV1,
     HistorySelectionError,
     HistorySelectionSnapshotV1,
@@ -113,6 +114,7 @@ class MessageStore:
         conn: Any,
         selected_ids: tuple[str, ...] = (),
         include_message_versions: bool = False,
+        edit_precondition: tuple[Mapping[str, Any], str] | None = None,
     ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
         """One statement captures all fences, rows, metadata, assets and an optional base.
 
@@ -294,6 +296,21 @@ class MessageStore:
                 contents[node["id"]]["revision"] = node["revision"]
                 contents[node["id"]]["images"] = tuple(contents[node["id"]]["images"])
         manifest = tuple(nodes.values())
+        if edit_precondition is not None:
+            original, selection_digest = edit_precondition
+            target = nodes.get(original["message_id"])
+            if (
+                target is None
+                or target["role"] != "user"
+                or target["settled"] is not True
+                or target["revision"] != original["message_revision"]
+            ):
+                raise HistoryEditTargetChangedError(
+                    conversation_id=conversation_id,
+                    message_id=original["message_id"],
+                    message_revision=original["message_revision"],
+                    selection_digest=selection_digest,
+                )
         status: dict[str, Any] = {"kind": "legacy_review_required"}
         if projection_id is not None:
             if header["projection_json"] is None:
@@ -647,8 +664,14 @@ class MessageStore:
             return {**json.loads(canonical), "projection_digest": digest, "created_at": created_at}
 
     def validate_history_selection(
-        self, conversation_id: str, selection: Mapping[str, Any], *,
-        owner_client_id: str, owner_key: str, conn: Any,
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any,
+        history_edit: Mapping[str, Any] | None = None,
     ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
         """Re-resolve retained membership and context under the caller's owner fence."""
         from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
@@ -658,12 +681,17 @@ class MessageStore:
         if body["owner_key"] != owner_key or body["conversation_id"] != conversation_id:
             raise HistorySelectionError("owner_conversation_mismatch")
         fresh, content = self._read_history_snapshot(
-            conversation_id, owner_client_id=owner_client_id, owner_key=owner_key,
-            projection_id=body["interpretation"].get("projection_id"), conn=conn,
+            conversation_id,
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            projection_id=body["interpretation"].get("projection_id"),
+            conn=conn,
             selected_ids=tuple(row["id"] for row in body["messages"]),
             include_message_versions=True,
+            edit_precondition=(history_edit, body["selection_digest"]) if history_edit is not None else None,
         )
-        result = resolve_history_selection(snapshot_to_wire(fresh), body, body["purpose"], body["request_context_digest"])
+        wire = snapshot_to_wire(fresh)
+        result = resolve_history_selection(wire, body, body["purpose"], body["request_context_digest"])
         if result["status"] != "ready":
             raise HistorySelectionError(result["code"])
         # Fence changes alone are not evidence of a changed retained path or context.
@@ -724,6 +752,34 @@ class MessageStore:
         return MessageStore._history_digest(encode(message))
 
     @staticmethod
+    def _prepare_history_edit(
+        selection: Mapping[str, Any],
+        messages: Sequence[Mapping[str, Any]],
+        history_branch: bool | None,
+        history_edit: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Detach strict original intent before the transaction or committed replay."""
+        if history_edit is None:
+            return None
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryEditTargetV1
+
+        try:
+            target = HistoryEditTargetV1.model_validate(history_edit).model_dump(mode="json")
+        except ValidationError as exc:
+            raise HistorySelectionError("invalid_history_edit") from exc
+        if (
+            history_branch is not True
+            or selection.get("purpose") != "send"
+            or selection.get("cursor") != {"kind": "before_message", "message_id": target["message_id"]}
+            or len(messages) != 1
+            or messages[0].get("sender") != "user"
+        ):
+            raise HistorySelectionError("invalid_history_edit")
+        return target
+
+    @staticmethod
     def _require_history_tip(
         snapshot: HistorySelectionSnapshotV1,
         parent_id: str | None,
@@ -757,12 +813,14 @@ class MessageStore:
         owner_key: str,
         conn: Any | None = None,
         history_branch: bool | None = None,
+        history_edit: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically validate selected history and append one accepted current input.
 
         `history_branch=False` requires the selection's last message to have no live
         child (see `_require_history_tip`). A replay of an already-admitted message id
-        returns its admission before that check, whatever the flag.
+        returns its admission before that check, whatever the flag. Protected Edit
+        retains its original excluded-target precondition in immutable replay intent.
         """
         body, data = dict(selection), dict(message)
         if (
@@ -775,7 +833,8 @@ class MessageStore:
             raise HistorySelectionError("invalid_input")
         if data.get("conversation_id", conversation_id) != conversation_id:
             raise HistorySelectionError("owner_conversation_mismatch")
-        intent = self._history_intent_digest(data)
+        target = self._prepare_history_edit(body, [data], history_branch, history_edit)
+        intent = self._history_intent_digest({"message": data, "history_edit": target} if target else data)
         with nullcontext(conn) if conn is not None else self._db.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             existing = active.execute("SELECT history_admission_json FROM messages WHERE id = ?", (data["id"],)).fetchone()
@@ -796,7 +855,12 @@ class MessageStore:
                 )
                 return authority["admission"]
             fresh, _ = self.validate_history_selection(
-                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                conversation_id,
+                body,
+                owner_client_id=owner_client_id,
+                owner_key=owner_key,
+                conn=active,
+                history_edit=target,
             )
             parent = body["messages"][-1]["id"] if body["messages"] else None
             if "parent_message_id" in data and data["parent_message_id"] != parent:
@@ -848,11 +912,13 @@ class MessageStore:
         owner_key: str,
         conn: Any | None = None,
         history_branch: bool | None = None,
+        history_edit: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Accept a server-owned current-input chain once, under one owner transaction.
 
         `history_branch` has the same meaning as for `append_selected_history_input`;
         a reused selection still fails first with `selection_already_consumed`.
+        Protected Edit checks the original excluded target before any chain insert.
         """
         body = dict(selection)
         if not messages or any(message.get("sender") not in {"user", "tool"} for message in messages):
@@ -863,6 +929,7 @@ class MessageStore:
             or body.get("purpose") != "send"
         ):
             raise HistorySelectionError("owner_conversation_mismatch")
+        target = self._prepare_history_edit(body, messages, history_branch, history_edit)
         with nullcontext(conn) if conn is not None else self._db.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             consumed = active.execute(
@@ -879,7 +946,12 @@ class MessageStore:
                 ):
                     raise HistorySelectionError("selection_already_consumed")
             fresh, _ = self.validate_history_selection(
-                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                conversation_id,
+                body,
+                owner_client_id=owner_client_id,
+                owner_key=owner_key,
+                conn=active,
+                history_edit=target,
             )
             scope = dict(
                 active.execute(
@@ -3007,6 +3079,9 @@ class MessageStore:
             ),
         )
         if advance_history:
+            if metadata_message_id is not None:
+                # Undo must not restore an opaque revision within one timestamp tick.
+                conn.execute("UPDATE messages SET version = version + 1 WHERE id = ?", (message_id,))
             conversation_id = str(self._row_value(row, "conversation_id"))
             self._advance_history_version(conn, conversation_id)
         return True
@@ -3132,12 +3207,6 @@ class MessageStore:
     ) -> dict[str, Any] | None:
         """Read metadata under the row lock used by PostgreSQL merge writers."""
         if self._db.backend_type == BackendType.POSTGRESQL:
-            conn.execute(
-                "INSERT INTO message_metadata(message_id, last_modified) "
-                "SELECT id, CURRENT_TIMESTAMP FROM messages WHERE id = ? "
-                "ON CONFLICT(message_id) DO NOTHING",
-                (message_id,),
-            )
             query = (
                 "SELECT tool_calls_json, extra_json, last_modified "
                 "FROM message_metadata WHERE message_id = ? FOR UPDATE"
@@ -3150,9 +3219,8 @@ class MessageStore:
 
         row = conn.execute(query, (message_id,)).fetchone()
         if row is None:
-            # SQLite merge writers retain the existing create-on-first-write
-            # behavior; the downstream message join still rejects missing IDs.
-            return {} if self._db.backend_type == BackendType.SQLITE else None
+            # The conversation lock serializes first writes on both backends.
+            return {}
         tool_calls = self._row_value(row, "tool_calls_json")
         extra = self._row_value(row, "extra_json", 1)
         return {

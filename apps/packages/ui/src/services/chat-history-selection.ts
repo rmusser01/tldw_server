@@ -4,6 +4,7 @@ import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/c
 import type { ChatScope } from "@/types/chat-scope"
 import type {
   HistoryAdmissionReferenceV1,
+  HistoryEditTargetV1,
   HistoryAdmissionV1,
   HistoryCaptureRequestV1,
   HistoryCaptureResultV1,
@@ -61,6 +62,9 @@ const freeze = <T>(value: T): T => {
   return value
 }
 const str = z.string().min(1)
+const historyEditSchema = z
+  .object({ version: z.literal(1), message_id: str, message_revision: str })
+  .strict()
 const revision = z.object({ id: str, revision: str }).strict()
 const fences = z
   .object({
@@ -407,6 +411,29 @@ export const nativeHistoryNeedsBranchChoice = async (
   return capture.snapshot.nodes.some(
     (node) => parents.get(node.id) === selectedParent
   )
+}
+
+/** Protected Edit has no read-only fallback for servers lacking atomic target admission. */
+export const requireNativeHistoryEditAdmission = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  operation: "messages" | "completion",
+  options?: HistoryOperationOptions
+): Promise<void> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.view, true)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.purpose !== "send") fail("selected_content_mismatch")
+  const spec = await tldwClient
+    .getOpenAPISpec(nativeOptions(owner, options?.signal))
+    .catch(() => null)
+  assertOwnerLease(owner, options)
+  const { detectNativeHistoryEditAdmission } = await import(
+    "./tldw/server-capabilities"
+  )
+  assertOwnerLease(owner, options)
+  if (!detectNativeHistoryEditAdmission(spec, operation))
+    fail("native_history_edit_unsupported")
 }
 
 /** Read the deployed history fence without loading message content or changing the view. */
@@ -941,7 +968,7 @@ export const finalizeHistorySelection = (
   return freeze(resolved.selection)
 }
 
-export { isDefinitiveNativeBranchRejection } from "@/utils/history-selection"
+export { isDefinitiveNativeBranchRejection, isDefinitiveNativeEditRejection } from "@/utils/history-selection"
 
 // These exact native HistorySelectionError responses precede projection commit.
 // Transport/scope/abort errors and unrecognized responses cannot prove non-commit.
@@ -1153,13 +1180,15 @@ export const appendSelectedUser = async (
   owner: HistoryOwnerV1,
   selection: HistorySelectionV1,
   input: Message,
-  opts?: HistoryOperationOptions & { historyBranch?: boolean; documentPresentation?: boolean }
+  opts?: HistoryOperationOptions & { historyBranch?: boolean; historyEdit?: HistoryEditTargetV1; documentPresentation?: boolean }
 ): Promise<HistoryAdmissionV1> => {
   selection = structuredClone(selection)
   input = structuredClone(input)
+  const historyEdit = opts?.historyEdit === undefined ? undefined :
+    parse(historyEditSchema, structuredClone(opts.historyEdit)) as HistoryEditTargetV1
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
-  if (opts?.historyBranch !== undefined && owner.kind !== "native")
+  if ((opts?.historyBranch !== undefined || historyEdit !== undefined) && owner.kind !== "native")
     fail("native_history_requires_server_owner")
   if (owner.kind === "local")
     return appendLocalSelectedUser(owner, selection, input, {
@@ -1173,12 +1202,15 @@ export const appendSelectedUser = async (
     selectionDigest(selection) !== selection.selection_digest
   )
     fail("invalid_selection")
+  if (historyEdit && (opts?.historyBranch !== true || selection.cursor.kind !== "before_message" ||
+      selection.cursor.message_id !== historyEdit.message_id)) fail("invalid_history_edit")
   const body = {
     ...nativeHistoryMessagePayload(input),
     tldw_history_selection_v1: structuredClone(selection),
     ...(opts?.historyBranch !== undefined
       ? { tldw_history_branch: opts.historyBranch }
-      : {})
+      : {}),
+    ...(historyEdit ? { tldw_history_edit_v1: historyEdit } : {})
   }
   const response = await tldwClient.addChatMessage(
     owner.conversation_id,

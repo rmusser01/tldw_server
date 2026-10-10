@@ -1,4 +1,11 @@
 /** H1 wire values. Owners construct snapshots and admissions; views only select them. */
+/** Original excluded row; editor leases and callbacks stay private. */
+export type HistoryEditTargetV1 = {
+  readonly version: 1
+  readonly message_id: string
+  readonly message_revision: string
+}
+
 export type HistoryCursorV1 =
   | { readonly kind: "after_message"; readonly message_id: string }
   | { readonly kind: "before_message"; readonly message_id: string }

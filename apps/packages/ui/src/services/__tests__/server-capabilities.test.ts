@@ -1374,3 +1374,132 @@ describe("server capabilities docs-info merge", () => {
     expect(source).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
   })
 })
+
+
+describe("protected Edit primary request capability", () => {
+  const path = (operation: "messages" | "completion") =>
+    operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"
+  const spec = (
+    operation: "messages" | "completion",
+    schema: unknown,
+    components = {}
+  ) => ({
+    paths: {
+      [path(operation)]: {
+        post: { requestBody: { content: { "application/json": { schema } } } }
+      }
+    },
+    components: { schemas: components }
+  })
+  it.each(["messages", "completion"] as const)(
+    "accepts only the supported primary %s schema",
+    async (operation) => {
+      const { protectedEditRequestSchema } = await import(
+        "./history-edit-fixture"
+      )
+      const { detectNativeHistoryEditAdmission: detect } =
+        await importCapabilitiesModule()
+      const schema = protectedEditRequestSchema()
+      expect(detect(spec(operation, schema), operation)).toBe(true)
+      expect(
+        detect(
+          spec(
+            operation,
+            { $ref: "#/components/schemas/Request" },
+            { Request: schema }
+          ),
+          operation
+        )
+      ).toBe(true)
+      const target = schema.properties.tldw_history_edit_v1.anyOf[0]
+      const refSchema = {
+        ...schema,
+        properties: {
+          ...schema.properties,
+          tldw_history_edit_v1: {
+            anyOf: [{ $ref: "#/components/schemas/Target" }, { type: "null" }]
+          }
+        }
+      }
+      expect(
+        detect(spec(operation, refSchema, { Target: target }), operation)
+      ).toBe(true)
+    }
+  )
+  it.each([
+    "missing field",
+    "false only",
+    "string branch",
+    "nullable only",
+    "open target",
+    "optional member",
+    "extra member",
+    "wrong version",
+    "coerced version",
+    "empty revision",
+    "ambiguous union",
+    "constraint sibling",
+    "external ref",
+    "cyclic ref",
+    "unrelated component",
+    "wrong operation",
+    "missing primary"
+  ])("does not grant Edit authority from %s", async (change) => {
+    const { protectedEditRequestSchema } = await import("./history-edit-fixture")
+    const { detectNativeHistoryEditAdmission: detect } =
+      await importCapabilitiesModule()
+    const schema = protectedEditRequestSchema()
+    const target = schema.properties.tldw_history_edit_v1.anyOf[0]
+    if (!target.properties || !target.required)
+      throw new Error("Missing target fixture")
+    let value: unknown
+    if (change === "missing field")
+      Reflect.deleteProperty(schema.properties, "tldw_history_edit_v1")
+    if (change === "false only")
+      Object.assign(schema.properties, {
+        tldw_history_branch: { type: "boolean", const: false }
+      })
+    if (change === "string branch")
+      Object.assign(schema.properties, {
+        tldw_history_branch: { type: "string" }
+      })
+    if (change === "nullable only")
+      Object.assign(schema.properties, { tldw_history_edit_v1: { type: "null" } })
+    if (change === "open target") target.additionalProperties = true
+    if (change === "optional member") target.required.pop()
+    if (change === "extra member")
+      Object.assign(target.properties, { optional: { type: "string" } })
+    if (change === "wrong version") target.properties.version.const = 2
+    if (change === "coerced version") target.properties.version.type = "number"
+    if (change === "empty revision")
+      target.properties.message_revision.minLength = 0
+    if (change === "ambiguous union")
+      schema.properties.tldw_history_edit_v1.anyOf.push(structuredClone(target))
+    if (change === "constraint sibling")
+      Object.assign(schema.properties.tldw_history_edit_v1, {
+        allOf: [{ type: "null" }]
+      })
+    if (change === "external ref")
+      Object.assign(schema.properties, {
+        tldw_history_edit_v1: {
+          $ref: "https://foreign.test/schema"
+        }
+      })
+    if (change === "cyclic ref")
+      value = spec(
+        "messages",
+        { $ref: "#/components/schemas/Loop" },
+        { Loop: { $ref: "#/components/schemas/Loop" } }
+      )
+    if (change === "unrelated component")
+      value = spec("messages", { type: "object" }, { Unused: schema })
+    if (change === "wrong operation") value = spec("completion", schema)
+    if (change === "missing primary")
+      value = {
+        paths: { [path("messages")]: { post: { responses: { 200: schema } } } }
+      }
+    expect(detect(value ?? spec("messages", schema), "messages")).toBe(false)
+  })
+})

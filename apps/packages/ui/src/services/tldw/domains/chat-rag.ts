@@ -34,7 +34,7 @@ import type {
 } from '../TldwApiClient'
 import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
 import { trackServerChatWrite } from '@/store/server-chat-save-status'
-import { isDefinitiveNativeBranchRejection } from "@/utils/history-selection"
+import { isDefinitiveNativeBranchRejection, isDefinitiveNativeEditRejection } from "@/utils/history-selection"
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 
@@ -1440,6 +1440,16 @@ export const chatRagMethods = {
             }))
           }
         : null
+    const originalEdit = payload.tldw_history_edit_v1
+    const submittedEdit = options?.requestScope && payload.role === "user" && payload.tldw_history_branch === true &&
+      originalEdit?.version === 1 && typeof originalEdit.message_id === "string" && originalEdit.message_id.length > 0 &&
+      typeof originalEdit.message_revision === "string" && originalEdit.message_revision.length > 0 &&
+      Object.keys(originalEdit).length === 3 && ["version", "message_id", "message_revision"].every(key => Object.hasOwn(originalEdit, key)) &&
+      selection?.conversation_id === cid && selection.cursor?.kind === "before_message" && selection.cursor.message_id === originalEdit.message_id &&
+      typeof selection.selection_digest === "string" && selection.selection_digest.length > 0
+      ? { target: { version: 1 as const, message_id: originalEdit.message_id, message_revision: originalEdit.message_revision },
+          selection: { conversation_id: cid, cursor: { kind: "before_message" as const, message_id: originalEdit.message_id },
+            selection_digest: selection.selection_digest } } : null
     const res = await trackServerChatWrite(
       cid,
       () =>
@@ -1456,8 +1466,8 @@ export const chatRagMethods = {
       {
         isUnchangedError: (error) =>
           Boolean(
-            submittedSelection &&
-              isDefinitiveNativeBranchRejection(error, submittedSelection)
+            (submittedSelection && isDefinitiveNativeBranchRejection(error, submittedSelection)) ||
+            (submittedEdit && isDefinitiveNativeEditRejection(error, submittedEdit.selection, submittedEdit.target))
           )
       }
     )

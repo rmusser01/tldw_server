@@ -1,4 +1,4 @@
-import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
   appendSelectedUser,
@@ -677,7 +677,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               ? { documentPresentation: true } : {}),
             ...(historyTurn.historyBranch !== undefined
               ? { historyBranch: historyTurn.historyBranch }
-              : {})
+              : {}),
+            ...(historyTurn.historyEdit ? { historyEdit: historyTurn.historyEdit } : {})
           }
         )
       }
@@ -1250,7 +1251,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
             e
           )
         } catch (refusal) {
-          if (!(refusal instanceof NativeHistoryBranchRefusal)) throw refusal
+          if (!(refusal instanceof NativeHistoryBranchRefusal || refusal instanceof NativeHistoryEditRefusal)) throw refusal
           if (refusal.isCurrent())
             setMessagesWithTransition((prev) =>
               prev.filter(

@@ -5,7 +5,7 @@ import type {
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
 import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
-import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal } from "@/hooks/chat/native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type {
   HistorySendTurn,
   NativeHistoryEditResend
@@ -15,8 +15,10 @@ import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
   nativeHistoryNeedsBranchChoice,
+  requireNativeHistoryEditAdmission,
   historyAdmissionReference,
   isDefinitiveNativeBranchRejection,
+  isDefinitiveNativeEditRejection,
   nativeEditResendView
 } from "@/services/chat-history-selection"
 import {
@@ -1076,6 +1078,7 @@ const captureNormalHistoryTurn = async (
     capture,
     ...(retryAdmission ? { retryAdmission } : {}),
     ...(owner.kind === "native" ? { historyBranch: Boolean(editResend || branchIntent) } : {}),
+    ...(editResend ? { historyEdit: Object.freeze({ version: 1 as const, message_id: editResend.message_id, message_revision: editResend.message_revision }) } : {}),
     currentView: () =>
       editResend
         ? canUpdateView()
@@ -1088,6 +1091,10 @@ const captureNormalHistoryTurn = async (
     beforeDispatch: async () => {
       if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
+      if (owner.kind === "native" && turn.historyEdit)
+        await requireNativeHistoryEditAdmission(owner, capture, "messages", {
+          signal, validate_lease: editPreparationIsCurrent
+        })
       if (
         owner.kind === "native" &&
         turn.historyBranch === false &&
@@ -1124,19 +1131,19 @@ const captureNormalHistoryTurn = async (
       stopCheckpoints()
       if (
         owner.kind === "native" &&
-        turn.historyBranch === false &&
         !turn.retryAdmission &&
         !turn.admission &&
         !turn.resultId &&
         data.content === "" &&
         turn.selection &&
-        (error instanceof NativeHistoryBranchChoice ||
-          isDefinitiveNativeBranchRejection(error, turn.selection))
+        ((turn.historyBranch === false && (error instanceof NativeHistoryBranchChoice ||
+          isDefinitiveNativeBranchRejection(error, turn.selection))) ||
+          (turn.dispatched && turn.historyEdit && isDefinitiveNativeEditRejection(error, turn.selection, turn.historyEdit)))
       ) {
         const refusal =
           error instanceof NativeHistoryBranchChoice
             ? error
-            : new NativeHistoryBranchRefusal(
+            : new (turn.historyEdit ? NativeHistoryEditRefusal : NativeHistoryBranchRefusal)(
                 error,
                 () => canUpdateView() && originalOwner.validate_lease?.() !== false
               )
@@ -1146,7 +1153,7 @@ const captureNormalHistoryTurn = async (
           console.warn("Could not retain a native input that was not admitted.")
         }
         if (refusal.isCurrent()) {
-          controller.holdStaleSend?.(current.view!, draftIsCurrent)
+          if (!turn.historyEdit) controller.holdStaleSend?.(current.view!, draftIsCurrent)
           try {
             await controller.refreshRecovery?.()
           } catch {

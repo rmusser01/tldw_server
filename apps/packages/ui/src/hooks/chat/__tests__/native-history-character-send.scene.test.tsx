@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { TFunction } from "i18next"
 import { useStoreMessageOption } from "@/store/option"
@@ -177,8 +178,7 @@ it("refuses a native snapshot for another account before creation", async () => 
 describe("native admitted reasoning progress", () => {
   const mountAdmitted = async (detached = false) => {
     const { memory } = await import("./local-history-fixture")
-    for (const table of Object.values(memory))
-      if (table?.rows) table.rows.clear()
+    for (const table of Object.values(memory)) if (table?.rows) table.rows.clear()
     sessionStorage.clear()
     await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
     const chatId = "native-reasoning-chat"
@@ -248,8 +248,7 @@ describe("native admitted reasoning progress", () => {
               content: {
                 "application/json": {
                   schema: {
-                    type: "object",
-                    properties: { tldw_history_branch: { type: "boolean" } }
+                    ...protectedEditRequestSchema()
                   }
                 }
               }
@@ -551,4 +550,84 @@ describe("native admitted reasoning progress", () => {
       mounted.selection.unmount()
     }
   })
+  it("refuses protected Character Edit on an older primary contract before journal or POST", async () => {
+    const mounted = await mountAdmitted(true)
+    io.spec.mockResolvedValue({
+      paths: {
+        "/api/v1/chat/completions": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    properties: { tldw_history_branch: { type: "boolean" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    io.stream.mockImplementation(() => {
+      throw new Error("unguarded old-server Edit POST")
+    })
+    try {
+      await expect(sendNativeHistoryCharacter(mounted.params)).rejects.toThrow(
+        "native_history_edit_unsupported"
+      )
+      expect(io.stream).not.toHaveBeenCalled()
+      expect(await mounted.journal()).toEqual([])
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        mounted.originalRows
+      )
+    } finally {
+      mounted.release()
+      mounted.selection.unmount()
+    }
+  })
+  it("sends the original excluded Character user precondition and retains exact typed refusal", async () => {
+    const mounted = await mountAdmitted(true)
+    io.stream.mockImplementation(function* (request) {
+      const selection = request.tldw_history_selection_v1
+      yield* []
+      throw Object.assign(new Error("changed target"), {
+        status: 409,
+        details: {
+          detail: {
+            status: "stale_selection",
+            code: "history_edit_target_changed",
+            conversation_id: selection.conversation_id,
+            message_id: "old-user",
+            message_revision: "1",
+            selection_digest: selection.selection_digest
+          }
+        }
+      })
+    })
+    try {
+      await expect(sendNativeHistoryCharacter(mounted.params)).rejects.toThrow(
+        "native_history_edit_target_changed"
+      )
+      expect(io.stream.mock.calls[0][0].tldw_history_edit_v1).toEqual({
+        version: 1,
+        message_id: "old-user",
+        message_revision: "1"
+      })
+      expect((await mounted.journal())[0]?.turn).toMatchObject({
+        state: "refused",
+        input_text: "Edited question",
+        result_text: "",
+        action: "edit_resend"
+      })
+      expect(useStoreMessageOption.getState().messages).toEqual(
+        mounted.originalRows
+      )
+      expect(mounted.follow).not.toHaveBeenCalled()
+    } finally {
+      mounted.release()
+      mounted.selection.unmount()
+    }
+  })
+
 })
