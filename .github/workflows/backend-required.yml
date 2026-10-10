@@ -423,7 +423,7 @@ jobs:
           PYTHONPATH: .
         run: |
           python Helper_Scripts/export_openapi_schema.py \
-            --check apps/tldw-frontend/lib/api/openapi.fingerprint.json
+            --check apps/packages/api-types/openapi.fingerprint.json
 
   # Wakes the merge queue when the gate above fails (TASK-13462, section 4.6 of
   # Docs/superpowers/specs/2026-10-04-merge-queue-design.md). A red gate causes

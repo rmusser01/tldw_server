@@ -87,6 +87,7 @@ apps/
 | `~/` | `packages/ui/src/` | `packages/ui/src/` | Alternative shared path |
 | `@tldw/ui` | `packages/ui/src/` | `packages/ui/src/` | Explicit shared package |
 | `@web/*` | N/A | `tldw-frontend/*` | Web-only modules |
+| `@tldw/api-types` | `packages/api-types/` | `packages/api-types/` | Generated API contract types (ADR-065) |
 
 ## Code Organization Rules
 
