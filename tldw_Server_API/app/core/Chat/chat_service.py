@@ -7,6 +7,7 @@ the /api/v1/chat/completions endpoint so the endpoint can orchestrate at a
 higher level. The goal is to reduce duplication and cognitive load while
 keeping the wire behavior identical.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -1331,6 +1332,8 @@ def _resolve_run_first_completion_outcome(exc: Exception) -> str:
         ):
             return "blocked"
     return "error"
+
+
 def _tool_names_from_tool_calls(tool_calls: Any) -> list[str]:
     """Extract normalized tool names from OpenAI-style tool call payloads."""
     if not isinstance(tool_calls, list):
@@ -1375,6 +1378,7 @@ def _emit_chat_run_first_rollout_metrics(
     except _CHAT_RUN_FIRST_METRIC_EXCEPTIONS as exc:
         logger.warning("Chat run-first rollout metric emission failed: {}", exc)
     return context
+
 
 def _emit_chat_run_first_tool_path_metrics(
     metrics: Any,
@@ -4143,6 +4147,68 @@ async def _resolve_saved_regeneration(
     return user, legacy_reply
 
 
+def _format_selected_history_messages(
+    snapshot: Any,
+    content: Any,
+    character_card: dict[str, Any],
+    *,
+    user_name: str = "User",
+    replace_user_placeholders: bool = True,
+) -> list[dict[str, Any]]:
+    """Format only detached owner-selected rows; never reload current sources."""
+    from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+
+    output: list[dict[str, Any]] = []
+    source_nodes = {row["id"]: row for row in snapshot.nodes}
+    for item in content:
+        extra = item.get("extra_metadata") or {}
+        source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
+        role = extra.get("sender_role") or source_role
+        text = _saved_image_text(
+            {
+                "content": item["message"],
+                "images": item["images"],
+                "sender": source_nodes[item["id"]]["role"],
+                "version": item["_message_version"],
+            },
+            extra,
+        )
+        image_details = _saved_image_details(extra, len(item["images"]))
+        if text and role != "tool" and (role != "user" or replace_user_placeholders):
+            text = replace_placeholders(text, character_card.get("name", "Char"), user_name)
+        placeholder = extra.get("content_placeholder_reason")
+        if placeholder == "invalid_content" or (
+            placeholder in {"tool_calls", "function_call"}
+            and (
+                role != "assistant"
+                or not (item.get("tool_calls") if placeholder == "tool_calls" else extra.get("function_call"))
+            )
+        ):
+            raise HistorySelectionError("unsupported_history_context_content_placeholder")
+        if placeholder == "empty_tool_result":
+            if role != "tool" or item["images"]:
+                raise HistorySelectionError("unsupported_history_context_content_placeholder")
+            if item["_message_version"] == 1 and text == "[empty tool result]":
+                text = ""
+        entry = {"role": role, "content": text}
+        if item["images"]:
+            entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
+                {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                for image, detail in zip(item["images"], image_details)
+            ]
+        if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
+            entry["content"] = None
+        if item.get("tool_calls") is not None:
+            entry["tool_calls"] = item["tool_calls"]
+        for key in ("function_call", "tool_call_id"):
+            if extra.get(key) is not None:
+                entry[key] = extra[key]
+        if extra.get("sender_name") or extra.get("tool_name"):
+            entry["name"] = extra.get("sender_name") or extra.get("tool_name")
+        output.append(entry)
+    return output
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -4181,12 +4247,14 @@ async def build_context_and_messages(
     if versioned:
         from tldw_Server_API.app.core.Chat.history_context import project_history_context
         from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
+
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
         selection = history_selection.model_dump(mode="json")
         edit_target = getattr(request_data, "tldw_history_edit_v1", None)
         edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
+
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
             tuple[dict[str, Any], ...],
@@ -4210,8 +4278,7 @@ async def build_context_and_messages(
                     history_edit=edit_target,
                 )
                 context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
-                for item in content:
-                    _saved_image_details(item.get("extra_metadata"), len(item["images"]))
+                _format_selected_history_messages(snap, content, context[0] or {})
                 if regenerate_reply_id is not None:
                     if getattr(request_data, "tldw_history_branch", None) is not True:
                         raise HistorySelectionError("unsupported_history_regeneration")
@@ -4273,6 +4340,7 @@ async def build_context_and_messages(
                         history_edit=edit_target,
                     )
                 return snap, content, accepted, state["conversation"], context
+
         try:
             history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
         except HistorySelectionError as exc:
@@ -4542,7 +4610,12 @@ async def build_context_and_messages(
                     hist_entry["tool_calls"] = tool_calls_meta
                 if function_call_meta and not hist_entry.get("tool_calls"):
                     hist_entry["function_call"] = function_call_meta
-                if content_placeholder_reason in {"tool_calls", "function_call"}:
+                if content_placeholder_reason in {"tool_calls", "function_call"} or (
+                    content_placeholder_reason == "empty_tool_result"
+                    and role == "tool"
+                    and db_msg.get("version") == 1
+                    and db_msg.get("content") == "[empty tool result]"
+                ):
                     hist_entry["content"] = ""
                 if role == "tool" and tool_call_id_meta:
                     hist_entry["tool_call_id"] = tool_call_id_meta
@@ -4765,33 +4838,7 @@ async def build_context_and_messages(
     if versioned:
         if regenerate_reply_id is not None:
             overlap_cut = len(request_messages)
-        source_nodes = {row["id"]: row for row in history_snapshot.nodes}
-        for item in selected_content:
-            extra = item.get("extra_metadata") or {}
-            source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
-            role = extra.get("sender_role") or source_role
-            text = _saved_image_text({
-                "content": item["message"], "images": item["images"],
-                "sender": source_nodes[item["id"]]["role"], "version": item["_message_version"],
-            }, extra)
-            image_details = _saved_image_details(extra, len(item["images"]))
-            if text and role != "tool":
-                text = replace_placeholders(text, character_card.get("name", "Char"), "User")
-            entry = {"role": role, "content": text}
-            if item["images"]:
-                entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
-                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
-                    for image, detail in zip(item["images"], image_details)]
-            if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
-                entry["content"] = None
-            if item.get("tool_calls") is not None:
-                entry["tool_calls"] = item["tool_calls"]
-            for key in ("function_call", "tool_call_id"):
-                if extra.get(key) is not None:
-                    entry[key] = extra[key]
-            if extra.get("sender_name") or extra.get("tool_name"):
-                entry["name"] = extra.get("sender_name") or extra.get("tool_name")
-            historical_msgs.append(entry)
+        historical_msgs.extend(_format_selected_history_messages(history_snapshot, selected_content, character_card))
         assistant_parent_message_id = admission["input_message_id"]
         runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
         runtime_state["tldw_history_admission_v1"] = admission

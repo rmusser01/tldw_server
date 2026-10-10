@@ -45,3 +45,30 @@ def require_roleplay_resume_fence(state: dict[str, Any], expected: dict[str, Any
     ):
         if actual[field] != expected[field]:
             raise RoleplayResumeConflictError(code)
+
+
+def roleplay_resume_sampling_arguments(effective: dict[str, Any]) -> dict[str, Any]:
+    """Preserve saved sampling or refuse before admitting an unrepresentable input."""
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import (
+        get_allowed_fields,
+    )
+
+    sampling = effective["sampling"]
+    if effective["provider"] == "mlx":
+        raise RoleplayResumeConflictError("resume_provider_unsupported")
+    if (
+        effective["provider"] == "openai"
+        and effective["model"].lower().startswith("gpt-5")
+        and sampling["top_p"] != 1.0
+    ):
+        raise RoleplayResumeConflictError("resume_sampling_unsupported")
+    arguments = {
+        "temp": sampling["temperature"],
+        "top_p": sampling["top_p"],
+        "stop": list(sampling["stop"]),
+    }
+    if "repetition_penalty" in get_allowed_fields(effective["provider"]):
+        arguments["repetition_penalty"] = sampling["repetition_penalty"]
+    elif sampling["repetition_penalty"] != 1.0:
+        raise RoleplayResumeConflictError("resume_sampling_unsupported")
+    return arguments

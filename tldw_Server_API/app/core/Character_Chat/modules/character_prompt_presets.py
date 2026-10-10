@@ -8,6 +8,7 @@ system prompts accordingly.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from loguru import logger
@@ -170,6 +171,31 @@ def build_custom_system_prompt(
             sections.append(rendered)
 
     return "\n\n".join(sections).strip()
+
+
+def build_saved_builtin_system_prompt(
+    character: dict[str, Any],
+    char_name: str,
+    user_name: str,
+    preset: dict[str, Any],
+) -> str:
+    """Render frozen builtin templates without treating inserted field text as a template."""
+    values = {
+        token: _safe_replace(character.get(field), char_name, user_name) for token, field in _TOKEN_FIELD_MAP.items()
+    }
+    values.update({"{{char}}": char_name, "{{user}}": user_name})
+    pattern = re.compile("|".join(re.escape(token) for token in values))
+    sections = []
+    for key in preset["section_order"]:
+        template = preset["section_templates"].get(key, "")
+        field_tokens = [token for token in _TOKEN_FIELD_MAP if token in template]
+        if field_tokens and not any(values[token] for token in field_tokens):
+            continue
+        rendered = pattern.sub(lambda match: values[match.group()], template)
+        if rendered:
+            sections.append(rendered)
+    separator = "\n" if preset["preset_id"] == DEFAULT_PROMPT_PRESET else "\n\n"
+    return separator.join(sections).strip()
 
 
 def get_builtin_presets() -> list[dict[str, Any]]:

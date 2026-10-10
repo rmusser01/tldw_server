@@ -304,6 +304,7 @@ def _build_scheduler_next_interval_previews(
         return build_fsrs_next_interval_previews(card, scheduler_settings_envelope["fsrs"], now=now)
     return build_next_interval_previews(card, scheduler_settings_envelope["sm2_plus"], now=now)
 
+
 # --- Order-by validation helpers (defense in depth) ---
 _ORDER_BY_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
 _ORDER_BY_EXPR_RE = re.compile(
@@ -320,6 +321,7 @@ _CHAT_GRAMMAR_VALIDATION_STATUSES = frozenset({"unchecked", "valid", "invalid"})
 # from stored chats and the Sync materializer, which reads it in a payload as no assistant.
 RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND = "persona"
 RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID = "sync-v2"
+
 
 # --- Custom Exceptions ---
 class CharactersRAGDBError(Exception):
@@ -453,6 +455,7 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     InputError,
     ConflictError,
 )
+
 
 class BackendCursorAdapter:
     """Adapter exposing QueryResult via a cursor-like interface."""
@@ -45978,6 +45981,8 @@ for _conversation_store_method in (
 
 for _conversation_resume_store_method in (
     "append_idempotent_user_message",
+    "prepare_roleplay_resume_generation",
+    "commit_roleplay_resume_generation",
     "put_behavior_snapshot",
     "get_conversation_behavior_snapshot",
     "get_roleplay_resume_state",
@@ -46395,6 +46400,8 @@ class TransactionContextManager:
         # allowing them to be handled by the caller or to propagate further up.
         # This is standard behavior for context managers.
         return False
+
+
 #
 # End of ChaChaNotes_DB.py
 #######################################################################################################################

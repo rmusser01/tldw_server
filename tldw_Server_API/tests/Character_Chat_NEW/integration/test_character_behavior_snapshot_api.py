@@ -2823,7 +2823,7 @@ def test_pin_writer_uses_transactional_conversation_identity(
 
 
 @pytest.mark.integration
-def test_pin_edit_acquires_message_metadata_before_conversation_lock(
+def test_pin_edit_acquires_conversation_before_message_metadata_locks(
     test_client,
     auth_headers,
     character_db,
@@ -2872,7 +2872,7 @@ def test_pin_edit_acquires_message_metadata_before_conversation_lock(
     )
 
     assert response.status_code == 200, response.text
-    assert order[:3] == ["message", "metadata", "conversation"]
+    assert order[:3] == ["conversation", "message", "metadata"]
 
 
 def test_postgres_message_edit_lock_uses_for_update() -> None:
@@ -2902,7 +2902,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
     assert conn.calls[0][1] == ("message-1",)
 
 
-def test_postgres_pin_edit_locks_metadata_before_conversation() -> None:
+def test_postgres_pin_edit_creates_and_locks_metadata_row() -> None:
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:

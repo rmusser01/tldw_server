@@ -74,6 +74,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
 
 # Import new modules for integration
 
+
 def is_authentication_required() -> bool:
     """Legacy shim used by tests to toggle auth enforcement.
 
@@ -81,6 +82,8 @@ def is_authentication_required() -> bool:
     function on the chat module to simulate authentication-disabled scenarios.
     """
     return True
+
+
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -416,6 +419,7 @@ def _request_has_endpoint_override(request_data: Any) -> bool:
         for field in ("base_url", "api_base_url")
     )
 
+
 #######################################################################################################################
 #
 # ---------------------------------------------------------------------------
@@ -462,6 +466,7 @@ get_chat_grammar = chat_grammars.get_chat_grammar
 update_chat_grammar = chat_grammars.update_chat_grammar
 delete_chat_grammar = chat_grammars.delete_chat_grammar
 
+
 def _chat_connectors_enabled() -> bool:
     """Feature flag for chat connectors v2 (email/issue/wiki exports)."""
     return _shared_env_flag_enabled("CHAT_CONNECTORS_V2_ENABLED")
@@ -473,6 +478,7 @@ def _mandatory_audit_unavailable_detail() -> dict[str, str]:
         "error_code": "mandatory_audit_unavailable",
         "message": "Mandatory audit persistence is currently unavailable",
     }
+
 
 # Load configuration values from config
 import contextlib
@@ -499,6 +505,8 @@ MAX_IMAGES_PER_REQUEST: int = int(_chat_config.get('max_images_per_request', 10)
 MAX_BASE64_BYTES: int = get_max_base64_bytes()
 # Provider fallback setting - disabled by default for production stability
 ENABLE_PROVIDER_FALLBACK: bool = _chat_config.get('enable_provider_fallback', 'False').lower() == 'true'
+
+
 def _cfg_float(key: str, fallback: float) -> float:
     try:
         raw = _chat_config.get(key)
@@ -590,6 +598,7 @@ ANALYTICS_MAX_RANGE_DAYS: int = int(_chat_config.get("analytics_max_range_days",
 TREE_MESSAGE_CAP_DEFAULT: int = int(_chat_config.get("tree_message_cap_default", 200))
 TREE_MESSAGE_CAP_MAX: int = int(_chat_config.get("tree_message_cap_max", 500))
 
+
 # Chat-Commands feature toggles (env overrides take priority)
 def _cfg_bool_cmds(env_name: str, cfg_key: str, fallback: bool) -> bool:
     v = os.getenv(env_name)
@@ -601,6 +610,7 @@ def _cfg_bool_cmds(env_name: str, cfg_key: str, fallback: bool) -> bool:
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         return fallback
 
+
 # Feature flag: queued execution of chat calls via workers (default disabled)
 _env_queued = os.getenv("CHAT_QUEUED_EXECUTION")
 try:
@@ -610,6 +620,7 @@ try:
     )
 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
     QUEUED_EXECUTION = False
+
 
 def _to_bool(val: str) -> bool:
     return _shared_is_truthy(val)
@@ -625,6 +636,7 @@ def _resolve_base64_image_limit_enforcement() -> bool:
         # Default to enforcing base64 image limits unless explicitly disabled.
         return True
     return _to_bool(cfg_val)
+
 
 # Optional flag: allow auto-switch from 'local-llm' to 'openai' when an
 # OpenAI key is present. Intended primarily for tests; disabled by default.
@@ -2617,9 +2629,11 @@ async def _maybe_rg_shadow_chat_decision(
             # Metrics must never affect control flow
             logger.debug("RG shadow: mismatch metric recording failed: {}", exc)
 
+
 # ------------------------------------------------------------------------------------
 # New Endpoints: Chat Commands discovery and Dictionary Validation
 # ------------------------------------------------------------------------------------
+
 
 @router.get(
     "/commands",
@@ -2740,7 +2754,9 @@ async def validate_chat_dictionary(
         partial_reason=result.partial_reason,
     )
 
+
 # --- Helper Functions ---
+
 
 @lru_cache(maxsize=1)
 def _config_default_llm_provider() -> str | None:
@@ -2821,6 +2837,7 @@ def _validate_explicit_model_availability(provider: str, model: str) -> dict[str
         "provider": provider_name,
         "model": model_name,
     }
+
 
 async def _process_content_for_db_sync(
     content_iterable: Any, # Can be list of dicts or string
@@ -2952,6 +2969,7 @@ async def _process_content_for_db_sync(
                 text_parts_sync.append(f"<Image URL (not processed): {url_str[:200]}>")
     return text_parts_sync, images_sync
 
+
 def _jsonify_metadata_payload(value: Any) -> Any:
     """Best-effort conversion of metadata objects to JSON-safe structures."""
     if value is None:
@@ -2971,6 +2989,7 @@ def _jsonify_metadata_payload(value: Any) -> Any:
         if isinstance(encoded, (dict, list, str, int, float, bool)) or encoded is None:
             return encoded
         return str(encoded)
+
 
 def _summarize_tool_calls(tool_calls: Any) -> str:
     """Produce a concise placeholder string describing tool call names."""
@@ -2994,6 +3013,7 @@ def _summarize_tool_calls(tool_calls: Any) -> str:
         return "[tool_call: {}{}]".format(", ".join(names[:5]), suffix)
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         return "[tool_call]"
+
 
 def _normalize_message_timestamp(value: Any) -> str | None:
     if value is None:
@@ -3030,6 +3050,7 @@ def _normalize_message_timestamp(value: Any) -> str | None:
         .replace("+00:00", "Z")
     )
 
+
 def _persist_message_sync(
     db: CharactersRAGDB,
     payload: dict[str, Any],
@@ -3046,11 +3067,12 @@ def _persist_message_sync(
             )
     return message_id
 
+
 async def _save_message_turn_to_db(
     db: CharactersRAGDB,
     conversation_id: str,
     message_obj: dict[str, Any],
-    use_transaction: bool = False
+    use_transaction: bool = False,
 ) -> str | None:
     """
     Persist a single user/assistant message.
@@ -3131,11 +3153,14 @@ async def _save_message_turn_to_db(
         sender_meta["sender_name"] = _jsonify_metadata_payload(sender_name_raw)
     placeholder_reason: str | None = None
 
-    if not text_parts and not images:
+    if not "\n".join(text_parts) and not images:
         if serialized_tool_calls is not None:
             text_parts = [_summarize_tool_calls(serialized_tool_calls)]
             placeholder_reason = "tool_calls"
-        elif serialized_extra is not None:
+        elif role == "tool" and content == "" and tool_call_id_raw is not None:
+            text_parts = ["[empty tool result]"]
+            placeholder_reason = "empty_tool_result"
+        elif function_call_raw is not None:
             placeholder_reason = "function_call"
             function_name = None
             try:
@@ -3150,6 +3175,7 @@ async def _save_message_turn_to_db(
                 conversation_id,
             )
             text_parts = ["<Message processing failed - no valid content>"]
+            placeholder_reason = "invalid_content"
 
     if placeholder_reason:
         if serialized_extra is None:
@@ -6308,6 +6334,7 @@ async def get_chat_queue_activity(
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         logger.exception("Chat queue activity inspection failed")
         return {"enabled": True, "error": "Queue activity unavailable"}
+
 
 def _sanitize_json_for_rate_limit(request_json: str) -> str:
     """Redact base64 image payloads to avoid inflating token estimates.

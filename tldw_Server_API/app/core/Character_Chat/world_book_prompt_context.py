@@ -4,6 +4,7 @@ World-book prompt context helpers for character chat.
 This module centralizes prompt assembly and bounded diagnostics for lorebook
 injection. It does not change provider dispatch behavior.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -91,6 +92,11 @@ def build_world_book_prompt_context(
         character_id=character_id,
         include_diagnostics=True,
     )
+    return world_book_prompt_context_from_result(result)
+
+
+def world_book_prompt_context_from_result(result: Any) -> WorldBookPromptContext:
+    """Format already matched lore through the shared bounded diagnostics contract."""
     if not isinstance(result, Mapping):
         return _empty_context()
 

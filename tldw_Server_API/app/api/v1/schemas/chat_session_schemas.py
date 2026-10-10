@@ -141,6 +141,7 @@ class AssistantOverlaySettings(BaseModel):
     def _validate_updated_at(cls, value: str) -> str:
         return _validate_iso_timestamp_text(value)
 
+
 class ChatSessionCreate(BaseModel):
     """Schema for creating a new chat session."""
     id: str | None = Field(
@@ -617,6 +618,7 @@ class MessageListResponse(BaseModel):
 # Chat Completion Schemas
 # ========================================================================
 
+
 class CharacterChatCompletionV1Request(BaseModel):
     """Schema for character-specific chat completion requests."""
     message: str = Field(..., description="User message to respond to", min_length=1)
@@ -658,6 +660,7 @@ class CharacterChatCompletionV1Response(BaseModel):
 # ========================================================================
 # Character Chat v2 + Prep Schemas (centralized)
 # ========================================================================
+
 
 class MessageSteeringPromptOverrides(BaseModel):
     """Optional prompt text overrides for single-turn message steering."""
@@ -815,12 +818,54 @@ class PromptPreviewResponse(BaseModel):
     persona_context: PromptPreviewPersonaContext | None = None
 
 
+class RoleplayResumeCompletionV1(HistoryWireModel):
+    """Exact acknowledged input and complete original generation precondition."""
+
+    version: StrictInt = Field(ge=1, le=1)
+    input_message_id: str = Field(min_length=1, max_length=255)
+    input_message_version: StrictInt = Field(ge=1)
+    assistant_message_id: str = Field(min_length=1, max_length=255)
+    expected: RoleplayResumeFenceV1
+
+
 class CharacterChatCompletionV2Request(BaseModel):
     """Character Chat completion (v2) - builds context and calls a provider.
 
     Includes provider/model controls, optional appended user message,
     persistence toggle, and streaming control.
     """
+
+    tldw_roleplay_resume_v1: RoleplayResumeCompletionV1 | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _require_protected_resume_controls(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "tldw_roleplay_resume_v1" not in value:
+            return value
+        if value["tldw_roleplay_resume_v1"] is None:
+            raise ValueError("Protected Resume requires its complete contract")
+        if set(value) - {
+            "tldw_roleplay_resume_v1",
+            "stream",
+            "save_to_db",
+            "append_user_message",
+            "include_character_context",
+        }:
+            raise ValueError("Protected Resume accepts no request-time behavior override")
+        if "save_to_db" in value and value["save_to_db"] is not True:
+            raise ValueError("Protected Resume requires assistant persistence")
+        if "include_character_context" in value and value["include_character_context"] is not True:
+            raise ValueError("Protected Resume requires its saved snapshot context")
+        if (
+            "append_user_message" in value
+            and value["append_user_message"] is not None
+            and value["append_user_message"] is not False
+        ):
+            raise ValueError("Protected Resume uses only its acknowledged input")
+        if "stream" in value and value["stream"] is not False:
+            raise ValueError("Protected streaming Resume is not supported")
+        return {**value, "append_user_message": None, "save_to_db": True}
+
     # Character/context controls
     include_character_context: bool = Field(True, description="Include character system context")
     limit: int = Field(100, ge=1, le=1000, description="Max messages to include")
@@ -916,7 +961,21 @@ class CharacterChatCompletionV2Request(BaseModel):
         return self
 
 
+class RoleplayResumeCompletionResultV1(HistoryWireModel):
+    """Original dispatch fence and exact authoritative save outcome."""
+
+    version: StrictInt = Field(ge=1, le=1)
+    input_message_id: str = Field(min_length=1, max_length=255)
+    input_message_version: StrictInt = Field(ge=1)
+    assistant_message_id: str = Field(min_length=1, max_length=255)
+    assistant_message_version: StrictInt | None = Field(default=None, ge=1)
+    expected: RoleplayResumeFenceV1
+    fence: RoleplayResumeFenceV1 | None = None
+    unsaved_reason: str | None = Field(default=None, min_length=1, max_length=100)
+
+
 class CharacterChatCompletionV2Response(BaseModel):
+    tldw_roleplay_resume_v1: RoleplayResumeCompletionResultV1 | None = None
     chat_id: str
     character_id: int
     provider: str
@@ -1014,6 +1073,7 @@ class CharacterChatStreamPersistResponse(BaseModel):
 # Export Schemas
 # ========================================================================
 
+
 class ChatExportFormat(BaseModel):
     """Schema for chat export format options."""
     format: Literal["json", "markdown", "text"] = Field("json", description="Export format")
@@ -1058,6 +1118,7 @@ class ChatHistoryExport(BaseModel):
 # Error Response Schemas
 # ========================================================================
 
+
 class ChatErrorResponse(BaseModel):
     """Schema for chat-related error responses."""
     error: str = Field(..., description="Error type")
@@ -1078,6 +1139,7 @@ class ChatErrorResponse(BaseModel):
 # Filter Schemas
 # ========================================================================
 
+
 class CharacterTagFilter(BaseModel):
     """Schema for filtering characters by tags."""
     tags: list[str] = Field(..., description="Tags to filter by", min_length=1)
@@ -1094,6 +1156,7 @@ class CharacterTagFilter(BaseModel):
 # ========================================================================
 # Greeting List Picker Schemas (PRD 1 Stage A2)
 # ========================================================================
+
 
 class GreetingItem(BaseModel):
     """A single greeting entry from the character card."""
@@ -1129,6 +1192,7 @@ class GreetingSelectResponse(BaseModel):
 # Author Note Info Schemas (PRD 4 Stage D2)
 # ========================================================================
 
+
 class AuthorNoteInfoResponse(BaseModel):
     """Response for GET /{chat_id}/author-note/info."""
     chat_id: str
@@ -1149,6 +1213,7 @@ class AuthorNoteInfoResponse(BaseModel):
 # ========================================================================
 # Lorebook Diagnostic Export Schemas (PRD 6 Stage F2)
 # ========================================================================
+
 
 class DiagnosticTurnEntry(BaseModel):
     """A single turn's lorebook diagnostics."""
@@ -1173,6 +1238,7 @@ class LorebookDiagnosticExportResponse(BaseModel):
 # ========================================================================
 # Preset Editor Schemas (PRD 2 Stage B2)
 # ========================================================================
+
 
 class PresetTokenInfo(BaseModel):
     """Template token with description."""

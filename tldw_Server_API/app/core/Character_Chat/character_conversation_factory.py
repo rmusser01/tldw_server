@@ -32,6 +32,9 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
     get_builtin_presets,
     resolve_character_prompt_preset,
 )
+from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
+    _resolve_author_note_position,
+)
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
@@ -331,20 +334,7 @@ def _bounded_behavior_int(
 
 
 def _author_note_position(settings: Mapping[str, Any]) -> Any:
-    for key in (
-        "authorNotePosition",
-        "authorNotePlacement",
-        "authorNoteInjectionPosition",
-    ):
-        if key not in settings:
-            continue
-        value = settings.get(key)
-        if isinstance(value, Mapping):
-            return _safe_json(value)
-        if isinstance(value, (str, int)) and not isinstance(value, bool):
-            return value
-    # This must match the live prompt-construction default.
-    return "before_system"
+    return _safe_json(_resolve_author_note_position(settings))
 
 
 def _deduplicated_text_ids(value: Any) -> list[str]:
@@ -2525,7 +2515,17 @@ def create_character_conversation(
                 for initial_message in messages_to_persist:
                     message = dict(initial_message)
                     message["conversation_id"] = conversation_id
-                    db.add_message(message, conn=conn)
+                    message_id = db.add_message(message, conn=conn)
+                    if not message_id:
+                        raise InputError("Failed to retain initial message.")
+                    if message.get("tool_calls") is not None or message.get("extra_metadata") is not None:
+                        if not db.add_message_metadata(
+                            message_id,
+                            tool_calls=message.get("tool_calls"),
+                            extra=message.get("extra_metadata"),
+                            conn=conn,
+                        ):
+                            raise InputError("Failed to retain initial message metadata.")
                 db.conversation_resume_store.put_behavior_snapshot(
                     conversation_id,
                     current.snapshot,

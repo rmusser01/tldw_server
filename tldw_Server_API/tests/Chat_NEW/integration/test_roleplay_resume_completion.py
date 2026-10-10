@@ -155,3 +155,534 @@ def test_global_resume_never_ignores_an_explicit_workspace_scope(resume_api):
     )
     assert response.status_code == 404, response.text
     assert db.count_messages_for_conversation(cid) == 2
+
+
+@pytest.mark.parametrize("mutation", ["ancestor-edit", "settings", "input-id", "input-version", "sync"])
+def test_resume_completion_fence_rejects_before_live_sources_or_dispatch(resume_api, monkeypatch, mutation):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+
+    client, db, cid, headers = resume_api
+    accepted = post_input(client, cid, headers, input_request(db, cid))
+    assert accepted.status_code == 201, accepted.text
+    contract = {
+        "version": 1,
+        "input_message_id": "resume-chosen",
+        "input_message_version": 1,
+        "assistant_message_id": "resume-assistant",
+        "expected": accepted.json()["fence"],
+    }
+    if mutation == "ancestor-edit":
+        db.update_message("resume-ancestor", {"content": "Another tab"}, 1)
+    elif mutation == "settings":
+        db.upsert_conversation_settings(cid, db.get_roleplay_resume_state(cid)["settings"])
+    elif mutation == "input-id":
+        contract["input_message_id"] = "resume-ancestor"
+    elif mutation == "input-version":
+        contract["input_message_version"] = 2
+    else:
+        monkeypatch.setattr(endpoint, "_active_chat_sync_service", lambda *args: object())
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Protected Resume fell through to current sources/provider")
+
+    monkeypatch.setattr(db, "get_character_card_by_id", forbidden)
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    response = client.post(
+        f"/api/v1/chats/{cid}/complete-v2",
+        headers=headers,
+        json={"tldw_roleplay_resume_v1": contract},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["status"] == "resume_conflict"
+    assert db.get_message_by_id("resume-assistant") is None
+
+
+def generation_request(client, db, cid, headers):
+    accepted = post_input(client, cid, headers, input_request(db, cid))
+    assert accepted.status_code == 201, accepted.text
+    return {
+        "tldw_roleplay_resume_v1": {
+            "version": 1,
+            "input_message_id": "resume-chosen",
+            "input_message_version": 1,
+            "assistant_message_id": "resume-assistant",
+            "expected": accepted.json()["fence"],
+        }
+    }
+
+
+def test_unchanged_protected_generation_dispatches_saved_prompt_and_persists_once(resume_api, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    calls = []
+    content = "Original generated reply.\n  Exact spaces.  "
+
+    def provider(**kwargs):
+        calls.append(kwargs)
+        return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Loaded a changed source card")
+
+    monkeypatch.setattr(db, "get_character_card_by_id", forbidden)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["saved"] is True
+    assert result["assistant_content"] == content
+    assert result["assistant_message_id"] == "resume-assistant"
+    assert result["tldw_roleplay_resume_v1"]["expected"] == body["tldw_roleplay_resume_v1"]["expected"]
+    assert calls[0]["api_endpoint"] == "local-llm"
+    assert calls[0]["model"] == "local-test"
+    assert calls[0]["messages_payload"][-1]["content"] == input_request(db, cid)["content"]
+    assert "Original saved archivist" in str(calls[0]["messages_payload"])
+    db.update_message("resume-ancestor", {"content": "Later changed"}, 1)
+    replay = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == result
+    assert len(calls) == 1
+    assert db.count_messages_for_conversation(cid) == 4
+
+
+@pytest.mark.parametrize("mutation", ["ancestor-edit", "append", "settings", "input-delete", "sync"])
+def test_concurrent_writer_retains_generated_content_without_wrong_save(resume_api, monkeypatch, mutation):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    started, release = Event(), Event()
+    content = "Keep this generated content.\n  Exact spaces.  "
+
+    def provider(**kwargs):
+        started.set()
+        assert release.wait(8), "Test did not release owned provider"
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(client.post, f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+        try:
+            assert started.wait(8), "Saved provider was never dispatched"
+            other = CharactersRAGDB(db_path=db.db_path_str, client_id="1", owner_user_id="1")
+            try:
+                if mutation == "ancestor-edit":
+                    other.update_message("resume-ancestor", {"content": "Another writer"}, 1)
+                elif mutation == "append":
+                    other.add_message(
+                        {
+                            "id": "resume-other",
+                            "conversation_id": cid,
+                            "sender": "user",
+                            "content": "Other tab",
+                            "parent_message_id": "resume-chosen",
+                        }
+                    )
+                elif mutation == "settings":
+                    other.upsert_conversation_settings(cid, other.get_roleplay_resume_state(cid)["settings"])
+                elif mutation == "input-delete":
+                    other.soft_delete_message("resume-chosen", expected_version=1)
+                else:
+                    monkeypatch.setattr(endpoint, "_active_chat_sync_service", lambda *args: object())
+            finally:
+                other.close_connection()
+        finally:
+            release.set()
+        response = future.result(timeout=20)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["saved"] is False
+    assert result["assistant_content"] == content
+    assert result["assistant_message_id"] is None
+    assert result["tldw_roleplay_resume_v1"]["unsaved_reason"]
+    assert db.get_message_by_id("resume-assistant") is None
+
+
+@pytest.mark.parametrize(
+    "provider_result",
+    [
+        {},
+        {"choices": []},
+        {"choices": [{"message": {"content": "   "}}]},
+        {"error": {"message": "private-provider-detail"}},
+    ],
+)
+def test_invalid_provider_result_is_never_saved_as_roleplay_text(resume_api, monkeypatch, provider_result):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", lambda **kwargs: provider_result)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 502, response.text
+    assert "private-provider-detail" not in response.text
+    assert db.get_message_by_id("resume-assistant") is None
+    assert db.count_messages_for_conversation(cid) == 3
+
+
+@pytest.mark.parametrize("action", ["block", "warn"])
+def test_frozen_lore_obeys_current_segment_cost_policy(resume_api, monkeypatch, action):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+    from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
+        WorldBookService,
+    )
+    from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+        PromptCostGuardrailConfig,
+    )
+
+    client, db, _, headers = resume_api
+    card = db.add_character_card({"name": "Lio", "description": "Original traveller"})
+    books = WorldBookService(db)
+    book = books.create_world_book("Historical harbor")
+    lore = "Saved harbor law. " * 12
+    books.add_entry(book, ["Original"], lore)
+    books.attach_to_character(book, card)
+    cid = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": card,
+            "title": "Cost policy",
+            "client_id": "1",
+        },
+        provider="local-llm",
+        model="local-test",
+    )
+    body = generation_request(client, db, cid, headers)
+    calls = []
+
+    def provider(**kwargs):
+        calls.append(kwargs)
+        return {"choices": [{"message": {"content": "Actual reply"}}]}
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr(
+        endpoint,
+        "load_prompt_cost_guardrail_config",
+        lambda: PromptCostGuardrailConfig(enabled=True, default_action=action, warn_world_book_tokens=1),
+    )
+    before = db.count_messages_for_conversation(cid)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    if action == "block":
+        assert response.status_code == 413, response.text
+        assert calls == []
+        assert response.json()["detail"]["prompt_guardrails"]["segment_token_totals"]["world_book"] > 1
+        assert lore not in response.text
+        assert db.get_message_by_id("resume-assistant") is None
+        assert db.count_messages_for_conversation(cid) == before
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json()["saved"] is True
+        assert lore.strip() in str(calls[0]["messages_payload"])
+
+
+@pytest.mark.parametrize("saved_penalty", [1.0, 1.2])
+def test_saved_kobold_sampling_reaches_actual_http_payload(resume_api, monkeypatch, saved_penalty):
+    import httpx
+
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    client, db, _, headers = resume_api
+    card = db.add_character_card(
+        {
+            "name": "Kobold Ari",
+            "extensions": {"tldw": {"generation": {"repetition_penalty": saved_penalty}}},
+        }
+    )
+    cid = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": card,
+            "title": "Saved Kobold sampling",
+            "client_id": "1",
+        },
+        provider="kobold",
+        model="saved-kobold-model",
+    )
+    body = generation_request(client, db, cid, headers)
+    contrary_extra = {
+        "temperature": 0.01,
+        "top_p": 0.01,
+        "stop": ["CURRENT-STOP"],
+        "rep_pen": 2.2,
+        "seed": 7,
+        "unsaved_sampling_sentinel": True,
+    }
+    config = {
+        "extra_body": contrary_extra,
+        "kobold_api": {"api_ip": "https://example.com/saved-kobold", "rep_pen": 2.2, "extra_body": contrary_extra},
+    }
+    monkeypatch.setattr(provider_credential_runtime, "load_server_config_snapshot", lambda: config)
+    sent = []
+
+    def fetch(**kwargs):
+        sent.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            json={"results": [{"text": "Actual adapter reply"}]},
+            request=httpx.Request("POST", kwargs["url"]),
+        )
+
+    adapter = chat_service._get_llm_registry().get_adapter("kobold")
+    monkeypatch.setattr(adapter, "http_fetcher", fetch)
+    frozen = db.prepare_roleplay_resume_generation(cid, body["tldw_roleplay_resume_v1"], owner_client_id="1")
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["saved"] is True
+    assert sent[0]["rep_pen"] == saved_penalty
+    assert sent[0]["temperature"] == frozen["context"]["provider_arguments"]["temp"]
+    assert sent[0]["top_p"] == frozen["context"]["provider_arguments"]["top_p"]
+    assert sent[0]["stop_sequence"] == frozen["context"]["provider_arguments"]["stop"]
+    assert not {"seed", "unsaved_sampling_sentinel"} & sent[0].keys()
+    assert response.json()["provider"] == "kobold"
+    assert response.json()["model"] == "saved-kobold-model"
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "google", "cohere"])
+def test_frozen_vendor_instructions_reach_actual_http_payload(resume_api, monkeypatch, provider):
+    import httpx
+
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+    from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
+        WorldBookService,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers import (
+        anthropic_adapter,
+        google_adapter,
+    )
+
+    client, db, _, headers = resume_api
+    from tldw_Server_API.app.core.Chat.chat_service import (
+        known_models_for_provider_cached,
+    )
+
+    saved_model = known_models_for_provider_cached(provider)[0]
+    card = db.add_character_card(
+        {
+            "name": "Vendor Ava",
+            "description": "Saved vendor identity.",
+            "system_prompt": "Original saved instructions.",
+        }
+    )
+    service = WorldBookService(db)
+    book = service.create_world_book("Vendor frozen lore")
+    service.add_entry(book, ["Original"], "Original frozen harbor law.")
+    service.attach_to_character(book, card)
+    cid = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": card,
+            "title": "Vendor saved effects",
+            "client_id": "1",
+        },
+        provider=provider,
+        model=saved_model,
+        conversation_settings={"authorNote": "Original frozen note."},
+    )
+    body = generation_request(client, db, cid, headers)
+    config = {
+        provider
+        + "_api": {
+            "api_key": "roleplay-test-only-key",
+            "api_retries": 0,
+            "tools": [{"type": "function", "function": {"name": "current-tool"}}],
+            "tool_choice": "required",
+            "response_format": {"type": "json_object"},
+            "n": 4,
+            "num_generations": 4,
+            "candidate_count": 4,
+            "k": 40,
+            "topK": 40,
+        }
+    }
+    monkeypatch.setattr(provider_credential_runtime, "load_server_config_snapshot", lambda: config)
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_ANTHROPIC", "1")
+    sent = []
+    reply = {
+        "anthropic": {
+            "type": "message",
+            "content": [{"type": "text", "text": "Vendor reply"}],
+        },
+        "google": {"candidates": [{"content": {"parts": [{"text": "Vendor reply"}]}}]},
+        "cohere": {
+            "text": "Vendor reply",
+            "generation_id": "vendor-generation",
+            "meta": {},
+        },
+    }[provider]
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def post(self, url, **kwargs):
+            sent.append(kwargs["json"])
+            return httpx.Response(200, json=reply, request=httpx.Request("POST", url))
+
+        def close(self):
+            pass
+
+    if provider == "anthropic":
+        monkeypatch.setattr(anthropic_adapter, "http_client_factory", lambda **kwargs: Client())
+    elif provider == "google":
+        monkeypatch.setattr(google_adapter, "http_client_factory", lambda **kwargs: Client())
+    else:
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.LLM_Calls.chat_calls.create_session_with_retries",
+            lambda **kwargs: Client(),
+        )
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["saved"] is True
+    payload = sent[0]
+    for text in (
+        "Saved vendor identity.",
+        "Original saved instructions.",
+        "Original frozen note.",
+        "Original frozen harbor law.",
+    ):
+        assert text in str(payload)
+    assert "current-tool" not in str(payload)
+    assert "response_format" not in payload
+    if provider == "google":
+        assert payload["generationConfig"]["candidateCount"] == 1
+        assert "responseMimeType" not in payload["generationConfig"]
+    elif provider == "cohere":
+        assert payload["num_generations"] == 1
+        assert "k" not in payload
+
+
+def test_resume_suppresses_current_local_tool_and_candidate_defaults_at_http_boundary(resume_api, monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    config = {
+        "local_llm": {
+            "api_ip": "https://example.com/saved-local",
+            "n": 4,
+            "tools": [{"type": "function", "function": {"name": "current-tool"}}],
+            "tool_choice": "required",
+            "response_format": {"type": "json_object"},
+            "stop": ["CURRENT-STOP"],
+            "seed": 7,
+            "top_k": 20,
+            "min_p": 0.1,
+            "presence_penalty": 0.8,
+            "frequency_penalty": 0.9,
+            "logit_bias": {"25": 50},
+        }
+    }
+    monkeypatch.setattr(provider_credential_runtime, "load_server_config_snapshot", lambda: config)
+    sent = []
+
+    def fetch(**kwargs):
+        sent.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Local reply"}}]},
+            request=httpx.Request("POST", kwargs["url"]),
+        )
+
+    monkeypatch.setattr(chat_service._get_llm_registry().get_adapter("local-llm"), "http_fetcher", fetch)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["saved"] is True
+    assert "current-tool" not in str(sent[0])
+    assert "response_format" not in sent[0]
+    assert sent[0]["n"] == 1
+    assert sent[0]["stop"] == []
+
+    assert (
+        not {
+            "seed",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "frequency_penalty",
+            "logit_bias",
+        }
+        & sent[0].keys()
+    )
+
+
+@pytest.mark.parametrize("provider", ["qwen", "deepseek"])
+def test_resume_suppresses_unsaved_sampling_modifiers_at_vendor_http_boundary(resume_api, monkeypatch, provider):
+    import httpx
+
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+    from tldw_Server_API.app.core.Chat.chat_service import (
+        known_models_for_provider_cached,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers import (
+        deepseek_adapter,
+        qwen_adapter,
+    )
+
+    client, db, _, headers = resume_api
+    card = db.add_character_card({"name": "Modifier Vendor Ava"})
+    model = known_models_for_provider_cached(provider)[0]
+    cid = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": card,
+            "title": "Saved sampling modifiers",
+            "client_id": "1",
+        },
+        provider=provider,
+        model=model,
+    )
+    body = generation_request(client, db, cid, headers)
+    config = {
+        provider
+        + "_api": {
+            "api_key": "roleplay-test-only-key",
+            "seed": 7,
+            "presence_penalty": 0.8,
+            "frequency_penalty": 0.9,
+            "logit_bias": {"25": 50},
+        }
+    }
+    monkeypatch.setattr(provider_credential_runtime, "load_server_config_snapshot", lambda: config)
+    sent = []
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def close(self):
+            pass
+
+        def post(self, url, **kwargs):
+            sent.append(kwargs["json"])
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "Vendor reply"}}]},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr(
+        qwen_adapter if provider == "qwen" else deepseek_adapter,
+        "http_client_factory",
+        lambda **kwargs: Client(),
+    )
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["saved"] is True
+    assert not {"seed", "presence_penalty", "frequency_penalty", "logit_bias"} & sent[0].keys()
+    assert sent[0]["model"] == model

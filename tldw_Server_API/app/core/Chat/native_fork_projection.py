@@ -356,6 +356,69 @@ def _embedded_asset_manifest(rows: Sequence[Mapping[str, Any]]) -> tuple[NativeA
     return tuple(assets)
 
 
+def _validate_tool_replay_message(
+    role: str,
+    calls: list[Any],
+    extra: Mapping[str, Any],
+    pending: set[str],
+    seen_calls: set[str],
+) -> None:
+    if pending and role != "tool":
+        _unsupported("incomplete_tool_replay")
+    if calls:
+        if role != "assistant" or not isinstance(calls, list):
+            _unsupported("tool_replay")
+        for call in calls:
+            if (
+                not isinstance(call, dict)
+                or set(call) != {"id", "type", "function"}
+                or call["type"] != "function"
+                or not isinstance(call["id"], str)
+                or not call["id"]
+                or not isinstance(call["function"], dict)
+                or set(call["function"]) != {"name", "arguments"}
+                or not all(isinstance(value, str) for value in call["function"].values())
+            ):
+                _unsupported("tool_replay")
+            try:
+                arguments = json.loads(call["function"]["arguments"])
+                _canonical(arguments)  # Reject NaN/Infinity accepted by json.loads.
+            except (ValueError, TypeError) as exc:
+                raise HistorySelectionError("unsupported_native_fork_tool_replay_arguments") from exc
+            if _contains_credentials(arguments):
+                _unsupported("tool_replay_credentials")
+            if call["id"] in seen_calls:
+                _unsupported("tool_replay")
+            pending.add(call["id"])
+            seen_calls.add(call["id"])
+    if role == "tool":
+        call_id = extra.get("tool_call_id")
+        if call_id not in pending:
+            _unsupported("incomplete_tool_replay")
+        pending.remove(call_id)
+    elif "tool_call_id" in extra:
+        _unsupported("tool_replay")
+
+
+def validate_closed_tool_replay(messages: Sequence[Mapping[str, Any]]) -> None:
+    """Validate historical calls as inert data with exact, closed result bindings."""
+    pending: set[str] = set()
+    seen_calls: set[str] = set()
+    for message in messages:
+        role = message.get("role")
+        if role not in {"user", "assistant", "system", "tool"} or message.get("function_call") is not None:
+            _unsupported("tool_replay")
+        calls = message.get("tool_calls")
+        calls = [] if calls is None else calls
+        if not isinstance(calls, list):
+            _unsupported("tool_replay")
+        if message.get("content") is None and not (role == "assistant" and calls):
+            _unsupported("tool_replay_placeholder")
+        _validate_tool_replay_message(role, calls, message, pending, seen_calls)
+    if pending:
+        _unsupported("incomplete_tool_replay")
+
+
 def _project_messages(
     rows: Sequence[Mapping[str, Any]],
     effects: set[str],
@@ -441,44 +504,17 @@ def _project_messages(
             if version == 1 and text == f"<Image attachment x{len(images)}>":
                 text = ""
             extra.pop("content_placeholder_reason")
+        elif placeholder == "empty_tool_result":
+            if role != "tool" or images or type(row.get("_message_version")) is not int or row["_message_version"] < 1:
+                _unsupported("tool_replay_placeholder")
+            if row["_message_version"] == 1 and text == "[empty tool result]":
+                text = ""
+            extra.pop("content_placeholder_reason")
         elif placeholder is not None and (placeholder != "tool_calls" or not calls):
             _unsupported("tool_replay_placeholder")
-        if pending and role != "tool":
-            _unsupported("incomplete_tool_replay")
+        _validate_tool_replay_message(role, calls, extra, pending, seen_calls)
         if calls:
-            if role != "assistant" or not isinstance(calls, list):
-                _unsupported("tool_replay")
-            for call in calls:
-                if (
-                    not isinstance(call, dict)
-                    or set(call) != {"id", "type", "function"}
-                    or call["type"] != "function"
-                    or not isinstance(call["id"], str)
-                    or not call["id"]
-                    or not isinstance(call["function"], dict)
-                    or set(call["function"]) != {"name", "arguments"}
-                    or not all(isinstance(value, str) for value in call["function"].values())
-                ):
-                    _unsupported("tool_replay")
-                try:
-                    arguments = json.loads(call["function"]["arguments"])
-                    _canonical(arguments)  # Reject NaN/Infinity accepted by json.loads.
-                except (ValueError, TypeError) as exc:
-                    raise HistorySelectionError("unsupported_native_fork_tool_replay_arguments") from exc
-                if _contains_credentials(arguments):
-                    _unsupported("tool_replay_credentials")
-                if call["id"] in seen_calls:
-                    _unsupported("tool_replay")
-                pending.add(call["id"])
-                seen_calls.add(call["id"])
             effects.add("tool_replay")
-        if role == "tool":
-            call_id = extra.get("tool_call_id")
-            if call_id not in pending:
-                _unsupported("incomplete_tool_replay")
-            pending.remove(call_id)
-        elif "tool_call_id" in extra:
-            _unsupported("tool_replay")
         message = {
             "id": row["id"],
             "role": role,
