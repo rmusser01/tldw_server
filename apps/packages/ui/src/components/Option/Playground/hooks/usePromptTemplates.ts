@@ -15,7 +15,16 @@ import {
 import { detectCurrentPreset, getPresetByKey } from "../ParameterPresets";
 import type { PromptTemplate } from "../SystemPromptTemplates";
 import type { Prompt } from "@/db/dexie/types";
-import type { ChatModelSettings } from "@/store/model";
+import {
+  useStoreChatModelSettings,
+  type ChatModelSettings
+} from "@/store/model"
+import {
+  captureModelSettingsOperation,
+  type ModelSettingsOperation
+} from "@/hooks/chat/model-settings-operation"
+import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
+import { resolveExplicitProviderForSelectedModel } from "@/utils/resolve-api-provider"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor";
 import type { RolePlayApplyContext } from "../RolePlaySetupDrawer";
 import { captureSelectedModelGuard, type SelectedModelSaveOperation } from "@/hooks/chat/useSelectedModel";
@@ -32,62 +41,65 @@ import type { Character } from "@/types/character";
 
 export interface UsePromptTemplatesDeps {
   /** Startup templates raw string from storage */
-  startupTemplatesRaw: string;
-  setStartupTemplatesRaw: (value: string) => void;
+  startupTemplatesRaw: string
+  setStartupTemplatesRaw: (value: string) => void
   /** Prompt library from query */
-  promptLibrary: Prompt[];
+  promptLibrary: Prompt[]
   /** Current state snapshots */
-  selectedModel: string | undefined | null;
-  systemPrompt: string | undefined | null;
-  selectedSystemPrompt: string | undefined | null;
-  selectedQuickPrompt: string | undefined | null;
-  selectedCharacter: any | null;
-  ragPinnedResults: any[];
-  currentChatModelSettings: Record<string, any>;
+  selectedModel: string | undefined | null
+  systemPrompt: string | undefined | null
+  selectedSystemPrompt: string | undefined | null
+  selectedQuickPrompt: string | undefined | null
+  selectedCharacter: any | null
+  ragPinnedResults: any[]
+  currentChatModelSettings: Record<string, any>
+  composerModels?: Parameters<typeof resolveModelSelectorSelection>[0]
   /** Capture the reviewed source before opening a preview. */
   captureStartupTemplateSource?: () => {
-    isCurrent: () => boolean;
-    continuationIsCurrent: () => boolean;
-  };
+    isCurrent: () => boolean
+    continuationIsCurrent: () => boolean
+    acceptRestoreCancelled?: (revision: number) => boolean
+  }
   /** Setters for applying templates */
-  setSelectedModel: (model: string) => Promise<boolean | void> | boolean | void;
-  beginSelectedModelSave?: (model: string) => SelectedModelSaveOperation;
-  setSelectedSystemPrompt: (id: string | undefined) => void;
-  setSelectedQuickPrompt: (prompt: string | null) => void;
-  setSystemPrompt: (prompt: string) => void;
+  setSelectedModel: (model: string) => Promise<boolean | void> | boolean | void
+  beginSelectedModelSave?: (model: string) => SelectedModelSaveOperation
+  setSelectedSystemPrompt: (id: string | undefined) => void
+  setSelectedQuickPrompt: (prompt: string | null) => void
+  setSystemPrompt: (prompt: string) => void
   /** Explicit identity action: detach a different saved target before persistence. */
   applyAssistantSelection: (
     assistant: AssistantSelection | null,
-    options?: AssistantSetupApplyOptions,
-  ) => Promise<boolean | void> | boolean | void;
-  setRagPinnedResults: (results: any[]) => void;
-  updateChatModelSettings: (settings: Partial<ChatModelSettings>) => void;
+    options?: AssistantSetupApplyOptions
+  ) => Promise<boolean | void> | boolean | void
+  setRagPinnedResults: (results: any[]) => void
+  updateChatModelSettings: (settings: Partial<ChatModelSettings>) => void
   /** Compare mode (needed when applying template to sync model selection) */
-  compareModeActive: boolean;
+  compareModeActive: boolean
   setCompareSelectedModels: (
-    models: string[] | ((prev: string[]) => string[]),
-  ) => void;
+    models: string[] | ((prev: string[]) => string[])
+  ) => void
   /** Mode announcement */
-  setModeAnnouncement: (msg: string | null) => void;
+  setModeAnnouncement: (msg: string | null) => void
   /** i18n */
-  t: (key: string, ...args: any[]) => string;
+  t: (key: string, ...args: any[]) => string
 }
 
 export type AssistantSetupApplyOptions = RolePlayApplyContext & {
-  model?: string | null;
-  settings?: Partial<ChatModelSettings>;
-  selectedSystemPrompt?: string | null;
-  sceneSettings?: ActorSettings;
-  hasExplicitContext?: boolean;
-  applyIdentity?: boolean;
-  freshCharacterRoute?: boolean;
-};
+  model?: string | null
+  settings?: Partial<ChatModelSettings>
+  selectedSystemPrompt?: string | null
+  sceneSettings?: ActorSettings
+  hasExplicitContext?: boolean
+  applyIdentity?: boolean
+  freshCharacterRoute?: boolean
+}
 
 export type StartupTemplatePreviewLease = {
   id: object
   isCurrent: () => boolean
   sourceIsCurrent: () => boolean
   continuationIsCurrent: () => boolean
+  acceptRestoreCancelled?: (revision: number) => boolean
 }
 
 export type SaveRolePlaySetupInput = {
@@ -110,6 +122,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     selectedCharacter,
     ragPinnedResults,
     currentChatModelSettings,
+    composerModels,
     captureStartupTemplateSource,
     setSelectedModel,
     beginSelectedModelSave,
@@ -152,7 +165,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
               isCurrent: () =>
                 previewMountedRef.current && previewRef.current?.lease.id === id,
               sourceIsCurrent: source?.isCurrent ?? (() => true),
-              continuationIsCurrent: source?.continuationIsCurrent ?? (() => true)
+              continuationIsCurrent:
+                source?.continuationIsCurrent ?? (() => true),
+              acceptRestoreCancelled: source?.acceptRestoreCancelled
             }
           }
         : null
@@ -339,11 +354,49 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   );
 
   const createStartupTemplateApplication = React.useCallback(
-    (original: StartupTemplateBundle) => {
+    (
+      original: StartupTemplateBundle,
+      originalSettingsOperation?: ModelSettingsOperation
+    ) => {
       const template = JSON.parse(
         JSON.stringify(original)
       ) as StartupTemplateBundle
       const source = captureStartupTemplateSource?.()
+      const settingsOperation =
+        originalSettingsOperation ?? captureModelSettingsOperation()
+      const originalSettings = useStoreChatModelSettings.getState()
+      const requestedModel = template.selectedModel || selectedModel
+      const proposedProvider = resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: selectedModel,
+        requestedSelectedModel: requestedModel,
+        explicitProvider: originalSettings.apiProvider
+      })
+      const proposedScope = resolveModelSelectorSelection(
+        composerModels,
+        requestedModel,
+        proposedProvider,
+        {
+          scope: originalSettings.activeSettingsScope,
+          providerOverride: originalSettings.activeSettingsScope
+            ? originalSettings.scopedSettingsByModelKey[
+                originalSettings.activeSettingsScope
+              ]?.apiProvider
+            : undefined
+        }
+      ).settingsScope
+      const modelScope = resolveModelSelectorSelection(
+        composerModels,
+        requestedModel,
+        proposedProvider ??
+          originalSettings.getEffectiveSettings(proposedScope).apiProvider,
+        {
+          scope: proposedScope,
+          providerOverride: proposedScope
+            ? originalSettings.scopedSettingsByModelKey[proposedScope]
+                ?.apiProvider
+            : undefined
+        }
+      ).settingsScope
       let modelIsCurrent = captureSelectedModelGuard()
       let destinationIsCurrent = source?.isCurrent ?? (() => true)
       let destination: NonNullable<
@@ -356,6 +409,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       let retired = false
       const operationIsCurrent = () =>
         !retired &&
+        settingsOperation.isCurrent() &&
         previewMountedRef.current &&
         source?.continuationIsCurrent?.() !== false &&
         destinationIsCurrent() &&
@@ -404,6 +458,25 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         if (!identityAccepted) {
           const applied = await applyAssistantSelection(selection, {
             ...context,
+            settingsOperation,
+            onRestoreCancelled: (revision) => {
+              if (
+                retired ||
+                !previewMountedRef.current ||
+                source?.continuationIsCurrent?.() === false ||
+                !settingsOperation.isCurrent() ||
+                !modelIsCurrent()
+              )
+                return false
+              if (
+                source?.acceptRestoreCancelled
+                  ? !source.acceptRestoreCancelled(revision)
+                  : source?.isCurrent() === false
+              )
+                return false
+              if (context?.onRestoreCancelled?.(revision) === false) return false
+              return isCurrent()
+            },
             onDestination: (next) => {
               modelIsCurrent = captureSelectedModelGuard()
               destinationIsCurrent = next.isCurrent
@@ -427,6 +500,15 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         if (completed) return true
 
         if (template.selectedModel && !modelAccepted) {
+          if (
+            !settingsOperation.write(() =>
+              useStoreChatModelSettings
+                .getState()
+                .setActiveSettingsScope(modelScope)
+            ) ||
+            !isCurrent()
+          )
+            return false
           let acknowledged: boolean | void
           if (modelSave) {
             acknowledged = await modelSave.retry()
@@ -455,9 +537,13 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         }
         setSelectedSystemPrompt(resolvedPromptId || undefined)
         if (!isCurrent()) return false
-        setSystemPrompt(resolvedPromptContent)
+        if (
+          !settingsOperation.write(() => setSystemPrompt(resolvedPromptContent))
+        )
+          return false
         if (!isCurrent()) return false
-        updateChatModelSettings(settings)
+        if (!settingsOperation.write(() => updateChatModelSettings(settings)))
+          return false
         if (!isCurrent()) return false
         setRagPinnedResults(template.ragPinnedResults || [])
         completed = isCurrent()
@@ -466,6 +552,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     },
     [
       captureStartupTemplateSource,
+      composerModels,
       compareModeActive,
       promptLibrary,
       selectedModel,
@@ -498,7 +585,10 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       if (!application) {
         application = {
           intent,
-          apply: createStartupTemplateApplication(template)
+          apply: createStartupTemplateApplication(
+            template,
+            context?.settingsOperation
+          )
         }
         if (id) startupApplicationsRef.current.set(id, application)
       }
@@ -577,19 +667,36 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   );
 
   const handleTemplateSelect = React.useCallback(
-    (template: Pick<PromptTemplate, "id" | "content">) => {
-      setSystemPrompt(template.content);
-      updateChatModelSettings({ systemPromptTemplateId: template.id });
-      setSelectedSystemPrompt(undefined);
-      setSelectedQuickPrompt(null);
+    (
+      template: Pick<PromptTemplate, "id" | "content">,
+      isCurrent: () => boolean = () => true,
+      settingsOperation?: ModelSettingsOperation
+    ) => {
+      for (const apply of [
+        () => setSystemPrompt(template.content),
+        () => updateChatModelSettings({ systemPromptTemplateId: template.id })
+      ]) {
+        if (!isCurrent()) return false
+        if (settingsOperation) {
+          if (!settingsOperation.write(apply)) return false
+        } else apply()
+      }
+      for (const apply of [
+        () => setSelectedSystemPrompt(undefined),
+        () => setSelectedQuickPrompt(null)
+      ]) {
+        if (!isCurrent()) return false
+        apply()
+      }
+      return isCurrent()
     },
     [
       setSystemPrompt,
       setSelectedSystemPrompt,
       setSelectedQuickPrompt,
-      updateChatModelSettings,
-    ],
-  );
+      updateChatModelSettings
+    ]
+  )
 
   // Prompt summary label
   const promptSummaryLabel = React.useMemo(() => {

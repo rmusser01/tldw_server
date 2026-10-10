@@ -78,33 +78,46 @@ export const captureChatDraftSource = (
   isCurrent: () => boolean = () => true,
   isHistoryIdCurrent: (
     current: string | null,
-    original: string | null,
-  ) => boolean = (current, original) => current === original,
+    original: string | null
+  ) => boolean = (current, original) => current === original
 ) => {
-  const source = useStoreMessageOption.getState();
-  const session = usePlaygroundSessionStore.getState();
-  const current = () => {
-    const state = useStoreMessageOption.getState();
+  const source = useStoreMessageOption.getState()
+  const session = usePlaygroundSessionStore.getState()
+  let restoreRevision = session.restoreRevision
+  const sourceCurrent = () => {
+    const state = useStoreMessageOption.getState()
     return (
       isCurrent() &&
-      usePlaygroundSessionStore.getState().restoreRevision ===
-        session.restoreRevision &&
       usePlaygroundSessionStore.getState().sourceSelectionRevision ===
         session.sourceSelectionRevision &&
       state.chatDraftRevision === source.chatDraftRevision &&
       state.chatDraftAddress === source.chatDraftAddress &&
       isHistoryIdCurrent(state.historyId, source.historyId) &&
       state.serverChatId === source.serverChatId
-    );
-  };
+    )
+  }
+  const current = () =>
+    sourceCurrent() &&
+    usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
   return {
     isCurrent: current,
+    acceptRestoreCancelled: (revision: number) => {
+      if (
+        !Number.isSafeInteger(revision) ||
+        revision !== restoreRevision + 1 ||
+        usePlaygroundSessionStore.getState().restoreRevision !== revision ||
+        !sourceCurrent()
+      )
+        return false
+      restoreRevision = revision
+      return true
+    },
     isQuickPromptCurrent: () =>
       current() &&
       useStoreMessageOption.getState().quickPromptRevision ===
-        source.quickPromptRevision,
-  };
-};
+        source.quickPromptRevision
+  }
+}
 
 /** Only explicit interactive replacement asks; retained tab switches keep their source. */
 export const hasTemporaryChatContent = (chat: {

@@ -9,11 +9,21 @@ export const settingsTestOwner = {
 
 export const installSettingsLocks = () => {
   const tails = new Map<string, Promise<unknown>>()
-  vi.stubGlobal("navigator", Object.create(window.navigator, { locks: { value: {
+  const locks = {
     request: (key: string, operation: () => unknown) => {
       const next = (tails.get(key) ?? Promise.resolve()).then(operation)
-      tails.set(key, next.catch(() => undefined))
+      tails.set(
+        key,
+        next.catch(() => undefined)
+      )
       return next
     }
-  } } }))
+  }
+  vi.stubGlobal(
+    "navigator",
+    new Proxy(window.navigator, {
+      get: (original, key) =>
+        key === "locks" ? locks : Reflect.get(original, key, original)
+    })
+  )
 }

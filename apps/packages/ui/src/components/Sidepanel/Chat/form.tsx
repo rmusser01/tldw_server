@@ -5,7 +5,7 @@ import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
-import { getActorSettingsForChat } from "@/services/actor-settings"
+import { createDefaultActorSettings } from "@/types/actor"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -140,7 +140,11 @@ import {
 } from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
-import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
+import {
+  chatDraftAddressKey,
+  conversationDraftKey,
+  freshChatDraftAddress
+} from "@/utils/chat-draft-address"
 import { useStoreChatModelSettings } from "@/store/model"
 import { shallow } from "zustand/shallow"
 import { Button } from "@/components/Common/Button"
@@ -1035,6 +1039,7 @@ export const SidepanelForm = ({
           view.message,
           view.image,
           chat.selectedModel,
+          chat.selectedModelRevision,
           chat.toolChoice,
           chat.history,
           chat.messages,
@@ -1096,10 +1101,7 @@ export const SidepanelForm = ({
         if (selection.kind === "persona" && greetingHistorySelection)
           throw new Error("native_history_persona_unsupported")
         if (selection.kind === "character") {
-          const actor = await getActorSettingsForChat({
-            historyId: null,
-            serverChatId: null
-          })
+          const actor = createDefaultActorSettings()
           if (!isCurrent()) return false
           const steering = resolveMessageSteering({
             mode: source.messageSteeringMode,
@@ -1109,7 +1111,7 @@ export const SidepanelForm = ({
             temporary:
               Boolean(
                 source.temporaryChat &&
-                (source.history.length || source.messages.length)
+                  (source.history.length || source.messages.length)
               ) || source.historyId === "temp",
             image: view.image,
             model: view.model || "",
@@ -1120,15 +1122,15 @@ export const SidepanelForm = ({
             actorEnabled: actor?.isEnabled,
             unsupportedContext: Boolean(
               view.chatMode !== "normal" ||
-              view.documents.length ||
-              view.files.length ||
-              view.pageContext ||
-              source.webSearch ||
-              source.selectedSystemPrompt ||
-              source.replyTarget ||
-              steering.continueAsUser ||
-              steering.impersonateUser ||
-              steering.forceNarrate
+                view.documents.length ||
+                view.files.length ||
+                view.pageContext ||
+                source.webSearch ||
+                source.selectedSystemPrompt ||
+                source.replyTarget ||
+                steering.continueAsUser ||
+                steering.impersonateUser ||
+                steering.forceNarrate
             )
           })
           if (
@@ -1155,25 +1157,80 @@ export const SidepanelForm = ({
           return false
         // The accepted transition reuses the full form's targeted reset. Response
         // settings and the source overlay record stay owned by their existing scopes.
-        usePlaygroundSessionStore.getState().clearSession()
-        source.startNewChatDraft(false)
-        greetingHistorySelection?.reset()
-        source.setHistoryId(null)
-        source.setHistory([])
-        source.setMessages([])
-        source.setServerChatId(null)
-        source.setIsFirstMessage(true)
-        source.setIsLoading(false)
-        source.setIsProcessing(false)
-        source.setStreaming(false)
-        source.clearReplyTarget()
-        source.setServerChatAssistantKind(selection.kind)
-        source.setServerChatAssistantId(selection.id)
-        source.setServerChatCharacterId(
-          selection.kind === "character" ? selection.id : null
+        const address = freshChatDraftAddress(false)
+        const revision = source.chatDraftRevision + 1
+        if (
+          !source.setChatDraftAddress(address, {
+            sourceAddress: source.chatDraftAddress,
+            expectedRevision: source.chatDraftRevision
+          })
         )
-        source.setServerChatMetaLoaded(false)
-        return true
+          return false
+        let historyId = source.historyId
+        let serverChatId = source.serverChatId
+        let restoreRevision = session.restoreRevision
+        let selectionIsCurrent = () => true
+        const destinationIsCurrent = () => {
+          const current = useStoreMessageOption.getState()
+          const activeSession = usePlaygroundSessionStore.getState()
+          return (
+            trackedSelectionPendingRef.current === attempt &&
+            characterMeta.isCurrent() &&
+            selectionIsCurrent() &&
+            form.getRevision() === composerRevision &&
+            connectionGenerationRef.current === connectionGeneration &&
+            (getSelectedAssistantOperationRevision() === assistantRevision ||
+              getSelectedAssistantOperationRevision() ===
+                assistantRevision + 1) &&
+            current.selectedModel === source.selectedModel &&
+            current.selectedModelRevision === source.selectedModelRevision &&
+            current.toolChoice === source.toolChoice &&
+            current.chatDraftAddress === address &&
+            current.chatDraftRevision === revision &&
+            current.historyId === historyId &&
+            current.serverChatId === serverChatId &&
+            activeSession.restoreRevision === restoreRevision &&
+            activeSession.sourceSelectionRevision ===
+              session.sourceSelectionRevision &&
+            useStoreChatModelSettings.getState() === settings &&
+            useMcpToolsStore.getState() === tools &&
+            !snapshot?.scopeSignal.aborted &&
+            !snapshot?.scopeInvalidatedSignal.aborted
+          )
+        }
+        if (!destinationIsCurrent()) return false
+        restoreRevision++
+        usePlaygroundSessionStore.getState().clearSession()
+        if (!destinationIsCurrent()) return false
+        greetingHistorySelection?.reset()
+        if (!destinationIsCurrent()) return false
+        selectionIsCurrent = greetingHistorySelection?.fence() ?? (() => true)
+        historyId = null
+        source.setHistoryId(null)
+        if (!destinationIsCurrent()) return false
+        serverChatId = null
+        source.setServerChatId(null)
+        if (!destinationIsCurrent()) return false
+        for (const publish of [
+          () => source.setHistory([]),
+          () => source.setMessages([]),
+          () => source.setIsFirstMessage(true),
+          () => source.setIsLoading(false),
+          () => source.setIsProcessing(false),
+          () => source.setStreaming(false),
+          () => source.clearReplyTarget(),
+          () => source.setServerChatAssistantKind(selection.kind),
+          () => source.setServerChatAssistantId(selection.id),
+          () =>
+            source.setServerChatCharacterId(
+              selection.kind === "character" ? selection.id : null
+            ),
+          () => source.setServerChatMetaLoaded(false)
+        ]) {
+          if (!destinationIsCurrent()) return false
+          publish()
+        }
+        return destinationIsCurrent()
       } catch (error) {
         if (isCurrent())
           notification.error({
@@ -1185,11 +1242,11 @@ export const SidepanelForm = ({
                     "playground:characterRail.nativePersonaUnavailable",
                     "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here."
                   )
-                : (nativeCharacterPreflightMessage(error, t) ??
+                : nativeCharacterPreflightMessage(error, t) ??
                   t(
                     "playground:characterRail.selectionError",
                     "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
-                  ))
+                  )
           })
         return false
       } finally {

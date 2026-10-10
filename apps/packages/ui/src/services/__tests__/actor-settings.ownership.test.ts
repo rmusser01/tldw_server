@@ -1197,4 +1197,121 @@ describe("qualified scene and character-default records", () => {
     }
   )
 
+  describe("missing qualified targets refuse every public storage wrapper", () => {
+    const unqualifiedSources = [
+      { label: "native ID", historyId: null, serverChatId: "collision" },
+      { label: "local ID", historyId: "collision", serverChatId: null },
+      { label: "scratch IDs", historyId: null, serverChatId: null }
+    ]
+    const readCases = unqualifiedSources.flatMap((source) =>
+      ["rich Scene", "plain Scene", "Scene profile fallback"].map((kind) => ({
+        ...source,
+        kind
+      }))
+    )
+    beforeEach(() => {
+      // Valid legacy data must not make an unchecked caller qualified. Include
+      // owned records too: refusal must precede any physical record discovery.
+      for (const key of [
+        "actorSettings:server:collision",
+        "actorSettings:local:collision",
+        "actorSettings:scratch",
+        "actorProfile:card-one"
+      ])
+        io.values.set(key, structuredClone(sceneA))
+      io.values.set(sceneKey(native), { value: sceneA, updatedAt: 11 })
+      io.values.set(`actorProfile:owned:${profileA.key}`, {
+        value: sceneA,
+        updatedAt: 11
+      })
+    })
+
+    it.each(readCases)(
+      "refuses missing target $kind with $label before any storage IO",
+      async ({ kind, historyId, serverChatId }) => {
+        const before = structuredClone([...io.values])
+        const params = { historyId, serverChatId }
+        const pending =
+          kind === "rich Scene"
+            ? // Exercise an unchecked runtime caller without fabricating a target
+              // or weakening the rich reader's required static parameter type.
+              Reflect.apply(getActorSceneForChat, undefined, [params])
+            : kind === "plain Scene"
+              ? getActorSettingsForChat(params)
+              : getActorSettingsForChatWithCharacterFallback({
+                  ...params,
+                  characterId: "card-one"
+                })
+        await expect(pending).rejects.toThrow("actor_settings_unavailable")
+        expect([...io.values]).toEqual(before)
+        expect(io.get).not.toHaveBeenCalled()
+        expect(io.set).not.toHaveBeenCalled()
+        expect(io.verifyProfile).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(
+      unqualifiedSources.flatMap((source) =>
+        ["certified absence", "original raw record"].map((expectation) => ({
+          ...source,
+          expectation
+        }))
+      )
+    )(
+      "refuses missing target Scene Save with $label and otherwise valid $expectation",
+      async ({ historyId, serverChatId, expectation }) => {
+        const before = structuredClone([...io.values])
+        const original = { value: structuredClone(sceneA), updatedAt: 11 }
+        expect(
+          await saveActorSettingsForChat({
+            historyId,
+            serverChatId,
+            settings: sceneB,
+            expectedRecord: expectation === "certified absence" ? null : original,
+            validate_lease: () => true
+          })
+        ).toBe(false)
+        expect(original).toEqual({ value: sceneA, updatedAt: 11 })
+        expect([...io.values]).toEqual(before)
+        expect(io.get).not.toHaveBeenCalled()
+        expect(io.set).not.toHaveBeenCalled()
+        expect(io.verifyProfile).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(["advisory", "strict"])(
+      "refuses a missing target %s Profile read before any storage IO",
+      async (kind) => {
+        const before = structuredClone([...io.values])
+        await expect(
+          getActorProfileForCharacter(
+            "card-one",
+            kind === "strict"
+              ? { throwOnError: true, validate_lease: () => true }
+              : undefined
+          )
+        ).rejects.toThrow("actor_settings_unavailable")
+        expect([...io.values]).toEqual(before)
+        expect(io.get).not.toHaveBeenCalled()
+        expect(io.set).not.toHaveBeenCalled()
+        expect(io.verifyProfile).not.toHaveBeenCalled()
+      }
+    )
+
+    it("refuses missing target Profile Save with an otherwise valid proposal and lease", async () => {
+      const before = structuredClone([...io.values])
+      expect(
+        await saveActorProfileForCharacter({
+          characterId: "card-one",
+          settings: sceneB,
+          validate_lease: () => true
+        })
+      ).toBe(false)
+      expect([...io.values]).toEqual(before)
+      expect(io.get).not.toHaveBeenCalled()
+      expect(io.set).not.toHaveBeenCalled()
+      expect(io.verifyProfile).not.toHaveBeenCalled()
+    })
+  })
+
 })

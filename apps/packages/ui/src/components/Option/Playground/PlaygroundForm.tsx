@@ -32,18 +32,35 @@ import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight";
 import { useMcpToolsStore } from "@/store/mcp-tools";
-import { getActorSettingsForChat } from "@/services/actor-settings";
+import {
+  getActorSceneForChat,
+  type ActorSceneRead
+} from "@/services/actor-settings"
+import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import {
+  captureActorSettingsTarget,
+  type ActorSettingsTarget
+} from "@/utils/actor-settings-target"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import { requestSettingsNavigation } from "@/utils/settings-return";
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent";
 import { buildChatModelUsability } from "@/utils/chat-model-availability";
-import { normalizeModelSettingsScope } from "@/store/model-settings-scope";
-import { parseProviderQualifiedModelSelection, resolveExplicitProviderForSelectedModel } from "@/utils/resolve-api-provider";
+import {
+  captureModelSettingsOperation,
+  type ModelSettingsOperation
+} from "@/hooks/chat/model-settings-operation"
+import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
+import { resolveExplicitProviderForSelectedModel } from "@/utils/resolve-api-provider"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, resolveOutputFormattingGuideSuffix } from "@/utils/output-formatting-guide";
 import { resolveMessageSteering } from "@/utils/message-steering";
 import type { AssistantSetupApplyOptions } from "./hooks/usePromptTemplates";
 import { captureSelectedModelGuard, createSelectedModelGuard } from "@/hooks/chat/useSelectedModel";
-import type { RolePlayApplyContext } from "./RolePlaySetupDrawer";
+import type {
+  RolePlayApplyContext,
+  RolePlayApplyGuard
+} from "./RolePlaySetupDrawer"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
   type CollapsedRange,
@@ -740,10 +757,7 @@ export const PlaygroundForm = ({
   }, [textareaRef]);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const actorSettings = useActorStore((state) => state.settings);
-  const setActorSettings = useActorStore((state) => state.setSettings);
-  const setActorPreviewAndTokens = useActorStore(
-    (state) => state.setPreviewAndTokens,
-  );
+  const applyActorScene = useActorStore((state) => state.applyScene);
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
   const setSystemPrompt = useStoreChatModelSettings(
     (state) => state.setSystemPrompt,
@@ -1692,34 +1706,53 @@ export const PlaygroundForm = ({
     assistantActionMountedRef.current = true;
     return () => { assistantActionMountedRef.current = false; };
   }, []);
-  const captureAssistantActionGuard = React.useCallback(() => {
-    const selectionIsCurrent = captureSelectionFence?.() ?? (() => true);
-    const actionRevision = assistantActionRevisionRef.current;
-    const expected = useStoreMessageOption.getState();
-    const targetId = expected.serverChatId;
-    const historyId = expected.historyId;
-    const draftRevision = expected.chatDraftRevision;
-    const draftAddress = expected.chatDraftAddress;
-    const sourceSelectionRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision;
-    const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision;
-    return () => {
-      const current = useStoreMessageOption.getState();
-      return assistantActionMountedRef.current &&
-        selectionIsCurrent() && (assistantOwnerIsCurrent?.() ?? true) &&
-        assistantActionRevisionRef.current === actionRevision &&
-        usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
-        usePlaygroundSessionStore.getState().sourceSelectionRevision === sourceSelectionRevision &&
-        current.chatDraftAddress === draftAddress &&
-        current.serverChatId === targetId && (draftAddress?.kind === "native" || current.historyId === historyId) && current.chatDraftRevision === draftRevision;
-    };
-  }, [captureSelectionFence, assistantOwnerIsCurrent]);
+  const captureAssistantActionGuard =
+    React.useCallback((): RolePlayApplyGuard => {
+      const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+      let actionRevision = assistantActionRevisionRef.current
+      const address = useStoreMessageOption.getState().chatDraftAddress
+      const source = captureChatDraftSource(
+        () =>
+          assistantActionMountedRef.current &&
+          selectionIsCurrent() &&
+          (assistantOwnerIsCurrent?.() ?? true),
+        (current, original) => address?.kind === "native" || current === original
+      )
+      return Object.assign(
+        () =>
+          assistantActionRevisionRef.current === actionRevision &&
+          source.isCurrent(),
+        {
+          acceptNextAction: (revision: number) => {
+            if (
+              !Number.isSafeInteger(revision) ||
+              revision !== actionRevision + 1 ||
+              assistantActionRevisionRef.current !== revision ||
+              !source.isCurrent()
+            )
+              return false
+            actionRevision = revision
+            return true
+          },
+          acceptRestoreCancelled: (revision: number) =>
+            assistantActionRevisionRef.current === actionRevision &&
+            source.acceptRestoreCancelled(revision)
+        }
+      )
+    }, [captureSelectionFence, assistantOwnerIsCurrent])
   const captureAssistantPreparationGuard = React.useCallback(() => {
-    const sourceIsCurrent = captureAssistantActionGuard();
-    const inputRevision = assistantComposerRef.current?.getRevision();
-    const connectionRevision = assistantConnectionRevisionRef.current;
-    return () => sourceIsCurrent() && assistantComposerRef.current?.getRevision() === inputRevision &&
-      assistantConnectionRevisionRef.current === connectionRevision;
-  }, [captureAssistantActionGuard]);
+    const sourceIsCurrent = captureAssistantActionGuard()
+    const inputRevision = assistantComposerRef.current?.getRevision()
+    const connectionRevision = assistantConnectionRevisionRef.current
+    const inputsAreCurrent = () =>
+      assistantComposerRef.current?.getRevision() === inputRevision &&
+      assistantConnectionRevisionRef.current === connectionRevision
+    return Object.assign(() => inputsAreCurrent() && sourceIsCurrent(), {
+      acceptRestoreCancelled: (revision: number) =>
+        inputsAreCurrent() &&
+        sourceIsCurrent.acceptRestoreCancelled?.(revision) === true
+    })
+  }, [captureAssistantActionGuard])
   const readAssistantPreparationInputs = React.useCallback(() => {
     const chat = useStoreMessageOption.getState();
     const view = assistantPreparationViewRef.current;
@@ -1730,133 +1763,471 @@ export const PlaygroundForm = ({
       view.appendFormattingGuidePrompt, view.isConnectionReady, view.composerModels, view.composerModelsLoading];
   }, []);
   const applyAssistantSelection = React.useCallback(
-    async (selection: AssistantSelection | null, options: AssistantSetupApplyOptions = {}): Promise<boolean> => {
-      assistantActionRevisionRef.current++;
-      const activeChat = useStoreMessageOption.getState();
+    async (
+      selection: AssistantSelection | null,
+      options: AssistantSetupApplyOptions = {}
+    ): Promise<boolean> => {
+      const settingsOperation =
+        options.settingsOperation ?? captureModelSettingsOperation()
+      if (options.isCurrent?.() === false || !settingsOperation.isCurrent())
+        return false
+      const activeChat = useStoreMessageOption.getState()
       let modelIsCurrent = captureSelectedModelGuard()
-      const sourcePreparationIsCurrent = captureAssistantPreparationGuard();
-      const sourceIsCurrent = () => sourcePreparationIsCurrent() && modelIsCurrent();
-      const matchesActiveChat = selection?.kind === "character"
-        ? activeChat.serverChatAssistantKind === "character" &&
-          String(activeChat.serverChatCharacterId) === selection.id
-        : selection?.kind === "persona"
-          ? activeChat.serverChatAssistantKind === "persona" &&
-            String(activeChat.serverChatAssistantId) === selection.id
-          : activeChat.serverChatMetaLoaded &&
-            (activeChat.serverChatAssistantKind === null || activeChat.serverChatAssistantKind === undefined) &&
-            (activeChat.serverChatAssistantId === null || activeChat.serverChatAssistantId === undefined) &&
-            (activeChat.serverChatCharacterId === null || activeChat.serverChatCharacterId === undefined);
-      const nativeCharacter = Boolean(historySelection && selection?.kind === "character" && getAssistantSelectionMode(selection) !== "overlay");
-      const replacing = Boolean(nativeCharacter && (options.freshCharacterRoute || historySelection?.getCurrent().owner?.kind === "local")) || (!matchesActiveChat && getAssistantSelectionMode(selection) !== "overlay" &&
-        Boolean(activeChat.serverChatId || (nativeCharacter && (activeChat.historyId || historySelection?.getCurrent().owner))));
-      let snapshot: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined;
-      let preparationIsCurrent = () => sourceIsCurrent() && options.isCurrent?.() !== false;
-      let preparedModelScope: string | null = null;
-      const proposedModel = options.model || activeChat.selectedModel || "";
+      const toolsState = useMcpToolsStore.getState()
+      const toolChoice = activeChat.toolChoice
+      const configurationIsCurrent = () =>
+        useStoreMessageOption.getState().toolChoice === toolChoice &&
+        useMcpToolsStore.getState() === toolsState
+      const publicationInputsAreCurrent = () =>
+        modelIsCurrent() && configurationIsCurrent()
+      const entrySource = captureChatDraftSource()
+      const actionRevision = ++assistantActionRevisionRef.current
+      if (
+        options.onActionStarted?.(actionRevision) === false ||
+        assistantActionRevisionRef.current !== actionRevision ||
+        !entrySource.isCurrent() ||
+        !publicationInputsAreCurrent() ||
+        !settingsOperation.isCurrent() ||
+        options.isCurrent?.() === false
+      )
+        return false
+      const sourceAddress = activeChat.chatDraftAddress
+      const sourceRevision = activeChat.chatDraftRevision
+      const originalSceneTarget = captureCurrentActorSceneTarget(historySelection)
+      const draftAccount = historySelection?.draftAccount
+      const originalAccount =
+        draftAccount?.requestScope && draftAccount.isCurrent()
+          ? {
+              requestScope: structuredClone(draftAccount.requestScope),
+              isCurrent: draftAccount.isCurrent
+            }
+          : !draftAccount
+            ? originalSceneTarget?.account
+            : undefined
+      const explicitScene = options.sceneSettings
+        ? structuredClone(options.sceneSettings)
+        : undefined
+      const inputRevision = assistantComposerRef.current?.getSetupInputRevision()
+      const connectionRevision = assistantConnectionRevisionRef.current
+      const sourceSession = usePlaygroundSessionStore.getState()
+      const sourcePreparationIsCurrent = captureAssistantPreparationGuard()
+      let sourceRestoreRevision = sourceSession.restoreRevision
+      let routeReceiptRejected = false
+      const sourceIsCurrent = () =>
+        settingsOperation.isCurrent() &&
+        !routeReceiptRejected &&
+        sourcePreparationIsCurrent() &&
+        publicationInputsAreCurrent() &&
+        originalAccount?.isCurrent() !== false
+      let destinationIsCurrent = () =>
+        settingsOperation.isCurrent() &&
+        !routeReceiptRejected &&
+        sourcePreparationIsCurrent() &&
+        configurationIsCurrent() &&
+        originalAccount?.isCurrent() !== false
+      const publicationIsCurrent = () =>
+        destinationIsCurrent() && publicationInputsAreCurrent()
+      let sceneTarget = originalSceneTarget
+      let destinationHistoryId = activeChat.historyId
+      let destinationServerChatId = activeChat.serverChatId
+      const matchesActiveChat =
+        selection?.kind === "character"
+          ? activeChat.serverChatAssistantKind === "character" &&
+            String(activeChat.serverChatCharacterId) === selection.id
+          : selection?.kind === "persona"
+            ? activeChat.serverChatAssistantKind === "persona" &&
+              String(activeChat.serverChatAssistantId) === selection.id
+            : activeChat.serverChatMetaLoaded &&
+              (activeChat.serverChatAssistantKind === null ||
+                activeChat.serverChatAssistantKind === undefined) &&
+              (activeChat.serverChatAssistantId === null ||
+                activeChat.serverChatAssistantId === undefined) &&
+              (activeChat.serverChatCharacterId === null ||
+                activeChat.serverChatCharacterId === undefined)
+      const nativeCharacter = Boolean(
+        historySelection &&
+          selection?.kind === "character" &&
+          getAssistantSelectionMode(selection) !== "overlay"
+      )
+      const replacing =
+        Boolean(
+          nativeCharacter &&
+            (options.freshCharacterRoute ||
+              activeChat.temporaryChat ||
+              historySelection?.getCurrent().owner?.kind === "local")
+        ) ||
+        (!matchesActiveChat &&
+          getAssistantSelectionMode(selection) !== "overlay" &&
+          Boolean(
+            activeChat.serverChatId ||
+              (nativeCharacter &&
+                (activeChat.historyId || historySelection?.getCurrent().owner))
+          ))
+      let snapshot:
+        | Awaited<ReturnType<typeof loadServicePromptSnapshot>>
+        | undefined
+      let preparationIsCurrent = () =>
+        sourceIsCurrent() && options.isCurrent?.() !== false
+      let preparedModelScope: string | null = null
+      const proposedModel = options.model || activeChat.selectedModel || ""
+      const replaceRoute = (
+        detail: Parameters<typeof dispatchChatRouteReplacement>[0]
+      ) => {
+        let receiving = true
+        let accepted = false
+        try {
+          dispatchChatRouteReplacement({
+            ...detail,
+            onRestoreCancelled: (revision) => {
+              if (!receiving || accepted) return false
+              if (
+                revision !== sourceRestoreRevision + 1 ||
+                !sourcePreparationIsCurrent.acceptRestoreCancelled(revision) ||
+                options.onRestoreCancelled?.(revision) === false
+              ) {
+                routeReceiptRejected = true
+                return false
+              }
+              sourceRestoreRevision = revision
+              accepted = true
+              if (!preparationIsCurrent()) {
+                routeReceiptRejected = true
+                return false
+              }
+              return true
+            }
+          })
+        } finally {
+          receiving = false
+        }
+      }
       try {
         if (nativeCharacter) {
-          if (activeChat.isProcessing || activeChat.isLoading || activeChat.streaming) throw new Error("native_history_response_pending");
-          const settingsState = useStoreChatModelSettings.getState();
-          const toolsState = useMcpToolsStore.getState();
-          const capturedInputs = readAssistantPreparationInputs();
-          const sourceAssistantRevision = getSelectedAssistantOperationRevision();
-          let writingIdentity = false;
-          preparationIsCurrent = () => sourceIsCurrent() && options.isCurrent?.() !== false &&
-            (getSelectedAssistantOperationRevision() === sourceAssistantRevision ||
-              (writingIdentity && getSelectedAssistantOperationRevision() === sourceAssistantRevision + 1)) &&
-            !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted && useStoreChatModelSettings.getState() === settingsState &&
-            useMcpToolsStore.getState() === toolsState && readAssistantPreparationInputs().every((value, index) => value === capturedInputs[index]);
-          const proposedSelection = parseProviderQualifiedModelSelection(proposedModel);
+          if (
+            activeChat.isProcessing ||
+            activeChat.isLoading ||
+            activeChat.streaming
+          )
+            throw new Error("native_history_response_pending")
+          const settingsState = useStoreChatModelSettings.getState()
+          const capturedInputs = readAssistantPreparationInputs()
+          const sourceAssistantRevision = getSelectedAssistantOperationRevision()
+          let writingIdentity = false
+          preparationIsCurrent = () =>
+            sourceIsCurrent() &&
+            options.isCurrent?.() !== false &&
+            (getSelectedAssistantOperationRevision() ===
+              sourceAssistantRevision ||
+              (writingIdentity &&
+                getSelectedAssistantOperationRevision() ===
+                  sourceAssistantRevision + 1)) &&
+            !snapshot?.scopeSignal.aborted &&
+            !snapshot?.scopeInvalidatedSignal.aborted &&
+            useStoreChatModelSettings.getState() === settingsState &&
+            useMcpToolsStore.getState() === toolsState &&
+            readAssistantPreparationInputs().every(
+              (value, index) => value === capturedInputs[index]
+            )
           const proposedProvider = resolveExplicitProviderForSelectedModel({
-            currentSelectedModel: activeChat.selectedModel, requestedSelectedModel: proposedModel,
-            explicitProvider: options.settings?.apiProvider ?? settingsState.apiProvider,
-          });
-          preparedModelScope = normalizeModelSettingsScope(proposedProvider, proposedSelection.modelId.replace(/^tldw:/, ""));
-          const proposedSettings = settingsState.getEffectiveSettings(preparedModelScope, options.settings);
-          const actor = options.sceneSettings ?? await getActorSettingsForChat(replacing || !activeChat.serverChatId
-            ? { historyId: null, serverChatId: null }
-            : { historyId: activeChat.historyId, serverChatId: activeChat.serverChatId });
-          if (!preparationIsCurrent()) return false;
-          const steering = resolveMessageSteering({ mode: activeChat.messageSteeringMode, forceNarrate: activeChat.messageSteeringForceNarrate });
+            currentSelectedModel: activeChat.selectedModel,
+            requestedSelectedModel: proposedModel,
+            explicitProvider:
+              options.settings?.apiProvider ?? settingsState.apiProvider
+          })
+          preparedModelScope = resolveModelSelectorSelection(
+            composerModels,
+            proposedModel,
+            proposedProvider,
+            {
+              scope: settingsState.activeSettingsScope,
+              providerOverride: settingsState.activeSettingsScope
+                ? settingsState.scopedSettingsByModelKey[
+                    settingsState.activeSettingsScope
+                  ]?.apiProvider
+                : undefined
+            }
+          ).settingsScope
+          const proposedSettings = settingsState.getEffectiveSettings(
+            preparedModelScope,
+            options.settings
+          )
+          if (!explicitScene && !replacing && !originalSceneTarget)
+            throw new Error("actor_settings_unavailable")
+          let actor = explicitScene ?? createDefaultActorSettings()
+          if (!explicitScene && !replacing) {
+            try {
+              actor = (
+                await getActorSceneForChat({
+                  target: originalSceneTarget!,
+                  validate_lease: preparationIsCurrent
+                })
+              ).settings
+            } catch (error) {
+              if (!preparationIsCurrent()) return false
+              throw error
+            }
+          }
+          if (!preparationIsCurrent()) return false
+          const steering = resolveMessageSteering({
+            mode: activeChat.messageSteeringMode,
+            forceNarrate: activeChat.messageSteeringForceNarrate
+          })
           const prepared = validateNativeCharacterConfiguration({
-            temporary: Boolean(activeChat.temporaryChat && (activeChat.history.length || activeChat.messages.length)) || activeChat.historyId === "temp",
+            temporary:
+              Boolean(
+                activeChat.temporaryChat &&
+                  (activeChat.history.length || activeChat.messages.length)
+              ) || activeChat.historyId === "temp",
             image: composerImageRef.current,
-            unsupportedContext: Boolean(activeChat.webSearch ||
-              (options.selectedSystemPrompt !== undefined ? options.selectedSystemPrompt : activeChat.selectedSystemPrompt) ||
-              activeChat.uploadedFiles?.length || activeChat.contextFiles?.length || activeChat.documentContext?.length ||
-              activeChat.selectedKnowledge || activeChat.ragMediaIds?.length ||
-              (options.hasExplicitContext ?? Boolean(activeChat.ragPinnedResults?.length)) ||
-              activeChat.replyTarget || steering.continueAsUser || steering.impersonateUser || steering.forceNarrate || researchContext || openUIRequestMode || resolveOutputFormattingGuideSuffix(Boolean(appendFormattingGuidePrompt))),
+            unsupportedContext: Boolean(
+              activeChat.webSearch ||
+                (options.selectedSystemPrompt !== undefined
+                  ? options.selectedSystemPrompt
+                  : activeChat.selectedSystemPrompt) ||
+                activeChat.uploadedFiles?.length ||
+                activeChat.contextFiles?.length ||
+                activeChat.documentContext?.length ||
+                activeChat.selectedKnowledge ||
+                activeChat.ragMediaIds?.length ||
+                (options.hasExplicitContext ??
+                  Boolean(activeChat.ragPinnedResults?.length)) ||
+                activeChat.replyTarget ||
+                steering.continueAsUser ||
+                steering.impersonateUser ||
+                steering.forceNarrate ||
+                researchContext ||
+                openUIRequestMode ||
+                resolveOutputFormattingGuideSuffix(
+                  Boolean(appendFormattingGuidePrompt)
+                )
+            ),
             toolChoice: activeChat.toolChoice,
             clientToolCount: toolsState.tools.length,
             actorEnabled: actor?.isEnabled,
             model: proposedModel,
             currentModel: activeChat.selectedModel,
-            settings: proposedSettings,
-          });
-          if (!isConnectionReady) throw new Error("native_history_server_unavailable");
-          const usability = buildChatModelUsability({ selectedModel: `${prepared.provider}:${prepared.model}`,
-            availableModels: composerModels, modelsLoading: composerModelsLoading, isServerConnected: isConnectionReady });
-          if (!usability.canSend) throw new Error("native_history_model_unavailable");
-          const owner = historySelection?.getCurrent().owner;
-          snapshot = await loadServicePromptSnapshot([], { requestScope: !replacing && owner?.kind === "native" ? owner.request_scope : undefined });
-          if (!preparationIsCurrent()) return false;
-          if (!await assistantComposerRef.current?.retainCurrentDraft()) throw new Error("native_history_draft_not_retained");
-          if (!preparationIsCurrent() || (replacing && !requestSettingsNavigation("/chat"))) return false;
-          if (!preparationIsCurrent()) return false;
-          writingIdentity = options.applyIdentity !== false;
+            settings: proposedSettings
+          })
+          if (!isConnectionReady)
+            throw new Error("native_history_server_unavailable")
+          const usability = buildChatModelUsability({
+            selectedModel: `${prepared.provider}:${prepared.model}`,
+            availableModels: composerModels,
+            modelsLoading: composerModelsLoading,
+            isServerConnected: isConnectionReady
+          })
+          if (!usability.canSend)
+            throw new Error("native_history_model_unavailable")
+          const owner = historySelection?.getCurrent().owner
+          snapshot = await loadServicePromptSnapshot([], {
+            requestScope:
+              originalAccount?.requestScope ??
+              (!replacing && owner?.kind === "native"
+                ? owner.request_scope
+                : undefined)
+          })
+          if (!preparationIsCurrent()) return false
+          if (!(await assistantComposerRef.current?.retainCurrentDraft()))
+            throw new Error("native_history_draft_not_retained")
+          if (
+            !preparationIsCurrent() ||
+            (replacing && !requestSettingsNavigation("/chat"))
+          )
+            return false
+          if (!preparationIsCurrent()) return false
+          writingIdentity = options.applyIdentity !== false
           // A failed identity write must not release the acknowledged source owner.
-          if (options.applyIdentity !== false && !await setSelectedAssistant(selection, { isCurrent: preparationIsCurrent })) return false;
-          if (!preparationIsCurrent()) return false;
+          if (
+            options.applyIdentity !== false &&
+            !(await setSelectedAssistant(selection, {
+              isCurrent: preparationIsCurrent
+            }))
+          )
+            return false
+          if (!preparationIsCurrent()) return false
         }
-      if (replacing) {
-        if (!preparationIsCurrent()) return false;
-        if (!nativeCharacter || !options.freshCharacterRoute) dispatchChatRouteReplacement({ serverChatId: activeChat.serverChatId, historyId: activeChat.historyId,
-          restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
-          characterId: selection?.kind === "character" ? String(selection.id) : null });
-        if (nativeCharacter) activeChat.setQueuedMessages(previous => previous.map(item => blockQueuedRequest(item, "chat_setup_changed")));
-        activeChat.startNewChatDraft(nativeCharacter ? false : activeChat.temporaryChat);
-        resetSelectedHistory?.();
-        usePlaygroundSessionStore.getState().clearSession();
-        activeChat.setHistoryId(null, { preserveServerChatId: false });
-        activeChat.setHistory([]);
-        activeChat.setMessages([]);
-        activeChat.setServerChatCharacterId(null);
-        activeChat.setServerChatAssistantKind(null);
-        activeChat.setServerChatAssistantId(null);
-        activeChat.setServerChatPersonaMemoryMode(null);
-        activeChat.setServerChatMetaLoaded(false);
-        activeChat.setServerChatId(null);
-      }
-      if (nativeCharacter) {
-        activeChat.setTemporaryChat(false);
-        if (options.model) {
-          const revision = useStoreMessageOption.getState().selectedModelRevision + 1
-          modelIsCurrent = createSelectedModelGuard(options.model, revision)
-          activeChat.setSelectedModel(options.model)
+        if (replacing) {
+          if (!preparationIsCurrent()) return false
+          if (!nativeCharacter || !options.freshCharacterRoute)
+            replaceRoute({
+              serverChatId: activeChat.serverChatId,
+              historyId: activeChat.historyId,
+              restoreRevision:
+                usePlaygroundSessionStore.getState().restoreRevision,
+              characterId:
+                selection?.kind === "character" ? String(selection.id) : null
+            })
+          if (
+            !preparationIsCurrent() ||
+            (nativeCharacter && !originalAccount?.isCurrent())
+          )
+            return false
+          const address = freshChatDraftAddress(
+            nativeCharacter ? false : activeChat.temporaryChat
+          )
+          const revision = sourceRevision + 1
+          if (
+            !activeChat.setChatDraftAddress(address, {
+              sourceAddress,
+              expectedRevision: sourceRevision
+            })
+          )
+            return false
+          let restoreRevision = sourceRestoreRevision
+          let selectionIsCurrent = () => true
+          destinationIsCurrent = () => {
+            const current = useStoreMessageOption.getState()
+            const session = usePlaygroundSessionStore.getState()
+            return (
+              assistantActionMountedRef.current &&
+              settingsOperation.isCurrent() &&
+              configurationIsCurrent() &&
+              assistantActionRevisionRef.current === actionRevision &&
+              (assistantOwnerIsCurrent?.() ?? true) &&
+              originalAccount?.isCurrent() !== false &&
+              selectionIsCurrent() &&
+              assistantComposerRef.current?.getSetupInputRevision() ===
+                inputRevision &&
+              assistantConnectionRevisionRef.current === connectionRevision &&
+              current.chatDraftAddress === address &&
+              current.chatDraftRevision === revision &&
+              current.historyId === destinationHistoryId &&
+              current.serverChatId === destinationServerChatId &&
+              session.restoreRevision === restoreRevision &&
+              session.sourceSelectionRevision ===
+                sourceSession.sourceSelectionRevision &&
+              !snapshot?.scopeSignal.aborted &&
+              !snapshot?.scopeInvalidatedSignal.aborted
+            )
+          }
+          if (!publicationIsCurrent()) return false
+          if (nativeCharacter)
+            activeChat.setQueuedMessages((previous) =>
+              previous.map((item) =>
+                blockQueuedRequest(item, "chat_setup_changed")
+              )
+            )
+          if (!publicationIsCurrent()) return false
+          resetSelectedHistory?.()
+          if (!publicationIsCurrent()) return false
+          selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+          restoreRevision++
+          usePlaygroundSessionStore.getState().clearSession()
+          if (!publicationIsCurrent()) return false
+          destinationHistoryId = null
+          activeChat.setHistoryId(null, { preserveServerChatId: false })
+          if (!publicationIsCurrent()) return false
+          destinationServerChatId = null
+          activeChat.setServerChatId(null)
+          if (!publicationIsCurrent()) return false
+          for (const publish of [
+            () => activeChat.setHistory([]),
+            () => activeChat.setMessages([]),
+            () => activeChat.setServerChatCharacterId(null),
+            () => activeChat.setServerChatAssistantKind(null),
+            () => activeChat.setServerChatAssistantId(null),
+            () => activeChat.setServerChatPersonaMemoryMode(null),
+            () => activeChat.setServerChatMetaLoaded(false)
+          ]) {
+            if (!publicationIsCurrent()) return false
+            publish()
+          }
+          if (!publicationIsCurrent()) return false
+          sceneTarget = captureActorSettingsTarget({
+            address,
+            requestScope: originalAccount?.requestScope,
+            accountIsCurrent: originalAccount?.isCurrent,
+            isCurrent: () => {
+              const current = useStoreMessageOption.getState()
+              return (
+                current.chatDraftAddress === address &&
+                current.chatDraftRevision === revision &&
+                current.historyId === null &&
+                current.serverChatId === null
+              )
+            }
+          })
         }
-        if (!modelIsCurrent()) return false;
-        useStoreChatModelSettings.getState().setActiveSettingsScope(preparedModelScope);
-        if (!modelIsCurrent()) return false;
+        if (nativeCharacter && !replacing && !options.freshCharacterRoute) {
+          const target = useStoreMessageOption.getState()
+          const owner = historySelection?.getCurrent().owner
+          replaceRoute({
+            serverChatId: target.serverChatId,
+            historyId: target.historyId,
+            restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
+            characterId: String(selection!.id),
+            nextChatId:
+              owner?.kind === "native" &&
+              owner.conversation_id === target.serverChatId
+                ? target.serverChatId
+                : null
+          })
+        }
+        if (!publicationIsCurrent()) return false
+        if (nativeCharacter) {
+          activeChat.setTemporaryChat(false)
+          if (!publicationIsCurrent()) return false
+          if (options.model) {
+            const revision =
+              useStoreMessageOption.getState().selectedModelRevision + 1
+            modelIsCurrent = createSelectedModelGuard(options.model, revision)
+            activeChat.setSelectedModel(options.model)
+          }
+          if (!publicationIsCurrent() || !modelIsCurrent()) return false
+          if (
+            !settingsOperation.write(() =>
+              useStoreChatModelSettings
+                .getState()
+                .setActiveSettingsScope(preparedModelScope)
+            )
+          )
+            return false
+          if (!publicationIsCurrent() || !modelIsCurrent()) return false
+        }
+        if (!publicationIsCurrent() || !modelIsCurrent()) return false
+        const actionIsCurrent = captureAssistantActionGuard()
+        const isCurrent = () => destinationIsCurrent() && actionIsCurrent()
+        options.onDestination?.({
+          historyId: destinationHistoryId,
+          serverChatId: destinationServerChatId,
+          sceneTarget: sceneTarget ?? undefined,
+          settingsOperation,
+          isCurrent
+        })
+        if (
+          !nativeCharacter &&
+          options.applyIdentity !== false &&
+          !(await setSelectedAssistant(selection, {
+            isCurrent: () => isCurrent() && publicationInputsAreCurrent()
+          }))
+        )
+          return false
+        return (
+          isCurrent() &&
+          publicationInputsAreCurrent() &&
+          options.isCurrent?.() !== false
+        )
+      } finally {
+        snapshot?.release()
       }
-      if (nativeCharacter && !replacing && !options.freshCharacterRoute) {
-        const target = useStoreMessageOption.getState();
-        const owner = historySelection?.getCurrent().owner;
-        dispatchChatRouteReplacement({ serverChatId: target.serverChatId, historyId: target.historyId,
-          restoreRevision: usePlaygroundSessionStore.getState().restoreRevision, characterId: String(selection!.id),
-          nextChatId: owner?.kind === "native" && owner.conversation_id === target.serverChatId ? target.serverChatId : null });
-      }
-      if (!modelIsCurrent()) return false;
-      const isCurrent = captureAssistantActionGuard();
-      const destination = useStoreMessageOption.getState();
-      options.onDestination?.({ historyId: destination.historyId, serverChatId: destination.serverChatId, isCurrent });
-      if (!nativeCharacter && options.applyIdentity !== false && !await setSelectedAssistant(selection, { isCurrent })) return false;
-      return isCurrent() && modelIsCurrent() && options.isCurrent?.() !== false;
-      } finally { snapshot?.release(); }
     },
-    [appendFormattingGuidePrompt, captureAssistantActionGuard, captureAssistantPreparationGuard, composerModels, composerModelsLoading, historySelection,
-      isConnectionReady, openUIRequestMode, readAssistantPreparationInputs, researchContext, resetSelectedHistory, setSelectedAssistant],
-  );
+    [
+      appendFormattingGuidePrompt,
+      assistantOwnerIsCurrent,
+      captureSelectionFence,
+      captureAssistantActionGuard,
+      captureAssistantPreparationGuard,
+      composerModels,
+      composerModelsLoading,
+      historySelection,
+      isConnectionReady,
+      openUIRequestMode,
+      readAssistantPreparationInputs,
+      researchContext,
+      resetSelectedHistory,
+      setSelectedAssistant
+    ]
+  )
   const applyTrackedAssistantSelection = React.useCallback(async (selection: AssistantSelection, callerIsCurrent?: () => boolean) => {
     try { return await applyAssistantSelection(selection, { isCurrent: callerIsCurrent }); }
     catch (error) {
@@ -1868,32 +2239,21 @@ export const PlaygroundForm = ({
 
   const captureStartupTemplateSource = React.useCallback(() => {
     const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
-    const { chatDraftAddress, chatDraftRevision, historyId, serverChatId } =
-      useStoreMessageOption.getState()
-    const { restoreRevision, sourceSelectionRevision } =
-      usePlaygroundSessionStore.getState()
     const inputRevision = assistantComposerRef.current?.getRevision()
     const inputEditRevision =
       assistantComposerRef.current?.getSetupInputRevision()
     const connectionRevision = assistantConnectionRevisionRef.current
+    const source = captureChatDraftSource(
+      () =>
+        assistantActionMountedRef.current &&
+        selectionIsCurrent() &&
+        (assistantOwnerIsCurrent?.() ?? true) &&
+        assistantComposerRef.current?.getRevision() === inputRevision &&
+        assistantConnectionRevisionRef.current === connectionRevision
+    )
     return {
-      isCurrent: () => {
-        const current = useStoreMessageOption.getState()
-        const session = usePlaygroundSessionStore.getState()
-        return (
-          assistantActionMountedRef.current &&
-          selectionIsCurrent() &&
-          (assistantOwnerIsCurrent?.() ?? true) &&
-          current.chatDraftAddress === chatDraftAddress &&
-          current.chatDraftRevision === chatDraftRevision &&
-          current.historyId === historyId &&
-          current.serverChatId === serverChatId &&
-          session.restoreRevision === restoreRevision &&
-          session.sourceSelectionRevision === sourceSelectionRevision &&
-          assistantComposerRef.current?.getRevision() === inputRevision &&
-          assistantConnectionRevisionRef.current === connectionRevision
-        )
-      },
+      isCurrent: source.isCurrent,
+      acceptRestoreCancelled: source.acceptRestoreCancelled,
       continuationIsCurrent: () =>
         assistantActionMountedRef.current &&
         (assistantOwnerIsCurrent?.() ?? true) &&
@@ -1914,6 +2274,7 @@ export const PlaygroundForm = ({
     selectedCharacter,
     ragPinnedResults,
     currentChatModelSettings,
+    composerModels,
     captureStartupTemplateSource,
     setSelectedModel,
     beginSelectedModelSave,
@@ -2561,17 +2922,36 @@ export const PlaygroundForm = ({
     },
     [t],
   );
-  const clearPromptContext = React.useCallback(() => {
-    setSelectedQuickPrompt(null);
-    setSelectedSystemPrompt("");
-    setSystemPrompt("");
-    updateChatModelSetting("systemPromptTemplateId", undefined);
-  }, [
-    setSelectedQuickPrompt,
-    setSelectedSystemPrompt,
-    setSystemPrompt,
-    updateChatModelSetting,
-  ]);
+  const clearPromptContext = React.useCallback(
+    (
+      isCurrent: () => boolean = () => true,
+      settingsOperation?: ModelSettingsOperation
+    ) => {
+      for (const clear of [
+        () => setSelectedQuickPrompt(null),
+        () => setSelectedSystemPrompt("")
+      ]) {
+        if (!isCurrent()) return false
+        clear()
+      }
+      for (const clear of [
+        () => setSystemPrompt(""),
+        () => updateChatModelSetting("systemPromptTemplateId", undefined)
+      ]) {
+        if (!isCurrent()) return false
+        if (settingsOperation) {
+          if (!settingsOperation.write(clear)) return false
+        } else clear()
+      }
+      return isCurrent()
+    },
+    [
+      setSelectedQuickPrompt,
+      setSelectedSystemPrompt,
+      setSystemPrompt,
+      updateChatModelSetting
+    ]
+  )
   const clearBehaviorTemplateIdentity = React.useCallback(() => {
     updateChatModelSetting("systemPromptTemplateId", undefined);
   }, [updateChatModelSetting]);
@@ -2599,43 +2979,124 @@ export const PlaygroundForm = ({
   const clearRolePlayIdentity = React.useCallback(() => {
     void applyAssistantSelection(null);
   }, [applyAssistantSelection]);
-  const resetRolePlayGenerationStyle = React.useCallback(() => {
-    const preset = getPresetByKey("balanced");
-    if (!preset) return;
-    updateChatModelSettings(preset.settings);
-  }, [updateChatModelSettings]);
+  const resetRolePlayGenerationStyle = React.useCallback(
+    (
+      isCurrent: () => boolean = () => true,
+      settingsOperation?: ModelSettingsOperation
+    ) => {
+      const preset = getPresetByKey("balanced")
+      if (!preset || !isCurrent()) return false
+      if (settingsOperation) {
+        if (
+          !settingsOperation.write(() => updateChatModelSettings(preset.settings))
+        )
+          return false
+      } else updateChatModelSettings(preset.settings)
+      return isCurrent()
+    },
+    [updateChatModelSettings]
+  )
   const handleApplyRolePlaySetup = React.useCallback(
-    async (payload: RolePlaySetupApplyPayload, context?: RolePlayApplyContext) => {
-      const preset = payload.resetGenerationStyle ? getPresetByKey("balanced")
-        : payload.generationPresetKey ? getPresetByKey(payload.generationPresetKey) : undefined;
+    async (
+      original: RolePlaySetupApplyPayload,
+      context?: RolePlayApplyContext
+    ) => {
+      const payload = structuredClone(original)
+      let destination:
+        | Parameters<NonNullable<RolePlayApplyContext["onDestination"]>>[0]
+        | null = null
+      let modelIsCurrent = () => false
+      const isCurrent = () =>
+        destination?.isCurrent() === true &&
+        modelIsCurrent() &&
+        context?.isCurrent?.() !== false
+      const preset = payload.resetGenerationStyle
+        ? getPresetByKey("balanced")
+        : payload.generationPresetKey
+          ? getPresetByKey(payload.generationPresetKey)
+          : undefined
       const settings = {
         ...(preset && preset.key !== "custom" ? preset.settings : {}),
-        ...(payload.clearBehavior ? { systemPrompt: "", systemPromptTemplateId: undefined }
-          : payload.behaviorTemplate ? { systemPrompt: payload.behaviorTemplate.content, systemPromptTemplateId: payload.behaviorTemplate.id } : {}),
-      };
-      const active = useStoreMessageOption.getState();
-      const existingIdentity = resolvedAssistantSelection ?? selectedAssistant ??
-        (active.serverChatAssistantKind === "character" && active.serverChatCharacterId != null
-          ? { kind: "character" as const, id: String(active.serverChatCharacterId), name: String(active.serverChatCharacterId) } : null);
-      if (!await applyAssistantSelection(payload.clearIdentity ? null : payload.identitySelection ?? existingIdentity, {
-        ...context, settings, sceneSettings: payload.sceneSettings,
-        applyIdentity: Boolean(payload.clearIdentity || payload.identitySelection),
-        ...(payload.clearBehavior || payload.behaviorTemplate ? { selectedSystemPrompt: null } : {}),
-      })) return false;
+        ...(payload.clearBehavior
+          ? { systemPrompt: "", systemPromptTemplateId: undefined }
+          : payload.behaviorTemplate
+            ? {
+                systemPrompt: payload.behaviorTemplate.content,
+                systemPromptTemplateId: payload.behaviorTemplate.id
+              }
+            : {})
+      }
+      const active = useStoreMessageOption.getState()
+      const existingIdentity =
+        resolvedAssistantSelection ??
+        selectedAssistant ??
+        (active.serverChatAssistantKind === "character" &&
+        active.serverChatCharacterId != null
+          ? {
+              kind: "character" as const,
+              id: String(active.serverChatCharacterId),
+              name: String(active.serverChatCharacterId)
+            }
+          : null)
+      if (
+        !(await applyAssistantSelection(
+          payload.clearIdentity
+            ? null
+            : payload.identitySelection ?? existingIdentity,
+          {
+            ...context,
+            settings,
+            sceneSettings: payload.sceneSettings,
+            onDestination: (next) => {
+              modelIsCurrent = captureSelectedModelGuard()
+              destination = {
+                ...next,
+                isCurrent: () => next.isCurrent() && modelIsCurrent()
+              }
+              context?.onDestination?.(destination)
+            },
+            applyIdentity: Boolean(
+              payload.clearIdentity || payload.identitySelection
+            ),
+            ...(payload.clearBehavior || payload.behaviorTemplate
+              ? { selectedSystemPrompt: null }
+              : {})
+          }
+        ))
+      )
+        return false
+      if (!isCurrent()) return false
       if (payload.clearBehavior) {
-        clearPromptContext();
+        if (!clearPromptContext(isCurrent, destination?.settingsOperation))
+          return false
       } else if (payload.behaviorTemplate) {
-        handleTemplateSelect(payload.behaviorTemplate);
+        if (
+          !handleTemplateSelect(
+            payload.behaviorTemplate,
+            isCurrent,
+            destination?.settingsOperation
+          )
+        )
+          return false
       }
       if (payload.resetGenerationStyle) {
-        resetRolePlayGenerationStyle();
+        if (
+          !resetRolePlayGenerationStyle(isCurrent, destination?.settingsOperation)
+        )
+          return false
       } else if (payload.generationPresetKey) {
-        const preset = getPresetByKey(payload.generationPresetKey);
+        const preset = getPresetByKey(payload.generationPresetKey)
         if (preset && preset.key !== "custom") {
-          updateChatModelSettings(preset.settings);
+          if (!isCurrent()) return false
+          if (
+            !destination?.settingsOperation?.write(() =>
+              updateChatModelSettings(preset.settings)
+            )
+          )
+            return false
         }
       }
-      return true;
+      return isCurrent()
     },
     [
       clearPromptContext,
@@ -2644,16 +3105,21 @@ export const PlaygroundForm = ({
       applyAssistantSelection,
       resolvedAssistantSelection,
       selectedAssistant,
-      updateChatModelSettings,
-    ],
-  );
+      updateChatModelSettings
+    ]
+  )
   const startupTemplateProgressRef = React.useRef<{
     leaseId: object
     template: StartupTemplateBundle
+    originalScene: ActorSceneRead | null
+    originalAccount: ActorSettingsTarget["account"]
+    settingsOperation: ModelSettingsOperation
     destination: {
       historyId: string | null
       serverChatId: string | null
       isCurrent: () => boolean
+      sceneTarget: ActorSettingsTarget | null
+      expectedRecord: ActorSceneRead["originalRecord"] | undefined
     }
     settingsAccepted: boolean
   } | null>(null)
@@ -2678,15 +3144,44 @@ export const PlaygroundForm = ({
     if (progress?.leaseId !== lease.id) {
       if (!lease.sourceIsCurrent()) return false
       const destination = useStoreMessageOption.getState()
+      const settingsOperation = captureModelSettingsOperation()
+      const modelIsCurrent = captureSelectedModelGuard()
+      const toolChoice = destination.toolChoice
+      const toolsState = useMcpToolsStore.getState()
+      const sceneTarget = startupTemplatePreview.rolePlay
+        ? captureCurrentActorSceneTarget(historySelection)
+        : null
+      const draftAccount = historySelection?.draftAccount
+      const originalAccount =
+        draftAccount?.requestScope &&
+        draftAccount.isCurrent() &&
+        chatDraftOwnerKey(draftAccount.requestScope) === sceneTarget?.accountKey
+          ? {
+              requestScope: structuredClone(draftAccount.requestScope),
+              isCurrent: draftAccount.isCurrent
+            }
+          : !draftAccount
+            ? sceneTarget?.account
+            : undefined
       progress = {
         leaseId: lease.id,
+        originalScene: null,
+        originalAccount,
+        settingsOperation,
         template: JSON.parse(
           JSON.stringify(startupTemplatePreview)
         ) as StartupTemplateBundle,
         destination: {
           historyId: destination.historyId,
           serverChatId: destination.serverChatId,
-          isCurrent: lease.sourceIsCurrent
+          isCurrent: () =>
+            lease.sourceIsCurrent() &&
+            settingsOperation.isCurrent() &&
+            modelIsCurrent() &&
+            useStoreMessageOption.getState().toolChoice === toolChoice &&
+            useMcpToolsStore.getState() === toolsState,
+          sceneTarget,
+          expectedRecord: undefined
         },
         settingsAccepted: false
       }
@@ -2702,16 +3197,66 @@ export const PlaygroundForm = ({
       lease.isCurrent() &&
       lease.continuationIsCurrent() &&
       startupTemplateAttemptRef.current?.id === attempt &&
+      proposal.settingsOperation.isCurrent() &&
       proposal.destination.isCurrent()
     try {
+      if (proposal.template.rolePlay && !proposal.originalScene) {
+        const target = proposal.destination.sceneTarget
+        if (!target) throw new Error("actor_settings_unavailable")
+        const read = await getActorSceneForChat({
+          target,
+          validate_lease: isCurrent
+        })
+        if (!isCurrent()) return false
+        proposal.originalScene = read
+        proposal.destination.expectedRecord = read.originalRecord
+      }
       if (!proposal.settingsAccepted) {
         const applied = await applyStartupTemplateBundle(proposal.template, {
           applicationId: lease.id,
+          settingsOperation: proposal.settingsOperation,
           isCurrent,
+          onRestoreCancelled: (revision) => {
+            if (
+              !assistantActionMountedRef.current ||
+              !lease.isCurrent() ||
+              !lease.continuationIsCurrent() ||
+              startupTemplateAttemptRef.current?.id !== attempt ||
+              !proposal.settingsOperation.isCurrent() ||
+              proposal.originalAccount?.isCurrent() === false ||
+              proposal.destination.sceneTarget?.isCurrent() === false ||
+              lease.acceptRestoreCancelled?.(revision) !== true
+            )
+              return false
+            return isCurrent()
+          },
           onDestination: (next) => {
+            const original = proposal.originalScene
+            const sameTarget =
+              !next.sceneTarget || next.sceneTarget.key === original?.target.key
+            const target = sameTarget
+              ? original?.target ?? null
+              : next.sceneTarget!
+            if (
+              original &&
+              (!target?.isCurrent() ||
+                (!sameTarget &&
+                  (target.address?.kind !== "fresh" ||
+                    proposal.originalAccount?.isCurrent() !== true ||
+                    target.accountKey !== original.target.accountKey)))
+            ) {
+              proposal.destination.isCurrent = () => false
+              return
+            }
             proposal.destination = {
               ...next,
-              isCurrent: () => lease.isCurrent() && next.isCurrent()
+              sceneTarget: target,
+              expectedRecord: sameTarget ? original?.originalRecord : null,
+              isCurrent: () =>
+                lease.isCurrent() &&
+                next.isCurrent() &&
+                (!original || target?.isCurrent() === true) &&
+                proposal.originalAccount?.isCurrent() !== false
             }
           }
         })
@@ -2720,19 +3265,30 @@ export const PlaygroundForm = ({
       }
       if (!isCurrent()) return false
       if (proposal.template.rolePlay) {
+        const target = proposal.destination.sceneTarget
+        if (!target) throw new Error("actor_settings_unavailable")
         const nextScene =
           proposal.template.rolePlay.scene ?? createDefaultActorSettings()
         const saved = await saveActorSettingsForChat({
           historyId: proposal.destination.historyId,
           serverChatId: proposal.destination.serverChatId,
-          settings: nextScene
+          settings: nextScene,
+          target,
+          expectedRecord: proposal.destination.expectedRecord,
+          validate_lease: isCurrent
         })
         if (!isCurrent()) return false
         if (!saved) throw new Error("Scene settings save failed")
-        setActorSettings(nextScene)
-        if (!isCurrent()) return false
         const preview = summarizeRolePlayScene(nextScene)
-        setActorPreviewAndTokens(preview.prompt, preview.tokenCount)
+        if (
+          !applyActorScene({
+            target,
+            settings: nextScene,
+            preview: preview.prompt,
+            tokenCount: preview.tokenCount
+          })
+        )
+          return false
         if (!isCurrent()) return false
       }
       setModeAnnouncement(
@@ -2781,8 +3337,8 @@ export const PlaygroundForm = ({
     setModeAnnouncement,
     setStartupTemplatePreview,
     t,
-    setActorPreviewAndTokens,
-    setActorSettings,
+    applyActorScene,
+    historySelection,
     startupTemplatePreview,
     startupTemplatePreviewLease
   ])
@@ -4928,8 +5484,8 @@ export const PlaygroundForm = ({
     rolePlayState,
     rolePlayCompatibility: rawPreview.rolePlayCompatibility,
     onClearRolePlayIdentity: clearRolePlayIdentity,
-    onClearRolePlayBehavior: clearPromptContext,
-    onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
+    onClearRolePlayBehavior: () => { clearPromptContext(); },
+    onResetRolePlayGenerationStyle: () => { resetRolePlayGenerationStyle(); },
     onDisableCompareMode: compareModeActive ? toggleCompareMode : undefined,
     onOpenRolePlaySetup: openRolePlaySetup,
     t,
@@ -7222,7 +7778,7 @@ export const PlaygroundForm = ({
               tokenBudgetRisk={tokenBudgetRisk}
               contextFootprintRows={contextFootprintRows}
               formatContextWindowValue={formatContextWindowValue}
-              onClearPromptContext={clearPromptContext}
+              onClearPromptContext={() => { clearPromptContext(); }}
               onClearPinnedSourceContext={clearPinnedSourceContext}
               onClearHistoryContext={clearHistoryContext}
               onCreateSummaryCheckpoint={insertSummaryCheckpointPrompt}
