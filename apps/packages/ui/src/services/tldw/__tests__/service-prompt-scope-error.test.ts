@@ -12,6 +12,20 @@ import {
 } from "../service-prompt-scope-error"
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/config/docs-info", "GET", true],
+    ["/api/v1/config/docs-info", "POST", false],
+    ["/api/v1/config/docs-info/extra", "GET", false],
+    ["/api/v1/chats/owned/roleplay/messages", "POST", true],
+    ["/api/v1/chats/owned/roleplay/messages", "GET", false],
+    ["/api/v1/chats/owned/roleplay/messages/extra", "POST", false],
+    ["/api/v1/chats/a%2fb/roleplay/messages", "POST", false],
+    ["/api/v1/chats/%2e%2e/roleplay/messages", "POST", false],
+    ["/api/v1/chats//roleplay/messages", "POST", false]
+  ])("bounds original-scope Roleplay %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/files/create", "POST", true],
     ["/api/v1/files/create", "GET", false],
     ["/api/v1/files/create", "PUT", false],

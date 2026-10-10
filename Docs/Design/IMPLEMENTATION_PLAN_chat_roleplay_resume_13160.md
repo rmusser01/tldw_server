@@ -2,7 +2,7 @@
 
 Continue the accepted snapshot/fenced-completion contract in `Docs/superpowers/plans/2026-08-27-character-conversation-behavior-snapshot-contract.md` Stages4/5. Reopened chats must consume the saved behavior and authoritative history, preserve input across conflicts, and retain generated content if another writer invalidates saving.
 
-ADR assessment: no new ADR. `backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md` governs this public contract; ADR049/050 govern selected owner and operation lifetime, ADR059 governs task editing. Keep Personal Context authority separate. Baseline dev0c53973f17eede4074f4aa7894d0b42322340614 is included; refreshed origin/dev3b68f2dbc2 will be integrated after the qualified foundation commit.
+ADR assessment: no new ADR. `backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md` governs this public contract; ADR049/050 govern selected owner and operation lifetime, ADR059 governs task editing. Keep Personal Context authority separate. Latest dev3b68f2dbc2daa1b94099a8a3d56c809fd2c808db is included after the qualified foundation commit ec5b28ba95431eb5b48147b5e8c710917bfc9a3a; incoming performance plans and baseline tests did not overlap production changes.
 
 Reuse the current snapshot/materialized settings store, owner transaction, message writers and immutable owner-only message authority. No parallel conversation store, current-card substitution, implicit branch, or capability inferred from OpenAPI. Preserve legacy requests when the protected contract is absent. Streaming support requires its separately qualified feature; the base contract includes non-stream persistence.
 
@@ -22,13 +22,13 @@ Reuse the current snapshot/materialized settings store, owner transaction, messa
 **Goal**: Persist generated assistant text only against the original complete fence and advertise only verified required features.
 **Success Criteria**: Concurrent mutations preserve generated text with saved=false and no assistant/branch. Unchanged commit returns stable identity/parent; active Sync remains fail-closed. Optional stream grants cannot use client-known credentials.
 **Tests**: Blocked provider plus second-connection mutation; rollback and idempotent persist; authenticated capability; strict grant/owner/context controls if stream feature is enabled.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Shared consumers and native qualification
 **Goal**: Wire both chat layouts to the exact server contract and complete real character-card reopen/continuation journeys.
 **Success Criteria**: No mutation before original scoped capability/readiness proof; proposal/recoveries and scene/resource settings stay honest. Affected tests, types, static/Bandit, independent review and normal hooks pass.
 **Tests**: Full/compact shared callers, imported PNG/JSON cards, greeting/two-turn/reopen; exact runtime requests and saved state. Packaged/physical AT/uncoached participant evidence remains separately qualified.
-**Status**: Not Started
+**Status**: In Progress
 
 Execution detail for Stages 3/4:
 

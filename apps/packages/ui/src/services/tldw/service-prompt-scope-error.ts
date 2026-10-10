@@ -106,6 +106,7 @@ export const isServicePromptRequestPath = (
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
   if (pathname === "/openapi.json") return requestMethod === "GET"
+  if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
   if (["PUT", "DELETE"].includes(requestMethod) && /^\/api\/v1\/media\/[0-9]+$/.test(pathname)) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/keywords$/.test(pathname)) return true
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
@@ -211,7 +212,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod !== "POST") return false
   if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate", "/api/v1/flashcards/assets", "/api/v1/flashcards/bulk"].includes(pathname)) return true
-  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2)$/.test(pathname)) return true
+  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2|roleplay\/messages)$/.test(pathname)) return true
   if (pathname === "/api/v1/chats/") return true
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/history\/(?:selection|legacy-projection)$/.test(pathname)) return true
   if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true

@@ -6,6 +6,14 @@ from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import RoleplayResumeFenceV1
 
+ROLEPLAY_RESUME_CONTRACT_VERSION = 1
+ROLEPLAY_RESUME_FEATURES = (
+    "snapshot_completion",
+    "fenced_completion",
+    "idempotent_user_append",
+    "nonstream_assistant_persist",
+)
+
 
 class RoleplayResumeConflictError(ValueError):
     """A definitive no-write refusal of the original protected operation."""

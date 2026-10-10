@@ -699,3 +699,42 @@ def test_required_chat_scope_guard_fails_closed_when_session_store_fails(
     response = client.get(path)
     assert response.status_code == 401, response.text
     assert validation_attempts
+
+
+def _attach_resume_docs_handlers(app):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions, character_messages
+
+    served = {route.path for route in iter_served_routes(app.routes)}
+    for path, router, prefix in [
+        ("/api/v1/chats/{chat_id}/roleplay/messages", character_messages.router, "/api/v1"),
+        ("/api/v1/chats/{chat_id}/complete-v2", character_chat_sessions.router, "/api/v1/chats"),
+    ]:
+        if path not in served:
+            app.include_router(router, prefix=prefix)
+
+
+def test_docs_info_resume_authenticates_real_headerless_cookie_and_revocation(single_user_cookie_client):
+    client, api_key = single_user_cookie_client
+    _attach_resume_docs_handlers(client.app)
+    assert _mint(client, api_key).status_code == 200
+    original_cookie = client.cookies["tldw_single_user_session"]
+    csrf = client.cookies["csrf_token"]
+    authenticated = client.get("/api/v1/config/docs-info")
+    assert authenticated.status_code == 200
+    assert authenticated.json()["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert authenticated.headers["cache-control"] == "no-store"
+    logout = client.delete("/api/v1/auth/single-user/session", headers={"X-CSRF-Token": csrf})
+    assert logout.status_code == 200
+    client.cookies.set("tldw_single_user_session", original_cookie, path="/api")
+    revoked = client.get("/api/v1/config/docs-info")
+    assert revoked.status_code == 200
+    assert "roleplay_resume_contract_version" not in revoked.json()["capabilities"]
+
+
+@pytest.mark.parametrize("headers", [{"X-API-KEY": "invalid-key"}, {"Authorization": ""}])
+def test_docs_info_resume_does_not_replace_invalid_headers_with_valid_cookie(single_user_cookie_client, headers):
+    client, api_key = single_user_cookie_client
+    _attach_resume_docs_handlers(client.app)
+    assert _mint(client, api_key).status_code == 200
+    assert client.get("/api/v1/config/docs-info").json()["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert client.get("/api/v1/config/docs-info", headers=headers).status_code == 401

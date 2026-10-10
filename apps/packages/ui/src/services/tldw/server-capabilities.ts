@@ -4,6 +4,7 @@ import {
   type TldwConfig
 } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
+import { requestScopeFields, type ServicePromptRequestScope } from "./domains/service-prompts"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
@@ -32,6 +33,7 @@ export type ServerCapabilities = {
   hasFlashcards: boolean
   hasQuizzes: boolean
   hasCharacters: boolean
+  hasRoleplayResumeV1?: boolean
   hasWorldBooks: boolean
   hasChatDictionaries: boolean
   hasChatKnowledgeSave: boolean
@@ -84,6 +86,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasFlashcards: false,
   hasQuizzes: false,
   hasCharacters: false,
+  hasRoleplayResumeV1: false,
   hasWorldBooks: false,
   hasChatDictionaries: false,
   hasChatKnowledgeSave: false,
@@ -222,7 +225,7 @@ type IngestionSourceCapabilitiesResponse = {
 }
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV5"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV6"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -618,6 +621,27 @@ const extractFeatureFlag = (
   return null
 }
 
+const hasRoleplayResumeV1 = (
+  docsInfo: DocsInfoResponse | null | undefined
+): boolean => {
+  const capabilities = docsInfo?.capabilities
+  const version = capabilities?.roleplay_resume_contract_version
+  const features = capabilities?.roleplay_resume_features
+  return (
+    typeof version === "number" &&
+    Number.isSafeInteger(version) &&
+    version >= 1 &&
+    Array.isArray(features) &&
+    features.every((feature) => typeof feature === "string") &&
+    [
+      "snapshot_completion",
+      "fenced_completion",
+      "idempotent_user_append",
+      "nonstream_assistant_persist"
+    ].every((feature) => features.includes(feature))
+  )
+}
+
 const applyDocsInfoFeatureGates = (
   capabilities: ServerCapabilities,
   docsInfo: DocsInfoResponse | null | undefined
@@ -702,6 +726,7 @@ const applyDocsInfoFeatureGates = (
 
   return {
     ...capabilities,
+    hasRoleplayResumeV1: hasRoleplayResumeV1(docsInfo),
     hasAudio,
     hasStt,
     hasTts,
@@ -1076,7 +1101,7 @@ const fetchCapabilitiesFromServer = async (
       bgRequest<DocsInfoResponse, any>({
         path: "/api/v1/config/docs-info" as any,
         method: "GET" as any,
-        noAuth: true,
+        noAuth: !shouldProbeSourceCapabilities,
         configSnapshot
       }).catch(() => null)
     ])
@@ -1130,8 +1155,21 @@ const fetchCapabilitiesFromServer = async (
 }
 
 export const getServerCapabilities = async (
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; requestScope?: ServicePromptRequestScope; signal?: AbortSignal }
 ): Promise<ServerCapabilities> => {
+  if (options?.requestScope) {
+    options.signal?.throwIfAborted()
+    const docsInfo = await bgRequest<DocsInfoResponse>({
+      path: "/api/v1/config/docs-info",
+      method: "GET",
+      noAuth: false,
+      abortSignal: options.signal,
+      ...requestScopeFields(options.requestScope)
+    })
+    options.signal?.throwIfAborted()
+    return applyDocsInfoFeatureGates({ ...defaultCapabilities }, docsInfo)
+  }
+
   const context = await getCapabilitiesFetchContext()
   const { cacheKey } = context
   const now = Date.now()

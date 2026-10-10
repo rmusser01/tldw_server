@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 
 const cacheState = vi.hoisted(() => ({
   values: new Map<string, unknown>()
@@ -121,6 +122,212 @@ describe("server capabilities docs-info merge", () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  const resumeFeatures = [
+    "snapshot_completion",
+    "fenced_completion",
+    "idempotent_user_append",
+    "nonstream_assistant_persist"
+  ]
+  const resumeProof = {
+    capabilities: {
+      roleplay_resume_contract_version: 1,
+      roleplay_resume_features: resumeFeatures
+    }
+  }
+  const originalScope = {
+    config: {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user" as const,
+      expectedRefreshToken: "original-lineage"
+    },
+    userId: 17
+  }
+
+  it.each([
+    [1, resumeFeatures, true],
+    [2, [...resumeFeatures, "future_feature"], true],
+    ["1", resumeFeatures, false],
+    [true, resumeFeatures, false],
+    [1.5, resumeFeatures, false],
+    [0, resumeFeatures, false],
+    [Number.MAX_SAFE_INTEGER + 1, resumeFeatures, false],
+    [1, resumeFeatures.slice(1), false],
+    [1, { snapshot_completion: true }, false],
+    [1, [...resumeFeatures, 1], false],
+    [null, resumeFeatures, false]
+  ])(
+    "requires exact authenticated Resume fields %s %s",
+    async (version, features, supported) => {
+      mocks.bgRequest.mockResolvedValue({
+        capabilities: {
+          roleplay_resume_contract_version: version,
+          roleplay_resume_features: features
+        }
+      })
+      const { getServerCapabilities } = await importCapabilitiesModule()
+      const result = await getServerCapabilities({ requestScope: originalScope })
+      expect(result.hasRoleplayResumeV1).toBe(supported)
+      expect(mocks.getOpenAPISpec).not.toHaveBeenCalled()
+      expect(mocks.getConfig).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not combine contradictory capability aliases into Resume proof", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: { roleplay_resume_contract_version: 1 },
+      supported_features: { roleplay_resume_features: resumeFeatures }
+    })
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect(
+      (await getServerCapabilities({ requestScope: originalScope }))
+        .hasRoleplayResumeV1
+    ).toBe(false)
+  })
+
+  it("requests fresh Resume proof with only the original scope and signal", async () => {
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const signal = new AbortController().signal
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect(
+      (await getServerCapabilities({ requestScope: originalScope, signal }))
+        .hasRoleplayResumeV1
+    ).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/config/docs-info",
+      method: "GET",
+      noAuth: false,
+      abortSignal: signal,
+      servicePromptConfig: { ...originalScope.config, expectedUserId: 17 },
+      headers: { "X-TLDW-Expected-User-ID": "17" }
+    })
+    expect(mocks.storageGet).not.toHaveBeenCalled()
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
+
+  it("never borrows cached or in-flight discovery for an original Resume scope", async () => {
+    let resolveGeneric!: (value: unknown) => void
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {} })
+    mocks.bgRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGeneric = resolve
+        })
+    )
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const generic = getServerCapabilities()
+    await vi.waitFor(() => expect(resolveGeneric).toBeTypeOf("function"))
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const first = await getServerCapabilities({ requestScope: originalScope })
+    expect(first.hasRoleplayResumeV1).toBe(true)
+    resolveGeneric({})
+    await generic
+    mocks.bgRequest.mockResolvedValue({})
+    expect(
+      (await getServerCapabilities({ requestScope: originalScope }))
+        .hasRoleplayResumeV1
+    ).toBe(false)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([401, 412, 503])(
+    "propagates original-scope discovery failure %s",
+    async (status) => {
+      const error = Object.assign(new Error("original scope discovery failed"), {
+        status
+      })
+      mocks.bgRequest.mockRejectedValue(error)
+      const { getServerCapabilities } = await importCapabilitiesModule()
+      await expect(
+        getServerCapabilities({ requestScope: originalScope })
+      ).rejects.toBe(error)
+    }
+  )
+
+  it("retains a held discovery abort even if its transport resolves", async () => {
+    const controller = new AbortController()
+    mocks.bgRequest.mockImplementation(async () => {
+      controller.abort()
+      return resumeProof
+    })
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await expect(
+      getServerCapabilities({
+        requestScope: originalScope,
+        signal: controller.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+  })
+
+  it("rejects an already aborted scoped proof before transport", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await expect(
+      getServerCapabilities({
+        requestScope: originalScope,
+        signal: controller.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("keeps the original single-user credential scope when its user ID is null", async () => {
+    const requestScope = {
+      config: {
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user" as const,
+        expectedSingleUserApiKeyScope: "original-key-scope"
+      },
+      userId: null
+    }
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect(
+      (await getServerCapabilities({ requestScope })).hasRoleplayResumeV1
+    ).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        servicePromptConfig: { ...requestScope.config, expectedUserId: null },
+        noAuth: false
+      })
+    )
+    expect(mocks.bgRequest.mock.calls[0][0]).not.toHaveProperty("headers")
+  })
+
+  it("does not reuse persisted V5 support after the authenticated contract changes", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV5", {
+      key: buildChatSurfaceScopeKeyFromConfig({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user"
+      }),
+      fetchedAt: Date.now(),
+      capabilities: { hasRoleplayResumeV1: true }
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {} })
+    mocks.bgRequest.mockResolvedValue({})
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasRoleplayResumeV1).toBe(false)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("authenticates ordinary discovery when captured credentials are usable", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-usable-key"
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {} })
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasRoleplayResumeV1).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        noAuth: false,
+        configSnapshot: expect.objectContaining({ apiKey: "test-usable-key" })
+      })
+    )
   })
 
   it.each(["messages", "completion"] as const)(

@@ -686,3 +686,104 @@ def test_resume_suppresses_unsaved_sampling_modifiers_at_vendor_http_boundary(re
     assert response.json()["saved"] is True
     assert not {"seed", "presence_penalty", "frequency_penalty", "logit_bias"} & sent[0].keys()
     assert sent[0]["model"] == model
+
+
+_RESUME_FEATURES = {
+    "snapshot_completion", "fenced_completion", "idempotent_user_append", "nonstream_assistant_persist"
+}
+
+
+def test_docs_info_attests_resume_only_to_authenticated_owner(credentialed_test_client, auth_headers):
+    client = credentialed_test_client
+    public = client.get("/api/v1/config/docs-info")
+    assert public.status_code == 200
+    assert "roleplay_resume_contract_version" not in public.json()["capabilities"]
+    authenticated = client.get("/api/v1/config/docs-info", headers=auth_headers)
+    assert authenticated.status_code == 200
+    payload = authenticated.json()
+    assert payload["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert set(payload["capabilities"]["roleplay_resume_features"]) == _RESUME_FEATURES
+    assert payload["capabilities"] == payload["supported_features"]
+    assert authenticated.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("headers", [{"X-API-KEY": "invalid-key"}, {"Authorization": "Bearer invalid"},
+                                     {"X-API-KEY": ""}, {"Authorization": ""}])
+def test_docs_info_does_not_downgrade_explicit_invalid_credentials(credentialed_test_client, headers):
+    response = credentialed_test_client.get("/api/v1/config/docs-info", headers=headers)
+    assert response.status_code == 401
+
+
+def test_docs_info_resume_checks_original_expected_owner(credentialed_test_client, auth_headers):
+    response = credentialed_test_client.get(
+        "/api/v1/config/docs-info", headers={**auth_headers, "X-TLDW-Expected-User-ID": "999999"}
+    )
+    assert response.status_code == 412
+    assert response.json()["detail"]["code"] == "request_config_scope_changed"
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("disabled", ["character-chat-sessions", "character-messages"])
+def test_docs_info_resume_requires_both_current_route_policies(
+    credentialed_test_client, auth_headers, monkeypatch, disabled
+):
+    from tldw_Server_API.app.core import config as config_mod
+
+    monkeypatch.setenv("ROUTES_DISABLE", disabled)
+    config_mod._route_toggle_policy.cache_clear()
+    try:
+        response = credentialed_test_client.get("/api/v1/config/docs-info", headers=auth_headers)
+        assert response.status_code == 200
+        assert "roleplay_resume_contract_version" not in response.json()["capabilities"]
+    finally:
+        config_mod._route_toggle_policy.cache_clear()
+
+
+@pytest.mark.parametrize("missing", ["append_roleplay_resume_input", "character_chat_completion"])
+def test_docs_info_resume_requires_actual_registered_handlers(
+    credentialed_test_client, auth_headers, monkeypatch, missing
+):
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions, character_messages, config_info
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
+    app = FastAPI()
+    for router, prefix in [(character_messages.router, "/api/v1"), (character_chat_sessions.router, "/api/v1/chats")]:
+        retained = [route for route in router.routes if getattr(getattr(route, "endpoint", None), "__name__", None) != missing]
+        app.include_router(APIRouter(routes=retained), prefix=prefix)
+    app.include_router(config_info.router, prefix="/api/v1")
+    assert all(getattr(route.endpoint, "__name__", None) != missing for route in iter_served_routes(app.routes))
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config/docs-info", headers=auth_headers)
+    assert response.status_code == 200
+    assert "roleplay_resume_contract_version" not in response.json()["capabilities"]
+
+
+def test_docs_info_resume_derivation_failure_remains_public_only(credentialed_test_client, auth_headers, monkeypatch):
+    from tldw_Server_API.app.core import config as config_mod
+
+    def failed_policy(*_args, **_kwargs):
+        raise RuntimeError("unavailable-route-policy")
+
+    monkeypatch.setattr(config_mod, "route_enabled", failed_policy)
+    response = credentialed_test_client.get("/api/v1/config/docs-info", headers=auth_headers)
+    assert response.status_code == 200
+    assert "roleplay_resume_contract_version" not in response.json()["capabilities"]
+    assert response.json()["capabilities"]["hasReadingSnapshotPagesV1"] is True
+
+
+def test_docs_info_resume_overlay_survives_missing_public_config(
+    credentialed_test_client, auth_headers, monkeypatch, tmp_path
+):
+    from tldw_Server_API.app.core import config as config_mod
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(tmp_path / "absent-config.txt"))
+    config_mod._route_toggle_policy.cache_clear()
+    try:
+        response = credentialed_test_client.get("/api/v1/config/docs-info", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["capabilities"]["roleplay_resume_contract_version"] == 1
+    finally:
+        config_mod._route_toggle_policy.cache_clear()
