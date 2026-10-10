@@ -357,7 +357,7 @@ describe("useChatActions persona integration", () => {
       source: undefined,
       external_ref: undefined
     }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
-    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
+    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: false })
     expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")

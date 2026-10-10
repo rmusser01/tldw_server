@@ -36,9 +36,11 @@ export const createServerChatSlice: StoreSlice<
   >
 > = (set) => ({
   serverChatId: null,
-  setServerChatId: (id) =>
+  setServerChatId: (id, options) =>
     set(() => ({
       serverChatId: id,
+      // Saved selection retires a draft; creating a temporary session preserves it.
+      ...(id?.trim() && !options?.preserveTemporaryChat ? { temporaryChat: false } : {}),
       serverChatState: id ? "in-progress" : null,
       serverChatVersion: null,
       serverChatTitle: null,

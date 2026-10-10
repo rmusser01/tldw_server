@@ -469,7 +469,7 @@ type UseChatActionsOptions = {
   serverChatSource: string | null
   serverChatExternalRef: string | null
   scope?: ChatScope
-  setServerChatId: (id: string | null) => void
+  setServerChatId: import("@/store/option/types").State["setServerChatId"]
   setServerChatTitle: (title: string | null) => void
   setServerChatCharacterId: (id: string | number | null) => void
   setServerChatAssistantKind: (
@@ -2176,7 +2176,7 @@ export const useChatActions = ({
         }
         chatId = normalizedId
         createdNewChat = true
-        setServerChatId(normalizedId)
+        setServerChatId(normalizedId, { preserveTemporaryChat: temporaryChat })
         const createdTitle =
           created && typeof created === "object"
             ? String(created.title ?? "")

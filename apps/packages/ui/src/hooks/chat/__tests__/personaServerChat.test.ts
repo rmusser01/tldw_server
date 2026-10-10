@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { useStoreMessageOption } from "@/store/option"
 
 import {
   DEFAULT_PERSONA_MEMORY_MODE,
@@ -30,6 +31,40 @@ const deferred = <T,>() => {
 }
 
 describe("ensurePersonaServerChat", () => {
+  it("keeps a newly created temporary Persona session temporary", async () => {
+    const previous = useStoreMessageOption.getState()
+    useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null })
+    const ensureServerChatHistoryId = vi.fn()
+    try {
+      await ensurePersonaServerChat({
+        assistant: { kind: "persona", id: "garden-helper", name: "Garden Helper" },
+        serverChatId: null,
+        serverChatTitle: null,
+        serverChatAssistantKind: null,
+        serverChatAssistantId: null,
+        serverChatPersonaMemoryMode: null,
+        serverChatState: "in-progress",
+        serverChatTopic: null,
+        serverChatClusterId: null,
+        serverChatSource: null,
+        serverChatExternalRef: null,
+        historyId: null,
+        temporaryChat: true,
+        createChat: vi.fn().mockResolvedValue({ id: "temporary-persona-session" }),
+        ensureServerChatHistoryId,
+        invalidateServerChatHistory: vi.fn(),
+        ...createSetterBundle(),
+        setServerChatId: useStoreMessageOption.getState().setServerChatId
+      })
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        serverChatId: "temporary-persona-session", temporaryChat: true
+      })
+      expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
+    } finally {
+      useStoreMessageOption.setState(previous, true)
+    }
+  })
+
   it("creates a persona-backed chat with read_only default and updates chat state", async () => {
     const setters = createSetterBundle()
     const createChat = vi.fn().mockResolvedValue({
@@ -79,7 +114,7 @@ describe("ensurePersonaServerChat", () => {
       }),
       undefined
     )
-    expect(setters.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
+    expect(setters.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: false })
     expect(setters.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(setters.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")
     expect(setters.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
@@ -445,7 +480,7 @@ describe("ensurePersonaServerChat", () => {
       },
       undefined
     )
-    expect(setters.setServerChatId).toHaveBeenLastCalledWith("persona-chat-4")
+    expect(setters.setServerChatId).toHaveBeenLastCalledWith("persona-chat-4", { preserveTemporaryChat: false })
     expect(setters.setServerChatAssistantKind).toHaveBeenLastCalledWith(
       "persona"
     )

@@ -638,15 +638,26 @@ describe("useChatActions character integration", () => {
         selectedCharacter: selection,
         selectedAssistant: selection
       }
+      const { useStoreMessageOption } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+      const previous = useStoreMessageOption.getState()
+      useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null })
+      options.setServerChatId = vi.fn(useStoreMessageOption.getState().setServerChatId)
       const { result } = renderHook(() =>
         useChatActions(
           options as unknown as Parameters<typeof useChatActions>[0]
         )
       )
-      await act(async () => {
-        await result.current.onSubmit({ message: "Hello", image: "" })
-      })
-      expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
+      try {
+        await act(async () => {
+          await result.current.onSubmit({ message: "Hello", image: "" })
+        })
+        expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
+        expect(useStoreMessageOption.getState()).toMatchObject({
+          serverChatId: "temporary-character-chat", temporaryChat: true
+        })
+      } finally {
+        useStoreMessageOption.setState(previous, true)
+      }
     }
   )
   it.each([42, 88])(

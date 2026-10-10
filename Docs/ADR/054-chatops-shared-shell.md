@@ -98,4 +98,3 @@ and returns a job only to its owner, or to an active member of an org that insta
 the job's guild/workspace unless that tenant's policy restricts status to the job owner
 (`*_and_user`), matching the in-platform `status` command. Single-user mode sees every
 job of the integration. Everything else is 404. TASK-13364.
-
