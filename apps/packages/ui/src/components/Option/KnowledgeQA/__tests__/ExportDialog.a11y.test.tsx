@@ -8,7 +8,8 @@ import {
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ExportDialog } from "../ExportDialog"
-import type { RagResult, ScopeSnapshot } from "../types"
+import type { CitationRef, RagResult, ScopeSnapshot } from "../types"
+import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -39,7 +40,7 @@ const state = {
   messages: [] as Array<{ role: string; content: string }>,
   currentThreadId: "thread-1" as string | null,
   results: [] as RagResult[],
-  citations: [] as Array<{ index: number }>,
+  citations: [] as Array<{ index: number; documentId?: CitationRef["documentId"] }> | undefined,
   answer: "Test answer" as string | null,
   answerTrustState: "cited_answer" as
     | "cited_answer"
@@ -159,6 +160,87 @@ describe("ExportDialog accessibility", () => {
     state.preset = "balanced"
     state.searchDetails = null
     state.lastSearchScope = null
+  })
+
+  it.each([true, false])("honors citation document identity without remapping a missing document (present: %s)", async (present) => {
+    state.answer = "B claim [2]."
+    state.citations = [{ index: 2, documentId: "note-b" }]
+    state.results = [
+      ...(present ? [{ id: "note-b", metadata: { title: "B" } }] : []),
+      { id: "note-d", metadata: { title: "D" } },
+    ] as RagResult[]
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+    await screen.findByText("Preview")
+    const preview = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
+    expect(preview).toContain(present ? "- [2] B maps to Source 1." : "- [2] Source unavailable in exported results.")
+    expect(preview).not.toContain("- [2] D maps")
+  })
+
+  it.each([undefined, [{ index: 2 }]])("does not choose an arbitrary duplicate source for a legacy citation list: %j", async (citations) => {
+    state.answer = "Ambiguous claim [2]."
+    state.citations = citations
+    state.results = [
+      { id: "note-b", metadata: { title: "B", original_result_index: 1 } },
+      { id: "note-d", metadata: { title: "D", original_result_index: 1 } },
+    ] as RagResult[]
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+    await screen.findByText("Preview")
+    const preview = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
+    expect(preview).toContain("- [2] Source unavailable in exported results.")
+    expect(preview).not.toContain("maps to Source")
+  })
+
+  it.each(["markdown", "pdf"])("binds %s Settings Used and the saved receipt to the displayed result scope", async (format) => {
+    state.resultQuery = "When does B open?"
+    state.query = "Unsearched C question"
+    state.answer = "B opens in February [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "note-b", content: "B opens in February.", metadata: { source_type: "notes", note_id: "note-b" } } as RagResult]
+    state.lastSearchScope = { preset: "thorough", sources: ["notes"], includeNoteIds: ["note-b"], includeMediaIds: [], collectionId: 7, keywordFilter: "b-topic", webFallback: true }
+    state.settings = { ...state.settings, sources: ["media_db"], include_note_ids: ["note-c"], include_media_ids: [99], enable_web_fallback: false, collection_id: 9, keyword_filter: "c-topic" } as typeof state.settings
+    state.preset = "fast"
+    const scope = { sources: ["notes"], include_note_ids: ["note-b"], include_media_ids: [], collection_id: 7, keyword_filter: "b-topic", enable_web_fallback: true }
+    createNoteMock.mockImplementation(async (content, fields) => ({ id: "scope-receipt", content, title: fields.title, version: 1 }))
+    const print = vi.spyOn(window, "print").mockImplementation(() => undefined)
+    try {
+      render(<ExportDialog open onClose={vi.fn()} />)
+      if (format === "pdf") fireEvent.click(screen.getByRole("button", { name: /PDF/i }))
+      fireEvent.click(screen.getByLabelText("Settings snapshot"))
+      fireEvent.click(screen.getByRole("button", { name: "Export" }))
+      await screen.findByText("Preview")
+      const preview = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
+      const snapshot = JSON.parse(preview.match(/## Settings Used\n\n```json\n([\s\S]*?)\n```/)![1])
+      expect(snapshot).toMatchObject({
+        preset: "thorough",
+        settings: { ...scope, top_k: 12, generation_provider: "openai", generation_model: "gpt-4o-mini" },
+      })
+      expect(preview).toContain("> When does B open?")
+      expect(preview).not.toContain("Unsearched C question")
+      fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+      expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=scope-receipt")
+      const [body, fields, request] = createNoteMock.mock.calls[0]
+      const savedSnapshot = JSON.parse(body.match(/## Settings Used\n\n```json\n([\s\S]*?)\n```/)![1])
+      expect(savedSnapshot).toMatchObject({ preset: "thorough", settings: scope })
+      expect(fields.knowledge_provenance.scope).toEqual(scope)
+      expect(readKnowledgeNoteProvenance(body)).toMatchObject({ question: "When does B open?", scope })
+      expect(request.idempotencyKey).toBeTruthy()
+    } finally { print.mockRestore() }
+  })
+
+  it("does not fill an unfiltered result scope from later editable filters", async () => {
+    state.lastSearchScope = { preset: "balanced", sources: ["notes"], includeNoteIds: [], includeMediaIds: [], collectionId: null, webFallback: false }
+    state.settings = { ...state.settings, collection_id: 9, keyword_filter: "unsearched-topic" } as typeof state.settings
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByLabelText("Settings snapshot"))
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    await screen.findByRole("link", { name: "Open saved note" })
+    const [body, fields] = createNoteMock.mock.calls[0]
+    const snapshot = JSON.parse(body.match(/## Settings Used\n\n```json\n([\s\S]*?)\n```/)![1])
+    expect(snapshot.settings).toMatchObject({ sources: ["notes"], include_note_ids: [], include_media_ids: [], collection_id: null, enable_web_fallback: false, top_k: 12 })
+    expect(snapshot.settings).not.toHaveProperty("keyword_filter")
+    expect(fields.knowledge_provenance.scope).toEqual({ sources: ["notes"], include_note_ids: [], include_media_ids: [], collection_id: null, enable_web_fallback: false })
   })
 
   it("persists provenance in canonical content when NoteResponse drops metadata", async () => {

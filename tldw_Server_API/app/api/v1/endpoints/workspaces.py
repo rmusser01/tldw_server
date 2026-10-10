@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_expected_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
@@ -1115,7 +1115,7 @@ async def list_workspaces(
 @router.get(
     "/{workspace_id}",
     response_model=WorkspaceResponse,
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT), Depends(require_expected_user)],
     summary="Get workspace",
 )
 async def get_workspace(
@@ -1710,7 +1710,7 @@ def delete_source_saved_view(
 @router.get(
     "/{workspace_id}/sources",
     response_model=list[WorkspaceSourceResponse],
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT), Depends(require_expected_user)],
     summary="List workspace sources",
 )
 async def list_sources(
@@ -2235,7 +2235,7 @@ async def list_workspace_file_inventory_items(
 @router.get(
     "/{workspace_id}/sources/{source_id}/preview",
     response_model=WorkspaceSourcePreviewResponse,
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT), Depends(require_expected_user)],
     summary="Preview workspace source content and evidence",
 )
 async def get_source_preview(
@@ -2509,7 +2509,7 @@ async def get_workspace_output_status(
 @router.get(
     "/{workspace_id}/artifacts",
     response_model=list[WorkspaceArtifactResponse],
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT), Depends(require_expected_user)],
     summary="List workspace artifacts",
 )
 async def list_artifacts(
@@ -2647,7 +2647,7 @@ async def delete_artifact(
 @router.get(
     "/{workspace_id}/notes",
     response_model=list[WorkspaceNoteResponse],
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT), Depends(require_expected_user)],
     summary="List workspace notes",
 )
 async def list_notes(

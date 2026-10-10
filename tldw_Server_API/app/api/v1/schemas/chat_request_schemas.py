@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import Mapping
 from typing import Any, Literal, Optional, Union
+from uuid import UUID
 
 #
 # 3rd-party imports
@@ -17,13 +18,17 @@ from pydantic import (
     HttpUrl,
     StrictBool,
     ValidationError,
+    field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HISTORY_BRANCH_FIELD_DESCRIPTION,
+    DurableHistoryV1,
+    HistoryResultPayloadV1,
     HistorySelectionV1,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
@@ -770,6 +775,38 @@ class ResponseFormat(BaseModel):
 
 
 # --- Continuation Controls (tldw extension) ---
+class TLDWTurnSpec(BaseModel):
+    """Client identity retained from the first submission through every retry."""
+
+    user_message_id: UUID
+    history_v1: DurableHistoryV1 | None = None
+    result_v1: HistoryResultPayloadV1 | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_nested_pair(cls, values: Any) -> Any:
+        """Opt in as a complete pair; explicit null is not an absent member."""
+        if isinstance(values, Mapping) and ("history_v1" in values or "result_v1" in values):
+            if values.get("history_v1") is None or values.get("result_v1") is None:
+                raise ValueError("selected durable history_v1 and result_v1 are required together")
+        return values
+
+    @model_serializer(mode="wrap")
+    def omit_absent_nested_mode(self, handler: Any):
+        """Keep legacy omission and the model schema; a return annotation replaces it."""
+        return {
+            key: value
+            for key, value in handler(self).items()
+            if key not in {"history_v1", "result_v1"} or value is not None
+        }
+
+    @field_serializer("user_message_id")
+    def serialize_user_message_id(self, value: UUID) -> str:
+        """Keep ordinary model_dump callers JSON-compatible."""
+        return str(value)
+
+
 class TLDWContinuationSpec(BaseModel):
     """Optional continuation controls for anchored append/branch generation."""
 
@@ -886,6 +923,10 @@ class ChatCompletionResponse(BaseModel):
     tldw_conversation_id: Optional[str] = Field(
         default=None,
         description="Conversation identifier persisted by tldw_server when chat history is enabled.",
+    )
+    tldw_user_message_id: Optional[str] = Field(
+        default=None,
+        description="Durable user-turn receipt; does not acknowledge assistant persistence.",
     )
     meta: Optional[dict[str, Any]] = Field(
         default=None,
@@ -1153,6 +1194,10 @@ class ChatCompletionRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     tldw_history_selection_v1: HistorySelectionV1 | None = None
     tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
+    tldw_turn: Optional[TLDWTurnSpec] = Field(
+        None,
+        description="Stable user-turn identity; requires an existing conversation and explicit save_to_db=true.",
+    )
     tldw_continuation: Optional[TLDWContinuationSpec] = Field(
         None,
         description=(
@@ -1231,6 +1276,62 @@ class ChatCompletionRequest(BaseModel):
             raise ValueError("If top_logprobs is specified, logprobs must be set to true.")
         return values
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_selected_durable_wire(cls, values: Any) -> Any:
+        """Gate new mode before coercion, dropped message extras or legacy normalization."""
+        if not isinstance(values, Mapping):
+            return values
+        turn = values.get("tldw_turn")
+        selected = (isinstance(turn, Mapping) and ("history_v1" in turn or "result_v1" in turn)) or (
+            isinstance(turn, TLDWTurnSpec) and turn.history_v1 is not None
+        )
+        if not selected:
+            return values
+        if type(values.get("stream")) is not bool or values.get("save_to_db") is not True:
+            raise ValueError("selected durable mode requires explicit boolean stream and save_to_db=true")
+        if any(type(values.get(key)) is not str or not values[key].strip() for key in ("model", "api_provider")):
+            raise ValueError("selected durable mode requires explicit model and api_provider")
+        if values["model"].strip().lower() == "auto":
+            raise ValueError("selected durable mode requires a resolved model, not auto routing")
+        forbidden = {
+            "tools",
+            "tool_choice",
+            "functions",
+            "function_call",
+            "parallel_tool_calls",
+            "tldw_continuation",
+            "tldw_history_selection_v1",
+            "history_message_limit",
+            "history_message_order",
+            "tldw_retry_failed_turn",
+            "tldw_regenerate_from_message_id",
+            "tldw_history_admission_v1",
+            "tldw_history_result_v1",
+            "tldw_user_message_id",
+            "tldw_message_id",
+        }
+        if forbidden.intersection(values) or values.get("extra_body") is not None:
+            raise ValueError("selected durable mode cannot mix tools, legacy controls or body overrides")
+        metadata = values.get("metadata")
+        if isinstance(metadata, Mapping) and forbidden.intersection(metadata):
+            raise ValueError("selected durable mode cannot mix legacy metadata controls")
+        messages = values.get("messages")
+        if not isinstance(messages, (list, tuple)):
+            raise ValueError("selected durable mode requires a message array")
+        for message in messages:
+            if isinstance(message, Mapping):
+                if (
+                    type(message.get("role")) is not str
+                    or message["role"] not in {"user", "system"}
+                    or type(message.get("content")) is not str
+                ):
+                    raise ValueError("selected durable mode requires original string user and text systems")
+                if {"tools", "tool_calls", "function_call", "tool_call_id", "images"}.intersection(message):
+                    raise ValueError("selected durable mode does not support message tools or assets")
+                message["content"].encode("utf-8")
+        return values
+
     @model_validator(mode="after")
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
         if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
@@ -1245,6 +1346,47 @@ class ChatCompletionRequest(BaseModel):
             roles = [message.role for message in self.messages]
             if not any(role in {"user", "tool"} for role in roles) or any(role not in {"system", "user", "tool"} for role in roles):
                 raise ValueError("Versioned messages must contain only current system/user/tool inputs")
+        return self
+
+    @model_validator(mode="after")
+    def validate_durable_user_turn(self) -> "ChatCompletionRequest":
+        """Keep durable turns text-only and prevent client history persistence."""
+        if self.tldw_turn is None:
+            return self
+        if not self.conversation_id or not self.conversation_id.strip() or self.save_to_db is not True:
+            raise ValueError("tldw_turn requires conversation_id and explicit save_to_db=true")
+        if self.tldw_continuation is not None:
+            raise ValueError("tldw_turn cannot be combined with tldw_continuation")
+        metadata = getattr(self, "metadata", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        if (
+            self.tldw_history_selection_v1 is not None
+            or metadata.get("tldw_retry_failed_turn") is True
+            or metadata.get("tldw_regenerate_from_message_id") is not None
+        ):
+            raise ValueError("tldw_turn cannot be combined with history selection or legacy retry/regeneration")
+        users = [message for message in self.messages if message.role == "user"]
+        if len(users) != 1 or any(message.role not in {"user", "system"} for message in self.messages):
+            raise ValueError("tldw_turn requires one current user and optional request-local system messages")
+        content = users[0].content
+        history = self.tldw_turn.history_v1
+        if history is not None:
+            reference = history.selection if history.kind == "selection" else history.admission
+            if reference.conversation_id != self.conversation_id:
+                raise ValueError("selected durable conversation mismatch")
+            if history.kind == "admission" and history.admission.input_message_id != str(
+                self.tldw_turn.user_message_id
+            ):
+                raise ValueError("selected durable admission input must equal user_message_id")
+            if not isinstance(content, str) or any(not isinstance(message.content, str) for message in self.messages):
+                raise ValueError("selected durable mode requires original string user and text systems")
+        if isinstance(content, list):
+            if any(part.type != "text" for part in content):
+                raise ValueError("tldw_turn supports text-only user content")
+            content = "\n".join(part.text for part in content)
+        if not isinstance(content, str) or not content.strip() or len(content) > MAX_MESSAGE_CONTENT_LENGTH:
+            raise ValueError("tldw_turn requires nonempty text within the message content limit")
+        users[0].content = content
         return self
 
     @model_validator(mode="after")

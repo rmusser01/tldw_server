@@ -6,7 +6,7 @@ import {
 import { normalizeNoteKeyword } from "@/services/note-keywords";
 import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance";
 import { bgRequest } from "@/services/background-proxy";
-import { loadServicePromptSnapshot } from "@/services/service-prompts";
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
 import type {
   WorkspaceArtifactApiResponse,
@@ -15,23 +15,41 @@ import type {
   WorkspaceNoteApiResponse,
 } from "@/services/tldw/domains/workspace-api";
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
+import { hydrateWorkspaceFromServer, type LocalWorkspaceState } from "@/store/workspace-api";
 import {
-  createEmptyWorkspaceSnapshot,
   createSlug,
   useWorkspaceStore,
-  type WorkspaceState,
 } from "@/store/workspace";
-import { hydrateWorkspaceFromServer } from "@/store/workspace-api";
 import { RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX } from "@/store/workspace-migration";
-import { normalizeWorkspaceAssistantDefaults } from "@/types/workspace-assistant-defaults";
 import type { WorkspaceSourceStatus } from "@/types/workspace";
 
-type WorkspaceSnapshot = WorkspaceState["workspaceSnapshots"][string];
 const INFORMATIONAL_CONTEXT_ERRORS = new Set([
   "jobs_unavailable",
   "media_db_unavailable",
   "membership_summary_unavailable",
 ]);
+
+/** Pins decorate verified membership; recovery records and provenance cannot add sources. */
+export const hydrateCanonicalWorkspaceCapturePins = async (
+  local: LocalWorkspaceState,
+  scope: Pick<ServicePromptSnapshot, "scopeKey" | "requestScope">,
+  assertCurrent: () => void,
+): Promise<void> => {
+  assertCurrent();
+  const owner = await getResearchWorkspaceOwner(scope.requestScope);
+  assertCurrent();
+  const records = await readResearchWebCaptures(owner, local.id);
+  assertCurrent();
+  const state = useWorkspaceStore.getState();
+  const previous = state.workspaceId === local.id ? state : state.workspaceSnapshots[local.id];
+  local.sources = retainResearchWebCapturePins(local.sources, records,
+    previous?.workspaceId === local.id && previous.serverWorkspace?.scopeKey === scope.scopeKey &&
+    previous.serverWorkspace.metadata.id === local.id
+      ? previous.sources : []);
+  const refused = new Set(local.sources.filter(source =>
+    source.statusDetails?.statusReason === "capture_head_changed").map(source => source.id));
+  local.selectedSourceIds = local.selectedSourceIds.filter(id => !refused.has(id));
+};
 
 type MigrationReceipt = {
   id: string;
@@ -82,10 +100,76 @@ export const readMigratedResearchWorkspaceId = (
   storage: Storage,
 ): string | null => readMigrationReceipts(storage)[0]?.id ?? null;
 
+/** Recover UUID Notes without granting provenance authority over workspace membership. */
+export const hydrateCanonicalWorkspaceNote = async (
+  local: LocalWorkspaceState,
+  scope: Pick<ServicePromptSnapshot, "scopeKey" | "requestScope">,
+  signal: AbortSignal,
+): Promise<void> => {
+  const workspaceId = local.id;
+  const workspaceTag = `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`;
+  const found = await bgRequest<{
+    notes?: Array<KnowledgeNoteHead & {
+      id: string;
+      title: string;
+      content: string;
+      keywords?: unknown[];
+      version: number;
+    }>;
+  }>({
+    method: "GET",
+    abortSignal: signal,
+    ...requestScopeFields(scope.requestScope),
+    path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
+  });
+  signal.throwIfAborted();
+  let canonical: NonNullable<typeof found.notes>[number] | undefined;
+  for (const candidate of found.notes || []) {
+    if (typeof candidate.id !== "string") continue;
+    // Search rows may omit metadata or truncate content. Resolve the exact owned head.
+    const full = await bgRequest<NonNullable<typeof found.notes>[number]>({
+      method: "GET",
+      abortSignal: signal,
+      ...requestScopeFields(scope.requestScope),
+      path: `/api/v1/notes/${encodeURIComponent(candidate.id)}`,
+    });
+    signal.throwIfAborted();
+    if (full.id !== candidate.id) throw new Error("Research note identity changed");
+    if (typeof full.content !== "string") continue;
+    const belongsToWorkspace = (full.keywords || []).map(normalizeNoteKeyword).includes(`workspace:${workspaceId}`);
+    if (belongsToWorkspace || resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
+      canonical = full;
+      break;
+    }
+  }
+  if (!canonical) return;
+  const provenance = resolveKnowledgeNoteProvenance(canonical).provenance;
+  local.currentNote = {
+    id: canonical.id,
+    title: canonical.title,
+    content: retainKnowledgeNoteProvenance(canonical.content, canonical),
+    ...knowledgeNoteHead(canonical),
+    keywords: (canonical.keywords || [])
+      .map(normalizeNoteKeyword)
+      .filter((keyword): keyword is string =>
+        keyword !== null && keyword !== workspaceTag && keyword !== `workspace:${workspaceId}`),
+    version: canonical.version,
+    isDirty: false,
+    serverWorkspaceId: workspaceId,
+    serverScopeKey: scope.scopeKey,
+  };
+  local.sources = local.sources.map((source) => {
+    const retained = provenance?.research?.workspace_id === workspaceId
+      ? provenance.research.sources.find((item) => item.mediaId === source.mediaId)
+      : undefined;
+    return retained ? { ...source, knowledgeQaEvidence: retained.evidence } : source;
+  });
+};
+
 /** Restore one migrated workspace atomically while its captured account lease remains live. */
 export const restoreMigratedResearchWorkspace = async (options: {
   signal: AbortSignal;
-  apply: (snapshot: WorkspaceSnapshot) => void;
+  apply: (workspace: LocalWorkspaceState, scopeKey: string) => boolean;
   storage?: Storage;
 }): Promise<boolean> => {
   const storage = options.storage ?? window.localStorage;
@@ -187,26 +271,17 @@ export const restoreMigratedResearchWorkspace = async (options: {
       throw new Error("Workspace restoration returned a different workspace");
     }
     const local = await hydrateWorkspaceFromServer(workspaceId, {
+      requireComplete: true,
       fetch: async () => ({
         ...context.workspace,
+        metadata: context.workspace,
         sources: context.sources.items,
         artifacts,
         notes,
       }),
     });
     assertCurrent();
-    const workspace = context.workspace;
-    const snapshot = createEmptyWorkspaceSnapshot({
-      id: workspaceId,
-      name: local.name || "Research Workspace",
-      tag: `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`,
-      createdAt: new Date(workspace.created_at),
-      studyMaterialsPolicy: workspace.study_materials_policy,
-      assistantDefaults: normalizeWorkspaceAssistantDefaults(
-        workspace.assistant_defaults,
-      ),
-    });
-    snapshot.sources = local.sources.map((source, index) => {
+    local.sources = local.sources.map((source, index) => {
       const authoritative = context.sources.items[index];
       const status: WorkspaceSourceStatus =
         authoritative.state === "queryable" ||
@@ -219,122 +294,15 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
-    const captureRecords = await readResearchWebCaptures(
-      await getResearchWorkspaceOwner(scope.requestScope),
-      workspaceId,
-    );
+    await hydrateCanonicalWorkspaceCapturePins(local, scope, assertCurrent);
+    await hydrateCanonicalWorkspaceNote(local, scope, scope.scopeSignal);
     assertCurrent();
-    const displayState = useWorkspaceStore.getState();
-    const previousSnapshot = displayState.workspaceSnapshots[workspaceId];
-    snapshot.sources = retainResearchWebCapturePins(
-      snapshot.sources,
-      captureRecords,
-      displayState.workspaceId === workspaceId
-        ? displayState.sources
-        : previousSnapshot?.workspaceId === workspaceId
-          ? previousSnapshot.sources
-          : [],
-    );
-    snapshot.selectedSourceIds = local.selectedSourceIds.filter(
-      (id) =>
-        !snapshot.sources.some(
-          (source) =>
-            source.id === id &&
-            source.statusDetails?.statusReason === "capture_head_changed",
-        ),
-    );
-    snapshot.generatedArtifacts = local.artifacts;
-    snapshot.workspaceBanner = {
-      ...snapshot.workspaceBanner,
-      title: workspace.banner_title || "",
-      subtitle: workspace.banner_subtitle || "",
-    };
-    const note = notes[0];
-    if (note) {
-      let keywords: unknown = [];
-      try {
-        keywords = JSON.parse(note.keywords_json || "[]");
-      } catch {
-        // Keywords are optional metadata; retain the note's title and content.
-      }
-      snapshot.currentNote = {
-        id: note.id,
-        title: note.title,
-        content: note.content,
-        keywords: Array.isArray(keywords)
-          ? keywords.filter(
-              (keyword): keyword is string => typeof keyword === "string",
-            )
-          : [],
-        isDirty: false,
-        version: note.version,
-      };
-      snapshot.notes = note.content;
-    }
-    // Canonical Quick Notes survive the legacy snapshot tombstone. The marker is
-    // descriptive evidence only; server membership and selection stay authoritative.
-    const found = await bgRequest<{
-      notes?: Array<KnowledgeNoteHead & {
-        id: string;
-        title: string;
-        content: string;
-        keywords?: unknown[];
-        version: number;
-      }>;
-    }>({
-      ...request,
-      path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
-    });
-    assertCurrent();
-    let canonical: NonNullable<typeof found.notes>[number] | undefined;
-    for (const candidate of found.notes || []) {
-      if (typeof candidate.id !== "string") continue;
-      // Search rows may omit metadata or truncate content. Resolve the exact owned head.
-      const full = await bgRequest<NonNullable<typeof found.notes>[number]>({
-        ...request, path: `/api/v1/notes/${encodeURIComponent(candidate.id)}`,
-      });
-      assertCurrent();
-      if (full.id !== candidate.id) throw new Error("Research note identity changed");
-      const belongsToWorkspace = (full.keywords || []).map(normalizeNoteKeyword).includes(`workspace:${workspaceId}`);
-      if (belongsToWorkspace || resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
-        canonical = full;
-        break;
-      }
-    }
-    if (canonical) {
-      const provenance = resolveKnowledgeNoteProvenance(canonical).provenance;
-      snapshot.currentNote = {
-        id: canonical.id,
-        title: canonical.title,
-        content: retainKnowledgeNoteProvenance(canonical.content, canonical),
-        ...knowledgeNoteHead(canonical),
-        keywords: (canonical.keywords || [])
-          .map(normalizeNoteKeyword)
-          .filter(
-            (keyword): keyword is string =>
-              keyword !== null &&
-              keyword !== snapshot.workspaceTag &&
-              keyword !== `workspace:${workspaceId}`,
-          ),
-        version: canonical.version,
-        isDirty: false,
-      };
-      snapshot.notes = snapshot.currentNote.content;
-      snapshot.sources = snapshot.sources.map((source) => {
-        const retained = provenance?.research?.workspace_id === workspaceId
-          ? provenance.research.sources.find((item) => item.mediaId === source.mediaId)
-          : undefined;
-        return retained
-          ? { ...source, knowledgeQaEvidence: retained.evidence }
-          : source;
-      });
-    }
-    assertCurrent();
+    if (!options.apply(local, scope.scopeKey))
+      throw new Error("Workspace restoration could not be installed without replacing retained content");
     storage.setItem(
       receipt.key,
       JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),
     );
-    options.apply(snapshot);
     return true;
   } finally {
     scope.release();

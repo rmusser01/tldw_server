@@ -5,6 +5,7 @@ import type { Message, ToolChoice } from "@/store/option"
 import type { ChatModelSettings } from "@/store/model"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import type { ChatScope } from "@/types/chat-scope"
 import type {
   HistoryLoadReceipt,
@@ -65,6 +66,10 @@ export const sendNativeHistoryCharacter = async (
   params: NativeHistoryCharacterSendParams
 ): Promise<void> => {
   const { controller, signal } = params
+  const navigation = usePlaygroundSessionStore.getState()
+  const navigationIsCurrent = () =>
+    usePlaygroundSessionStore.getState().restoreRevision === navigation.restoreRevision &&
+    usePlaygroundSessionStore.getState().serverChatSelectionIntent === navigation.serverChatSelectionIntent
   if (params.temporary || params.historyId === "temp")
     throw new Error("temporary_history_unavailable")
   if (params.image) throw new Error("native_history_assets_unsupported")
@@ -140,7 +145,7 @@ export const sendNativeHistoryCharacter = async (
   })
   if (!model || !provider)
     throw new Error("native_history_explicit_model_provider_required")
-  if (!params.originIsCurrent()) throw new Error("stale_selection")
+  if (!params.originIsCurrent() || !navigationIsCurrent()) throw new Error("stale_selection")
   const initialOwner = controller.getCurrent().owner
   if (initialOwner?.kind === "local")
     throw new Error("native_history_requires_server_owner")
@@ -157,11 +162,11 @@ export const sendNativeHistoryCharacter = async (
     useStoreChatModelSettings.getState() === settingsState &&
     useMcpToolsStore.getState() === toolsState
   try {
-    if (!params.originIsCurrent() || !leaseValid())
+    if (!params.originIsCurrent() || !navigationIsCurrent() || !leaseValid())
       throw new Error("stale_selection")
     let current = controller.getCurrent()
     if (!current.owner && current.status === "idle") {
-      if (!params.originIsCurrent() || !leaseValid())
+      if (!params.originIsCurrent() || !navigationIsCurrent() || !leaseValid())
         throw new Error("stale_selection")
       let chatId = params.serverChatId
       let createdCharacterId: string | number | undefined
@@ -177,41 +182,55 @@ export const sendNativeHistoryCharacter = async (
           }
         )
         // A late creation ACK must never bind the newly opened view or account.
-        if (!params.originIsCurrent() || !leaseValid())
+        if (!params.originIsCurrent() || !navigationIsCurrent() || !leaseValid())
           throw new Error("stale_selection")
         chatId = created.id
         createdCharacterId = params.characterId
         if (!chatId) throw new Error("native_history_creation_unacknowledged")
       }
       let receipt: HistoryLoadReceipt | undefined
-      const loaded = await controller.loadConversation(
-        {
-          historyId: params.historyId,
-          serverChatId: chatId,
-          scope: params.scope
-        },
-        null,
-        (value) => {
-          receipt = value
-        }
-      )
-      current = controller.getCurrent()
-      if (
-        !loaded ||
-        !receipt ||
-        current.owner !== receipt.owner ||
-        current.view !== receipt.view ||
-        !leaseValid()
-      )
-        throw new Error("stale_selection")
-      if (
-        chatId &&
-        (receipt.owner.kind !== "native" ||
-          receipt.owner.conversation_id !== chatId)
-      )
-        throw new Error("owner_conversation_mismatch")
-      if (chatId) params.setServerChatId(chatId)
-      if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
+      let adoptionIsCurrent: (() => boolean) | undefined
+      let loadAdopted = false
+      let loadRejected = false
+      try {
+        const loaded = await controller.loadConversation(
+          {
+            historyId: params.historyId,
+            serverChatId: chatId,
+            scope: params.scope,
+            // The adopted owner outlives this turn's Stop and sampling settings.
+            isCurrent: () => loadAdopted ||
+              (!loadRejected && navigationIsCurrent() && leaseValid())
+          },
+          null,
+          (value) => {
+            receipt = value
+            adoptionIsCurrent = controller.fence()
+          }
+        )
+        current = controller.getCurrent()
+        if (
+          !loaded ||
+          !receipt ||
+          current.owner !== receipt.owner ||
+          current.view !== receipt.view ||
+          !adoptionIsCurrent?.() ||
+          !navigationIsCurrent() ||
+          !leaseValid()
+        )
+          throw new Error("stale_selection")
+        if (
+          chatId &&
+          (receipt.owner.kind !== "native" ||
+            receipt.owner.conversation_id !== chatId)
+        )
+          throw new Error("owner_conversation_mismatch")
+        loadAdopted = true
+        if (chatId) params.setServerChatId(chatId)
+        if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
+      } finally {
+        loadRejected = !loadAdopted
+      }
     }
     if (current.owner?.kind !== "native")
       throw new Error("native_history_requires_server_owner")
@@ -239,6 +258,7 @@ export const sendNativeHistoryCharacter = async (
       const now = controller.getCurrent().view
       return (
         authValid() &&
+        navigationIsCurrent() &&
         !!now &&
         now.owner_key === view.owner_key &&
         now.conversation_id === view.conversation_id &&
@@ -399,14 +419,14 @@ export const sendNativeHistoryCharacter = async (
       await dismissHistoryTurnRecovery(scope, view, operationId, "completed")
       if (sameView()) {
         followAttempted = true
-        await controller.followResult(view, resultId)
+        await controller.followResult(view, resultId, navigationIsCurrent)
       }
     } catch (error) {
       if (admission && resultId) {
         // A later disconnect cannot erase an already verified owner settlement.
         await dismissHistoryTurnRecovery(scope, view, operationId, "completed")
         if (sameView() && !followAttempted)
-          await controller.followResult(view, resultId)
+          await controller.followResult(view, resultId, navigationIsCurrent)
         return
       }
       if (dispatched) {

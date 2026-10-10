@@ -1,13 +1,22 @@
 import "./knowledgeQaAuthorityFixture"
 import React from "react"
-import { act, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { createInstance } from "i18next"
+import { I18nextProvider } from "react-i18next"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import knowledgeEn from "@/assets/locale/en/knowledge.json"
+import ICUWithInterpolation from "@/i18n/icu-format"
 import { KnowledgeQAProvider, useKnowledgeQA } from "../KnowledgeQAProvider"
+import { AnswerPanel } from "../AnswerPanel"
+import { ExportDialog } from "../ExportDialog"
+import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 
 const ragSearchMock = vi.fn()
 const ragSearchStreamMock = vi.fn()
 const messageOpenMock = vi.fn()
 const trackMetricMock = vi.fn()
+const queuePrefillMock = vi.fn()
 const mockTldwClient = vi.hoisted(() => ({
   initialize: vi.fn().mockResolvedValue(undefined),
   fetchWithAuth: vi.fn().mockResolvedValue({
@@ -16,6 +25,8 @@ const mockTldwClient = vi.hoisted(() => ({
     text: async () => "",
   }),
   normalizeRagQuery: vi.fn((query: string) => query),
+  createNote: vi.fn().mockResolvedValue({ id: "partial-scope-receipt" }),
+  addChatMessage: vi.fn().mockResolvedValue({ id: "partial-message" }),
   ragSearch: vi.fn((...args: unknown[]) => ragSearchMock(...args)),
   ragSearchStream: vi.fn(async function* (
     this: { normalizeRagQuery: (query: string) => string },
@@ -37,6 +48,15 @@ vi.mock("@/hooks/useAntdMessage", () => ({
 
 vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
   trackKnowledgeQaSearchMetric: (...args: unknown[]) => trackMetricMock(...args),
+}))
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({
+  useHomeMilestoneScope: () => "test-owner",
+}))
+
+vi.mock("@/utils/research-workspace-prefill", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/research-workspace-prefill")>()),
+  queueResearchWorkspacePrefill: (...args: unknown[]) => queuePrefillMock(...args),
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -76,16 +96,434 @@ function ContextProbe() {
 describe("KnowledgeQAProvider streaming search", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ragSearchStreamMock.mockReset()
     localStorage.clear()
     sessionStorage.clear()
     latestContext = null
     mockTldwClient.normalizeRagQuery.mockImplementation((query: string) => query)
     trackMetricMock.mockResolvedValue(undefined)
+    queuePrefillMock.mockResolvedValue(undefined)
     mockTldwClient.fetchWithAuth.mockResolvedValue({ ok: false, json: async () => [], text: async () => "" })
     ragSearchMock.mockResolvedValue({
       results: [{ id: "fallback-doc" }],
       answer: "Fallback answer",
     })
+  })
+
+  it("retains received scoped answer and citations when the iterator fails before its queued flush", async () => {
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-a", source_type: "notes", source_id: "note-a", excerpt: "A evidence." }] }
+      yield { type: "delta", text: "Received answer [1]" }
+      throw new Error("Synthetic stream parser failure")
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => { latestContext!.setQuery("retain received evidence") })
+    await act(async () => { await latestContext!.search() })
+    expect(latestContext!.answer).toBe("Received answer [1]")
+    expect(latestContext!.citations).toEqual([expect.objectContaining({ index: 1, documentId: "note-a" })])
+    expect(latestContext!.answerTrustState).toBe("failed_search")
+    expect(latestContext!.isSearching).toBe(false)
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["cancel", "clear", "supersede"] as const)("drops queued output before a held generator settles after %s", async action => {
+    let queued!: () => void
+    let finishOld!: () => void
+    let startedNew!: () => void
+    let finishNew!: () => void
+    const oldQueued = new Promise<void>(resolve => { queued = resolve })
+    const oldEnd = new Promise<void>(resolve => { finishOld = resolve })
+    const newStarted = new Promise<void>(resolve => { startedNew = resolve })
+    const newEnd = new Promise<void>(resolve => { finishNew = resolve })
+    let oldSignal!: AbortSignal
+    ragSearchStreamMock.mockImplementationOnce(async function* (_query: string, options: { signal: AbortSignal }) {
+      oldSignal = options.signal
+      yield { type: "contexts", contexts: [{ id: "note-a", source_type: "notes", source_id: "note-a", excerpt: "A evidence." }] }
+      yield { type: "delta", text: "Queued old answer [1]." }
+      queued()
+      await oldEnd
+      yield completeEvent(true)
+    }).mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-b", source_type: "notes", source_id: "note-b", excerpt: "B evidence." }] }
+      startedNew()
+      await newEnd
+      yield completeEvent(false)
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-held-stream-owner") })
+    act(() => {
+      latestContext!.setQuery("Old question")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-a", "note-b"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    vi.useFakeTimers()
+    let oldRequest!: Promise<void>
+    let newRequest: Promise<void> | undefined
+    try {
+      const baselineTimers = vi.getTimerCount()
+      await act(async () => { oldRequest = latestContext!.search(); await oldQueued })
+      expect(vi.getTimerCount()).toBe(baselineTimers + 1)
+      expect(latestContext!.answer).toBeNull()
+      if (action === "supersede") {
+        act(() => { latestContext!.setQuery("New question") })
+        await act(async () => { newRequest = latestContext!.search(); await newStarted })
+      } else {
+        act(() => {
+          if (action === "cancel") latestContext!.cancelSearch()
+          else latestContext!.clearResults()
+        })
+      }
+      expect(oldSignal.aborted).toBe(true)
+      const retained = {
+        answer: latestContext!.answer, results: latestContext!.results,
+        resultQuery: latestContext!.resultQuery, lastSearchScope: latestContext!.lastSearchScope,
+        citations: latestContext!.citations, isSearching: latestContext!.isSearching,
+        queryStage: latestContext!.queryStage,
+      }
+      expect(vi.getTimerCount()).toBe(baselineTimers)
+      await act(async () => { await vi.advanceTimersByTimeAsync(80) })
+      expect(latestContext).toMatchObject(retained)
+      expect(latestContext!.answer || "").not.toContain("Queued old answer")
+      expect(vi.getTimerCount()).toBe(baselineTimers)
+      expect(ragSearchMock).not.toHaveBeenCalled()
+    } finally {
+      finishOld()
+      finishNew()
+      await act(async () => { await oldRequest; await newRequest })
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(["markdown", "pdf", "note", "handoff"])("keeps original citation [2] bound to B after excluding C in %s", async (destination) => {
+    let finish!: () => void
+    const end = new Promise<void>(resolve => { finish = resolve })
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [
+        { id: "note-c", source_type: "notes", source_id: "note-c", title: "C", excerpt: "Excluded C evidence." },
+        { id: "note-b", source_type: "notes", source_id: "note-b", title: "B", excerpt: "B evidence." },
+        { id: "note-d", source_type: "notes", source_id: "note-d", title: "D", excerpt: "D evidence." },
+      ] }
+      yield { type: "delta", text: "B claim [2]." }
+      await end
+      throw Object.assign(new Error("Cancelled partial output"), { name: "AbortError" })
+    })
+    mockTldwClient.fetchWithAuth.mockResolvedValue({ ok: true, json: async () => [], text: async () => "" })
+    const i18n = createInstance().use(ICUWithInterpolation)
+    await i18n.init({ lng: "en", fallbackLng: "en", defaultNS: "knowledge", resources: { en: { knowledge: knowledgeEn } } })
+    render(<I18nextProvider i18n={i18n}><MemoryRouter><KnowledgeQAProvider><ContextProbe /><AnswerPanel /><ExportDialog open onClose={vi.fn()} /></KnowledgeQAProvider></MemoryRouter></I18nextProvider>)
+    await act(async () => { await latestContext!.selectThread("remote-citation-identity") })
+    act(() => {
+      latestContext!.setQuery("B question")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-b", "note-d"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.search() })
+    try {
+      await waitFor(() => expect(latestContext!.answer).toBe("B claim [2]."))
+      expect(latestContext!.results.map(result => [result.id, result.metadata?.original_result_index])).toEqual([["note-b", 1], ["note-d", 2]])
+      expect(latestContext!.citations.map(citation => [citation.index, citation.documentId])).toEqual([[2, "note-b"]])
+      await act(async () => { latestContext!.cancelSearch(); finish(); await pending })
+      expect(latestContext!.queryStage).toBe("cancelled")
+      if (destination === "handoff") {
+        fireEvent.click(screen.getByRole("button", { name: "Continue in Research Workspace" }))
+        await waitFor(() => expect(queuePrefillMock).toHaveBeenCalledTimes(1))
+        const prefill = queuePrefillMock.mock.calls[0][0]
+        expect(prefill.citations).toEqual([2])
+        expect(prefill.sources.map(source => [source.originalId, source.citationIndex])).toEqual([["note-b", 2], ["note-d", undefined]])
+        expect(prefill.scope.include_note_ids).toEqual(["note-b", "note-d"])
+      } else if (destination === "note") {
+        fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+        await screen.findByRole("link", { name: "Open saved note" })
+        const [body, fields, request] = mockTldwClient.createNote.mock.calls[0]
+        expect(fields.knowledge_provenance.sources.map(source => [source.originalId, source.citationIndex])).toEqual([["note-b", 2], ["note-d", undefined]])
+        expect(readKnowledgeNoteProvenance(body)?.sources).toEqual(fields.knowledge_provenance.sources)
+        expect(body).toContain("- [2] B maps to Source 2.")
+        expect(body).not.toContain("Excluded C evidence.")
+        expect(request.idempotencyKey).toBeTruthy()
+      } else {
+        if (destination === "pdf") fireEvent.click(screen.getByRole("button", { name: /PDF/i }))
+        fireEvent.click(screen.getByRole("button", { name: "Export" }))
+        await screen.findByText("Preview")
+        const preview = screen.getByText((_, element) => element?.tagName === "PRE").textContent!
+        expect(preview).toContain("- [2] B maps to Source 2.")
+        expect(preview).toContain("### [2] B")
+        expect(preview).toContain("### [3] D")
+        expect(preview).toMatch(/## Bibliography[\s\S]*\[2\] B[\s\S]*\[3\] D/)
+        expect(preview).not.toContain("Excluded C evidence.")
+      }
+    } finally {
+      finish()
+      await act(async () => { await pending })
+    }
+  })
+
+  it.each([
+    { firstEvent: "contexts", includeAllowed: false },
+    { firstEvent: "delta", includeAllowed: false },
+    { firstEvent: "contexts", includeAllowed: true },
+    { firstEvent: "delta", includeAllowed: true },
+  ])("validates every partial publication before cancellation: %j", async ({ firstEvent, includeAllowed }) => {
+    let publishSecond!: () => void
+    let finish!: () => void
+    const second = new Promise<void>(resolve => { publishSecond = resolve })
+    const end = new Promise<void>(resolve => { finish = resolve })
+    const draft = includeAllowed ? "Excluded claim [1]; selected claim [2]." : "Excluded claim [1]."
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      const contexts = { type: "contexts", contexts: [
+        { id: "note-c", source_type: "notes", source_id: "note-c", excerpt: "Excluded evidence C." },
+        ...(includeAllowed ? [{ id: "note-b", source_type: "notes", source_id: "note-b", excerpt: "Selected evidence B." }] : []),
+      ] }
+      const delta = { type: "delta", text: draft }
+      yield firstEvent === "contexts" ? contexts : delta
+      await second
+      yield firstEvent === "contexts" ? delta : contexts
+      await end
+      throw Object.assign(new Error("Aborted after partial output"), { name: "AbortError" })
+    })
+    mockTldwClient.fetchWithAuth.mockResolvedValue({ ok: true, json: async () => [], text: async () => "" })
+    const i18n = createInstance().use(ICUWithInterpolation)
+    await i18n.init({ lng: "en", fallbackLng: "en", defaultNS: "knowledge", resources: { en: { knowledge: knowledgeEn } } })
+    render(<I18nextProvider i18n={i18n}><MemoryRouter><KnowledgeQAProvider><ContextProbe /><AnswerPanel /><ExportDialog open onClose={vi.fn()} /></KnowledgeQAProvider></MemoryRouter></I18nextProvider>)
+    await act(async () => { await latestContext!.selectThread("remote-partial-validation") })
+    act(() => {
+      latestContext!.setQuery("Selected note B?")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-b"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.search() })
+    try {
+      await waitFor(() => expect(latestContext!.resultQuery).toBe("Selected note B?"))
+      expect(latestContext!.results.map(result => result.id)).toEqual(firstEvent === "contexts" && includeAllowed ? ["note-b"] : [])
+      act(() => { publishSecond() })
+      await waitFor(() => expect(latestContext!.answer).toBe(draft))
+      await waitFor(() => expect(latestContext!.queryStage).toBe(firstEvent === "contexts" ? "generating" : "ranking"))
+      expect(latestContext!.results.map(result => result.id)).toEqual(includeAllowed ? ["note-b"] : [])
+      expect(latestContext!.citations.map(citation => [citation.index, citation.documentId])).toEqual(includeAllowed ? [[2, "note-b"]] : [])
+      expect(latestContext!.answerTrustState).toBe(includeAllowed ? "cited_answer" : "no_results")
+      expect(latestContext!.answerTrustReasonCodes).toEqual(includeAllowed ? [] : ["no_evidence"])
+      expect(latestContext!.queryWarning).toContain("outside the selected source scope")
+      act(() => { latestContext!.cancelSearch(); finish() })
+      await act(async () => { await pending })
+      expect(latestContext!.lastSearchScope).toMatchObject({ sources: ["notes"], includeNoteIds: ["note-b"], webFallback: false })
+      expect(latestContext!.results.map(result => result.id)).toEqual(includeAllowed ? ["note-b"] : [])
+      expect(latestContext!.answer).toBe(draft)
+      expect(latestContext!.queryStage).toBe("cancelled")
+      expect(ragSearchMock).not.toHaveBeenCalled()
+      if (includeAllowed) {
+        fireEvent.click(screen.getByRole("button", { name: "Continue in Research Workspace" }))
+        await waitFor(() => expect(queuePrefillMock).toHaveBeenCalledTimes(1))
+        expect(queuePrefillMock.mock.calls[0][0]).toMatchObject({
+          scope: { sources: ["notes"], include_note_ids: ["note-b"] },
+          sources: [expect.objectContaining({ originalId: "note-b", excerpt: "Selected evidence B." })],
+        })
+        fireEvent.click(screen.getByLabelText("Settings snapshot"))
+        fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+        expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=partial-scope-receipt")
+        const [body, fields] = mockTldwClient.createNote.mock.calls[0]
+        expect(body).not.toContain("Excluded evidence C.")
+        expect(fields.knowledge_provenance).toMatchObject({
+          scope: { sources: ["notes"], include_note_ids: ["note-b"] },
+          sources: [expect.objectContaining({ originalId: "note-b" })],
+        })
+      }
+    } finally {
+      act(() => { latestContext!.cancelSearch(); publishSecond(); finish() })
+      await act(async () => { await pending })
+    }
+  })
+
+  it.each([false, true])("fences buffered events yielded after abort (prior partial: %s)", async (publishBeforeCancel) => {
+    let drain!: () => void
+    const buffered = new Promise<void>(resolve => { drain = resolve })
+    let observedAbort = false
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-a", source_type: "notes", source_id: "note-a", excerpt: "A evidence." }] }
+      yield { type: "delta", text: "A answer [1]." }
+      yield completeEvent(true)
+    }).mockImplementationOnce(async function* (_query: string, options: { signal: AbortSignal }) {
+      if (publishBeforeCancel) {
+        yield { type: "contexts", contexts: [{ id: "note-b", source_type: "notes", source_id: "note-b", excerpt: "B evidence." }] }
+        yield { type: "delta", text: "B partial [1]." }
+      }
+      await buffered
+      observedAbort = options.signal.aborted
+      yield { type: "contexts", contexts: [{ id: "buffered-b", source_type: "notes", source_id: "note-b", excerpt: "Buffered B evidence." }] }
+      yield { type: "delta", text: "Buffered late answer [1]." }
+      yield completeEvent(true)
+      throw Object.assign(new Error("Aborted after draining"), { name: "AbortError" })
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-buffered-cancel") })
+    act(() => {
+      latestContext!.setQuery("A question")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-a"])
+    })
+    await act(async () => { await latestContext!.search() })
+    act(() => {
+      latestContext!.setQuery("B question")
+      latestContext!.updateSetting("include_note_ids", ["note-b"])
+    })
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.search() })
+    try {
+      await waitFor(() => expect(ragSearchStreamMock).toHaveBeenCalledTimes(2))
+      if (publishBeforeCancel) await waitFor(() => expect(latestContext!.answer).toBe("B partial [1]."))
+      const retained = { answer: latestContext!.answer, results: latestContext!.results, citations: latestContext!.citations, resultQuery: latestContext!.resultQuery, lastSearchScope: latestContext!.lastSearchScope, answerTrustState: latestContext!.answerTrustState }
+      act(() => { latestContext!.cancelSearch(); drain() })
+      await act(async () => { await pending })
+      expect(observedAbort).toBe(true)
+      expect(latestContext).toMatchObject(retained)
+      expect(latestContext!.isSearching).toBe(false)
+      expect(latestContext!.queryStage).toBe("cancelled")
+      expect(ragSearchMock).not.toHaveBeenCalled()
+    } finally {
+      act(() => { latestContext!.cancelSearch(); drain() })
+      await act(async () => { await pending })
+    }
+  })
+
+  it.each(["contexts", "delta"])("hands off the replacement scope after cancellation when %s publishes first", async (firstEvent) => {
+    let publishFirst!: () => void
+    let publishSecond!: () => void
+    let finish!: () => void
+    const first = new Promise<void>(resolve => { publishFirst = resolve })
+    const second = new Promise<void>(resolve => { publishSecond = resolve })
+    const end = new Promise<void>(resolve => { finish = resolve })
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-a", source: "notes", source_id: "note-a", excerpt: "A opens in January." }] }
+      yield { type: "delta", text: "A opens in January [1]." }
+      yield completeEvent(true)
+    }).mockImplementationOnce(async function* (_query: string, options: { signal: AbortSignal }) {
+      const contexts = { type: "contexts", contexts: [{ id: "note-b", source: "notes", source_id: "note-b", excerpt: "B opens in February." }] }
+      const delta = { type: "delta", text: "B opens in February [1]." }
+      await first
+      yield firstEvent === "contexts" ? contexts : delta
+      await second
+      yield firstEvent === "contexts" ? delta : contexts
+      await end
+      if (options.signal.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" })
+      yield completeEvent(true)
+    })
+    const i18n = createInstance().use(ICUWithInterpolation)
+    await i18n.init({ lng: "en", fallbackLng: "en", defaultNS: "knowledge", resources: { en: { knowledge: knowledgeEn } } })
+    render(<I18nextProvider i18n={i18n}><MemoryRouter><KnowledgeQAProvider><ContextProbe /><AnswerPanel /><ExportDialog open onClose={vi.fn()} /></KnowledgeQAProvider></MemoryRouter></I18nextProvider>)
+    await act(async () => { await latestContext!.selectThread("local-scope-replacement") })
+    act(() => {
+      latestContext!.setQuery("When does A open?")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-a"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    await act(async () => { await latestContext!.search() })
+    const priorScope = latestContext!.lastSearchScope
+    act(() => {
+      latestContext!.setQuery("When does B open?")
+      latestContext!.updateSetting("sources", ["notes", "media_db"])
+      latestContext!.updateSetting("include_note_ids", ["note-b"])
+      latestContext!.updateSetting("include_media_ids", [84])
+      latestContext!.updateSetting("collection_id", 7)
+      latestContext!.updateSetting("keyword_filter", "b-topic")
+      latestContext!.updateSetting("enable_web_fallback", true)
+      latestContext!.setPreset("thorough")
+    })
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.search() })
+    try {
+      await waitFor(() => expect(ragSearchStreamMock).toHaveBeenCalledTimes(2))
+      expect(latestContext!.answer).toBe("A opens in January [1].")
+      expect(latestContext!.lastSearchScope).toEqual(priorScope)
+      act(() => {
+        latestContext!.updateSetting("sources", ["media_db"])
+        latestContext!.updateSetting("include_note_ids", ["note-c"])
+        latestContext!.updateSetting("include_media_ids", [99])
+        latestContext!.updateSetting("collection_id", 9)
+        latestContext!.updateSetting("keyword_filter", "c-topic")
+        latestContext!.updateSetting("enable_web_fallback", false)
+        publishFirst()
+      })
+      await waitFor(() => expect(latestContext!.resultQuery).toBe("When does B open?"))
+      expect(latestContext!.lastSearchScope).toEqual({ preset: "thorough", sources: ["notes", "media_db"], includeNoteIds: ["note-b"], includeMediaIds: [84], collectionId: 7, keywordFilter: "b-topic", webFallback: true })
+      act(() => { publishSecond() })
+      await waitFor(() => expect(latestContext!.answer).toBe("B opens in February [1]."))
+      await waitFor(() => expect(latestContext!.results.map(result => result.id)).toEqual(["note-b"]))
+      act(() => { latestContext!.cancelSearch(); finish() })
+      await act(async () => { await pending })
+      expect(latestContext!.queryStage).toBe("cancelled")
+      fireEvent.click(screen.getByRole("button", { name: "Continue in Research Workspace" }))
+      await waitFor(() => expect(queuePrefillMock).toHaveBeenCalledTimes(1))
+      expect(queuePrefillMock.mock.calls[0]).toEqual([
+        expect.objectContaining({
+          query: "When does B open?", answer: "B opens in February [1].",
+          scope: { sources: ["notes", "media_db"], include_note_ids: ["note-b"], include_media_ids: [84], collection_id: 7, keyword_filter: "b-topic", enable_web_fallback: true },
+          sources: [expect.objectContaining({ originalId: "note-b", excerpt: "B opens in February." })],
+        }), "test-owner",
+      ])
+      fireEvent.click(screen.getByLabelText("I understand this unsupported draft will be labeled in the export."))
+      fireEvent.click(screen.getByLabelText("Settings snapshot"))
+      fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+      expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=partial-scope-receipt")
+      const [body, fields] = mockTldwClient.createNote.mock.calls[0]
+      const snapshot = JSON.parse(body.match(/## Settings Used\n\n```json\n([\s\S]*?)\n```/)![1])
+      const scope = { sources: ["notes", "media_db"], include_note_ids: ["note-b"], include_media_ids: [84], collection_id: 7, keyword_filter: "b-topic", enable_web_fallback: true }
+      expect(snapshot).toMatchObject({ preset: "thorough", settings: scope })
+      expect(fields.knowledge_provenance).toMatchObject({ question: "When does B open?", scope })
+      expect(readKnowledgeNoteProvenance(body)).toMatchObject({ question: "When does B open?", scope })
+      expect(ragSearchMock).not.toHaveBeenCalled()
+    } finally {
+      act(() => { latestContext!.cancelSearch(); publishFirst(); publishSecond(); finish() })
+      await act(async () => { await pending })
+    }
+  })
+
+  it("keeps the completed answer scope when a replacement is cancelled before publication", async () => {
+    let finish!: () => void
+    const end = new Promise<void>(resolve => { finish = resolve })
+    ragSearchStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "contexts", contexts: [{ id: "note-a", source: "notes", source_id: "note-a", excerpt: "A opens in January." }] }
+      yield { type: "delta", text: "A opens in January [1]." }
+      yield completeEvent(true)
+    }).mockImplementationOnce(async function* (_query: string, options: { signal: AbortSignal }) {
+      await end
+      if (options.signal.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" })
+      yield { type: "delta", text: "B opens in February." }
+      yield completeEvent(true)
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-before-publication") })
+    act(() => {
+      latestContext!.setQuery("When does A open?")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-a"])
+    })
+    await act(async () => { await latestContext!.search() })
+    const priorScope = latestContext!.lastSearchScope
+    act(() => {
+      latestContext!.setQuery("When does B open?")
+      latestContext!.updateSetting("include_note_ids", ["note-b"])
+    })
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.search() })
+    try {
+      await waitFor(() => expect(ragSearchStreamMock).toHaveBeenCalledTimes(2))
+      act(() => { latestContext!.cancelSearch(); finish() })
+      await act(async () => { await pending })
+      expect(latestContext!.queryStage).toBe("cancelled")
+      expect(latestContext!.resultQuery).toBe("When does A open?")
+      expect(latestContext!.answer).toBe("A opens in January [1].")
+      expect(latestContext!.lastSearchScope).toEqual(priorScope)
+      expect(ragSearchMock).not.toHaveBeenCalled()
+    } finally {
+      act(() => { latestContext!.cancelSearch(); finish() })
+      await act(async () => { await pending })
+    }
   })
 
   it("keeps received answer and evidence when the user cancels a partial stream", async () => {

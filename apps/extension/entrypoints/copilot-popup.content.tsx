@@ -1,5 +1,9 @@
 import { browser } from "wxt/browser"
 import { defineContentScript } from "wxt/utils/define-content-script"
+import {
+  captureSelectionContext,
+  type SelectionContext
+} from "../../packages/ui/src/utils/selection-replace"
 
 /**
  * Minimal every-page stub for the copilot popup.
@@ -15,10 +19,9 @@ import { defineContentScript } from "wxt/utils/define-content-script"
  *      web-accessible `copilot-popup-main.js` chunk via a runtime URL the
  *      bundler cannot inline, then delegates to the registered handler.
  *
- * Top-frame only: the background addresses the popup via
- * `tabs.sendMessage(tabId, ..., { frameId })` from the `contextual-popup-pa`
- * context-menu handler, and frame 0 (top frame) is where the popup is
- * expected to render.
+ * Registered eagerly in the top frame only. The background lazily injects
+ * this same minimal stub into an originating iframe if it has no receiver.
+ * Selection authority stays in the frame that received the explicit action.
  */
 
 const COPILOT_POPUP_CHUNK_RESOURCE = "copilot-popup-main.js"
@@ -51,6 +54,9 @@ const ensurePopupChunkLoaded = (): Promise<void> => {
 }
 
 const handlePopupMessage = async (payload: CopilotPopupPayload) => {
+  const context = captureSelectionContext(
+    typeof payload.selectionText === "string" ? payload.selectionText : undefined
+  )
   await ensurePopupChunkLoaded()
   const handle = (globalThis as Record<string, unknown>)[
     COPILOT_POPUP_HANDLE_KEY
@@ -58,7 +64,10 @@ const handlePopupMessage = async (payload: CopilotPopupPayload) => {
   if (typeof handle !== "function") {
     throw new Error("Copilot popup chunk did not register its handler.")
   }
-  await (handle as (payload?: CopilotPopupPayload) => Promise<void>)(payload)
+  await (handle as (
+    payload?: CopilotPopupPayload,
+    context?: SelectionContext | null
+  ) => Promise<void>)(payload, context)
 }
 
 export default defineContentScript({

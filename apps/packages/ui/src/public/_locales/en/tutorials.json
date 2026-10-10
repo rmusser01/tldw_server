@@ -170,6 +170,30 @@
   "playground_voice_settingsContent": {
     "message": "Configure voice chat settings including the voice model, auto-send timing, and trigger phrases."
   },
+  "chatWorkspace_basics_label": {
+    "message": "Chat Workspace Basics"
+  },
+  "chatWorkspace_basics_description": {
+    "message": "Prepare workspace chat, stage sources, and check send status"
+  },
+  "chatWorkspace_basics_scopeTitle": {
+    "message": "Workspace and Assistant"
+  },
+  "chatWorkspace_basics_scopeContent": {
+    "message": "Use the active workspace from Research Workspace and choose a model in Chat before returning here. Inspector reports the workspace, model, and persona, including inherited defaults. On narrow screens, switch between Chat, Sources, and Inspector."
+  },
+  "chatWorkspace_basics_sourcesTitle": {
+    "message": "Review Staged Sources"
+  },
+  "chatWorkspace_basics_sourcesContent": {
+    "message": "Browse opens a bounded read-only preview without staging or sending. Stage adds a ready source to the next send; review it in Chat first. Ready media is sent as retrieval context. Insert summary instead adds a text list of source names and clears staging, not the source contents."
+  },
+  "chatWorkspace_basics_statusTitle": {
+    "message": "Send Status and Recovery"
+  },
+  "chatWorkspace_basics_statusContent": {
+    "message": "The status strip and Inspector show readiness, streaming, and errors. Offline or failed sends keep the current draft and staged context for retry while this page stays open. Stop cancels generation. Switching workspaces or leaving this page can discard unsent work."
+  },
   "researchWorkspace_basics_label": {
     "message": "Research Workspace Basics"
   },
@@ -189,7 +213,7 @@
     "message": "Add and select sources here. Your selected source set controls what the chat and studio use."
   },
   "researchWorkspace_basics_chatTitle": {
-    "message": "Chat Workspace"
+    "message": "Source Chat"
   },
   "researchWorkspace_basics_chatContent": {
     "message": "Ask questions against your selected sources and review grounded answers before generating outputs."

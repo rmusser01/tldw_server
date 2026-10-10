@@ -288,6 +288,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 
 describe("useMessageOption selected model sync", () => {
   it("uses the same assistant owner for Character commits and route readiness", async () => {
@@ -296,6 +297,7 @@ describe("useMessageOption selected model sync", () => {
     expect(setSelectedAssistantSpy).toHaveBeenCalledWith(expect.objectContaining({ kind: "character", id: "7", name: "Owned Archivist" }))
   })
   beforeEach(() => {
+    vi.mocked(useServerChatLoader).mockClear()
     storageBacking.clear()
     storageSetCalls.length = 0
     lastUseChatActionsArgs.value = null
@@ -313,6 +315,25 @@ describe("useMessageOption selected model sync", () => {
     chatBaseState.setHistory.mockReset()
     chatBaseState.setHistoryId.mockReset()
     storeState.setServerChatId.mockReset()
+  })
+
+  it("does not load history for passive consumers unless the chat surface opts in", () => {
+    const scope = { type: "workspace", workspaceId: "workspace-a" } as const
+    const { rerender } = renderHook(
+      ({ hydrateServerChat }: { hydrateServerChat?: boolean }) =>
+        useMessageOption({ scope, hydrateServerChat }),
+      { initialProps: {} }
+    )
+
+    expect(useServerChatLoader).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false, scope })
+    )
+
+    rerender({ hydrateServerChat: true })
+
+    expect(useServerChatLoader).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true, scope })
+    )
   })
 
   it("prefers store-selected model over stale storage-selected model", async () => {

@@ -1,8 +1,8 @@
-import type { ScopedRequestOptions } from "../TldwApiClient"
-import { requestScopeFields } from "./service-prompts"
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
+import type { ScopedRequestOptions } from "../TldwApiClient"
+import { requestScopeFields } from "./service-prompts"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { OffsetPaginationMeta } from "@/services/response-envelope"
 import type {
@@ -1491,10 +1491,12 @@ export const workspaceApiMethods = {
     return normalizeWorkspaceApiResponse(response)
   },
 
-  async getWorkspace(workspaceId: string): Promise<WorkspaceApiResponse> {
+  async getWorkspace(workspaceId: string, options?: ScopedRequestOptions): Promise<WorkspaceApiResponse> {
     const response = await bgRequest<WorkspaceApiResponse>({
       path: workspacePath(workspaceId),
-      method: "GET"
+      method: "GET",
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      ...requestScopeFields(options?.requestScope)
     })
     return normalizeWorkspaceApiResponse(response)
   },
@@ -1688,8 +1690,8 @@ export const workspaceApiMethods = {
     return await bgRequest<WorkspaceSourceApiResponse[]>({
       path: workspacePath(workspaceId, "/sources"),
       method: "GET",
-      ...requestScopeFields(options?.requestScope),
-      abortSignal: options?.signal
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      ...requestScopeFields(options?.requestScope)
     })
   },
 
@@ -1823,8 +1825,8 @@ export const workspaceApiMethods = {
         query
       ),
       method: "GET",
-      ...requestScopeFields(options?.requestScope),
-      abortSignal: options?.signal
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      ...requestScopeFields(options?.requestScope)
     })
   },
 
@@ -1892,11 +1894,14 @@ export const workspaceApiMethods = {
   },
 
   async getWorkspaceArtifacts(
-    workspaceId: string
+    workspaceId: string,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceArtifactApiResponse[]> {
     return await bgRequest<WorkspaceArtifactApiResponse[]>({
       path: workspacePath(workspaceId, "/artifacts"),
-      method: "GET"
+      method: "GET",
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      ...requestScopeFields(options?.requestScope)
     })
   },
 
@@ -1941,11 +1946,14 @@ export const workspaceApiMethods = {
   },
 
   async getWorkspaceNotes(
-    workspaceId: string
+    workspaceId: string,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceNoteApiResponse[]> {
     return await bgRequest<WorkspaceNoteApiResponse[]>({
       path: workspacePath(workspaceId, "/notes"),
-      method: "GET"
+      method: "GET",
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      ...requestScopeFields(options?.requestScope)
     })
   },
 

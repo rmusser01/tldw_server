@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { App, ConfigProvider } from "antd"
 import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { createMemoryRouter, RouterProvider } from "react-router-dom"
 import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { TldwSettings } from "../tldw"
@@ -20,13 +21,6 @@ vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn().mockResolv
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (key: string, fallback: unknown) => typeof fallback === "string" ? fallback : key
 }) }))
-vi.mock("react-router-dom", async (importOriginal) => ({
-  ...await importOriginal<typeof import("react-router-dom")>(),
-  Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn(),
-  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
-  unstable_usePrompt: vi.fn()
-}))
 
 type TimeoutConfig = TldwConfig & {
   chatRequestTimeoutMs?: number
@@ -50,7 +44,10 @@ beforeEach(async () => {
 })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-const mount = () => render(<ConfigProvider theme={{ token: { motion: false } }}><App><TldwSettings /></App></ConfigProvider>)
+const mount = () => {
+  const router = createMemoryRouter([{ path: "/", element: <TldwSettings /> }])
+  return render(<ConfigProvider theme={{ token: { motion: false } }}><App><RouterProvider router={router} /></App></ConfigProvider>)
+}
 const load = async (config = target) => {
   await storage.set("tldwConfig", config)
   await tldwClient.initialize()

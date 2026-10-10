@@ -119,6 +119,85 @@ describe("resolveApiProviderForModel", () => {
       })
     ).resolves.toBe("anthropic")
   })
+
+  it.each(["llama", "tldw:llama"])(
+    "keeps an explicit %s selection when metadata is unavailable",
+    async (prefix) => {
+      getModelsMock.mockRejectedValue(new Error("Metadata unavailable"))
+
+      await expect(
+        resolveApiProviderForModel({
+          modelId: `${prefix}:../../../models/gemma:Q4_K_M/model.gguf`,
+          explicitProvider: "openai",
+          providerHint: "anthropic"
+        })
+      ).resolves.toBe("llama.cpp")
+      expect(getModelsMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("keeps a qualified llama selection ahead of stale catalog metadata", async () => {
+    getModelsMock.mockResolvedValue([
+      {
+        id: "../../../models/gemma:Q4_K_M/model.gguf",
+        name: "../../../models/gemma:Q4_K_M/model.gguf",
+        provider: "openai",
+        type: "chat"
+      }
+    ])
+
+    await expect(
+      resolveApiProviderForModel({
+        modelId: "llama:../../../models/gemma:Q4_K_M/model.gguf"
+      })
+    ).resolves.toBe("llama.cpp")
+    expect(getModelsMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["id", "../../../models/gemma:Q4_K_M/model.gguf"],
+    ["id", "tldw:../../../models/gemma:Q4_K_M/model.gguf"],
+    ["name", "../../../models/gemma:Q4_K_M/model.gguf"],
+    ["name", "tldw:../../../models/gemma:Q4_K_M/model.gguf"]
+  ])("normalizes llama catalog metadata matched by %s for %s", async (field, modelId) => {
+    getModelsMock.mockResolvedValue([
+      {
+        id: "catalog-entry",
+        name: "Gemma local",
+        [field]: "../../../models/gemma:Q4_K_M/model.gguf",
+        provider: "llama",
+        type: "chat"
+      }
+    ])
+
+    await expect(
+      resolveApiProviderForModel({ modelId, providerHint: "openai" })
+    ).resolves.toBe("llama.cpp")
+  })
+
+  it("normalizes an explicit llama provider without fetching metadata", async () => {
+    getModelsMock.mockRejectedValue(new Error("Metadata unavailable"))
+
+    await expect(
+      resolveApiProviderForModel({
+        modelId: "../../../models/gemma:Q4_K_M/model.gguf",
+        explicitProvider: " LLAMA ",
+        providerHint: "openai"
+      })
+    ).resolves.toBe("llama.cpp")
+    expect(getModelsMock).not.toHaveBeenCalled()
+  })
+
+  it("normalizes a cached llama provider hint when metadata is unavailable", async () => {
+    getModelsMock.mockRejectedValue(new Error("Metadata unavailable"))
+
+    await expect(
+      resolveApiProviderForModel({
+        modelId: "../../../models/gemma:Q4_K_M/model.gguf",
+        providerHint: "llama"
+      })
+    ).resolves.toBe("llama.cpp")
+  })
 })
 
 describe("parseProviderQualifiedModelSelection", () => {
@@ -162,6 +241,34 @@ describe("parseProviderQualifiedModelSelection", () => {
       isProviderQualified: false
     })
   })
+
+  it.each(["llama", "LLAMA", "llamacpp", "llama.cpp", "tldw:llama"])(
+    "normalizes %s while preserving the full local model path",
+    (prefix) => {
+      expect(
+        parseProviderQualifiedModelSelection(
+          `${prefix}:../../../models/gemma:Q4_K_M/model.gguf`
+        )
+      ).toEqual({
+        raw: `${prefix}:../../../models/gemma:Q4_K_M/model.gguf`,
+        modelId: "../../../models/gemma:Q4_K_M/model.gguf",
+        provider: "llama.cpp",
+        isProviderQualified: true
+      })
+    }
+  )
+
+  it.each(["../../../models/gemma:Q4_K_M/model.gguf", "C:/models/gemma:Q4.gguf"])(
+    "does not mistake the unqualified local path %s for a provider",
+    (modelId) => {
+      expect(parseProviderQualifiedModelSelection(modelId)).toEqual({
+        raw: modelId,
+        modelId,
+        provider: undefined,
+        isProviderQualified: false
+      })
+    }
+  )
 })
 
 describe("resolveExplicitProviderForSelectedModel", () => {
@@ -221,5 +328,25 @@ describe("resolveExplicitProviderForSelectedModel", () => {
         explicitProvider: undefined
       })
     ).toBe("openrouter")
+  })
+
+  it("uses the requested llama alias ahead of stale settings", () => {
+    expect(
+      resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: "openai:gpt-4o",
+        requestedSelectedModel: "llama:../../../models/gemma:Q4_K_M/model.gguf",
+        explicitProvider: "openai"
+      })
+    ).toBe("llama.cpp")
+  })
+
+  it("retains the current llama provider for the same local path without a qualifier", () => {
+    expect(
+      resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: "llama:../../../models/gemma:Q4_K_M/model.gguf",
+        requestedSelectedModel: "tldw:../../../models/gemma:Q4_K_M/model.gguf",
+        explicitProvider: "openai"
+      })
+    ).toBe("llama.cpp")
   })
 })

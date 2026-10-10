@@ -1,9 +1,15 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
+import { useCanonicalConnectionConfig } from '@/hooks/useCanonicalConnectionConfig'
+import { tldwAuth } from '@/services/tldw/TldwAuth'
+import { requestScopeFields } from '@/services/tldw/domains/service-prompts'
+import { createServicePromptScopeChangedError } from '@/services/tldw/service-prompt-scope-error'
+import { connectionAuthoritiesMatch, deriveConnectionAuthorityId, deriveSingleUserApiKeyCredentialScope } from '@/services/chat-surface-scope'
+import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 import { useDebounce } from '@/hooks/useDebounce'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
-import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
+import type { ActiveWikilinkQuery, WikilinkCandidate, WikilinkResolutions } from '@/components/Notes/wikilinks'
 import {
   buildWikilinkIndex,
   collectWikilinkTargets,
@@ -104,6 +110,52 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
 
   const [wikilinkSelectionIndex, setWikilinkSelectionIndex] = React.useState(0)
   const [largePreviewReady, setLargePreviewReady] = React.useState(true)
+  const { config, loading, authorityLoading } = useCanonicalConnectionConfig()
+  const capturedConfig = config ? { ...config } : null
+  const configReady = !(authorityLoading ?? loading) && capturedConfig !== null
+  const [, setAuthorityRevision] = React.useState(0)
+  const authorityEpochRef = React.useRef(0)
+  const authorityRef = React.useRef({ authorityScope, config: capturedConfig, configReady, isOnline })
+  const previousAuthority = authorityRef.current
+  if (
+    previousAuthority.authorityScope !== authorityScope ||
+    !connectionAuthoritiesMatch(capturedConfig, previousAuthority.config) ||
+    previousAuthority.configReady !== configReady || previousAuthority.isOnline !== isOnline
+  ) authorityEpochRef.current += 1
+  authorityRef.current = { authorityScope, config: capturedConfig, configReady, isOnline }
+  const authorityEpoch = authorityEpochRef.current
+  const connectionAuthority = deriveConnectionAuthorityId(capturedConfig)
+
+  // Invalidate immediately, including an A-B-A change between React renders.
+  React.useEffect(() => {
+    const invalidate = () => {
+      authorityEpochRef.current += 1
+      setAuthorityRevision(revision => revision + 1)
+    }
+    const configChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
+      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) invalidate()
+    }
+    window.addEventListener('tldw:config-updated', configChanged)
+    window.addEventListener('tldw:auth-principal-changed', invalidate)
+    return () => {
+      authorityEpochRef.current += 1
+      window.removeEventListener('tldw:config-updated', configChanged)
+      window.removeEventListener('tldw:auth-principal-changed', invalidate)
+    }
+  }, [])
+
+  const assertOwnerCurrent = (
+    user: { id?: string | number | null; is_active?: boolean } | null | undefined,
+    signal: AbortSignal
+  ) => {
+    if (
+      signal.aborted || authorityEpochRef.current !== authorityEpoch ||
+      !configReady || !isOnline || !capturedConfig || !authorityScope ||
+      user?.is_active !== true || user.id == null ||
+      createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== authorityScope
+    ) throw createServicePromptScopeChangedError()
+  }
 
   const wikilinkCandidates = React.useMemo(() => {
     const seen = new Set<string>()
@@ -156,22 +208,26 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
     return getActiveWikilinkQuery(content, editorCursorIndex)
   }, [content, editorCursorIndex, editorDisabled])
 
-  const serverLookupsEnabled = isOnline && authorityScope != null
+  const serverLookupsEnabled = isOnline && authorityScope != null && configReady
 
   // Autocomplete searches titles across the whole library, not just the
   // loaded list page (NE-02).
   const wikilinkQueryText = activeWikilinkQuery?.query.trim() ?? ''
   const debouncedWikilinkQueryText = useDebounce(wikilinkQueryText, WIKILINK_SUGGEST_DEBOUNCE_MS)
-  const { data: serverWikilinkCandidates } = useQuery({
-    queryKey: ['notes-wikilink-suggest', authorityScope, debouncedWikilinkQueryText],
+  const { data: serverWikilinkCandidates } = useQuery<WikilinkCandidate[]>({
+    queryKey: ['notes-wikilink-suggest', authorityScope, debouncedWikilinkQueryText, connectionAuthority, authorityEpoch],
     enabled: serverLookupsEnabled && !editorDisabled && debouncedWikilinkQueryText.length > 0,
     retry: false,
     refetchOnWindowFocus: false,
     staleTime: 30_000,
     // Keep the previous owner's titles out of a new owner's suggestions.
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === authorityScope ? previous : undefined,
-    queryFn: async () => {
+      previousQuery?.queryKey[1] === authorityScope &&
+      previousQuery.queryKey.at(-2) === connectionAuthority &&
+      previousQuery.queryKey.at(-1) === authorityEpoch ? previous : undefined,
+    queryFn: async ({ signal }) => {
+      const user = await tldwAuth.getCurrentUser()
+      assertOwnerCurrent(user, signal)
       const params = new URLSearchParams({
         query: debouncedWikilinkQueryText,
         title_only: 'true',
@@ -179,8 +235,22 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
       })
       const response = await bgRequest<unknown>({
         path: `/api/v1/notes/search/?${params.toString()}`,
-        method: 'GET'
+        method: 'GET',
+        abortSignal: signal,
+        ...requestScopeFields({
+          config: {
+            serverUrl: capturedConfig!.serverUrl,
+            authMode: capturedConfig!.authMode,
+            authSource: capturedConfig!.authSource,
+            orgId: capturedConfig!.orgId,
+            expectedSingleUserApiKeyScope: capturedConfig!.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig!.apiKey)
+              : undefined
+          },
+          userId: user.id
+        })
       })
+      assertOwnerCurrent(await tldwAuth.getCurrentUser(), signal)
       return toWikilinkCandidates(response)
     }
   })
@@ -230,26 +300,44 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
   }, [content])
   const debouncedWikilinkTargetsKey = useDebounce(wikilinkTargetsKey, WIKILINK_RESOLVE_DEBOUNCE_MS)
   const sourceNoteId = normalizeGraphNoteId(selectedId)
-  const { data: serverWikilinkResolutions } = useQuery({
-    queryKey: ['notes-wikilink-resolve', authorityScope, sourceNoteId, debouncedWikilinkTargetsKey],
+  const { data: serverWikilinkResolutions } = useQuery<WikilinkResolutions | null>({
+    queryKey: ['notes-wikilink-resolve', authorityScope, sourceNoteId, debouncedWikilinkTargetsKey, connectionAuthority, authorityEpoch],
     enabled: serverLookupsEnabled && debouncedWikilinkTargetsKey !== NO_WIKILINK_TARGETS_KEY,
     retry: false,
     refetchOnWindowFocus: false,
     // Keep earlier answers while a newly typed link resolves, but never
     // another owner's.
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === authorityScope ? previous : undefined,
-    queryFn: async () => {
+      previousQuery?.queryKey[1] === authorityScope &&
+      previousQuery.queryKey.at(-2) === connectionAuthority &&
+      previousQuery.queryKey.at(-1) === authorityEpoch ? previous : undefined,
+    queryFn: async ({ signal }) => {
+      const user = await tldwAuth.getCurrentUser()
+      assertOwnerCurrent(user, signal)
       const [titles, ids] = JSON.parse(debouncedWikilinkTargetsKey) as [string[], string[]]
       const response = await bgRequest<unknown>({
         path: '/api/v1/notes/wikilinks/resolve',
         method: 'POST',
+        abortSignal: signal,
+        ...requestScopeFields({
+          config: {
+            serverUrl: capturedConfig!.serverUrl,
+            authMode: capturedConfig!.authMode,
+            authSource: capturedConfig!.authSource,
+            orgId: capturedConfig!.orgId,
+            expectedSingleUserApiKeyScope: capturedConfig!.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig!.apiKey)
+              : undefined
+          },
+          userId: user.id
+        }),
         body: {
           titles,
           ids,
           ...(sourceNoteId ? { source_note_id: sourceNoteId } : {})
         }
       })
+      assertOwnerCurrent(await tldwAuth.getCurrentUser(), signal)
       return parseWikilinkResolutions(response)
     }
   })

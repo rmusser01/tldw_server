@@ -2528,6 +2528,9 @@ export const useMessage = () => {
     const historyOriginIsCurrent = historySelection?.fence();
     assertQueuedDispatchCurrent?.();
     const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);
+    const setTurnServerChatId = assertQueuedDispatchCurrent
+      ? (id: string) => assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
+      : setServerChatId;
     const saveMessageOnSuccess = saveSuccessForQueuedTurn(assertQueuedDispatchCurrent);
     const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const trimmedImageBackendOverride =
@@ -2988,9 +2991,7 @@ export const useMessage = () => {
               createChat: (payload) => tldwClient.createChat(payload),
               ensureServerChatHistoryId: async () => historyId,
               invalidateServerChatHistory,
-              setServerChatId: assertQueuedDispatchCurrent
-                ? (id) => assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
-                : setServerChatId,
+              setServerChatId: setTurnServerChatId,
               setServerChatTitle,
               setServerChatCharacterId,
               setServerChatAssistantKind,
@@ -3068,7 +3069,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
-                setServerChatId,
+                setServerChatId: setTurnServerChatId,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
@@ -3131,7 +3132,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
-                setServerChatId,
+                setServerChatId: setTurnServerChatId,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,

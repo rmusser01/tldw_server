@@ -364,7 +364,11 @@ def test_media_process_videos_api_key_principal_and_state_alignment(isolated_tes
     assert reg.status_code == 200, reg.text
 
     # 2. Create an API key for this user and grant media.create.
-    api_key_info = _run_async(_create_api_key(db_name, username))
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    app_pool = client.portal.call(get_db_pool)
+    api_key_info = client.portal.call(_create_api_key, db_name, username)
+    assert client.portal.call(get_db_pool) is app_pool
     api_key = api_key_info["key"]
 
     _run_async(_grant_user_permission(db_name, username, "media.create"))

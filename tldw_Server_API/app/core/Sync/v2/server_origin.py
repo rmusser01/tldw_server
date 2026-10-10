@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+
 from .adapters import (
     AdapterAccepted,
     AdapterConflict,
@@ -19,6 +21,11 @@ from .adapters import (
     SyncAdapterContext,
 )
 from .errors import SyncMaterializationPredecessorError, SyncStoreError
+from .materializers.notes import (
+    NOTES_EXPECTED_PRODUCT_VERSION_KEY,
+    NOTES_WIKILINK_REWRITE_SOURCE,
+    NotesMaterializer,
+)
 from .models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
@@ -126,6 +133,7 @@ def capture_server_origin_mutation(
     parent_id: str | None = None,
     stable_key: str | None = None,
     routing_metadata: Mapping[str, object] | None = None,
+    expected_product_version: int | None = None,
 ) -> ServerOriginCaptureResult:
     """Append and materialize one trusted server-origin Sync v2 mutation.
 
@@ -133,8 +141,22 @@ def capture_server_origin_mutation(
     tombstone (see ``SyncV2Service.settle_stranded_tombstones``) is unblocked
     first, and the append is tried once more. Every other unresolved conflict
     still refuses it.
+
+    Wikilink edits require a server-supplied product version. The persisted,
+    owner-bound guard also checks the atomic product write on every replay.
     """
 
+    if source == NOTES_WIKILINK_REWRITE_SOURCE:
+        if (
+            domain != "notes.note"
+            or operation != "upsert"
+            or isinstance(expected_product_version, bool)
+            or not isinstance(expected_product_version, int)
+            or expected_product_version < 1
+        ):
+            raise SyncStoreError("Wikilink capture requires a positive Notes product version")
+    elif expected_product_version is not None:
+        raise SyncStoreError("Product version capture is restricted to wikilink edits")
     dataset = _active_default_personal_dataset(service, user_id)
     if domain not in dataset.domains:
         raise SyncStoreError(f"Sync domain is not enrolled for this dataset: {domain}")
@@ -154,6 +176,7 @@ def capture_server_origin_mutation(
             parent_id=parent_id,
             stable_key=stable_key,
             routing_metadata=routing_metadata,
+            expected_product_version=expected_product_version,
         )
 
     try:
@@ -178,6 +201,7 @@ def _append_server_origin_mutation(
     parent_id: str | None,
     stable_key: str | None,
     routing_metadata: Mapping[str, object] | None,
+    expected_product_version: int | None,
 ) -> ServerOriginCaptureResult:
     """Append one server-origin envelope to ``dataset`` and require its projection."""
 
@@ -199,6 +223,13 @@ def _append_server_origin_mutation(
                 or accepted.object_id != object_id
                 or accepted.parent_id != parent_id
                 or not _payload_matches_idempotent_replay(accepted, payload, payload_hash)
+                or (
+                    source == NOTES_WIKILINK_REWRITE_SOURCE
+                    and (
+                        accepted.routing_metadata.get("source") != source
+                        or accepted.routing_metadata.get(NOTES_EXPECTED_PRODUCT_VERSION_KEY) != expected_product_version
+                    )
+                )
             ):
                 raise SyncServerOriginIdempotencyConflictError(accepted)
             accepted = _require_capture_applied(service, accepted)
@@ -206,6 +237,15 @@ def _append_server_origin_mutation(
 
     state = service.store.get_object_state(dataset.dataset_id, domain, object_id)
     object_revision = 1 if state is None else state.object_revision + 1
+    if expected_product_version is not None:
+        materializer = service.materializers.get(domain)
+        if not isinstance(materializer, NotesMaterializer) or str(materializer.note_db.client_id) != user_id:
+            raise SyncStoreError("Owner-bound Notes materializer is required for wikilink capture")
+        current = materializer.note_db.get_note_by_id(object_id)
+        if current is None or int(current["version"]) != expected_product_version:
+            raise ConflictError("Note changed before wikilink capture", entity="notes", entity_id=object_id)
+        # Keep product and Sync revisions monotonic after a local product edit.
+        object_revision = max(object_revision, expected_product_version + 1)
     now = service.clock() or None
     client_envelope_id = (
         stable_server_origin_envelope_id(dataset.dataset_id, domain, stable_key)
@@ -213,6 +253,8 @@ def _append_server_origin_mutation(
         else f"server-origin-{uuid4().hex}"
     )
     canonical_routing_metadata = dict(routing_metadata or {})
+    if expected_product_version is not None:
+        canonical_routing_metadata[NOTES_EXPECTED_PRODUCT_VERSION_KEY] = expected_product_version
     canonical_routing_metadata.update(
         {
             "source": source,

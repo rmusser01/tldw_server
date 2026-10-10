@@ -1298,6 +1298,9 @@ async def lifespan(app: FastAPI):
     _run_startup_config_validation()
 
     try:
+        # Cold schema generation must finish before requests share the event loop.
+        if app.openapi_url:
+            await asyncio.to_thread(app.openapi)
         yield
     finally:
         # Forced ASGI shutdown cancels this suspended lifespan. Owned workers

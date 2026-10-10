@@ -83,6 +83,41 @@ describe("background proxy fallback safety", () => {
     mocks.storageRemove.mockResolvedValue(undefined)
   })
 
+  it("keeps provider-status singleflight isolated across a single-user credential change", async () => {
+    mocks.runtimeId = null
+    let config = { serverUrl: "https://server.test", authMode: "single-user", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "https://server.test", apiKey: "synthetic-key-a" }
+    mocks.storageGet.mockImplementation(async key => key === "tldwConfig" ? config : null)
+    const actual = await vi.importActual<typeof import("@/services/tldw/request-core")>("@/services/tldw/request-core")
+    mocks.tldwRequest.mockImplementation(actual.tldwRequest)
+    let resolveOld!: (response: Response) => void
+    const valueA = { providers: [{ name: "authority-a" }], any_configured: true }
+    const valueB = { providers: [{ name: "authority-b" }], any_configured: true }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValue(new Response(JSON.stringify(valueB), { headers: { "content-type": "application/json" } }))
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+      const client = new TldwApiClient()
+      const old = client.getProvidersStatus().catch(error => error)
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      config = { ...config, apiKey: "synthetic-key-b" }
+      window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+      const current = client.getProvidersStatus().catch(error => error)
+      // Wait until the second request has read the new credential, even if transport coalesces it.
+      await vi.waitFor(() => expect(mocks.storageGet.mock.calls.filter(([key]) => key === "tldwConfig").length).toBeGreaterThanOrEqual(2))
+      resolveOld(new Response(JSON.stringify(valueA), { headers: { "content-type": "application/json" } }))
+      expect(await old).toMatchObject({ status: 412 })
+      expect(await current).toEqual(valueB)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("X-API-KEY")).toBe("synthetic-key-b")
+      expect(await client.getProvidersStatus()).toEqual(valueB)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("keeps a size-limited preview failure from marking the backend unreachable", async () => {
     mocks.tldwRequest.mockResolvedValue({ ok: false, status: 0, code: "RESPONSE_TOO_LARGE", error: "Response exceeds the size limit." })
     const offline = vi.fn()
@@ -374,6 +409,34 @@ describe("background proxy fallback safety", () => {
       bgRequest({ path: "/api/v1/health", method: "GET" })
     ).rejects.toMatchObject({ status: 500 })
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("keeps scoped OpenAPI discovery bound to its server (changed=%s)", async (changed) => {
+    mocks.runtimeId = null
+    const config = {
+      serverUrl: changed ? "https://other.example.com" : "https://api.example.com",
+      authMode: "single-user", apiKey: "scope-test-key", authSource: "manual",
+      credentialSource: "manual", apiKeyPersistence: "device",
+      apiKeyServerOrigin: changed ? "https://other.example.com" : "https://api.example.com"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? config : null)
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { paths: {} } })
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest({
+      path: "/openapi.json", method: "GET",
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "single-user", authSource: "manual",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "scope-test-key")
+      }
+    })
+    if (changed) {
+      await expect(pending).rejects.toMatchObject({ status: 412 })
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    } else {
+      await expect(pending).resolves.toEqual({ paths: {} })
+      const [, runtime] = mocks.tldwRequest.mock.calls[0]
+      await expect(runtime.getConfig()).resolves.toMatchObject(config)
+    }
   })
 
   it("does not replay a scoped POST when the response port closes ambiguously", async () => {
@@ -2981,90 +3044,85 @@ describe("background proxy fallback safety", () => {
     }
   })
 
-  it("classifies direct stream aborts as AbortError", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: false })
-    mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "tldwConfig") {
-        return {
-          serverUrl: "http://127.0.0.1:8000",
-          authMode: "single-user",
-          apiKey: "test-key-not-placeholder",
-          credentialSource: "manual",
-          apiKeyPersistence: "device",
-          apiKeyServerOrigin: "http://127.0.0.1:8000"
-        }
-      }
-      return null
-    })
-
-    let activeSignal: AbortSignal | null = null
-    let resolveReadStarted: (() => void) | null = null
-    const readStarted = new Promise<void>((resolve) => {
-      resolveReadStarted = resolve
-    })
-    const reader = {
-      read: vi.fn(() => {
-        resolveReadStarted?.()
-        return new Promise<never>((_, reject) => {
-          const signal = activeSignal
-          if (!signal) {
-            reject(new Error("Missing abort signal"))
-            return
+  it.each(["caller abort", "body failure"])(
+    "handles native reader cleanup rejection while preserving %s",
+    async (failure) => {
+      mocks.runtimeId = null
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        if (key === "tldwConfig") {
+          return {
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user",
+            apiKey: "test-key-not-placeholder",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "http://127.0.0.1:8000"
           }
-          const onAbort = () => {
-            signal.removeEventListener("abort", onAbort)
-            const abortError = new Error("The operation was aborted.")
-            abortError.name = "AbortError"
-            reject(abortError)
-          }
-          signal.addEventListener("abort", onAbort, { once: true })
-        })
-      }),
-      cancel: vi.fn()
-    }
-    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      activeSignal = (init?.signal as AbortSignal | undefined) || null
-      return {
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => reader
         }
-      } as unknown as Response
-    })
-    vi.stubGlobal("fetch", fetchSpy as any)
-
-    const { bgStream } = await importProxy()
-    const controller = new AbortController()
-    const consume = async () => {
-      for await (const _chunk of bgStream({
-        path: "/api/v1/chat/completions",
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: { stream: true, messages: [] },
-        abortSignal: controller.signal
-      })) {
-        // no-op
-      }
-    }
-
-    const pending = consume()
-
-    try {
-      await readStarted
-      controller.abort()
-
-      await expect(pending).rejects.toMatchObject({
-        name: "AbortError",
-        status: 0,
-        code: "REQUEST_ABORTED"
+        return null
       })
-      expect(fetchSpy).toHaveBeenCalledTimes(1)
-      expect(reader.cancel).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.unstubAllGlobals()
+
+      let notifyOpen!: () => void
+      const opened = new Promise<void>((resolve) => {
+        notifyOpen = resolve
+      })
+      let failBody!: (error: Error) => void
+      const transportError = new Error("Connection interrupted while reading")
+      const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(streamController) {
+            failBody = (error) => streamController.error(error)
+            init?.signal?.addEventListener(
+              "abort",
+              () => streamController.error(
+                new DOMException("BodyStreamBuffer was aborted", "AbortError")
+              ),
+              { once: true }
+            )
+          }
+        })
+        return new Response(body, { headers: { "Content-Type": "text/event-stream" } })
+      })
+      vi.stubGlobal("fetch", fetchSpy)
+
+      const { bgStream } = await importProxy()
+      const controller = new AbortController()
+      const consume = async () => {
+        for await (const _chunk of bgStream({
+          path: "/api/v1/chat/completions",
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: { stream: true, messages: [] },
+          abortSignal: controller.signal,
+          onOpen: notifyOpen
+        })) {
+          // no-op
+        }
+      }
+
+      const pending = consume()
+
+      try {
+        await opened
+        if (failure === "caller abort") {
+          controller.abort()
+          await expect(pending).rejects.toMatchObject({
+            name: "AbortError",
+            status: 0,
+            code: "REQUEST_ABORTED"
+          })
+        } else {
+          failBody(transportError)
+          await expect(pending).rejects.toBe(transportError)
+        }
+        // Let Vitest observe any unhandled rejection from native reader.cancel().
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(fetchSpy).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.unstubAllGlobals()
+      }
     }
-  })
+  )
 
   it("treats post-first-chunk transport disconnect as graceful end", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true })

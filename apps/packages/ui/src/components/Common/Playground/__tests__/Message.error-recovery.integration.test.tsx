@@ -6,6 +6,10 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
 import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat"
+import { createSaveMessageOnError } from "@/hooks/utils/messageHelpers"
+import { formatToMessage } from "@/db/dexie/helpers"
+
+const saveMessageMock = vi.hoisted(() => vi.fn(async (_payload: Record<string, unknown>) => undefined))
 
 const storedPreferences = vi.hoisted(() => new Map<string, unknown>())
 
@@ -206,7 +210,8 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
   })
 }))
 
-vi.mock("@/utils/chat-error-message", () => ({
+vi.mock("@/utils/chat-error-message", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/utils/chat-error-message")>(),
   decodeChatErrorPayload: decodeChatErrorPayloadMock
 }))
 
@@ -247,9 +252,17 @@ vi.mock("@/utils/character-mood", () => ({
   resolveCharacterMoodImageUrl: () => ""
 }))
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/helpers", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/dexie/helpers")>(),
   generateID: () => crypto.randomUUID(),
+  saveMessage: saveMessageMock,
+  updateLastUsedModel: vi.fn(async () => undefined),
+  updateLastUsedPrompt: vi.fn(async () => undefined),
   updateMessageDiscoSkillComment: vi.fn(async () => undefined)
+}))
+
+vi.mock("@/db/dexie/chat-persistence-transaction", () => ({
+  runChatPersistenceTransaction: async (_signal: AbortSignal, operation: () => Promise<unknown>) => operation()
 }))
 
 vi.mock("../message-layout", () => ({
@@ -376,6 +389,89 @@ describe("PlaygroundMessage error recovery integration", () => {
     render(<PlaygroundMessage {...baseProps} {...overrides} />)
     expect(screen.queryByText(/No final answer/)).not.toBeInTheDocument()
   })
+  it("restores an interrupted assistant without marking its saved user interrupted", async () => {
+    const saveError = createSaveMessageOnError(false, [], vi.fn(), vi.fn())
+    await saveError({
+      e: Object.assign(new Error("Connection dropped"), { name: "AbortError" }),
+      historyId: "history-1", image: "", selectedModel: "model-1",
+      userMessage: "Original question", botMessage: "Partial answer",
+      userMessageId: "user-1", assistantMessageId: "assistant-1",
+      isRegenerating: false,
+      scopeSignal: new AbortController().signal,
+      generationInfo: {
+        tldw_user_message_id: "durable-user-1",
+        interrupted: true,
+        partialResponseSaved: true,
+        streamTransportInterrupted: true,
+        streamTransportInterruptionReason: "Connection dropped"
+      }
+    })
+    const restored = formatToMessage(saveMessageMock.mock.calls.map(([row], index) => ({
+      ...row, createdAt: index, id: String(row.id)
+    })) as unknown as Parameters<typeof formatToMessage>[0])
+    for (const message of restored) {
+      render(<PlaygroundMessage {...baseProps}
+        message={message.message} isBot={message.isBot} role={message.role}
+        generationInfo={message.generationInfo} />)
+    }
+    expect(screen.getByText("Original question")).toBeInTheDocument()
+    expect(screen.getAllByText("Generation was interrupted. You can retry, switch model, or continue from the partial response.")).toHaveLength(1)
+    expect(restored.find((message) => !message.isBot)?.generationInfo).toEqual({
+      tldw_user_message_id: "durable-user-1"
+    })
+  })
+
+  it.each(["error", "empty", "interrupted"])(
+    "uses explicit workspace recovery instead of global actions for %s responses",
+    async (kind) => {
+      const user = userEvent.setup()
+      const retry = vi.fn()
+      const switchModel = vi.fn()
+      const fallback = vi.fn()
+      const openGlobalSettings = vi.fn()
+      window.addEventListener("tldw:open-model-settings", openGlobalSettings)
+      if (kind === "error") {
+        decodeChatErrorPayloadMock.mockReturnValue({ summary: "Request failed" })
+      }
+      try {
+        render(
+          <PlaygroundMessage
+            {...baseProps}
+            message={kind === "empty" ? "" : "Partial answer"}
+            generationInfo={kind === "interrupted" ? { interrupted: true } : undefined}
+            recoveryActions={[
+              { id: "retry", label: "Retry same model", onClick: retry },
+              { id: "switch", label: "Switch model", onClick: switchModel },
+              {
+                id: "fallback",
+                label: "Try provider fallback",
+                onClick: fallback,
+                disabled: true,
+                disabledReason: "Provider fallback is unavailable in this workspace."
+              }
+            ]}
+          />
+        )
+        await user.click(screen.getByRole("button", { name: "Retry same model" }))
+        await user.click(screen.getByRole("button", { name: "Switch model" }))
+        const fallbackButton = screen.getByRole("button", { name: "Try provider fallback" })
+        expect(fallbackButton).toBeDisabled()
+        expect(fallbackButton).toHaveAccessibleDescription(
+          "Provider fallback is unavailable in this workspace."
+        )
+        await user.click(fallbackButton)
+        expect(retry).toHaveBeenCalledTimes(1)
+        expect(switchModel).toHaveBeenCalledTimes(1)
+        expect(fallback).not.toHaveBeenCalled()
+        expect(baseProps.onRegenerate).not.toHaveBeenCalled()
+        expect(openGlobalSettings).not.toHaveBeenCalled()
+        expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+        expect(screen.queryByRole("button", { name: "Continue from partial" })).not.toBeInTheDocument()
+      } finally {
+        window.removeEventListener("tldw:open-model-settings", openGlobalSettings)
+      }
+    }
+  )
 
   it("wires retry/switch/fallback/continue actions for explicit provider errors", async () => {
     const user = userEvent.setup()

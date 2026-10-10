@@ -14,6 +14,7 @@ import {
 } from "./chat-request-debug"
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 import type { ServicePromptRequestScope } from "./domains/service-prompts"
+import type { ChatScope } from "@/types/chat-scope"
 import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
 import { CHAT_STARTUP_TIMEOUT_DEFAULT_MS, ChatStreamTimeoutError } from "./chat-timeouts"
 
@@ -263,10 +264,13 @@ const buildRequestMessages = (
   )
 }
 
-/** Pure final wire projection shared by preparation and legacy streaming. */
+/** Pure final wire projection shared by preparation and completion dispatch. */
 export const prepareChatCompletionRequest = (
   messages: ChatMessage[], options: TldwChatOptions, stream = true
 ): ChatCompletionRequest => {
+      // Durable identity owns retries; legacy retry/regeneration flags conflict.
+      const retryFailedTurn = !options.tldwTurn && options.retryFailedTurn
+      const regenerateFromMessageId = options.tldwTurn ? undefined : options.regenerateFromMessageId
       const normalizedTools =
         options.toolChoice === "none"
           ? undefined
@@ -306,12 +310,13 @@ export const prepareChatCompletionRequest = (
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
-          ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
+        ...(retryFailedTurn || options.clientMessageId || regenerateFromMessageId ? { metadata: {
+          ...(retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
           ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
-          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
+          ...(regenerateFromMessageId ? { tldw_regenerate_from_message_id: regenerateFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
+        ...(options.tldwTurn ? { tldw_turn: options.tldwTurn } : {}),
         history_message_limit: options.historyMessageLimit,
         history_message_order: options.historyMessageOrder,
         slash_command_injection_mode: options.slashCommandInjectionMode,
@@ -350,6 +355,7 @@ export interface TldwChatOptions {
   clientMessageId?: string
   regenerateFromMessageId?: string
   conversationId?: string
+  tldwTurn?: ChatCompletionRequest["tldw_turn"]
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -368,11 +374,14 @@ export interface TldwChatOptions {
   // internal per-call controller is aborted so the underlying request stops.
   signal?: AbortSignal
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
 
 export interface ChatStreamChunk {
+  tldw_history_admission_v1?: unknown
+  tldw_history_result_v1?: unknown
   id?: string
   object?: string
   created?: number
@@ -426,65 +435,7 @@ export class TldwChatService {
   ): Promise<string> {
     try {
       await tldwClient.initialize()
-      const normalizedTools =
-        options.toolChoice === "none"
-          ? undefined
-          : normalizeChatToolsForRequest(options.tools)
-      const toolChoice =
-        normalizedTools &&
-        (options.toolChoice === "auto" || options.toolChoice === "required")
-          ? options.toolChoice
-          : undefined
-      const requestMessages = buildRequestMessages(messages, options)
-      if (requestMessages.length === 0) {
-        throw new Error(
-          "Cannot send chat request without any messages. Add a user message or a system prompt."
-        )
-      }
-
-      const request: ChatCompletionRequest = {
-        messages: requestMessages,
-        model: options.model,
-        routing: options.routing,
-        stream: false,
-        temperature: options.temperature,
-        logprobs: options.logprobs,
-        top_logprobs:
-          options.logprobs && Number.isFinite(options.topLogprobs)
-            ? options.topLogprobs
-            : undefined,
-        max_tokens: options.maxTokens,
-        top_p: options.topP,
-        frequency_penalty: options.frequencyPenalty,
-        presence_penalty: options.presencePenalty,
-        reasoning_effort: options.reasoningEffort,
-        ...(normalizedTools
-          ? {
-              ...(toolChoice ? { tool_choice: toolChoice } : {}),
-              tools: normalizedTools
-            }
-          : {}),
-        save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
-          ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
-          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
-          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
-        } } : {}),
-        conversation_id: options.conversationId,
-        history_message_limit: options.historyMessageLimit,
-        history_message_order: options.historyMessageOrder,
-        slash_command_injection_mode: options.slashCommandInjectionMode,
-        api_provider: options.apiProvider,
-        extra_headers: options.extraHeaders,
-        extra_body: options.extraBody,
-        thinking_budget_tokens: options.thinkingBudgetTokens,
-        grammar_mode: options.grammarMode,
-        grammar_id: options.grammarId,
-        grammar_inline: options.grammarInline,
-        grammar_override: options.grammarOverride,
-        response_format: options.jsonMode ? { type: "json_object" } : undefined,
-        research_context: options.researchContext
-      }
+      const request = prepareChatCompletionRequest(messages, options, false)
       captureChatRequestDebugSnapshot({
         endpoint: "/api/v1/chat/completions",
         method: "POST",
@@ -496,7 +447,8 @@ export class TldwChatService {
       const response = await tldwClient.createChatCompletion(request, {
         debugMetadata: options.chatDebugMetadata,
         signal: options.signal,
-        requestScope: options.requestScope
+        requestScope: options.requestScope,
+        scope: options.scope
       })
       const data = await response.json().catch(() => null)
       if (onResponse) {
@@ -523,7 +475,7 @@ export class TldwChatService {
     messages: ChatMessage[],
     options: TldwChatOptions,
     onChunk?: (chunk: ChatStreamChunk) => void
-  ): AsyncGenerator<string, void, unknown> {
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown> {
     // Per-call abort controller: concurrent streams must not cancel each other.
     const controller = new AbortController()
     this.activeControllers.add(controller)
@@ -584,7 +536,8 @@ export class TldwChatService {
         signal: controller.signal,
         streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
-        requestScope: options.requestScope
+        requestScope: options.requestScope,
+        scope: options.scope
       })
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -648,6 +601,9 @@ export class TldwChatService {
             const token = extractTokenFromChunk(chunk)
             if (token) {
               yield token
+            } else if (request.tldw_turn?.history_v1 &&
+                (chunk?.tldw_history_admission_v1 !== undefined || chunk?.tldw_history_result_v1 !== undefined)) {
+              yield chunk
             }
           }
         } catch (error) {

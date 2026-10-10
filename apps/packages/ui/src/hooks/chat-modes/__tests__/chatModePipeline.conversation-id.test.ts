@@ -155,7 +155,21 @@ describe("runChatPipeline conversation id handoff", () => {
     expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
   })
 
-  it("passes explicit conversation ids into pageAssistModel instead of relying on store fallback", async () => {
+  it.each([
+    { assistantAck: true, userAck: "server-user", alreadyPersisted: true },
+    { assistantAck: true, userAck: undefined, alreadyPersisted: false },
+    { assistantAck: false, userAck: "server-user", alreadyPersisted: false },
+    { assistantAck: false, userAck: undefined, alreadyPersisted: false }
+  ])("hands off independent saved-message acknowledgements (%j)", async ({ assistantAck, userAck, alreadyPersisted }) => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1",
+      saveToDb: true,
+      serverMessagesAlreadyPersisted: assistantAck,
+      userServerMessageId: userAck,
+      stream: async function* () {
+        yield "Search-backed answer"
+      }
+    })
     const mode: ChatModeDefinition<any> = {
       id: "normal",
       setupMessages: () => ({
@@ -198,6 +212,13 @@ describe("runChatPipeline conversation id handoff", () => {
         model: "openai/gpt-4.1-mini",
         toolChoice: "none",
         conversationId: "server-chat-1"
+      })
+    )
+    expect(mocks.saveMessageOnSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "server-chat-1",
+        saveToDb: true,
+        serverMessagesAlreadyPersisted: alreadyPersisted
       })
     )
   })

@@ -997,9 +997,18 @@ async def trigger_source_sync(
     )
 
 
-@router.api_route(
+@router.get(
     "/providers/{provider}/webhook",
-    methods=["GET", "POST"],
+    response_model=ConnectorWebhookCallbackResponse,
+    responses={
+        200: {
+            "description": "Connector webhook callback result or plaintext validation challenge.",
+            "content": {"text/plain": {}},
+        },
+    },
+)
+@router.post(
+    "/providers/{provider}/webhook",
     response_model=ConnectorWebhookCallbackResponse,
     responses={
         200: {

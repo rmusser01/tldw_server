@@ -318,6 +318,7 @@
         "eslint": "^9.39.2",
         "eslint-plugin-react": "^7.35.2",
         "eslint-plugin-react-hooks": "^7.0.1",
+        "fake-indexeddb": "6.2.5",
         "globals": "^16.5.0",
         "jsdom": "^28.1.0",
         "openapi-typescript": "^7.13.0",
@@ -2186,6 +2187,8 @@
     "extend": ["extend@3.0.2", "", {}, "sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g=="],
 
     "extract-zip": ["extract-zip@2.0.1", "", { "dependencies": { "debug": "^4.1.1", "get-stream": "^5.1.0", "yauzl": "^2.10.0" }, "optionalDependencies": { "@types/yauzl": "^2.9.1" }, "bin": { "extract-zip": "cli.js" } }, "sha512-GDhU9ntwuKyGXdZBUgTIe+vXnWj0fppUEtMDL0+idd5Sta8TGpHssn/eusA9mrPr9qNDym6SxAYZjNvCn/9RBg=="],
+
+    "fake-indexeddb": ["fake-indexeddb@6.2.5", "", {}, "sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w=="],
 
     "fast-csv": ["fast-csv@4.3.6", "", { "dependencies": { "@fast-csv/format": "4.3.5", "@fast-csv/parse": "4.3.6" } }, "sha512-2RNSpuwwsJGP0frGsOmTb9oUF+VkFSM4SyLTDgwf2ciHWTarN0lQTC+F2f/t5J9QjW+c65VFIAAu85GsvMIusw=="],
 

@@ -7,39 +7,49 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_payload
 from ..store import SyncV2Store
 from .base import MaterializationResult
 
-_INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
+NOTES_EXPECTED_PRODUCT_VERSION_KEY = "notes_ingestion_expected_product_version"
+NOTES_WIKILINK_REWRITE_SOURCE = "notes-wikilink-rewrite"
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
 
 
-def _trusted_ingestion_expected_version(
+def _trusted_expected_product_version(
     envelope: SyncEnvelope,
     note_db: CharactersRAGDB,
 ) -> int | None:
-    """Return an owner-bound local ingestion projection precondition."""
+    """Return the owner-bound atomic precondition for ingestion or wikilink edits."""
 
     routing = envelope.routing_metadata
+    wikilink_guard = (
+        envelope.device_id == _SERVER_ORIGIN_DEVICE_ID
+        and routing.get("source") == NOTES_WIKILINK_REWRITE_SOURCE
+    )
     if (
         envelope.domain != "notes.note"
         or envelope.operation != "upsert"
         or envelope.device_id != _SERVER_ORIGIN_DEVICE_ID
-        or routing.get("source") != "notes-ingestion"
+        or routing.get("source") not in ("notes-ingestion", NOTES_WIKILINK_REWRITE_SOURCE)
         or routing.get("origin") != "server"
         or routing.get("server_device_id") != _SERVER_ORIGIN_DEVICE_ID
         or routing.get("server_owner_user_id") != str(note_db.client_id)
     ):
+        if wikilink_guard:
+            raise ValueError("Trusted wikilink product version guard identity is invalid")
         return None
-    expected_version = routing.get(_INGESTION_EXPECTED_VERSION_KEY)
+    expected_version = routing.get(NOTES_EXPECTED_PRODUCT_VERSION_KEY)
     if (
         isinstance(expected_version, bool)
         or not isinstance(expected_version, int)
         or expected_version < 0
+        or (wikilink_guard and expected_version == 0)
     ):
+        if wikilink_guard:
+            raise ValueError("Trusted wikilink mutation requires a positive product version")
         return None
     return expected_version
 
@@ -132,6 +142,24 @@ class NotesMaterializer:
                 apply_status="applied",
             )
         except Exception as exc:  # noqa: BLE001 - projection failures are persisted for replay
+            if (
+                isinstance(exc, ConflictError)
+                and envelope.device_id == _SERVER_ORIGIN_DEVICE_ID
+                and envelope.routing_metadata.get("source") == NOTES_WIKILINK_REWRITE_SOURCE
+            ):
+                conflict = _conflict_result(
+                    reason="product_version_changed", envelope=envelope, current_state=current_state
+                )
+                conflict.metadata["expected_product_version"] = envelope.routing_metadata.get(
+                    NOTES_EXPECTED_PRODUCT_VERSION_KEY
+                )
+                store.mark_envelope_apply_status(
+                    envelope.server_cursor,
+                    apply_status="conflict",
+                    apply_error_code="whole_object_conflict",
+                    apply_error_message=conflict.message,
+                )
+                return conflict
             logger.warning(
                 "Failed to materialize notes.note envelope {} for object {}: {}",
                 envelope.client_envelope_id,
@@ -158,13 +186,16 @@ class NotesMaterializer:
         object_hash = envelope.payload_hash or ""
         if envelope.operation == "upsert":
             payload = _note_payload(envelope.payload)
-            expected_product_version = _trusted_ingestion_expected_version(
+            expected_product_version = _trusted_expected_product_version(
                 envelope,
                 self.note_db,
             )
             projection_timestamp = None
             if expected_product_version is not None:
-                if object_revision != expected_product_version + 1:
+                if (
+                    envelope.routing_metadata.get("source") == "notes-ingestion"
+                    and object_revision != expected_product_version + 1
+                ):
                     raise ValueError(
                         "Trusted ingestion product revision is inconsistent"
                     )
@@ -320,7 +351,11 @@ def _conflict_result(
     return MaterializationResult(
         status="conflict",
         conflict_type="whole_object_conflict",
-        message="notes.note base state does not match the current server projection",
+        message=(
+            "notes.note product version changed before projection"
+            if reason == "product_version_changed"
+            else "notes.note base state does not match the current server projection"
+        ),
         metadata=metadata,
     )
 

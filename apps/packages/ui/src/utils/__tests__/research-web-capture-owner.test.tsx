@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react"
-import { beforeEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { webcrypto } from "node:crypto"
 import { useResearchWebCapture } from "../use-research-web-capture"
 import {
@@ -91,6 +91,9 @@ const deferred = <T,>() => {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.stubGlobal("navigator", Object.create(window.navigator, {
+    locks: { value: { request: vi.fn((_key: string, work: () => Promise<unknown>) => work()) } }
+  }))
   Object.defineProperty(globalThis, "crypto", {
     value: webcrypto,
     configurable: true
@@ -119,6 +122,7 @@ beforeEach(() => {
     selectedSourceFolderIds: []
   })
 })
+afterEach(() => vi.unstubAllGlobals())
 it.each(["single-user", "multi-user"] as const)(
   "real %s snapshot is compatible with the unchanged public owner and explicit extraction",
   async (mode) => {

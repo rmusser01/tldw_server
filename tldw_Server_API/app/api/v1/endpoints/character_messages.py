@@ -36,6 +36,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
     _detect_image_mime_type,
+    expand_message_images,
     format_message_content,
     read_messages_with_images,
 )
@@ -125,7 +126,8 @@ def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse
         timestamp=msg_data.get('timestamp', datetime.now(timezone.utc)),
         ranking=msg_data.get('ranking'),
         has_image=bool(msg_data.get('image_data')),
-        version=msg_data.get('version', 1)
+        version=msg_data.get('version', 1),
+        tldw_history_recovery_v1=msg_data.get("tldw_history_recovery_v1"),
     )
 
 
@@ -619,8 +621,14 @@ async def send_message(
 
 
 @router.get("/chats/{chat_id}/messages",
-            summary="Get messages in a chat", tags=["Messages"])
+            summary="Get messages in a chat", tags=["Messages"],
+            responses={200: {
+                "model": MessageListResponse,
+                "description": "Standard message list. Protected recovery requires this nondeleted, unformatted projection; completion formatting remains opt-in.",
+            }},
+            openapi_extra={"x-tldw-history-recovery-read": {"version": 1, "projection": "protected_live_v1"}})
 async def get_chat_messages(
+    request: Request = None,
     chat_id: str = Path(..., description="Chat session ID"),
     limit: int = Query(50, ge=1, le=200, description="Number of messages to return"),
     offset: int = Query(0, ge=0, description="Number of messages to skip"),
@@ -630,6 +638,7 @@ async def get_chat_messages(
     include_images: bool = Query(False, description="Include complete ordered image data URLs in standard responses"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata per message when available (standard format only)"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
+    include_history_recovery_v1: bool = Query(False, description="Include protected live history recovery proof"),
     render_placeholders: bool = Query(
         True,
         description=(
@@ -669,12 +678,40 @@ async def get_chat_messages(
     """
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
+        if include_history_recovery_v1 is True and (
+            include_deleted is True or include_character_context is True
+            or format_for_completions is True or render_placeholders is not False
+        ):
+            raise HTTPException(422, detail="History recovery requires exact nondeleted, unformatted stored messages.")
         # Verify conversation access
         conversation = _verify_conversation_access(db, chat_id, current_user.id, scope)
 
         # Get messages (honor include_deleted and DB pagination)
         expand_images = include_images is True or format_for_completions is True
-        if expand_images:
+        if include_history_recovery_v1 is True:
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+            try:
+                messages, recovery_total = await run_in_threadpool(
+                    db.read_history_recovery_messages,
+                    chat_id, limit=limit, offset=offset, scope=scope.model_dump(),
+                    owner_client_id=str(current_user.id), owner_key=native_history_owner_key(request, current_user.id),
+                )
+            except InputError as exc:
+                if not expand_images:
+                    raise
+                raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.") from exc
+            except CharactersRAGDBError as exc:
+                if not expand_images:
+                    raise
+                raise HTTPException(
+                    status_code=503,
+                    detail="Saved chat attachments could not be read completely. Retry loading the conversation.",
+                ) from exc
+            attachment_urls = await run_in_threadpool(
+                expand_message_images, db, messages, image_byte_limit=MAX_CHAT_ATTACHMENT_READ_BYTES,
+            ) if expand_images else {}
+        elif expand_images:
             messages, attachment_urls = await run_in_threadpool(
                 read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
                 image_byte_limit=MAX_CHAT_ATTACHMENT_READ_BYTES,
@@ -692,7 +729,7 @@ async def get_chat_messages(
 
         # Compute total message count for pagination metadata
         try:
-            total_count = db.count_messages_for_conversation(chat_id, include_deleted=include_deleted)
+            total_count = recovery_total if include_history_recovery_v1 is True else db.count_messages_for_conversation(chat_id, include_deleted=include_deleted)
         except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(
                 "count_messages_for_conversation failed for chat_id={} include_deleted={} error={}",
@@ -987,6 +1024,8 @@ async def get_chat_messages(
 
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        raise HTTPException(404, detail="Chat session not found.") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting messages for chat {chat_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -996,11 +1035,14 @@ async def get_chat_messages(
 
 
 @router.get("/messages/{message_id}", response_model=MessageResponse,
-            summary="Get a specific message", tags=["Messages"])
+            summary="Get a specific message", tags=["Messages"],
+            openapi_extra={"x-tldw-history-recovery-read": {"version": 1, "projection": "protected_live_v1"}})
 async def get_message(
+    request: Request = None,
     message_id: str = Path(..., description="Message ID"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata when available"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
+    include_history_recovery_v1: bool = Query(False, description="Include protected live history recovery proof"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1023,6 +1065,13 @@ async def get_message(
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
         message = _verify_message_access(db, message_id, current_user.id, scope)
+        if include_history_recovery_v1 is True:
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+            messages, _ = await run_in_threadpool(db.read_history_recovery_messages,
+                message["conversation_id"], message_id=message_id, scope=scope.model_dump(),
+                owner_client_id=str(current_user.id), owner_key=native_history_owner_key(request, current_user.id))
+            message = messages[0]
         resp = _convert_db_message_to_response(message)
         if include_tool_calls or include_metadata:
             try:
@@ -1041,6 +1090,8 @@ async def get_message(
 
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        raise HTTPException(404, detail="Message not found.") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting message {message_id}: {e}", exc_info=True)
         raise HTTPException(

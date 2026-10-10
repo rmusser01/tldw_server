@@ -1,4 +1,4 @@
-import { generateID } from "@/db/dexie/helpers"
+import { generateID } from "@/utils/generate-id"
 
 export type QueueStatus = "queued" | "blocked" | "sending"
 

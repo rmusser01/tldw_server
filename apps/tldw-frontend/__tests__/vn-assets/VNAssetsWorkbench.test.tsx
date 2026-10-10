@@ -473,7 +473,7 @@ describe('VNAssetsWorkbench', () => {
       await screen.findByText('Original transport lost');
       sessionStorage.removeItem(receiptKey);
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage disabled'); });
+      const read = vi.spyOn(Object.getPrototypeOf(window.sessionStorage), 'getItem').mockImplementation(() => { throw new Error('Storage disabled'); });
       await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
       await screen.findByText(/Recovery storage is unavailable/);
       expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);

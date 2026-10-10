@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -473,6 +474,173 @@ def settle(db, cid, admission, mid="accepted-assistant", **kwargs):
         cid, reference, {"id": mid, "sender": "assistant", "content": "response", **kwargs},
         owner_client_id="alice", owner_key=OWNER_KEY,
     )
+
+
+def bounded_recovery_turn(db, cid, *, with_result=True):
+    """Write the approved text-only intent using the real admission transaction."""
+    selection = selected(db, cid)
+    mid = str(uuid.uuid4())
+    admission = admit(db, cid, selection, mid)
+    reference = {key: admission[key] for key in (
+        "version", "owner_key", "conversation_id", "input_message_id",
+        "input_message_revision", "selection_digest",
+    )}
+    result_id = str(uuid.uuid4())
+    payload = {"version": 1, "request_context_digest": "a" * 64, "sources": [{
+        "name": "Memo", "type": "document", "mode": "rag", "url": "memo.md",
+        "pageContent": "Actual evidence", "metadata": {"chunk_id": "chunk-1"},
+    }]}
+    if with_result:
+        db.settle_history_admission(cid, reference, {
+            "id": result_id, "sender": "assistant", "content": "Answer [0]",
+            "images": [], "tool_calls": None,
+            "extra_metadata": {"sender_role": "assistant", "history_result_v1": payload},
+            "parent_message_id": mid,
+        }, owner_client_id="alice", owner_key=OWNER_KEY)
+    return admission, result_id, payload
+
+
+def bounded_recovery_read(db, cid, **kwargs):
+    return db.read_history_recovery_messages(
+        cid, owner_client_id="alice", owner_key=OWNER_KEY,
+        scope={"scope_type": "global", "workspace_id": None}, **kwargs,
+    )
+
+
+def test_bounded_recovery_reads_exact_live_input_and_ordered_sources(history_db):
+    db, cid = history_db
+    admission, result_id, payload = bounded_recovery_turn(db, cid)
+    rows, total = bounded_recovery_read(db, cid)
+    assert total == 2
+    assert rows[0]["tldw_history_recovery_v1"] == {
+        "version": 1, "status": "input_verified",
+        "scope": {"scope_type": "global", "workspace_id": None}, "admission": admission,
+    }
+    result = rows[1]["tldw_history_recovery_v1"]["result"]
+    assert result == {
+        "version": 1, "result_message_id": result_id, "result_message_revision": "1",
+        "admission": {key: admission[key] for key in (
+            "version", "owner_key", "conversation_id", "input_message_id",
+            "input_message_revision", "selection_digest",
+        )}, "request_context_digest": payload["request_context_digest"], "sources": payload["sources"],
+    }
+    assert all("history_admission_json" not in row for row in rows)
+
+
+@pytest.mark.parametrize("mutation", ["content", "parent", "role", "metadata", "revision", "input"])
+def test_bounded_recovery_rejects_live_result_or_input_changes(history_db, mutation):
+    db, cid = history_db
+    admission, result_id, _ = bounded_recovery_turn(db, cid)
+    with db.transaction() as conn:
+        if mutation == "content":
+            conn.execute("UPDATE messages SET content = 'changed' WHERE id = ?", (result_id,))
+        elif mutation == "parent":
+            conn.execute("UPDATE messages SET parent_message_id = NULL WHERE id = ?", (result_id,))
+        elif mutation == "role":
+            conn.execute("UPDATE messages SET sender = 'user' WHERE id = ?", (result_id,))
+        elif mutation == "revision":
+            conn.execute("UPDATE messages SET version = 2 WHERE id = ?", (result_id,))
+        elif mutation == "input":
+            conn.execute("UPDATE messages SET content = 'changed' WHERE id = ?", (admission["input_message_id"],))
+        else:
+            conn.execute("UPDATE message_metadata SET extra_json = '{}' WHERE message_id = ?", (result_id,))
+    rows, _ = bounded_recovery_read(db, cid, message_id=result_id)
+    assert rows[0]["tldw_history_recovery_v1"]["status"] == "unverified"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("version", 2),
+        ("owner_key", "server:other/account:alice"),
+        ("conversation_id", "other-conversation"),
+        ("input_message_id", "00000000-0000-4000-8000-000000000001"),
+        ("input_message_revision", "2"),
+        ("selection_digest", "b" * 64),
+    ],
+)
+def test_bounded_recovery_rejects_mismatched_settlement_reference(history_db, field, value):
+    """An unchanged live result cannot authorize a different input reference."""
+    db, cid = history_db
+    _, result_id, _ = bounded_recovery_turn(db, cid)
+    with db.transaction() as conn:
+        row = conn.execute("SELECT history_admission_json FROM messages WHERE id = ?", (result_id,)).fetchone()
+        authority = json.loads(row["history_admission_json"])
+        authority["settlement"][field] = value
+        conn.execute("UPDATE messages SET history_admission_json = ? WHERE id = ?", (json.dumps(authority), result_id))
+    rows, _ = bounded_recovery_read(db, cid, message_id=result_id)
+    assert rows[0]["tldw_history_recovery_v1"]["status"] == "unverified"
+
+
+def test_message_lookup_uses_owned_read_lifecycle(history_db, monkeypatch):
+    """Both SELECTs must opt into the existing side-effect-free read lifecycle."""
+    db, cid = history_db
+    mid = add(db, cid, "original", images=[{"data": b"image", "mime": "image/png"}])
+    execute_query = db.execute_query
+    read_scopes = []
+
+    def observe_query(*args, **kwargs):
+        read_scopes.append(kwargs.get("read_only", False))
+        return execute_query(*args, **kwargs)
+
+    monkeypatch.setattr(db, "execute_query", observe_query)
+    message = db.get_message_by_id(mid, strict_images=True)
+    assert message["images"][0]["image_data"] == b"image"
+    assert read_scopes == [True, True]
+
+
+def test_message_lookup_leaves_caller_pending_work_unsettled(history_db):
+    """The read lifecycle must not commit or roll back an outer write."""
+    db, cid = history_db
+    mid = add(db, cid, "original", images=[{"data": b"image", "mime": "image/png"}])
+    with pytest.raises(RuntimeError, match="caller rollback"):
+        with db.transaction() as conn:
+            conn.execute("UPDATE messages SET content = 'pending' WHERE id = ?", (mid,))
+            assert db.get_message_by_id(mid, strict_images=True)["content"] == "pending"
+            raise RuntimeError("caller rollback")
+    assert db.get_message_by_id(mid)["content"] == "original"
+
+
+def test_bounded_recovery_does_not_adopt_public_metadata_or_legacy_result(history_db):
+    db, cid = history_db
+    admission, _, payload = bounded_recovery_turn(db, cid, with_result=False)
+    forged_id = add(db, cid, "forged", id=str(uuid.uuid4()), parent_message_id=admission["input_message_id"])
+    db.set_message_metadata_extra(forged_id, {"sender_role": "assistant", "history_result_v1": payload})
+    legacy_id = str(uuid.uuid4())
+    settle(db, cid, admission, legacy_id)
+    rows, _ = bounded_recovery_read(db, cid)
+    assert [row["tldw_history_recovery_v1"]["status"] for row in rows] == [
+        "input_verified", "unverified", "unverified",
+    ]
+
+
+def test_bounded_recovery_preserves_multiple_results_without_uniqueness_claim(history_db):
+    db, cid = history_db
+    admission, first_id, payload = bounded_recovery_turn(db, cid)
+    second_id = str(uuid.uuid4())
+    settle(db, cid, admission, second_id, images=[], tool_calls=None,
+           parent_message_id=admission["input_message_id"],
+           extra_metadata={"sender_role": "assistant", "history_result_v1": payload})
+    rows, total = bounded_recovery_read(db, cid, limit=1, offset=1)
+    assert total == 3
+    assert rows[0]["tldw_history_recovery_v1"]["result"]["result_message_id"] == first_id
+    rows, _ = bounded_recovery_read(db, cid, message_id=second_id)
+    assert rows[0]["tldw_history_recovery_v1"]["status"] == "result_verified"
+
+
+def test_bounded_recovery_rechecks_owner_scope_and_deleted_rows(history_db):
+    db, cid = history_db
+    _, result_id, _ = bounded_recovery_turn(db, cid)
+    with pytest.raises(NotFoundError):
+        db.read_history_recovery_messages(cid, owner_client_id="bob", owner_key=OWNER_KEY,
+            scope={"scope_type": "global", "workspace_id": None})
+    with pytest.raises(NotFoundError):
+        db.read_history_recovery_messages(cid, owner_client_id="alice", owner_key=OWNER_KEY,
+            scope={"scope_type": "workspace", "workspace_id": "other"})
+    with db.transaction() as conn:
+        conn.execute("UPDATE messages SET deleted = TRUE WHERE id = ?", (result_id,))
+    with pytest.raises(NotFoundError):
+        bounded_recovery_read(db, cid, message_id=result_id)
 
 
 def test_selected_admission_empty_parent_replay_and_late_settlement(history_db):

@@ -144,6 +144,15 @@ describe("e2e page object contracts", () => {
     expect(source).toContain("NotificationsPage")
   })
 
+  it("waits for the watchlist palette transition before each navigation command", () => {
+    const source = readFileSync(watchlistJourneySpecPath, "utf8")
+
+    expect(source).toContain("not.toHaveClass(/ant-zoom-(enter|appear)/)")
+    expect(source.match(/await openWatchlistCommandPalette\(page\)/g)).toHaveLength(2)
+    expect(source.match(/expect\(commandPalette\)\.toBeHidden\(\)/g)).toHaveLength(2)
+    expect(source).not.toContain("waitForTimeout")
+  })
+
   it("requires exact supported saves and source lineage in the notes to flashcards journey", () => {
     const source = readFileSync(notesFlashcardsJourneySpecPath, "utf8")
     expect(source).toContain("assertBiologyCardSet(generated.flashcards)")

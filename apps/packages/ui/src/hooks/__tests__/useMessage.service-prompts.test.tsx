@@ -497,6 +497,8 @@ vi.mock("@/utils/mcp-disclosure", () => ({
 import { useMessage } from "../useMessage"
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation"
 import { normalChatMode } from "../chat-modes/normalChatMode"
+import { useQueuedRequests } from "../chat/useQueuedRequests"
+import { buildQueuedRequest } from "@/utils/chat-request-queue"
 
 describe("sidepanel saved conversation metadata lifetime", () => {
   it.each([false, true])("uses the real Persona creation helper without adopting a replacement (replaced=%s)", async (replaced) => {
@@ -653,6 +655,49 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
           Object.prototype.hasOwnProperty.call(values, key) ? values[key] : _match
         )
     )
+  })
+
+  it("drains a fresh native queued turn after its own server adoption and dispatches the next turn", async () => {
+    const { useStoreMessageOption: realStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    const previous = realStore.getState()
+    mocks.useRealQueueState = true
+    realStore.setState({ historyId: null, serverChatId: null, serverChatMetaLoaded: false, messages: [], history: [], temporaryChat: false, chatMode: "normal", streaming: false, selectedSystemPrompt: null,
+      queuedMessages: ["first", "second"].map(id => buildQueuedRequest({ id, conversationId: null, promptText: id, snapshot: { chatMode: "normal" } })) })
+    vi.mocked(normalChatMode).mockImplementation(async (...args) => {
+      // The native owner path publishes this setter after its qualified H1 adoption.
+      args[6].setServerChatId!("created-native")
+      realStore.getState().setServerChatMetaLoaded(true)
+      return { status: "submitted" }
+    })
+    const hook = renderHook(() => {
+      const chat = useMessage()
+      const state = realStore()
+      return useQueuedRequests({
+        isConnectionReady: chat.conversationMetadata.isReady, isStreaming: false,
+        queue: state.queuedMessages, setQueue: state.setQueuedMessages,
+        sendQueuedRequest: async item => {
+          const guard = chat.conversationMetadata.captureQueuedDispatchGuard(item.conversationId)
+          await chat.onSubmit({ message: item.promptText, image: "", requestOverrides: { chatMode: "normal" }, assertQueuedDispatchCurrent: guard })
+        },
+        canCommitDispatchResult: chat.conversationMetadata.isQueuedCompletionCurrent,
+        stopStreamingRequest: () => {}
+      })
+    })
+    try {
+      await act(async () => { await hook.result.current.flushNext() })
+      expect(normalChatMode).toHaveBeenCalledOnce()
+      expect(realStore.getState().serverChatId).toBe("created-native")
+      expect(realStore.getState().queuedMessages[0]?.status).not.toBe("blocked")
+      expect(realStore.getState().queuedMessages.map(item => item.id)).toEqual(["second"])
+      await act(async () => { await hook.result.current.flushNext() })
+      expect(realStore.getState().queuedMessages).toEqual([])
+      expect(vi.mocked(normalChatMode).mock.calls.map(args => args[0])).toEqual(["first", "second"])
+    } finally {
+      hook.unmount()
+      realStore.setState(previous, true)
+      mocks.useRealQueueState = false
+      vi.mocked(normalChatMode).mockReset()
+    }
   })
 
   it.each([

@@ -45,6 +45,12 @@ const FENCE_START = /^(\s*)(`{3,}|~{3,})([^\n]*)$/
 const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/
 const INDENTED_CODE_LINE = /^(?: {4}|\t)\s*\S/
 
+// Reasoning renders Markdown through a nested component with no heading prop.
+const MarkdownHeadingOffsetContext = React.createContext(0)
+export const MarkdownHeadingScope = ({ value, children }: { value: number; children: React.ReactNode }) => (
+  <MarkdownHeadingOffsetContext.Provider value={value}>{children}</MarkdownHeadingOffsetContext.Provider>
+)
+
 type ClosedMermaidFenceSource = {
   blockIndex: number
   closingLine: number
@@ -162,6 +168,7 @@ export function Markdown({
   allowExternalImages,
   richTextModeOverride,
   headingAnchorIds,
+  headingOffset,
   enableMermaidDiagrams = false,
   enableMermaidArtifactActions = false,
   artifactContextId,
@@ -173,10 +180,16 @@ export function Markdown({
   allowExternalImages?: boolean
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
+  headingOffset?: number
   enableMermaidDiagrams?: boolean
   enableMermaidArtifactActions?: boolean
   artifactContextId?: string
 }) {
+  const inheritedHeadingOffset = React.useContext(MarkdownHeadingOffsetContext)
+  const resolvedHeadingOffset = Math.max(
+    0,
+    Math.min(5, Math.trunc(headingOffset ?? inheritedHeadingOffset) || 0)
+  )
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [codeTheme] = useStorage("codeTheme", "auto")
   const [allowExternalImagesSetting] = useStorage(
@@ -318,11 +331,32 @@ export function Markdown({
   }, [headingAnchorIds])
   const stCompatHtml = React.useMemo(() => {
     if (richTextMode !== "st_compat") return ""
-    return renderStCompatMarkdownToHtml(
+    const html = renderStCompatMarkdownToHtml(
       processedMessage,
       resolvedAllowExternalImages
     )
-  }, [processedMessage, resolvedAllowExternalImages, richTextMode])
+    if (!resolvedHeadingOffset || typeof DOMParser === "undefined") return html
+    const doc = new DOMParser().parseFromString(html, "text/html")
+    for (const heading of Array.from(doc.querySelectorAll("h1,h2,h3,h4,h5,h6"))) {
+      const level = Number(heading.tagName.slice(1))
+      const replacement = doc.createElement(`h${Math.min(6, level + resolvedHeadingOffset)}`)
+      for (const attribute of Array.from(heading.attributes)) {
+        if (attribute.name === "aria-level") continue
+        replacement.setAttribute(attribute.name, attribute.value)
+      }
+      replacement.append(...Array.from(heading.childNodes))
+      heading.replaceWith(replacement)
+    }
+    return doc.body.innerHTML
+  }, [processedMessage, resolvedAllowExternalImages, richTextMode, resolvedHeadingOffset])
+  const renderHeading = (
+    level: number,
+    { children, node: _node, ...props }: React.ComponentProps<"h1"> & { node?: unknown }
+  ) => {
+    const Heading = `h${Math.min(6, level + resolvedHeadingOffset)}` as
+      "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    return <Heading {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</Heading>
+  }
   const hasManagedAssetImages = React.useMemo(
     () => processedMessage.includes(MANAGED_ASSET_MARKER),
     [processedMessage]
@@ -563,24 +597,12 @@ export function Markdown({
           th({ children, ...props }) {
             return <th {...props}>{renderHighlightedChildren(children)}</th>
           },
-          h1({ children, ...props }) {
-            return <h1 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h1>
-          },
-          h2({ children, ...props }) {
-            return <h2 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h2>
-          },
-          h3({ children, ...props }) {
-            return <h3 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h3>
-          },
-          h4({ children, ...props }) {
-            return <h4 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h4>
-          },
-          h5({ children, ...props }) {
-            return <h5 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h5>
-          },
-          h6({ children, ...props }) {
-            return <h6 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h6>
-          },
+          h1: props => renderHeading(1, props),
+          h2: props => renderHeading(2, props),
+          h3: props => renderHeading(3, props),
+          h4: props => renderHeading(4, props),
+          h5: props => renderHeading(5, props),
+          h6: props => renderHeading(6, props),
         }}
       >
         {processedMessage}

@@ -17,6 +17,9 @@ from loguru import logger
 from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    DEFAULT_MAX_ARTICLE_BYTES as _PUBLIC_CAPTURE_MAX_PROBE_BYTES,
+)
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -474,8 +477,9 @@ class HttpxProbeTransport:
 
     async def send(self, request: ProbeHttpRequest) -> Any:
         proxies = _mutable_proxies(request.proxies)
+        public_capture = public_url_policy_active()
         client = http_client.create_async_client(
-            proxies=proxies, **({"trust_env": False} if public_url_policy_active() else {})
+            proxies=proxies, **({"trust_env": False} if public_capture else {})
         )
         try:
             response = await http_client.afetch(
@@ -489,6 +493,7 @@ class HttpxProbeTransport:
                 proxies=proxies,
                 retry=http_client.RetryPolicy(attempts=1),
                 sensitive_observability=True,
+                **({"max_response_bytes": _PUBLIC_CAPTURE_MAX_PROBE_BYTES} if public_capture else {}),
             )
         except asyncio.CancelledError:
             await _close_resource(client, label="client")

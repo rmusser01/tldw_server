@@ -870,7 +870,7 @@ describe("workspace store snapshot persistence", () => {
     expect(indexedDbAdapter.putArtifactPayloadRecord).not.toHaveBeenCalled()
   })
 
-  it("does not re-persist covered workspace content after a migration tombstone exists", async () => {
+  it("suppresses deleted legacy content while retaining its migration marker", async () => {
     localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
     localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
     localStorage.setItem(
@@ -884,6 +884,8 @@ describe("workspace store snapshot persistence", () => {
       })
     )
 
+    const markerKey = "tldw:research-workspace:migration:tombstone:workspace-tombstoned"
+    const historicalMarker = localStorage.getItem(markerKey)
     const storage = createWorkspaceStorage()
     const payload = JSON.stringify({
       state: {
@@ -942,9 +944,10 @@ describe("workspace store snapshot persistence", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     expect(localStorage.getItem(snapshotKey("workspace-tombstoned"))).toBeNull()
     expect(localStorage.getItem(chatKey("workspace-tombstoned"))).toBeNull()
+    expect(localStorage.getItem(markerKey)).toBe(historicalMarker)
   })
 
-  it("cleans migrated workspace split keys only once per session", async () => {
+  it("does not repersist deleted legacy keys across repeated writes", async () => {
     const workspaceId = "workspace-cleanup-cache"
     localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
     localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
@@ -959,6 +962,8 @@ describe("workspace store snapshot persistence", () => {
       })
     )
 
+    const markerKey = `tldw:research-workspace:migration:tombstone:${workspaceId}`
+    const historicalMarker = localStorage.getItem(markerKey)
     const storage = createWorkspaceStorage()
     const payload = JSON.stringify({
       state: {
@@ -994,10 +999,13 @@ describe("workspace store snapshot persistence", () => {
     await storage.setItem(STORAGE_KEY, payload)
     expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
 
-    localStorage.setItem(snapshotKey(workspaceId), "{\"stale\":true}")
-    await storage.setItem(STORAGE_KEY, payload)
+    const nextPayload = JSON.parse(payload)
+    nextPayload.state.workspaceSnapshots[workspaceId].notes = "Fresh second draft"
+    await storage.setItem(STORAGE_KEY, JSON.stringify(nextPayload))
 
-    expect(localStorage.getItem(snapshotKey(workspaceId))).toBe("{\"stale\":true}")
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(localStorage.getItem(markerKey)).toBe(historicalMarker)
   })
 
   it("estimates persistence payload section sizes", () => {

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   ownerScope: 'alice-scope' as string | null,
   canDelete: true,
   readingProbe: false,
+  rawSelectedContent: null as string | null,
   navigationData: { nodes: [] as Array<{ id: string; title: string; level: number; target_type: 'char_range'; target_start: number; target_end: number }> },
   getNavigationResume: vi.fn(),
   getReadingProgress: vi.fn(),
@@ -42,6 +43,18 @@ vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => m
 vi.mock('@/hooks/useMediaCapabilities', () => ({
   useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
 }))
+
+vi.mock('../hooks/useMediaNavigationState', async importOriginal => {
+  const actual = await importOriginal<typeof import('../hooks/useMediaNavigationState')>()
+  return {
+    ...actual,
+    useMediaNavigationState: (deps: Parameters<typeof actual.useMediaNavigationState>[0]) => {
+      const nav = actual.useMediaNavigationState(deps)
+      // Supply raw page input independently of the upstream detail extractor's trim.
+      return mocks.rawSelectedContent == null ? nav : { ...nav, selectedContent: mocks.rawSelectedContent }
+    }
+  }
+})
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -400,6 +413,7 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     mocks.ownerScope = 'alice-scope'
     mocks.canDelete = true
     mocks.readingProbe = false
+    mocks.rawSelectedContent = null
     mocks.navigationData = { nodes: [] }
     mocks.getNavigationResume.mockReset().mockResolvedValue(null)
     mocks.getReadingProgress.mockReset().mockResolvedValue({ media_id: 1, percent_complete: 54.2, cfi: 'scroll:54.24' })
@@ -519,6 +533,49 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     expect(JSON.parse(screen.getByTestId('navigation-target').textContent!)).toEqual({
       target_type: 'char_range', target_start: 0, target_end: body.length, target_href: undefined
     })
+  })
+
+  it.each(['Article body  \r\n\t ', '\n\tArticle body  \r\n\t '])('aligns article character ranges with preserved body whitespace: %j', async body => {
+    const prefix = '[METADATA]\n{"title":"Envelope"}\n[/METADATA]\n\n'
+    mocks.readingProbe = true
+    mocks.rawSelectedContent = prefix + body
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Article' }, content: { text: prefix + body } }
+    mocks.navigationData = { nodes: [
+      { id: 'article', title: 'Article body', level: 1, target_type: 'char_range', target_start: prefix.length, target_end: prefix.length + body.length }
+    ] }
+    renderMediaPage('/media?id=1')
+    expect((await screen.findByTestId('reading-scroller')).textContent).toBe(prefix + body)
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to Article body' }))
+    expect(JSON.parse(screen.getByTestId('navigation-target').textContent!)).toEqual({
+      target_type: 'char_range', target_start: 0, target_end: body.length, target_href: undefined
+    })
+  })
+
+  it.each(['', 'Article body  \r\n\t ', '[METADATA]{broken}[/METADATA]\n\nArticle body  \r\n\t '])('retains source character ranges without a valid envelope: %j', async content => {
+    mocks.readingProbe = true
+    mocks.rawSelectedContent = content
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Article' }, content: { text: content } }
+    mocks.navigationData = { nodes: [
+      { id: 'article', title: 'Article body', level: 1, target_type: 'char_range', target_start: 0, target_end: content.length }
+    ] }
+    renderMediaPage('/media?id=1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to Article body' }))
+    expect(JSON.parse(screen.getByTestId('navigation-target').textContent!)).toEqual({
+      target_type: 'char_range', target_start: 0, target_end: content.length, target_href: undefined
+    })
+  })
+
+  it('omits metadata-only character ranges when the envelope has no body', async () => {
+    const content = '[METADATA]{}[/METADATA]\n\n'
+    mocks.readingProbe = true
+    mocks.rawSelectedContent = content
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Article' }, content: { text: content } }
+    mocks.navigationData = { nodes: [
+      { id: 'metadata', title: 'Metadata', level: 1, target_type: 'char_range', target_start: 0, target_end: content.length - 2 }
+    ] }
+    renderMediaPage('/media?id=1')
+    await waitFor(() => expect(screen.getByTestId('reading-scroller')).toHaveTextContent('[METADATA]'))
+    expect(screen.queryByRole('button', { name: 'Jump to Metadata' })).not.toBeInTheDocument()
   })
 
   it('clears a deleted deep link without hydrating its cached row again', async () => {

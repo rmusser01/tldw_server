@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import importlib
 from typing import Any
 
@@ -1262,6 +1263,60 @@ async def test_httpx_transport_uses_central_single_attempt_boundary(
     await result.aclose()
     assert raw.closed is True
     assert client.closed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload,encoding", [(b"safe", None), (b"oversized", None), (gzip.compress(b"expanded" * 20), "gzip")])
+async def test_public_http_probe_bounds_raw_body_and_closes_owned_client(
+    monkeypatch: pytest.MonkeyPatch, payload: bytes, encoding: str | None
+) -> None:
+    import httpx
+
+    from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
+
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_PUBLIC_CAPTURE_MAX_PROBE_BYTES", 5, raising=False)
+    seen: list[bytes] = []
+    accept_encoding: list[str | None] = []
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            seen.append(payload)
+            yield payload
+            if payload != b"safe" and encoding is None:
+                seen.append(b"must-not-be-read")
+                yield b"must-not-be-read"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        accept_encoding.append(request.headers.get("accept-encoding"))
+        return httpx.Response(
+            200, request=request, stream=Stream(), headers={"Content-Encoding": encoding} if encoding else {}
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False)
+    monkeypatch.setattr(module.http_client, "create_async_client", lambda **_kwargs: client)
+
+    async def fetch(**kwargs: Any) -> httpx.Response:
+        return await module.http_client._httpx_arequest_io(
+            client=kwargs["client"], method=kwargs["method"], url=kwargs["url"],
+            headers=kwargs["headers"], max_response_bytes=kwargs.get("max_response_bytes")
+        )
+
+    monkeypatch.setattr(module.http_client, "afetch", fetch)
+    request = ProbeHttpRequest(url="https://example.com/probe")
+    with public_url_policy_scope():
+        if payload == b"safe":
+            result = await module.HttpxProbeTransport().send(request)
+            assert result.content == payload
+            await result.aclose()
+        else:
+            message = "Compressed responses" if encoding else "Response exceeds max_response_bytes"
+            with pytest.raises(module.http_client.NetworkError, match=message):
+                await module.HttpxProbeTransport().send(request)
+    assert accept_encoding == ["identity"]
+    assert seen == ([] if encoding else [payload])
+    assert client.is_closed
 
 
 @pytest.mark.asyncio

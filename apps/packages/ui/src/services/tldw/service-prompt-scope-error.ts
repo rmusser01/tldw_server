@@ -115,8 +115,14 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
     return ["PATCH", "DELETE"].includes(requestMethod)
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
+  if (requestMethod === "GET" && /^\/api\/v1\/messages\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return true
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/workspaces\/[^/]+(?:\/(?:sources|artifacts|notes))?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources\/[^/]+\/preview$/.test(pathname)
+  )) return true
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
+  if (pathname === "/api/v1/notes/wikilinks/resolve") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
   if (pathname === "/api/v1/media/ingest-web-content")
@@ -168,6 +174,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   if (requestMethod === "GET") {
+    if (pathname === "/openapi.json") return true
     return (
       pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||

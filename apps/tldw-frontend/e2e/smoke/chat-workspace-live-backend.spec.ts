@@ -1,4 +1,6 @@
 import { type Page, type Route } from "@playwright/test"
+import AxeBuilder from "@axe-core/playwright"
+import promptFixtures from "../../../packages/ui/src/utils/__fixtures__/service-prompt-rendering.json"
 
 import { expect, test } from "./smoke.setup"
 import { seedAuth, waitForAppShell } from "../utils/helpers"
@@ -16,6 +18,37 @@ const READY_SOURCE_TITLE = "Workspace Smoke Source"
 const READY_SOURCE_MEDIA_ID = 24601
 const FALLBACK_SOURCE_ID = "workspace-smoke-fallback-source"
 const FALLBACK_SOURCE_TITLE = "Workspace Smoke Fallback Source"
+
+const SERVICE_PROMPTS = [
+  {
+    id: "chat.rag.answer",
+    key: "template",
+    variables: ["context", "question"]
+  },
+  {
+    id: "chat.rag.question_rewrite",
+    key: "template",
+    variables: ["chat_history", "question"]
+  },
+  { id: "chat.title.generation", key: "user_template", variables: ["query"] }
+].map(({ id, key, variables }) => {
+  const parts =
+    promptFixtures.defaults[id as keyof typeof promptFixtures.defaults]
+  return {
+    id,
+    label: id,
+    description: "Packaged chat prompt fixture",
+    parts: [
+      { key, label: key, mode: "template", required_variables: variables }
+    ],
+    affected_workflows: [],
+    default_parts: parts,
+    effective_parts: parts,
+    saved_parts: null,
+    source: "packaged",
+    revision: null
+  }
+})
 
 type CapturedRequest = {
   method: string
@@ -142,6 +175,22 @@ const installBackendFixture = async (
       return
     }
 
+    if (path === "/api/v1/service-prompts") {
+      await fulfillJson(route, 200, SERVICE_PROMPTS)
+      return
+    }
+    if (path.startsWith("/api/v1/service-prompts/")) {
+      const prompt = SERVICE_PROMPTS.find(
+        (entry) => entry.id === decodeURIComponent(path.split("/").pop()!)
+      )
+      await fulfillJson(
+        route,
+        prompt ? 200 : 404,
+        prompt ?? { detail: "Unknown fixture prompt" }
+      )
+      return
+    }
+
     if (path === "/api/v1/health" || path === "/api/v1/health/live") {
       await fulfillJson(route, 200, {
         status: "healthy",
@@ -248,7 +297,8 @@ const installBackendFixture = async (
         generated_answer: `Grounded answer for ${READY_SOURCE_TITLE}`,
         results: [
           {
-            content: "The workspace smoke source contains a deterministic proof point.",
+            content:
+              "The workspace smoke source contains a deterministic proof point.",
             metadata: {
               title: READY_SOURCE_TITLE,
               source: READY_SOURCE_TITLE,
@@ -264,12 +314,18 @@ const installBackendFixture = async (
       return
     }
 
-    if ((path === "/api/v1/chats" || path === "/api/v1/chats/") && method === "GET") {
+    if (
+      (path === "/api/v1/chats" || path === "/api/v1/chats/") &&
+      method === "GET"
+    ) {
       await fulfillJson(route, 200, { items: [], chats: [], total: 0 })
       return
     }
 
-    if ((path === "/api/v1/chats" || path === "/api/v1/chats/") && method === "POST") {
+    if (
+      (path === "/api/v1/chats" || path === "/api/v1/chats/") &&
+      method === "POST"
+    ) {
       const captured = await captureRequest(route)
       fixture.chatCreates.push(captured)
       const body = captured.body as Record<string, unknown> | null
@@ -285,7 +341,9 @@ const installBackendFixture = async (
       return
     }
 
-    const chatSettingsMatch = path.match(/^\/api\/v1\/chats\/([^/]+)\/settings\/?$/)
+    const chatSettingsMatch = path.match(
+      /^\/api\/v1\/chats\/([^/]+)\/settings\/?$/
+    )
     if (chatSettingsMatch) {
       await fulfillJson(route, 200, {
         chat_id: chatSettingsMatch[1],
@@ -295,7 +353,9 @@ const installBackendFixture = async (
       return
     }
 
-    const chatMessagesMatch = path.match(/^\/api\/v1\/chats\/([^/]+)\/messages\/?$/)
+    const chatMessagesMatch = path.match(
+      /^\/api\/v1\/chats\/([^/]+)\/messages\/?$/
+    )
     if (chatMessagesMatch && method === "GET") {
       await fulfillJson(route, 200, { items: [], messages: [], total: 0 })
       return
@@ -306,8 +366,11 @@ const installBackendFixture = async (
       await fulfillJson(route, 200, {
         id: `workspace-message-${fixture.chatMessages.length}`,
         chat_id: chatMessagesMatch[1],
-        role: (captured.body as Record<string, unknown> | null)?.role ?? "assistant",
-        content: (captured.body as Record<string, unknown> | null)?.content ?? "",
+        role:
+          (captured.body as Record<string, unknown> | null)?.role ??
+          "assistant",
+        content:
+          (captured.body as Record<string, unknown> | null)?.content ?? "",
         version: fixture.chatMessages.length,
         created_at: nowIso()
       })
@@ -374,7 +437,10 @@ const installBackendFixture = async (
       return
     }
 
-    await fulfillJson(route, 200, { status: "ok", fixture: "chat-workspace-live-backend" })
+    await fulfillJson(route, 200, {
+      status: "ok",
+      fixture: "chat-workspace-live-backend"
+    })
   })
 
   return fixture
@@ -563,14 +629,350 @@ const openSeededChatWorkspace = async (page: Page): Promise<void> => {
   await waitForAppShell(page)
   await expect(page.getByTestId("chat-workspace-page")).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: WORKSPACE_NAME, exact: true })
-  ).toBeVisible()
-  await expect(page.getByText(SELECTED_MODEL)).toBeVisible()
-  await expect(page.getByText(PERSONA_NAME)).toBeVisible()
+    page.getByRole("heading", {
+      name: WORKSPACE_NAME,
+      exact: true,
+      includeHidden: true
+    })
+  ).toBeAttached()
+  await expect(page.getByText(SELECTED_MODEL)).toBeAttached()
+  await expect(page.getByText(PERSONA_NAME)).toBeAttached()
 }
 
 test.describe("Chat Workspace live-backend smoke coverage", () => {
-  test("sends staged workspace media through scoped backend requests", async ({ page }) => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 320, height: 568 },
+    { width: 390, height: 844 }
+  ]) {
+    test(`completes the shared help tour at ${viewport.width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport)
+      await installBackendFixture(page)
+      await seedChatWorkspaceState(page)
+      await openSeededChatWorkspace(page)
+      if (viewport.width < 1280) {
+        await page
+          .getByRole("navigation", { name: "Workspace panels" })
+          .getByRole("button", { name: "Sources", exact: true })
+          .click()
+      }
+      const openGuides = async () => {
+        const helper = page.getByRole("button", { name: /Open Quick Chat Helper/ })
+        if (!(await helper.isVisible())) {
+          await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
+        }
+        await helper.click()
+        await page.getByText("Browse Guides", { exact: true }).click()
+      }
+      await openGuides()
+      const action = page.getByTestId("quick-chat-guides-tutorial-action-chat-workspace-basics")
+      await expect(page.getByText("Chat Workspace Basics", { exact: true })).toBeVisible()
+      await action.click()
+      if (viewport.width < 1280) {
+        await expect(page.locator(".ant-drawer-open")).toHaveCount(0)
+      }
+
+      const tour = page.locator(".react-joyride__tooltip")
+      for (const [index, title] of [
+        "Workspace and Assistant",
+        "Review Staged Sources",
+        "Send Status and Recovery"
+      ].entries()) {
+        await expect(tour.getByRole("heading", { name: title })).toBeVisible()
+        await expect(page.locator(".__floater").filter({ has: tour })).toHaveCSS("opacity", "1")
+        await expect(tour).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+        const next = tour.getByRole("button", { name: index === 2 ? /Finish/ : /Next/ })
+        await expect(next).toBeInViewport({ ratio: 1 })
+        await next.click({ trial: true })
+        await page.screenshot({
+          path: testInfo.outputPath(`chat-workspace-help-${viewport.width}-${index}.png`)
+        })
+        await next.click()
+      }
+      await expect(tour).toBeHidden()
+      await openGuides()
+      await expect(action).toHaveText("Replay")
+    })
+  }
+
+  for (const viewport of [
+    { width: 844, height: 390 },
+    { width: 844, height: 501 },
+    { width: 568, height: 320 }
+  ]) {
+    test(`keeps staged actions and streaming controls reachable at ${viewport.width}x${viewport.height}`, async ({
+      page
+    }, testInfo) => {
+      await page.setViewportSize(viewport)
+      await installBackendFixture(page, {
+        mode: "streaming",
+        streamDelayMs: 10_000
+      })
+      await seedChatWorkspaceState(page)
+      await openSeededChatWorkspace(page)
+      const panels = page.getByRole("navigation", { name: "Workspace panels" })
+      await panels.getByRole("button", { name: "Sources", exact: true }).click()
+      await page
+        .getByRole("button", { name: `Stage ${READY_SOURCE_TITLE} for chat` })
+        .click()
+      await panels.getByRole("button", { name: "Chat", exact: true }).click()
+      const composer = page.getByLabel("Chat workspace message")
+      await composer.fill("Stream in a short landscape viewport")
+      await composer.press("Control+Enter")
+      const stop = page.getByRole("button", { name: "Stop generating" })
+      await expect(stop).toBeVisible()
+      const clear = page.getByRole("button", { name: "Clear staged context" })
+      await clear.scrollIntoViewIfNeeded()
+      await expect(clear).toBeInViewport({ ratio: 1, timeout: 3_000 })
+      const send = page.getByRole("button", { name: "Send message", exact: true })
+      await send.scrollIntoViewIfNeeded()
+      await expect(send).toBeInViewport({ ratio: 1, timeout: 3_000 })
+      await expect(
+        page.getByRole("heading", { name: `${WORKSPACE_NAME} chat`, exact: true })
+      ).toBeInViewport({ ratio: 1, timeout: 3_000 })
+      await stop.scrollIntoViewIfNeeded()
+      await expect(stop).toBeInViewport({ ratio: 1 })
+      await page.screenshot({
+        path: testInfo.outputPath("workspace-landscape-streaming.png")
+      })
+      await stop.click()
+      await expect(stop).toBeHidden()
+      await composer.scrollIntoViewIfNeeded()
+      await expect(composer).toBeInViewport({ ratio: 1 })
+    })
+  }
+
+  test("preserves the focused pane across the desktop breakpoint", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await installBackendFixture(page)
+    await seedChatWorkspaceState(page)
+    await openSeededChatWorkspace(page)
+    const panels = page.getByRole("navigation", { name: "Workspace panels" })
+    await panels.getByRole("button", { name: "Sources", exact: true }).click()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const composer = page.getByLabel("Chat workspace message")
+    await composer.focus()
+    await expect(composer).toBeFocused()
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await expect(composer).toBeInViewport({ ratio: 1 })
+    await expect(composer).toBeFocused()
+    await expect(
+      panels.getByRole("button", { name: "Chat", exact: true })
+    ).toHaveAttribute("aria-pressed", "true")
+  })
+
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+    { width: 1440, height: 900 }
+  ]) {
+    test(`keeps workspace controls accessible at ${viewport.width}px`, async ({
+      page
+    }, testInfo) => {
+      await page.setViewportSize(viewport)
+      await installBackendFixture(page)
+      const sourceTitle = `WorkspaceSource${"LongTitle".repeat(16)}`
+      await seedChatWorkspaceState(page, { sourceTitle })
+      await openSeededChatWorkspace(page)
+      await expect(page.getByRole("main")).toHaveCount(1)
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1)
+
+      const panels = page.getByRole("navigation", { name: "Workspace panels" })
+      const narrow = viewport.width < 1280
+      if (narrow) {
+        await expect(panels).toBeVisible()
+        await expect(page.getByLabel("Chat workspace message")).toBeInViewport({
+          ratio: 1
+        })
+        await panels
+          .getByRole("button", { name: "Sources", exact: true })
+          .click()
+      }
+      const stage = page.getByRole("button", {
+        name: `Stage ${sourceTitle} for chat`,
+        exact: true
+      })
+      await stage.scrollIntoViewIfNeeded()
+      await expect(stage).toBeInViewport({ ratio: 1 })
+      await stage.click()
+      if (narrow)
+        await panels.getByRole("button", { name: "Chat", exact: true }).click()
+      const composer = page.getByLabel("Chat workspace message")
+      await composer.fill("Keep the staged composer reachable")
+      await expect(composer).toBeInViewport({ ratio: 1 })
+      await expect(
+        page.getByRole("heading", {
+          name: `${WORKSPACE_NAME} chat`,
+          exact: true
+        })
+      ).toBeInViewport({ ratio: 1 })
+      const send = page.getByRole("button", {
+        name: "Send message",
+        exact: true
+      })
+      await expect(send).toBeInViewport({ ratio: 1 })
+
+      const overflow = await page
+        .getByTestId("chat-workspace-page")
+        .evaluate((root) =>
+          [
+            root,
+            ...root.querySelectorAll<HTMLElement>(
+              "section, aside, form, button, h2, p, li"
+            )
+          ]
+            .filter(
+              (element) =>
+                element.clientWidth > 0 &&
+                element.scrollWidth > element.clientWidth + 2
+            )
+            .map((element) => ({
+              tag: element.tagName,
+              text: element.textContent?.slice(0, 70)
+            }))
+        )
+      expect(overflow).toEqual([])
+      await page.screenshot({
+        path: testInfo.outputPath(`workspace-${viewport.width}.png`),
+        fullPage: true
+      })
+      await send.click()
+      await expect(
+        page.getByText("deterministic workspace response")
+      ).toBeVisible()
+      if (narrow) {
+        await panels
+          .getByRole("button", { name: "Inspector", exact: true })
+          .click()
+        await expect(
+          page.getByRole("complementary", { name: "Chat workspace inspector" })
+        ).toBeVisible()
+        await panels.getByRole("button", { name: "Chat", exact: true }).click()
+        await expect(
+          page.getByText("deterministic workspace response")
+        ).toBeVisible()
+      }
+    })
+  }
+
+  test("supports keyboard source staging and mobile pane navigation", async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await installBackendFixture(page, {
+      mode: "streaming",
+      streamDelayMs: 4_000
+    })
+    await seedChatWorkspaceState(page)
+    await openSeededChatWorkspace(page)
+    const panels = page.getByRole("navigation", { name: "Workspace panels" })
+    const chat = panels.getByRole("button", { name: "Chat", exact: true })
+    await chat.focus()
+    await page.keyboard.press("Tab")
+    await expect(
+      panels.getByRole("button", { name: "Sources", exact: true })
+    ).toBeFocused()
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Tab")
+    await expect(page.getByLabel("Filter sources")).toBeFocused()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("link", { name: "Add source" })).toBeFocused()
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Tab")
+    await expect(
+      page.getByRole("button", { name: `Browse ${READY_SOURCE_TITLE}` })
+    ).toBeFocused()
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Enter")
+    await expect(
+      page.getByRole("button", {
+        name: `Unstage ${READY_SOURCE_TITLE} from chat`
+      })
+    ).toBeFocused()
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Enter")
+    await chat.focus()
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Tab")
+    await expect(
+      page.getByRole("button", {
+        name: `Remove ${READY_SOURCE_TITLE} from staged context`
+      })
+    ).toBeFocused()
+    const focusShadow = await page
+      .locator(":focus")
+      .evaluate((element) => getComputedStyle(element).boxShadow)
+    expect(focusShadow).not.toBe("none")
+    await page.keyboard.press("Tab")
+    await expect(
+      page.getByRole("button", { name: "Clear staged context" })
+    ).toBeFocused()
+    await page.keyboard.press("Tab")
+    await page.keyboard.press("Enter")
+    await expect(page.getByLabel("Chat workspace message")).not.toHaveValue("")
+    await expect(page.getByLabel("Chat workspace message")).toBeFocused()
+    await page.keyboard.press("Control+Enter")
+    const stop = page.getByRole("button", { name: "Stop generating" })
+    await expect(stop).toBeVisible()
+    await page.keyboard.press("Shift+Tab")
+    await expect(stop).toBeFocused()
+    await page.keyboard.press("Enter")
+    await expect(stop).toBeHidden()
+    await expect(page.getByLabel("Chat workspace message")).toBeFocused()
+  })
+
+  for (const theme of ["light", "dark"]) {
+    test(`passes focused accessibility checks in ${theme} theme`, async ({
+      page
+    }, testInfo) => {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await installBackendFixture(page, { mode: "failure" })
+      await seedChatWorkspaceState(page)
+      await openSeededChatWorkspace(page)
+      await page.evaluate((value) => {
+        document.documentElement.classList.toggle("dark", value === "dark")
+        document.documentElement.setAttribute("data-theme", value)
+      }, theme)
+      await page
+        .getByRole("button", { name: `Stage ${READY_SOURCE_TITLE} for chat` })
+        .click()
+      await page
+        .getByLabel("Chat workspace message")
+        .fill("Verify failed-send contrast")
+      await page
+        .getByRole("button", { name: "Send message", exact: true })
+        .click()
+      await expect(
+        page.getByRole("alert").filter({ hasText: "Stream completion failed" })
+      ).toBeVisible()
+      const results = await new AxeBuilder({ page })
+        .include('[data-testid="chat-workspace-page"]')
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .analyze()
+      expect(
+        results.violations.map(({ id, nodes }) => ({
+          id,
+          targets: nodes.map((node) => ({
+            target: node.target,
+            reason: node.failureSummary
+          }))
+        }))
+      ).toEqual([])
+      await page.screenshot({
+        path: testInfo.outputPath(`workspace-${theme}.png`),
+        fullPage: true
+      })
+    })
+  }
+
+  test("sends staged workspace media through scoped backend requests", async ({
+    page
+  }) => {
     const fixture = await installBackendFixture(page)
     await seedChatWorkspaceState(page)
     await openSeededChatWorkspace(page)
@@ -584,11 +986,17 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     const message = "Summarize the staged source for the release gate"
     await page.getByLabel("Chat workspace message").fill(message)
-    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled()
+    await expect(
+      page.getByRole("button", { name: "Send message" })
+    ).toBeEnabled()
     await page.getByRole("button", { name: "Send message" }).click()
 
-    await expect(page.getByText("deterministic workspace response")).toBeVisible()
-    await expect(page.getByRole("region", { name: "Staged context" })).toHaveCount(0)
+    await expect(
+      page.getByText("deterministic workspace response")
+    ).toBeVisible()
+    await expect(
+      page.getByRole("region", { name: "Staged context" })
+    ).toHaveCount(0)
     await expect(page.getByLabel("Chat workspace message")).toHaveValue("")
 
     expect(fixture.chatCreates).toHaveLength(1)
@@ -612,21 +1020,23 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     )
   })
 
-  test("browses, unstages, re-stages, and sends the selected workspace source", async ({ page }) => {
+  test("browses, unstages, re-stages, and sends the selected workspace source", async ({
+    page
+  }) => {
     const fixture = await installBackendFixture(page)
     await seedChatWorkspaceState(page)
     await openSeededChatWorkspace(page)
 
-    await expect(page.getByRole("link", { name: "Add source" })).toHaveAttribute(
-      "href",
-      "/research-workspace?tab=sources"
-    )
-    await expect(page.getByRole("link", { name: "Open library" })).toHaveAttribute(
-      "href",
-      "/media"
-    )
+    await expect(
+      page.getByRole("link", { name: "Add source" })
+    ).toHaveAttribute("href", "/research-workspace?tab=sources")
+    await expect(
+      page.getByRole("link", { name: "Open library" })
+    ).toHaveAttribute("href", "/media")
 
-    await page.getByRole("button", { name: `Browse ${READY_SOURCE_TITLE}` }).click()
+    await page
+      .getByRole("button", { name: `Browse ${READY_SOURCE_TITLE}` })
+      .click()
     await expect(page.getByText("Browsing")).toBeVisible()
 
     await page
@@ -639,8 +1049,12 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     await page
       .getByRole("button", { name: `Unstage ${READY_SOURCE_TITLE} from chat` })
       .click()
-    await expect(page.getByRole("region", { name: "Staged context" })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled()
+    await expect(
+      page.getByRole("region", { name: "Staged context" })
+    ).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: "Send message" })
+    ).toBeDisabled()
 
     await page
       .getByRole("button", { name: `Stage ${READY_SOURCE_TITLE} for chat` })
@@ -650,7 +1064,9 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
       .fill("Use the re-staged source after unstage")
     await page.getByRole("button", { name: "Send with staged context" }).click()
 
-    await expect(page.getByText("deterministic workspace response")).toBeVisible()
+    await expect(
+      page.getByText("deterministic workspace response")
+    ).toBeVisible()
     expect(fixture.ragSearches).toHaveLength(1)
     expect(fixture.ragSearches[0]?.body).toMatchObject({
       include_media_ids: [READY_SOURCE_MEDIA_ID],
@@ -664,7 +1080,9 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     )
   })
 
-  test("shows stop generation while the workspace stream is active", async ({ page }) => {
+  test("shows stop generation while the workspace stream is active", async ({
+    page
+  }) => {
     const streamDelayMs = 1_000
     const fixture = await installBackendFixture(page, {
       mode: "streaming",
@@ -673,8 +1091,12 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     await seedChatWorkspaceState(page)
     await openSeededChatWorkspace(page)
 
-    await page.getByLabel("Chat workspace message").fill("Stream long enough to stop")
-    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled()
+    await page
+      .getByLabel("Chat workspace message")
+      .fill("Stream long enough to stop")
+    await expect(
+      page.getByRole("button", { name: "Send message" })
+    ).toBeEnabled()
     await page.getByRole("button", { name: "Send message" }).click()
 
     const stopButton = page.getByRole("button", { name: "Stop generating" })
@@ -713,7 +1135,9 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     ).toHaveCount(0)
   })
 
-  test("switches active streaming rails to offline recovery state", async ({ page }) => {
+  test("switches active streaming rails to offline recovery state", async ({
+    page
+  }) => {
     await installBackendFixture(page, {
       mode: "streaming",
       streamDelayMs: 4_000
@@ -769,7 +1193,9 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     await expect(stopButton).toBeHidden()
   })
 
-  test("preserves draft and staged fallback context after send failure", async ({ page }) => {
+  test("preserves draft and staged fallback context after send failure", async ({
+    page
+  }) => {
     const fixture = await installBackendFixture(page, { mode: "failure" })
     await seedChatWorkspaceState(page, {
       sourceId: FALLBACK_SOURCE_ID,
@@ -787,7 +1213,9 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     const draft = "Keep this draft when the backend fails"
     await page.getByLabel("Chat workspace message").fill(draft)
-    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled()
+    await expect(
+      page.getByRole("button", { name: "Send message" })
+    ).toBeEnabled()
     await page.getByRole("button", { name: "Send message" }).click()
 
     await expect(
@@ -811,8 +1239,11 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
     const completionBody = fixture.chatCompletions[0]?.body as {
       messages?: Array<{ content?: unknown }>
     }
-    expect(JSON.stringify(completionBody.messages)).toContain("Context sources:")
-    expect(JSON.stringify(completionBody.messages)).toContain(FALLBACK_SOURCE_TITLE)
+    expect(JSON.stringify(completionBody.messages)).toContain(
+      "Context sources:"
+    )
+    expect(JSON.stringify(completionBody.messages)).toContain(
+      FALLBACK_SOURCE_TITLE
+    )
   })
-
 })

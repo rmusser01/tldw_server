@@ -84,6 +84,22 @@ it("renders selected content while retaining unloaded stable alternatives and ca
   expect(capture.rows[2].role).toBe("tool")
 })
 
+it("restores ordered bounded source presentation without treating public metadata as a receipt", () => {
+  const source = { name: "Memo", type: "text", mode: "rag", url: "memo.md", pageContent: "Evidence", metadata: { chunk_id: "c1" } }
+  const capture: any = {
+    status: "captured", view: { conversation_id: "h" },
+    snapshot: { nodes: [{ id: "a", parent_id: "u", role: "assistant" }] },
+    rows: [{ id: "a", parent_id: "u", role: "assistant" }],
+    selected_content: [{ id: "a", message: "Answer [0]", images: [], extra_metadata: {
+      sender_role: "assistant", history_result_v1: { version: 1, request_context_digest: "a".repeat(64), sources: [source] }
+    } }]
+  }
+  expect(formatSelectedHistory(capture).messages[0].sources).toEqual([source])
+  expect(formatSelectedHistory(capture).messages[0].metadataExtra).not.toHaveProperty("tldw_history_recovery_v1")
+  capture.selected_content[0].extra_metadata.history_result_v1.sources[0].metadata.headers = { authorization: "not-a-display-field" }
+  expect(() => formatSelectedHistory(capture)).toThrow("invalid_history_durable_result")
+})
+
 const ownedCapture = (ownerKey: string): HistorySelectionCaptureV1 => {
   const rows = [
     { id: "u", revision: "digest-u", parent_id: null, role: "user", settled: true },

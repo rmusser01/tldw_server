@@ -548,11 +548,36 @@ async def test_failed_run_degrades_health_and_audits(consumer_env) -> None:
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     updated = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
     assert updated is not None  # nosec B101
-    assert updated.health == "degraded"
-    audits, _total = sdb.list_audit_events(
-        owner_id=user_id, definition_id=definition.id
-    )
+    assert updated.health == "needs_attention"
+    audits, _total = sdb.list_audit_events(owner_id=user_id, definition_id=definition.id)
     assert any(a.event_type == "run_failed" for a in audits)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failed", "timed_out"])
+async def test_failed_execution_keeps_definition_get_and_list_readable(consumer_env, outcome: str) -> None:
+    from tldw_Server_API.app.services.scheduled_task_automation_service import (
+        ScheduledTaskAutomationService,
+    )
+
+    user_id = 1040
+    definition = _create_definition(user_id)
+
+    async def executor(d: DefinitionRow, p: dict[str, Any]) -> str:
+        if outcome == "timed_out":
+            await asyncio.sleep(30)
+        raise LookupError("finite unavailable message")
+
+    register_executor("recurring_question", executor)
+    result = await handle_agent_task_job(_job(definition, user_id), execution_timeout_seconds=0.05)
+    assert result["status"] == outcome
+    repository = ScheduledTasksDatabase.for_user(user_id=user_id)
+    service = ScheduledTaskAutomationService(repository=repository)
+    detail = service.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert detail.health == "needs_attention"
+    listing = service.list_definitions(owner_id=user_id, limit=10, offset=0, health="needs_attention")
+    assert listing.total == 1
+    assert [(item.id, item.health) for item in listing.items] == [(definition.id, "needs_attention")]
 
 
 @pytest.mark.asyncio

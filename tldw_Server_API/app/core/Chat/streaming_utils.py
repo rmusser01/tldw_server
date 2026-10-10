@@ -40,7 +40,13 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     sanitize_usage,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
-from tldw_Server_API.app.core.LLM_Calls.sse import SSE_CONTROL_FIELD_PREFIXES, is_done_line, sse_data, sse_done, sse_event
+from tldw_Server_API.app.core.LLM_Calls.sse import (
+    SSE_CONTROL_FIELD_PREFIXES,
+    is_done_line,
+    sse_data,
+    sse_done,
+    sse_event,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 #######################################################################################################################
@@ -1453,6 +1459,8 @@ class StreamingResponseHandler:
             if self.saved_message_id:
                 payload["tldw_message_id"] = self.saved_message_id
                 payload["tldw_conversation_id"] = self.conversation_id
+        elif self.user_message_id:
+            payload["tldw_user_message_id"] = self.user_message_id
         if not CHAT_STREAM_INCLUDE_METADATA:
             return payload
         if self.conversation_id:

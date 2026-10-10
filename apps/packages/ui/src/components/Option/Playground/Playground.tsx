@@ -1594,10 +1594,27 @@ const PlaygroundContent = () => {
 
   const handlePrepareResearchFollowUp = React.useCallback(
     async (target: ResearchFollowUpTarget) => {
+      const selectionCurrent = historySelection.fence();
+      const selection = historySelection.getCurrent();
+      const owner = selection.owner;
+      const threadKey = `${serverChatId ?? ""}::${historyId ?? ""}`;
+      const isCurrent = () =>
+        selectionCurrent() &&
+        previousThreadRef.current === threadKey &&
+        selection.view === historySelection.view &&
+        owner === historySelection.owner &&
+        historySelection.getCurrent().view === selection.view &&
+        historySelection.getCurrent().owner === owner &&
+        owner?.kind !== "unavailable" &&
+        owner?.validate_lease?.() !== false &&
+        historySelection.settingsMode(serverChatId) !== "pending";
+      if (!isCurrent()) return;
       if (attachedResearchContext?.run_id !== target.run_id) {
         try {
           await tldwClient.initialize().catch(() => null);
+          if (!isCurrent()) return;
           const bundle = await tldwClient.getResearchBundle(target.run_id);
+          if (!isCurrent()) return;
           handleAttachResearchContext(
             deriveAttachedResearchContext(bundle, target.run_id, target.query),
           );
@@ -1606,12 +1623,16 @@ const PlaygroundContent = () => {
         }
       }
 
+      if (!isCurrent()) return;
       setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
     },
     [
       attachedResearchContext?.run_id,
       handleAttachResearchContext,
       setSelectedQuickPrompt,
+      historySelection,
+      serverChatId,
+      historyId,
     ],
   );
 

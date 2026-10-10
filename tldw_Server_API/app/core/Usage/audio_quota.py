@@ -338,6 +338,7 @@ async def _monthly_minutes_exhausted(user_id: int, monthly_limit: float | None, 
     if monthly_limit is None:
         return False
     try:
+        await _get_daily_ledger()
         used_seconds = await ledger_used_this_month(str(int(user_id)), "minutes")
     except Exception:  # noqa: BLE001 - a counter failure must not block requests (spec 2 §2)
         logger.opt(exception=True).warning(
@@ -350,6 +351,7 @@ async def _monthly_minutes_exhausted(user_id: int, monthly_limit: float | None, 
 async def get_daily_minutes_used(user_id: int) -> float:
     """Audio minutes used today (UTC), from the resource ledger; 0.0 if it can't be read."""
     try:
+        await _get_daily_ledger()
         return float(await ledger_used_today(str(int(user_id)), "minutes")) / 60.0
     except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
         logger.debug("get_daily_minutes_used failed")
@@ -359,6 +361,7 @@ async def get_daily_minutes_used(user_id: int) -> float:
 async def get_monthly_minutes_used(user_id: int) -> float:
     """Audio minutes used this calendar month (UTC), from the resource ledger; 0.0 if it can't be read."""
     try:
+        await _get_daily_ledger()
         return float(await ledger_used_this_month(str(int(user_id)), "minutes")) / 60.0
     except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
         logger.debug("get_monthly_minutes_used failed")

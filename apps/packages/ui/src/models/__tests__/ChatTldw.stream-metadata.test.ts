@@ -100,6 +100,101 @@ describe("ChatTldw stream metadata handoff", () => {
     expect(tokens).toEqual(["hello"])
     expect(model.conversationId).toBe("server-chat-99")
     expect(model.saveToDb).toBe(true)
+    expect(model.serverMessagesAlreadyPersisted).toBe(false)
+  })
+
+  it("acknowledges a saved assistant message without yielding metadata as text", async () => {
+    mocks.streamMessage.mockImplementation(async function* (
+      _messages: unknown[],
+      _options: unknown,
+      onChunk?: (chunk: unknown) => void
+    ) {
+      yield "hello"
+      onChunk?.({
+        tldw_conversation_id: "server-chat-99",
+        tldw_message_id: "saved-assistant-1",
+        choices: [{ delta: {}, finish_reason: "stop", index: 0 }]
+      })
+    })
+    const model = new ChatTldw({ model: "tldw:gpt-test", streaming: true })
+    const tokens: string[] = []
+
+    for await (const token of await model.stream([new HumanMessage("Hi")])) {
+      tokens.push(token)
+    }
+
+    expect(tokens).toEqual(["hello"])
+    expect(model.serverMessagesAlreadyPersisted).toBe(true)
+  })
+
+  it.each([undefined, null, "", "   ", 42])(
+    "does not acknowledge an invalid saved-message id: %s",
+    async (messageId) => {
+      mocks.streamMessage.mockImplementation(async function* (
+        _messages: unknown[],
+        _options: unknown,
+        onChunk?: (chunk: unknown) => void
+      ) {
+        onChunk?.({
+          tldw_conversation_id: "server-chat-99",
+          tldw_message_id: messageId
+        })
+        yield "hello"
+      })
+      const model = new ChatTldw({ model: "tldw:gpt-test", streaming: true })
+
+      for await (const _token of await model.stream([new HumanMessage("Hi")])) {
+        // Consume the real model adapter's stream.
+      }
+
+      expect(model.serverMessagesAlreadyPersisted).toBe(false)
+    }
+  )
+
+  it("does not acknowledge a message without its server conversation", async () => {
+    mocks.streamMessage.mockImplementation(async function* (
+      _messages: unknown[],
+      _options: unknown,
+      onChunk?: (chunk: unknown) => void
+    ) {
+      onChunk?.({ tldw_message_id: "saved-assistant-1" })
+      yield "hello"
+    })
+    const model = new ChatTldw({ model: "tldw:gpt-test", streaming: true })
+
+    for await (const _token of await model.stream([new HumanMessage("Hi")])) {
+      // Consume the real model adapter's stream.
+    }
+
+    expect(model.serverMessagesAlreadyPersisted).toBe(false)
+  })
+
+  it("clears a previous request's acknowledgement before a later stream", async () => {
+    mocks.streamMessage.mockImplementationOnce(async function* (
+      _messages: unknown[],
+      _options: unknown,
+      onChunk?: (chunk: unknown) => void
+    ) {
+      onChunk?.({
+        tldw_conversation_id: "server-chat-99",
+        tldw_message_id: "saved-assistant-1"
+      })
+      yield "first"
+    }).mockImplementationOnce(async function* () {
+      yield "second"
+    })
+    const model = new ChatTldw({ model: "tldw:gpt-test", streaming: true })
+    for await (const _token of await model.stream([new HumanMessage("First")])) {
+      // Consume the real model adapter's stream.
+    }
+    expect(model.serverMessagesAlreadyPersisted).toBe(true)
+
+    const secondStream = await model.stream([new HumanMessage("Second")])
+    expect(model.serverMessagesAlreadyPersisted).toBe(false)
+    for await (const _token of secondStream) {
+      // Consume the real model adapter's stream.
+    }
+    expect(model.serverMessagesAlreadyPersisted).toBe(false)
   })
 })
 

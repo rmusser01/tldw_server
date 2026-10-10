@@ -4495,11 +4495,14 @@ async def test_worker_entrypoint_rejects_payload_owner_mismatch_before_opening_u
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("capture_timeout, entered_timeout", [(2, 2), (5, 10)], ids=["head-deadlines", "dev-deadlines"])
 async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     chacha_db: CharactersRAGDB,
     character_id: int,
     fake_jobs: FakeJobs,
     monkeypatch: pytest.MonkeyPatch,
+    capture_timeout: int,
+    entered_timeout: int,
 ) -> None:
     from tldw_Server_API.app.core.VN_Assets import service as service_module
 
@@ -4509,12 +4512,14 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     loop = asyncio.get_running_loop()
     entered = asyncio.Event()
     release = threading.Event()
+    release_observed = threading.Event()
     capture_unblocked = threading.Event()
     original = service_module.build_authored_recipe
 
     def slow_recipe(*args: Any, **kwargs: Any) -> dict[str, Any]:
         loop.call_soon_threadsafe(entered.set)
-        release.wait(timeout=5)
+        if release.wait(timeout=capture_timeout):
+            release_observed.set()
         capture_unblocked.set()
         return original(*args, **kwargs)
 
@@ -4530,13 +4535,15 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
         request_task = asyncio.create_task(client.post(url, json={"idempotency_key": "capture-offload"}))
         try:
             # Timeouts bound a broken test; progress is checked before capture is released.
-            await asyncio.wait_for(entered.wait(), timeout=10)
+            await asyncio.wait_for(entered.wait(), timeout=entered_timeout)
+            assert entered.is_set()
             assert not capture_unblocked.is_set()
             assert not request_task.done()
         finally:
             release.set()
             response = await request_task
 
+    assert release_observed.is_set()
     assert response.status_code == 202
 
 

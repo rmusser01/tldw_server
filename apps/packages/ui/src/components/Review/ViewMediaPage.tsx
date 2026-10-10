@@ -470,7 +470,7 @@ const MediaPageContent: React.FC = () => {
     const readingContent = stripMediaMetadata(nav.selectedContent)
     if (readingContent === nav.selectedContent) return nodes
     // API character ranges refer to the stored source, including its envelope.
-    const prefixLength = nav.selectedContent.trimEnd().length - readingContent.length
+    const prefixLength = nav.selectedContent.length - readingContent.length
     return nodes
       .filter(node => node.target_type !== 'char_range' || node.target_end == null || node.target_end > prefixLength)
       .map(node => node.target_type === 'char_range' ? {

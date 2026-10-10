@@ -91,4 +91,69 @@ describe("getProvidersStatus TTL cache", () => {
 
     expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
   })
+
+  it("does not reuse another server's cached provider status after an authority change", async () => {
+    const { TldwApiClient } = await importClient()
+    const client = new TldwApiClient()
+    await client.getProvidersStatus()
+    const current = { providers: [], any_configured: false }
+    mocks.bgRequest.mockResolvedValueOnce(current)
+
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+      detail: { authorityChanged: true }
+    }))
+
+    expect(await new TldwApiClient().getProvidersStatus()).toEqual(current)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not join or publish a held response from the previous authority", async () => {
+    let resolveOld!: (value: unknown) => void
+    let resolveCurrent!: (value: unknown) => void
+    mocks.bgRequest.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const { TldwApiClient } = await importClient()
+    const client = new TldwApiClient()
+    const old = client.getProvidersStatus().catch(error => error)
+    window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    mocks.bgRequest.mockImplementationOnce(() => new Promise(resolve => { resolveCurrent = resolve }))
+    const current = client.getProvidersStatus()
+
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    resolveOld({ providers: [{ name: "previous" }], any_configured: true })
+    expect(await old).toMatchObject({ status: 412 })
+    const joined = client.getProvidersStatus()
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    const value = { providers: [{ name: "current" }], any_configured: true }
+    resolveCurrent(value)
+    expect(await Promise.all([current, joined])).toEqual([value, value])
+    expect(await client.getProvidersStatus()).toEqual(value)
+  })
+
+  it("does not overwrite the current cache when an old authority settles last", async () => {
+    let resolveOld!: (value: unknown) => void
+    mocks.bgRequest.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const { TldwApiClient } = await importClient()
+    const client = new TldwApiClient()
+    const old = client.getProvidersStatus().catch(error => error)
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+    const value = { providers: [{ name: "current" }], any_configured: true }
+    mocks.bgRequest.mockResolvedValueOnce(value)
+    const current = client.getProvidersStatus()
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    expect(await current).toEqual(value)
+    resolveOld({ providers: [{ name: "previous" }], any_configured: true })
+    expect(await old).toMatchObject({ status: 412 })
+    expect(await client.getProvidersStatus()).toEqual(value)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("rejects an authority change between a cache read and delivery to its caller", async () => {
+    const { TldwApiClient } = await importClient()
+    const client = new TldwApiClient()
+    await client.getProvidersStatus()
+    const cached = client.getProvidersStatus()
+    window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    await expect(cached).rejects.toMatchObject({ status: 412 })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
 })
