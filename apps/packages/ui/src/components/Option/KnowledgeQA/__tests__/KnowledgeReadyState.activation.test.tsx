@@ -412,13 +412,20 @@ it("offers first-add for connected services with an empty personal library", () 
             loading: false,
             error: null,
             loadedAt: null,
-            bySource: { media_db: { itemCount: 0 }, notes: { itemCount: 0 } },
-            sources: []
-          } as any
+            bySource: {
+              media_db: { ...sourceHealth.bySource.media_db, itemCount: 0 },
+              notes: {
+                ...sourceHealth.bySource.media_db,
+                sourceId: "notes",
+                itemCount: 0,
+              },
+            },
+            sources: [],
+          } satisfies KnowledgeSourceHealthState
         }
       />
-    </MemoryRouter>
-  )
+    </MemoryRouter>,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Add your first source" }))
   expect(onAdd).toHaveBeenCalledOnce()
 })

@@ -25,6 +25,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -1941,6 +1942,7 @@ def _build_source_status(
     documents: list[Any],
     filtered_counts: dict[str, int],
     source_failures: set[DataSource] | None = None,
+    security_excluded_counts: dict[str, int] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build per-source availability and result-count diagnostics for UI recovery."""
     retriever_map = getattr(retriever, "retrievers", {}) or {}
@@ -1970,7 +1972,11 @@ def _build_source_status(
             entry = {
                 "status": "empty",
                 "count": 0,
-                "reason": "no_matching_entries",
+                "reason": (
+                    "security_filtered"
+                    if security_excluded_counts and security_excluded_counts.get(source, 0) > 0
+                    else "no_matching_entries"
+                ),
             }
         else:
             entry = {
@@ -3180,6 +3186,7 @@ async def unified_rag_pipeline(
         source_status_retriever: Any = None
         source_failures: set[DataSource] = set()
         cumulative_filtered_artifact_counts: dict[str, int] = {}
+        security_excluded_counts: Counter[str] = Counter()
 
         def _apply_workspace_filtering_to_result() -> None:
             """Filter the current result documents and refresh source diagnostics."""
@@ -3198,6 +3205,7 @@ async def unified_rag_pipeline(
                     documents=filtered_documents,
                     filtered_counts=dict(cumulative_filtered_artifact_counts),
                     source_failures=source_failures,
+                    security_excluded_counts=security_excluded_counts,
                 )
             if workspace_id is not None:
                 result.metadata["workspace_id"] = workspace_id
@@ -5410,6 +5418,7 @@ async def unified_rag_pipeline(
         # ========== SECURITY FILTERING ==========
         if enable_security_filter and result.documents:
             security_start = time.time()
+            incoming_source_counts = Counter(_document_canonical_source(doc) for doc in result.documents)
             try:
                 if SecurityFilter and SensitivityLevel:
                     security_filter = SecurityFilter()
@@ -5520,6 +5529,9 @@ async def unified_rag_pipeline(
                                 filtered_docs.append(doc_ref)
 
                     if filtered_docs is not None:
+                        security_excluded_counts.update(
+                            incoming_source_counts - Counter(_document_canonical_source(doc) for doc in filtered_docs)
+                        )
                         # Expose only aggregate outcomes, never excluded evidence.
                         result.metadata["security_filter"] = {
                             "excluded_count": max(0, len(result.documents) - len(filtered_docs)),

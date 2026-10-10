@@ -364,24 +364,26 @@ Object.defineProperty(HTMLMediaElement.prototype, "pause", {
   value: vi.fn()
 })
 
-const expandOutputTypesSection = () => {
-  const toggle = screen.getByRole("button", { name: /Output Types/i })
+const expandOutputTypesSection = (container: HTMLElement) => {
+  const toggle = within(container).getByRole("button", { name: /Output Types/i });
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
-const expandGeneratedOutputsSection = () => {
-  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+const expandGeneratedOutputsSection = (container: HTMLElement) => {
+  const toggle = within(container).getByRole("button", {
+    name: /Generated Outputs/i,
+  });
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
-const expandMoreOutputsSection = () => {
-  const toggle = screen.queryByRole("button", {
-    name: /More outputs/i
-  })
+const expandMoreOutputsSection = (container: HTMLElement) => {
+  const toggle = within(container).queryByRole("button", {
+    name: /More outputs/i,
+  });
   if (toggle?.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
@@ -389,8 +391,8 @@ const expandMoreOutputsSection = () => {
 
 const renderStudioPane = () => {
   const renderResult = render(<StudioPane />)
-  expandOutputTypesSection()
-  expandGeneratedOutputsSection()
+  expandOutputTypesSection(renderResult.container);
+  expandGeneratedOutputsSection(renderResult.container);
   return renderResult
 }
 
@@ -1612,10 +1614,12 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare Sources" }))
+    fireEvent.click(
+      within(container).getByRole("button", { name: "Compare Sources" }),
+    );
 
     await waitFor(() => {
       expect(mockCreateChatCompletion).toHaveBeenCalled()
@@ -1688,10 +1692,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     ])
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Mind Map" }));
 
     await waitFor(() => {
       expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
@@ -1767,15 +1771,17 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Mind Map" }));
 
-    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
-      "Select a chat model before generating Studio outputs."
-    )
-    expect(screen.getByRole("button", { name: "Mind Map" })).toBeDisabled()
+    expect(
+      within(container).getByTestId("studio-prerequisite-warning"),
+    ).toHaveTextContent("Select a chat model before generating Studio outputs.");
+    expect(
+      within(container).getByRole("button", { name: "Mind Map" }),
+    ).toBeDisabled();
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
     expect(mockAddArtifact).not.toHaveBeenCalled()
   })
@@ -1791,10 +1797,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Mind Map" }));
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -1822,10 +1828,12 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Audio Summary" }))
+    fireEvent.click(
+      within(container).getByRole("button", { name: "Audio Summary" }),
+    );
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -1877,10 +1885,10 @@ describe("StudioPane Stage 2 workflows", () => {
       claim_verification: createGroundedClaimVerification()
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
     await waitFor(() => {
       expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
@@ -1934,10 +1942,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -1963,10 +1971,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -2021,15 +2029,17 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
-    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
-      "Select a chat model before generating Studio outputs."
-    )
-    expect(screen.getByRole("button", { name: "Data Table" })).toBeDisabled()
+    expect(
+      within(container).getByTestId("studio-prerequisite-warning"),
+    ).toHaveTextContent("Select a chat model before generating Studio outputs.");
+    expect(
+      within(container).getByRole("button", { name: "Data Table" }),
+    ).toBeDisabled();
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
     expect(mockAddArtifact).not.toHaveBeenCalled()
   })

@@ -23,8 +23,8 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
-PAYLOAD = {"origin": "knowledge_qa", "trust_state": "cited_answer"}
-NOTE = {"title": "Title", "content": "Body", "conversation_id": None, "message_id": None}
+PAYLOAD: dict[str, object] = {"origin": "knowledge_qa", "trust_state": "cited_answer"}
+NOTE: dict[str, object] = {"title": "Title", "content": "Body", "conversation_id": None, "message_id": None}
 
 
 @pytest.fixture
@@ -71,20 +71,48 @@ def env(tmp_path, request, monkeypatch):
 
 
 def save(env, *, expected=0, core_expected=0, payload=PAYLOAD, content="Body", key="save"):
-    from tldw_Server_API.app.core.Sync.v2.notes_provenance import capture_note_with_provenance
+    from tldw_Server_API.app.core.Notes.organization_capture import (
+        compound_note_request_fingerprint,
+        plan_compound_note,
+    )
+    from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import NotesOrganizationCoordinator
 
     service, db = env
-    return capture_note_with_provenance(
-        service=service,
-        note_db=db,
-        user_id="alice",
+    coordinator = NotesOrganizationCoordinator(service=service, note_db=db, user_id="alice")
+    note_payload = {**NOTE, "content": content}
+    fingerprint = compound_note_request_fingerprint(
+        coordinator,
+        operation="note.create",
         note_id="note",
-        note_payload={**NOTE, "content": content},
-        expected_note_version=core_expected,
+        note_fields=note_payload,
+        keywords=None,
+        folder_paths=None,
+        expected_version=core_expected,
         provenance=payload,
         expected_provenance_version=expected,
-        idempotency_key=key,
+    )
+    plan = coordinator.replay_request_plan(
         source="test",
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+        result_domain="notes.note",
+        require_organization=False,
+    )
+    if plan is None:
+        plan = plan_compound_note(
+            coordinator,
+            note_id="note",
+            note_payload=note_payload,
+            keywords=None,
+            folder_paths=None,
+            request_key=key,
+            request_fingerprint=fingerprint,
+            provenance=payload,
+            expected_provenance_version=expected,
+            expected_note_version=core_expected,
+        )
+    return capture_server_origin_mutation_batch(
+        service=service, user_id="alice", steps=plan.steps, source="test", idempotency_key=key
     )
 
 
@@ -623,7 +651,9 @@ def test_postgres_pair_rollback_replay_and_parent_lifecycle(pg_database_config, 
             source="delete",
         )
         assert head(service).operation == "tombstone"
-        assert db.note_provenance_store.get("note", include_deleted=True)["version"] == 2
+        retained = db.note_provenance_store.get("note", include_deleted=True)
+        assert retained is not None
+        assert retained["version"] == 2
     finally:
         db.close_all_connections()
 
@@ -1069,3 +1099,108 @@ def test_ready_profile_required_parent_bootstrap_resumes_exact_source(env, monke
     assert result.envelopes[0].base_server_cursor == source_head.server_cursor
     assert db.get_note_by_id("note")["version"] == 10
     assert save(env, core_expected=9).fully_applied
+
+
+def test_capabilities_publish_strict_provenance_payload_and_lifecycle(env):
+    from tldw_Server_API.app.core.Sync.v2.models import DEFAULT_M1_ENCRYPTION_POLICY
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import MAX_PROVENANCE_BYTES, NotesProvenancePayload
+
+    service, _ = env
+    schema = service.capabilities().domain_schemas["notes.provenance"]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == DEFAULT_M1_ENCRYPTION_POLICY
+    assert schema["upsert"] == NotesProvenancePayload.model_json_schema()
+    assert schema["tombstone"] == schema["upsert"]
+    assert schema["upsert"]["additionalProperties"] is False
+    assert all(value["additionalProperties"] is False for value in schema["upsert"]["$defs"].values())
+    assert schema["constraints"]["max_canonical_utf8_bytes"] == MAX_PROVENANCE_BYTES
+    assert schema["constraints"]["max_portable_encoded_characters"] == MAX_PROVENANCE_BYTES
+    assert schema["constraints"]["text_length_unit"] == "utf16_code_units"
+    assert schema["constraints"]["parent_id"] == "object_id"
+    assert schema["constraints"]["requires_current_base"] is True
+    assert schema["constraints"]["enrollment_readiness"] == "notes_provenance_v1"
+    assert schema["constraints"]["object_hash"] == "sha256:canonical_json({payload,deleted})"
+    assert schema["restore"] == {
+        "operation": "upsert",
+        "routing_metadata": {"restore_intent": True},
+        "requires_current_base": True,
+        "requires_active_parent": True,
+    }
+
+
+def test_capabilities_http_response_exposes_provenance_schema(env):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.api.v1.endpoints import sync as endpoint
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import NotesProvenancePayload
+
+    service, _ = env
+    app = FastAPI()
+    app.include_router(endpoint.router, prefix="/api/v1/sync/v2")
+    app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id="alice")
+    app.dependency_overrides[endpoint.get_sync_v2_service] = lambda: service
+    with TestClient(app) as http:
+        response = http.get("/api/v1/sync/v2/capabilities")
+    assert response.status_code == 200, response.text
+    assert "notes.provenance" in response.json()["domains"]
+    assert response.json()["domain_schemas"]["notes.provenance"]["upsert"] == NotesProvenancePayload.model_json_schema()
+
+
+@pytest.mark.parametrize("missing_field", ["object_id", "server_cursor", "payload_hash"])
+def test_provenance_projection_refuses_incomplete_stored_identity_before_product_write(env, missing_field):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import project_notes_provenance
+
+    service, db = env
+    save(env)
+    before = db.get_note_by_id("note")
+    member = replace(
+        head(service, "notes.note"),
+        object_revision=2,
+        payload={**NOTE, "content": "Must not be projected"},
+        mutation_group_id=None,
+        mutation_step=None,
+        mutation_step_count=None,
+        mutation_plan_hash=None,
+    )
+    # Model constructors normalize these identities; persisted raw rows can be corrupt.
+    object.__setattr__(member, missing_field, None)
+    result = project_notes_provenance(member, store=service.store, note_db=db)
+    assert result.status == "failed"
+    assert db.get_note_by_id("note") == before
+
+
+def test_singleton_parent_delete_refuses_child_without_revision(env, monkeypatch):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import expand_provenance_tombstone
+
+    service, db = env
+    save(env)
+    child = replace(head(service), object_revision=None, entity_version=None)
+    monkeypatch.setattr(service.store, "get_current_head", lambda *_args: child)
+    deletion = SyncEnvelopeCreate(
+        dataset_id="personal", client_envelope_id="delete", domain="notes.note", operation="tombstone", object_id="note"
+    )
+    with pytest.raises(SyncStoreError):
+        expand_provenance_tombstone(deletion, store=service.store)
+    assert db.get_note_by_id("note")["version"] == 1
+
+
+@pytest.mark.parametrize("provenance", [False, True])
+def test_notes_materializers_refuse_unsupported_product_guards(env, provenance):
+    from tldw_Server_API.app.core.Sync.v2.errors import SyncMaterializationContractError
+    from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import GuardedProductMutation
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import NotesProvenanceMaterializer
+
+    service, db = env
+    save(env)
+    guard = GuardedProductMutation("notes.keyword", "note", lambda _conn: None, None)
+    materializer = NotesProvenanceMaterializer(db) if provenance else NotesMaterializer(db)
+    with pytest.raises(SyncMaterializationContractError):
+        materializer.apply(
+            head(service, "notes.provenance" if provenance else "notes.note"),
+            store=service.store,
+            guarded_mutation=guard,
+        )
+    assert db.get_note_by_id("note")["version"] == 1

@@ -444,6 +444,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         screen.getAllByText(/Snapshot changed outside refresh/).length
       ).toBeGreaterThan(0)
     )
+    expect(
+      screen.getByText("Snapshot changed outside refresh").textContent,
+    ).toBe("Snapshot changed outside refresh");
     expect(mockOnSubmit).not.toHaveBeenCalled()
     expect(workspaceStoreState.setSourceStatusById).toHaveBeenCalledWith(
       source.id,

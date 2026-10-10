@@ -560,7 +560,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         source_count: results.length,
       })
       navigate("/research-workspace")
-    } catch (error) {
+    } catch {
       if (
         !isAuthorityCurrent() ||
         activeAnswerSessionKeyRef.current !== requestSessionKey

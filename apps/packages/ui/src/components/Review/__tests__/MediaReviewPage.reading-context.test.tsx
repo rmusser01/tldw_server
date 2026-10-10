@@ -148,18 +148,22 @@ vi.mock('@plasmohq/storage/hook', () => ({
   useStorage: () => [true, mocks.setHelpDismissed, { isLoading: false }]
 }))
 
-vi.mock('@/hooks/useSetting', () => {
-  const React = require('react') as typeof import('react')
+vi.mock("@/hooks/useSetting", async () => {
+  const React = await import("react");
   return {
     useSetting: (setting: { key: string; defaultValue: unknown }) => {
-      const [value, setValue] = React.useState(setting.defaultValue)
+      const [value, setValue] = React.useState(setting.defaultValue);
       const setter = async (next: unknown | ((prev: unknown) => unknown)) => {
-        setValue((prev: unknown) => (typeof next === 'function' ? (next as (prev: unknown) => unknown)(prev) : next))
-      }
-      return [value, setter, { isLoading: false }] as const
-    }
-  }
-})
+        setValue((prev: unknown) =>
+          typeof next === "function"
+            ? (next as (prev: unknown) => unknown)(prev)
+            : next,
+        );
+      };
+      return [value, setter, { isLoading: false }] as const;
+    },
+  };
+});
 
 vi.mock('@/services/settings/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/settings/registry')>()
@@ -555,7 +559,21 @@ describe('MediaReviewPage active reading context', () => {
     expect(new URL(mocks.navigate.mock.calls.at(-1)![0], "https://local.test").searchParams.get("media_ids")).toBe(selected.map(item => item.id).join(","))
     fireEvent.click(within(toolbar).getByRole("button", { name: "Research with selected sources" }))
     await waitFor(() => expect(mocks.queuePrefill).toHaveBeenCalledOnce())
-    expect(mocks.queuePrefill.mock.calls[0][0].sources.map((source: any) => ({ mediaId: source.mediaId, title: source.title, type: source.type }))).toEqual(selected.map(item => ({ mediaId: item.id, title: item.title, type: item.type })))
+    expect(
+      mocks.queuePrefill.mock.calls[0][0].sources.map(
+        (source: { mediaId: number; title: string; type: string }) => ({
+          mediaId: source.mediaId,
+          title: source.title,
+          type: source.type,
+        }),
+      ),
+    ).toEqual(
+      selected.map((item) => ({
+        mediaId: item.id,
+        title: item.title,
+        type: item.type,
+      })),
+    );
     expect(mocks.bgRequest.mock.calls.filter(([r]) => /media\/\d+\?/.test(String(r.path)))).toHaveLength(0)
   })
 
@@ -870,7 +888,12 @@ describe('MediaReviewPage active reading context', () => {
     )
     expect(footer).toHaveTextContent("Reading item 1 of 40")
     expect(footer).not.toHaveTextContent("Previewing")
-    fireEvent.click(screen.getByRole("button", { name: "Next reading window" }))
+    fireEvent.click(
+      within(screen.getByTestId("media-review-reading-window")).getByRole(
+        "button",
+        { name: "Next reading window" },
+      ),
+    );
     await waitFor(() =>
       expect(
         screen.getByTestId("media-review-reading-context")
@@ -878,7 +901,12 @@ describe('MediaReviewPage active reading context', () => {
     )
     expect(footer).toHaveTextContent("40 selected")
     expect(footer).toHaveTextContent("Reading item 31 of 40")
-    fireEvent.click(screen.getByRole("button", { name: "Return to preview" }))
+    fireEvent.click(
+      within(screen.getByTestId("media-review-reading-context")).getByRole(
+        "button",
+        { name: "Return to preview" },
+      ),
+    );
     expect(screen.getByTestId("media-review-reading-context")).toHaveTextContent(
       "Result preview: Item 3"
     )

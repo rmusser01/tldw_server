@@ -1115,6 +1115,40 @@ describe("workspace store snapshot persistence", () => {
     expect(diagnostics?.updatedAt ?? 0).toBeGreaterThan(0)
   })
 
+  it("retains a Quick Notes pending operation reference through actual workspace rehydrate", async () => {
+    resetWorkspaceStore();
+    const pendingNoteWriteKey =
+      'surface:quick-notes:["workspace-retry","workspace:retry"]:7f8d6e98-7358-4cb0-8c42-dcc08e7b5a60';
+    const persisted = {
+      state: {
+        workspaceId: "workspace-retry",
+        workspaceTag: "workspace:retry",
+        workspaceName: "Retry",
+        sources: [],
+        selectedSourceIds: [],
+        generatedArtifacts: [],
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceSnapshots: {},
+        workspaceChatSessions: {},
+        currentNote: {
+          title: "Original",
+          content: "Body",
+          keywords: [],
+          version: undefined,
+          isDirty: true,
+          pendingNoteWriteKey,
+        },
+      },
+      version: 0,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+    await useWorkspaceStore.persist.rehydrate();
+    expect(useWorkspaceStore.getState().currentNote.pendingNoteWriteKey).toBe(
+      pendingNoteWriteKey,
+    );
+  });
+
   it("rehydrates array-shaped legacy snapshots and chat sessions safely", async () => {
     resetWorkspaceStore()
 

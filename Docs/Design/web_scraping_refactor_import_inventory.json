@@ -527,7 +527,7 @@
       {
         "import_kind": "from",
         "imported_name": "search_discussions",
-        "line": 3313,
+        "line": 3321,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -535,7 +535,7 @@
       {
         "import_kind": "from",
         "imported_name": "perform_websearch",
-        "line": 3342,
+        "line": 3350,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -543,7 +543,7 @@
       {
         "import_kind": "from",
         "imported_name": "process_web_search_results",
-        "line": 3342,
+        "line": 3350,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"

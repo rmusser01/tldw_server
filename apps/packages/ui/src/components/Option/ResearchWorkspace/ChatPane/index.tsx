@@ -3405,13 +3405,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 {submitError === "Snapshot changed outside refresh"
                   ? t(
                       "playground:sources.snapshotChanged",
-                      "Snapshot changed outside refresh"
+                      "Snapshot changed outside refresh",
                     )
-                  : t(
+                  : `${t(
                       "playground:chat.connectionBanner",
-                      "Unable to reach server"
-                    )}
-                : {connectionDescription}
+                      "Unable to reach server",
+                    )}: ${connectionDescription}`}
               </span>
             </div>
             <button

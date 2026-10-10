@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
@@ -525,7 +527,48 @@ it.each([
       boundary.captures = [
         { pin: { ...pin, versionNumber: 2, versionUuid: "version-two" } },
       ];
-    if (change === "ordinary") boundary.captures = [];
+    if (change === "ordinary") {
+      boundary.captures = [];
+      Object.assign(ctx.sources.items[0], {
+        id: "web-clipper:ordinary-clip",
+        url: "https://example.org/ordinary",
+      });
+    }
+    if (change === "owner" || change === "ordinary") {
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient");
+      const row = ctx.sources.items[0] as (typeof ctx.sources.items)[0] & {
+        url: string;
+      };
+      const clipId = row.id.slice("web-clipper:".length);
+      vi.spyOn(tldwClient, "getWebClipStatus").mockResolvedValue({
+        clip_id: clipId,
+        status: "saved" as const,
+        note: { id: "owned-note", title: "Ordinary", version: 1 },
+        workspace_placements: [
+          {
+            workspace_id: "original",
+            source_note_id: "owned-note",
+            workspace_note_id: 1,
+          },
+        ],
+        attachments: [],
+        analysis: {},
+        content_budget: {},
+      });
+      vi.spyOn(tldwClient, "listMediaDocumentVersions").mockResolvedValue([
+        {
+          media_id: 7,
+          version_number: 1,
+          created_at: pin.capturedAt,
+          safe_metadata: {
+            source: "web_clipper",
+            clip_id: clipId,
+            workspace_id: "original",
+            source_url: row.url,
+          },
+        },
+      ]);
+    }
     if (change === "transient")
       useWorkspaceStore
         .getState()
@@ -568,4 +611,383 @@ it("canonical restore never revives refusal display intentionally scrubbed by an
   expect(JSON.parse(localStorage.getItem(receiptKey)!).contentRetained).toBe(
     false,
   );
+});
+
+
+const intactCapture = async () => {
+  const clipId = "9c442db9-65b4-409a-b4f7-3cfe80cc963b";
+  const text = "Original accepted article";
+  const { sha256Text } = await import("@/store/workspace-migration");
+  const descriptor = {
+    mode: "server_article",
+    requested_url: "https://example.org/article",
+    captured_at: "2026-10-07T00:00:00Z",
+    content_sha256: await sha256Text(text),
+    refresh_of: null,
+  };
+  const version = {
+    media_id: 7,
+    version_number: 1,
+    uuid: "44d2295a-7165-4e28-bbb0-b488a2bc404e",
+    created_at: descriptor.captured_at,
+    content: text,
+    safe_metadata: {
+      source: "web_clipper",
+      clip_type: "article",
+      clip_id: clipId,
+      workspace_id: "original",
+      source_url: descriptor.requested_url,
+      capture_metadata: { web_capture_v1: descriptor },
+    },
+  };
+  const ctx = context();
+  Object.assign(ctx.sources.items[0], {
+    id: `web-clipper:${clipId}`,
+    url: descriptor.requested_url,
+  });
+  const status = {
+    clip_id: clipId,
+    status: "saved" as const,
+    note: { id: "canonical", title: "Article", version: 1 },
+    workspace_placements: [
+      {
+        workspace_id: "original",
+        source_note_id: "canonical",
+        workspace_note_id: 1,
+      },
+    ],
+    attachments: [],
+    analysis: {},
+    content_budget: {},
+  };
+  const { tldwClient } = await import("@/services/tldw/TldwApiClient");
+  vi.spyOn(tldwClient, "getWebClipStatus").mockResolvedValue(status);
+  vi.spyOn(tldwClient, "listMediaDocumentVersions").mockResolvedValue([
+    version,
+  ]);
+  vi.spyOn(tldwClient, "getMediaDocumentVersion").mockResolvedValue(version);
+  vi.spyOn(tldwClient, "getWorkspaceSources").mockResolvedValue(
+    ctx.sources.items as never,
+  );
+  boundary.request.mockImplementation(async ({ path }: { path: string }) =>
+    path.endsWith("/context") ? ctx : [],
+  );
+  return { ctx, version, descriptor, tldwClient, status };
+};
+
+it("restores the accepted version from owned history without a local checkpoint or current workspace", async () => {
+  const { version, tldwClient } = await intactCapture();
+  expect(useWorkspaceStore.getState().workspaceId).toBe("");
+  await restore();
+  const source = useWorkspaceStore.getState().sources[0];
+  expect(source.webCapture).toMatchObject({
+    versionNumber: 1,
+    versionUuid: version.uuid,
+    contentSha256:
+      version.safe_metadata.capture_metadata.web_capture_v1.content_sha256,
+  });
+  expect(tldwClient.getMediaDocumentVersion).toHaveBeenCalledWith(
+    7,
+    1,
+    expect.objectContaining({
+      requestScope: expect.objectContaining({ userId: "alice" }),
+    }),
+  );
+  expect(
+    boundary.request.mock.calls.every(([request]) => request.method === "GET"),
+  ).toBe(true);
+  vi.mocked(tldwClient.listMediaDocumentVersions).mockResolvedValue([
+    { ...version, version_number: 2, content: "Edited current body" },
+    version,
+  ]);
+  const { assertWebCaptureHeadCurrent } =
+    await import("@/utils/research-web-capture");
+  await expect(
+    assertWebCaptureHeadCurrent(source, "original", {
+      requestScope: { config: boundary.config, userId: "alice" },
+    }),
+  ).rejects.toThrow("no longer current");
+});
+
+it.each([
+  "ambiguous",
+  "digest",
+  "binding",
+  "missing-exact",
+  "changed-uuid",
+  "pagination",
+  "status-binding",
+])("blocks checkpointless capture with %s evidence", async (change) => {
+  const { version, tldwClient, status } = await intactCapture();
+  if (change === "ambiguous")
+    vi.mocked(tldwClient.listMediaDocumentVersions).mockResolvedValue([
+      {
+        ...version,
+        version_number: 2,
+        uuid: "66d2295a-7165-4e28-bbb0-b488a2bc404e",
+      },
+      version,
+    ]);
+  if (change === "digest") version.content = "Tampered";
+  if (change === "binding") version.safe_metadata.workspace_id = "foreign";
+  if (change === "missing-exact")
+    vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValue(
+      new Error("Deleted"),
+    );
+  if (change === "changed-uuid")
+    vi.mocked(tldwClient.getMediaDocumentVersion).mockResolvedValue({
+      ...version,
+      uuid: "66d2295a-7165-4e28-bbb0-b488a2bc404e",
+    });
+  if (change === "pagination")
+    vi.mocked(tldwClient.listMediaDocumentVersions).mockRejectedValue(
+      new Error("Page unavailable"),
+    );
+  if (change === "status-binding")
+    status.workspace_placements[0].workspace_id = "foreign";
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+    status: "error",
+    statusDetails: { statusReason: "capture_unavailable" },
+  });
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+});
+
+it("does not apply a recovered pin after owner scope invalidation", async () => {
+  const { tldwClient, version } = await intactCapture();
+  vi.mocked(tldwClient.getMediaDocumentVersion).mockImplementation(async () => {
+    boundary.controller.abort();
+    return version;
+  });
+  const apply = vi.fn();
+  await expect(restore(apply)).rejects.toThrow();
+  expect(apply).not.toHaveBeenCalled();
+});
+
+it("retains a known owned pin after checkpoint loss even when its exact version becomes unavailable", async () => {
+  const { tldwClient } = await intactCapture();
+  await restore();
+  const pin = useWorkspaceStore.getState().sources[0].webCapture;
+  expect(pin).toBeDefined();
+  vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValue(
+    new Error("Deleted version"),
+  );
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+    webCapture: pin,
+    status: "error",
+    statusDetails: { statusReason: "capture_unavailable" },
+  });
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+});
+
+it("reads every history page without treating a later edit as accepted", async () => {
+  const { version, tldwClient } = await intactCapture();
+  const page = Array.from({ length: 10 }, (_, i) => ({
+    ...version,
+    version_number: 11 - i,
+    safe_metadata: null,
+    content: "Later edit",
+  }));
+  vi.mocked(tldwClient.listMediaDocumentVersions)
+    .mockResolvedValueOnce(page)
+    .mockResolvedValueOnce([version]);
+  await restore();
+  expect(
+    useWorkspaceStore.getState().sources[0].webCapture?.versionNumber,
+  ).toBe(1);
+  expect(tldwClient.listMediaDocumentVersions).toHaveBeenCalledWith(
+    7,
+    expect.anything(),
+    { limit: 10, page: 2 },
+  );
+});
+
+it("keeps an authoritative ordinary clip usable without inventing capture semantics", async () => {
+  const { version } = await intactCapture();
+  delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([7]);
+});
+
+it("keeps unavailable capture blocked after ordinary Media readiness reconciliation", async () => {
+  const { tldwClient } = await intactCapture();
+  vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValue(
+    new Error("Deleted"),
+  );
+  await restore();
+  useWorkspaceStore.getState().setSourceStatusByMediaId(7, "ready");
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+    status: "error",
+    statusDetails: { statusReason: "capture_unavailable" },
+  });
+  useWorkspaceStore
+    .getState()
+    .toggleSourceSelection(useWorkspaceStore.getState().sources[0].id);
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+});
+
+it.each(["owner", "workspace", "source", "media", "url"])(
+  "never retains a previous pin across %s identity changes after checkpoint loss",
+  async (change) => {
+    const { ctx, version } = await intactCapture();
+    await restore();
+    const previous = useWorkspaceStore.getState().sources[0];
+    if (change === "owner")
+      useWorkspaceStore.setState({
+        sources: [{ ...previous, captureOwnerScope: "foreign" }],
+      });
+    if (change === "workspace")
+      useWorkspaceStore.setState({
+        workspaceId: "foreign",
+        workspaceSnapshots: {},
+      });
+    if (change === "source")
+      useWorkspaceStore.setState({ sources: [{ ...previous, id: "foreign" }] });
+    if (change === "media")
+      useWorkspaceStore.setState({ sources: [{ ...previous, mediaId: 900 }] });
+    if (change === "url")
+      useWorkspaceStore.setState({
+        sources: [{ ...previous, url: "https://example.org/foreign" }],
+      });
+    delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
+    await restore();
+    expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
+    expect(useWorkspaceStore.getState().sources[0].id).toBe(
+      ctx.sources.items[0].id,
+    );
+  },
+);
+
+it.each(["missing-metadata", "malformed-descriptor", "overlapping-pages"])(
+  "blocks a known capture when %s cannot establish its history",
+  async (change) => {
+    const { version, tldwClient } = await intactCapture();
+    if (change === "missing-metadata")
+      (version as { safe_metadata: unknown }).safe_metadata = null;
+    if (change === "malformed-descriptor")
+      version.safe_metadata.capture_metadata.web_capture_v1.content_sha256 =
+        "invalid";
+    if (change === "overlapping-pages")
+      vi.mocked(tldwClient.listMediaDocumentVersions).mockResolvedValue(
+        Array.from({ length: 10 }, (_, i) => ({
+          ...version,
+          version_number: 10 - i,
+          safe_metadata: null,
+        })),
+      );
+    await restore();
+    expect(
+      useWorkspaceStore.getState().sources[0].statusDetails?.statusReason,
+    ).toBe("capture_unavailable");
+    expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+  },
+);
+
+it("retains known unavailable capture semantics when later history loses its descriptor", async () => {
+  const { version } = await intactCapture();
+  version.content = "Tampered";
+  await restore();
+  expect(
+    useWorkspaceStore.getState().sources[0].statusDetails?.statusReason,
+  ).toBe("capture_unavailable");
+  delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
+  await restore();
+  expect(
+    useWorkspaceStore.getState().sources[0].statusDetails?.statusReason,
+  ).toBe("capture_unavailable");
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+});
+
+
+it("allows ordinary clip recovery after a transient history lookup failure", async () => {
+  const { tldwClient, version } = await intactCapture();
+  delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
+  vi.mocked(tldwClient.listMediaDocumentVersions).mockRejectedValueOnce(
+    new Error("Unavailable"),
+  );
+  await restore();
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([7]);
+});
+
+
+it.each(["queryable", "missing_media"])(
+  "clears stale capture unavailability after exact recovery using authoritative %s status",
+  async (state) => {
+    const { ctx, version, tldwClient } = await intactCapture();
+    vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValueOnce(
+      new Error("Temporarily unavailable"),
+    );
+    await restore();
+    expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+      status: "error",
+      statusDetails: { statusReason: "capture_unavailable" },
+      captureOwnerScope: boundary.captureOwner,
+    });
+    expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
+    ctx.sources.items[0].state = state;
+    await restore();
+    const recovered = useWorkspaceStore.getState().sources[0];
+    expect(recovered.webCapture).toMatchObject({
+      versionNumber: 1,
+      versionUuid: version.uuid,
+    });
+    expect(recovered.status).toBe(state === "queryable" ? "ready" : "error");
+    expect(recovered.statusDetails).toBeUndefined();
+    expect(recovered.statusMessage).toBeUndefined();
+    expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual(
+      state === "queryable" ? [7] : [],
+    );
+    if (state === "queryable") {
+      const preview = vi
+        .spyOn(tldwClient, "getWorkspaceSourcePreview")
+        .mockResolvedValue({
+          document_version_number: 1,
+          text_preview: "Original accepted article",
+          content_available: true,
+          snippets: [],
+        } as Awaited<ReturnType<typeof tldwClient.getWorkspaceSourcePreview>>);
+      const { SourcesPane } = await import("../SourcesPane");
+      render(createElement(SourcesPane));
+      fireEvent.click(screen.getByTestId(`preview-source-${recovered.id}`));
+      expect(
+        (await screen.findByText("Original accepted article")).textContent,
+      ).toBe("Original accepted article");
+      expect(preview).toHaveBeenCalledWith(
+        "original",
+        recovered.id,
+        expect.objectContaining({ version_number: 1 }),
+        expect.objectContaining({
+          requestScope: expect.objectContaining({ userId: "alice" }),
+        }),
+      );
+    }
+  },
+);
+
+it("preserves intentional changed-head refusal when canonical recovery verifies the existing pin", async () => {
+  await intactCapture();
+  await restore();
+  const source = useWorkspaceStore.getState().sources[0];
+  useWorkspaceStore
+    .getState()
+    .setSourceStatusById(
+      source.id,
+      "error",
+      "Snapshot changed outside refresh",
+      undefined,
+      { statusReason: "capture_head_changed", retryEligible: false },
+    );
+  await restore();
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+    webCapture: source.webCapture,
+    status: "error",
+    statusMessage: "Snapshot changed outside refresh",
+    statusDetails: { statusReason: "capture_head_changed" },
+  });
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
 });

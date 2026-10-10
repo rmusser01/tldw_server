@@ -91,7 +91,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError, WorkspaceArtifactExportStateError
 from tldw_Server_API.app.core.feature_flags import is_persona_enabled
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.manager import _JOB_NONCRITICAL_EXCEPTIONS, JobManager
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
     get_research_workspace_output_job_status,
     submit_research_workspace_output_job,
@@ -529,10 +529,7 @@ def _safe_get_job(jm: JobManager | None, job_id: Any) -> dict[str, Any] | None:
         return None
     try:
         return jm.get_job(int(job_id))
-    except (AttributeError, TypeError, ValueError) as exc:
-        logger.warning("Workspace file inventory job lookup failed for id {}: {}", job_id, exc)
-        return None
-    except Exception as exc:
+    except _JOB_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Workspace file inventory job lookup failed for id {}: {}", job_id, exc)
         return None
 
@@ -990,7 +987,7 @@ def try_get_workspace_job_manager() -> JobManager | None:
     """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
     try:
         return try_get_job_manager()
-    except Exception as exc:
+    except _JOB_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Workspace Jobs manager unavailable: {}", exc)
         return None
 
@@ -1215,7 +1212,7 @@ async def delete_workspace(
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
     try:
         await on_workspace_deleted(workspace_id, current_user.id)
-    except Exception:
+    except (ImportError, OSError, RuntimeError):
         logger.warning(
             "Workspace sharing cleanup hook failed after workspace deletion; "
             "workspace_id={} owner_user_id={}",
@@ -1877,7 +1874,7 @@ async def get_workspace_context(
     membership_summary = {"total": 0, "by_resource_type": {}, "by_role": {}}
     try:
         membership_summary = WorkspaceMembershipService(db).workspace_membership_summary(workspace_id)
-    except Exception:
+    except (CharactersRAGDBError, WorkspaceMembershipServiceError, RuntimeError, TypeError, ValueError):
         logger.warning("Workspace membership summary unavailable for workspace {}", workspace_id)
         partial_errors.append(
             {

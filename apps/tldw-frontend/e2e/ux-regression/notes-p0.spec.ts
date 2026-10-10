@@ -37,6 +37,7 @@ async function appendToEditor(page: Page, text: string) {
   await expect(editor).toHaveValue(new RegExp(text.trim()))
 }
 
+test.use({ trace: 'retain-on-failure' });
 test.describe("Notes P0 reproductions", () => {
   test("NL-01: the notes list reports every note in a library larger than 100", async ({
     authedPage,

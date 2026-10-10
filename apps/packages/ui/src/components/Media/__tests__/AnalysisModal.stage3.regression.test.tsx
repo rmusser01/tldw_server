@@ -20,14 +20,20 @@ const state = vi.hoisted(() => ({
   selectedModel: undefined as string | undefined
 }))
 
-vi.mock('react-i18next', () => ({
+vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
-      if (typeof fallbackOrOptions === 'string') return fallbackOrOptions
-      return (fallbackOrOptions?.defaultValue || key).replace('{{version}}', String((fallbackOrOptions as any)?.version ?? ''))
-    }
-  })
-}))
+    t: (
+      key: string,
+      fallbackOrOptions?: string | { defaultValue?: string; version?: number },
+    ) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
+      return (fallbackOrOptions?.defaultValue || key).replace(
+        "{{version}}",
+        String(fallbackOrOptions?.version ?? ""),
+      );
+    },
+  }),
+}));
 
 vi.mock('antd', async (importOriginal) => {
   const actual = await importOriginal<typeof import('antd')>()

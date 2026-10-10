@@ -1136,7 +1136,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     renderChatPane()
 
-    expect(screen.getByText(/Unable to reach server/)).toBeInTheDocument()
+    expect(screen.getByText(/Unable to reach server/).textContent).toBe(
+      "Unable to reach server: server-unreachable",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(mockCheckConnectionOnce).toHaveBeenCalledTimes(1)
   })

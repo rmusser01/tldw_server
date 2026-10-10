@@ -354,7 +354,7 @@ def _public_source_status(raw: Any) -> dict[str, dict[str, Any]] | None:
             continue
         safe = {"status": status, "count": count}
         reason = entry.get("reason")
-        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries"):
+        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries", "security_filtered"):
             safe["reason"] = reason
         filtered_count = entry.get("filtered_artifact_count")
         if type(filtered_count) is int and filtered_count >= 0:

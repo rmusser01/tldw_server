@@ -1099,14 +1099,16 @@ def _capture_notes_organization_plan(
             plain_pair = any(step.domain == "notes.provenance" for step in plan.steps) and all(
                 step.domain in {"notes.note", "notes.provenance"} for step in plan.steps
             )
-            capture = None if plain_pair else coordinator.capture
-            kwargs = {"steps": plan.steps, "source": source, "idempotency_key": idempotency_key}
             result = (
-                capture(**kwargs)
-                if capture
-                else capture_server_origin_mutation_batch(
-                    service=coordinator.service, user_id=coordinator.user_id, **kwargs
+                capture_server_origin_mutation_batch(
+                    service=coordinator.service,
+                    user_id=coordinator.user_id,
+                    steps=plan.steps,
+                    source=source,
+                    idempotency_key=idempotency_key,
                 )
+                if plain_pair
+                else coordinator.capture(steps=plan.steps, source=source, idempotency_key=idempotency_key)
             )
             if not result.fully_applied:
                 raise SyncStoreError("Notes organization projection is incomplete")
@@ -1155,7 +1157,7 @@ def _attach_note_provenance(db: CharactersRAGDB, note: dict[str, Any], *, portab
         head = (
             service.store.get_current_head(dataset.dataset_id, "notes.provenance", str(note["id"])) if dataset else None
         )
-        if head is not None:
+        if head is not None and dataset is not None:
             parent = service.store.get_current_head(dataset.dataset_id, "notes.note", str(note["id"]))
             # Acceptance precedes product projection; checkpoint failures can also
             # leave products ahead of both applied heads. Never mix these snapshots.
@@ -1204,7 +1206,10 @@ def _save_local_provenance_note(
         summary = _sync_note_keywords(db, note_id=saved_id, keywords=keywords) if keywords is not None else None
         if folder_paths is not None:
             db.sync_note_folders(saved_id, folder_paths)
-        response = _attach_folders_inline(db, _attach_keywords_inline(db, db.get_note_by_id(saved_id)))
+        note = db.get_note_by_id(saved_id)
+        if note is None:
+            raise CharactersRAGDBError("Created note could not be retrieved.")
+        response = _attach_folders_inline(db, _attach_keywords_inline(db, note))
         if summary and summary.get("failed_count", 0):
             response["keyword_sync"] = {key: summary[key] for key in ("failed_count", "failed_keywords")}
         return NoteResponse.model_validate(response).model_dump(mode="json")
@@ -2426,7 +2431,11 @@ async def create_note(
                 )
             except Exception as sync_exc:
                 raise _note_sync_http_error(sync_exc) from sync_exc
-        elif sync_service is None and compound_note is None and provenance is not None:
+        elif (
+            sync_service is None
+            and compound_note is None
+            and (provenance is not None or request_fingerprint is not None)
+        ):
             compound_note = _save_local_provenance_note(
                 db,
                 note_id=note_id,
@@ -3608,7 +3617,9 @@ async def import_notes(
                         parsed_note["content"]
                     )
                     provenance_version = parsed_note.get("expected_provenance_version")
-                    local_provenance_save = coordinator is None and provenance is not None
+                    local_provenance_save = coordinator is None and (
+                        provenance is not None or bool(request.headers.get("Idempotency-Key", "").strip())
+                    )
                     raw_note_payload = {
                         "title": parsed_note["title"],
                         "content": parsed_note["content"],
@@ -3618,15 +3629,15 @@ async def import_notes(
                     request_fingerprint = None
                     local_receipt_key = request_key if request.headers.get("Idempotency-Key", "").strip() else None
                     if coordinator is None:
-                        request_fingerprint, replayed_note = _replay_local_provenance(
+                        request_fingerprint, local_replayed_note = _replay_local_provenance(
                             db,
                             key=local_receipt_key,
                             operation=f"note.import.{payload.duplicate_strategy}",
                             fields={"item": item.model_dump(), "note_index": note_index},
                         )
-                        if replayed_note is not None:
-                            _attach_note_provenance(db, replayed_note)
-                            if replayed_note["version"] == 1:
+                        if local_replayed_note is not None:
+                            _attach_note_provenance(db, local_replayed_note)
+                            if local_replayed_note["version"] == 1:
                                 file_result.created_count += 1
                             else:
                                 file_result.updated_count += 1
@@ -3721,7 +3732,7 @@ async def import_notes(
                                 raise SyncStoreError(
                                     "Compound note projection did not return a note"
                                 )
-                            overwritten_note = overwrite_result
+                            overwritten_note: dict[str, Any] | None = overwrite_result
                         elif local_provenance_save:
                             overwritten_note = _save_local_provenance_note(
                                 db,
@@ -3809,7 +3820,7 @@ async def import_notes(
                             raise SyncStoreError(
                                 "Compound note projection did not return a note"
                             )
-                        created_note = create_result
+                        created_note: dict[str, Any] | None = create_result
                     elif local_provenance_save:
                         created_note = _save_local_provenance_note(
                             db,
@@ -6899,7 +6910,7 @@ async def update_note(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif provenance is not None:
+            elif provenance is not None or request_fingerprint is not None:
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
@@ -7133,40 +7144,10 @@ async def patch_note(
             data_keys.append("folder_paths")
         logger.info(
             f"User (DB client_id: {db.client_id}) partially updating note: ID='{note_id}', Version={expected_version}, DataKeys={data_keys}")
-        if compound_note is None and coordinator is not None:
-            current = _get_current_note()
-            current_version = current.get("version")
-            if current_version is not None and int(current_version) != int(expected_version):
-                raise ConflictError(
-                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
-                    entity="notes",
-                    entity_id=note_id,
-                )
-            payload = _note_payload_from_row(current)
-            payload.update(update_data)
-            compound_plan = plan_compound_note(
-                coordinator,
-                note_id=note_id,
-                note_payload=payload,
-                keywords=(kw_list or []) if keywords_supplied else None,
-                folder_paths=(folder_paths or []) if folders_supplied else None,
-                request_key=request_key,
-                request_fingerprint=request_fingerprint or "",
-                provenance=provenance,
-                expected_provenance_version=provenance_version,
-                expected_note_version=expected_version,
-            )
-            compound_result = _capture_notes_organization_plan(
-                coordinator,
-                compound_plan,
-                idempotency_key=request_key,
-                source="notes-api",
-            )
-            if not isinstance(compound_result, dict):
-                raise SyncStoreError("Compound note projection did not return a note")
-            compound_note = compound_result
-        elif compound_note is None and (update_data or provenance is not None):
-            if sync_service is not None:
+        if compound_note is None:
+            if expected_version is None:
+                raise ConflictError("Note version mismatch")
+            if coordinator is not None:
                 current = _get_current_note()
                 current_version = current.get("version")
                 if current_version is not None and int(current_version) != int(expected_version):
@@ -7177,42 +7158,75 @@ async def patch_note(
                     )
                 payload = _note_payload_from_row(current)
                 payload.update(update_data)
-                try:
-                    capture_server_origin_mutation(
-                        sync_service,
-                        user_id=str(current_user.id),
-                        domain="notes.note",
-                        operation="upsert",
-                        object_id=note_id,
-                        payload=payload,
-                        source="server_api",
-                    )
-                except Exception as sync_exc:
-                    raise _note_sync_http_error(sync_exc) from sync_exc
-            elif provenance is not None:
-                compound_note = _save_local_provenance_note(
-                    db,
+                compound_plan = plan_compound_note(
+                    coordinator,
                     note_id=note_id,
-                    fields=update_data or _note_payload_from_row(_get_current_note()),
-                    expected_version=expected_version,
-                    provenance=provenance,
-                    provenance_version=provenance_version,
+                    note_payload=payload,
                     keywords=(kw_list or []) if keywords_supplied else None,
                     folder_paths=(folder_paths or []) if folders_supplied else None,
-                    receipt_key=idempotency_key,
-                    request_fingerprint=request_fingerprint,
-                )
-            else:
-                success = save_local_note(
-                    db,
-                    note_id=note_id,
-                    fields=update_data or _note_payload_from_row(_get_current_note()),
-                    expected_note_version=expected_version,
+                    request_key=request_key,
+                    request_fingerprint=request_fingerprint or "",
                     provenance=provenance,
                     expected_provenance_version=provenance_version,
+                    expected_note_version=expected_version,
                 )
-                if not success:
-                    raise CharactersRAGDBError("Note update reported non-success without specific exception.")
+                compound_result = _capture_notes_organization_plan(
+                    coordinator,
+                    compound_plan,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                if not isinstance(compound_result, dict):
+                    raise SyncStoreError("Compound note projection did not return a note")
+                compound_note = compound_result
+            elif update_data or provenance is not None:
+                if sync_service is not None:
+                    current = _get_current_note()
+                    current_version = current.get("version")
+                    if current_version is not None and int(current_version) != int(expected_version):
+                        raise ConflictError(
+                            f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                            entity="notes",
+                            entity_id=note_id,
+                        )
+                    payload = _note_payload_from_row(current)
+                    payload.update(update_data)
+                    try:
+                        capture_server_origin_mutation(
+                            sync_service,
+                            user_id=str(current_user.id),
+                            domain="notes.note",
+                            operation="upsert",
+                            object_id=note_id,
+                            payload=payload,
+                            source="server_api",
+                        )
+                    except Exception as sync_exc:
+                        raise _note_sync_http_error(sync_exc) from sync_exc
+                elif provenance is not None or request_fingerprint is not None:
+                    compound_note = _save_local_provenance_note(
+                        db,
+                        note_id=note_id,
+                        fields=update_data or _note_payload_from_row(_get_current_note()),
+                        expected_version=expected_version,
+                        provenance=provenance,
+                        provenance_version=provenance_version,
+                        keywords=(kw_list or []) if keywords_supplied else None,
+                        folder_paths=(folder_paths or []) if folders_supplied else None,
+                        receipt_key=idempotency_key,
+                        request_fingerprint=request_fingerprint,
+                    )
+                else:
+                    success = save_local_note(
+                        db,
+                        note_id=note_id,
+                        fields=update_data or _note_payload_from_row(_get_current_note()),
+                        expected_note_version=expected_version,
+                        provenance=provenance,
+                        expected_provenance_version=provenance_version,
+                    )
+                    if not success:
+                        raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
         if sync_service is None and compound_note is None and keywords_supplied:
@@ -7272,7 +7286,7 @@ async def delete_note(
 ) -> Response:
     try:
         existing_note = db.get_note_by_id(note_id=note_id, include_deleted=True)
-        was_active = bool(existing_note) and not bool(existing_note.get("deleted"))
+        was_active = bool(existing_note and not existing_note.get("deleted"))
         note_for_activity = (
             _attach_folders_inline(db, _attach_keywords_inline(db, dict(existing_note)))
             if was_active and existing_note
@@ -7366,7 +7380,7 @@ async def restore_note(
             note_id=note_id,
             include_deleted=True,
         )
-        was_deleted = bool(existing_note) and bool(existing_note.get("deleted"))
+        was_deleted = bool(existing_note and existing_note.get("deleted"))
         # Rate limit: notes.restore
         try:
             allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.restore")
@@ -7435,20 +7449,22 @@ async def restore_note(
         ] if keywords else []
 
         _attach_note_provenance(db, restored_note)
-        return NoteResponse(
-            **{key: value for key, value in restored_note.items() if key.startswith("knowledge_provenance")},
-            id=str(restored_note["id"]),
-            title=restored_note.get("title", ""),
-            content=restored_note.get("content", ""),
-            created_at=restored_note.get("created_at"),
-            last_modified=restored_note.get("last_modified"),
-            version=restored_note.get("version", 1),
-            client_id=restored_note.get("client_id", ""),
-            deleted=bool(restored_note.get("deleted", False)),
-            keywords=keyword_responses,
-            folders=list(folders or []),
-            conversation_id=restored_note.get("conversation_id"),
-            message_id=restored_note.get("message_id"),
+        return NoteResponse.model_validate(
+            dict(
+                **{key: value for key, value in restored_note.items() if key.startswith("knowledge_provenance")},
+                id=str(restored_note["id"]),
+                title=restored_note.get("title", ""),
+                content=restored_note.get("content", ""),
+                created_at=restored_note.get("created_at"),
+                last_modified=restored_note.get("last_modified"),
+                version=restored_note.get("version", 1),
+                client_id=restored_note.get("client_id", ""),
+                deleted=bool(restored_note.get("deleted", False)),
+                keywords=keyword_responses,
+                folders=list(folders or []),
+                conversation_id=restored_note.get("conversation_id"),
+                message_id=restored_note.get("message_id"),
+            )
         )
     except HTTPException:
         raise
@@ -7489,23 +7505,23 @@ async def restore_note_provenance(
         key = _organization_request_key(idempotency_key)
         fingerprint = None
         if service is None:
-            fingerprint, replay = _replay_local_provenance(
+            fingerprint, local_replay = _replay_local_provenance(
                 db,
                 key=idempotency_key,
                 operation="note.provenance.restore",
                 fields={"note_id": note_id, "expected_version": expected_version, **restore_in.model_dump()},
             )
-            if replay is not None:
-                return _attach_note_provenance(db, replay)
+            if local_replay is not None:
+                return _attach_note_provenance(db, local_replay)
         if coordinator is not None:
-            fingerprint = coordinator.request_fingerprint(
+            sync_fingerprint = coordinator.request_fingerprint(
                 "note.provenance.restore",
                 {"note_id": note_id, "expected_version": expected_version, **restore_in.model_dump()},
             )
             replay = _replay_notes_organization_plan(
                 coordinator,
                 idempotency_key=idempotency_key,
-                request_fingerprint=fingerprint,
+                request_fingerprint=sync_fingerprint,
                 result_domain="notes.note",
                 require_organization=False,
             )
@@ -7532,7 +7548,7 @@ async def restore_note_provenance(
                 keywords=None,
                 folder_paths=None,
                 request_key=key,
-                request_fingerprint=fingerprint,
+                request_fingerprint=sync_fingerprint,
                 provenance=retained["payload"],
                 expected_provenance_version=restore_in.expected_provenance_version,
                 expected_note_version=expected_version,
@@ -7787,7 +7803,11 @@ async def bulk_create_notes(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif sync_service is None and compound_note is None and provenance is not None:
+            elif (
+                sync_service is None
+                and compound_note is None
+                and (provenance is not None or request_fingerprint is not None)
+            ):
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
@@ -7872,7 +7892,11 @@ async def bulk_create_notes(
                     surface="api.notes.bulk",
                 )
             )
-            results.append(NoteBulkCreateItemResult(success=True, note=_attach_note_provenance(db, nd)))
+            results.append(
+                NoteBulkCreateItemResult(
+                    success=True, note=NoteResponse.model_validate(_attach_note_provenance(db, nd))
+                )
+            )
             created += 1
         except _NOTES_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Bulk note create failed for title='{getattr(item, 'title', '')}': {e}")

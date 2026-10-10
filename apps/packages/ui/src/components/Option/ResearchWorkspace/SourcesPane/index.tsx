@@ -32,6 +32,7 @@ import {
   Dropdown
 } from "antd"
 import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
+import { isAbsoluteHttpUrl } from "@/utils/absolute-url-guard"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import {
   isWorkspaceSourcePartiallyQueryable,
@@ -1076,6 +1077,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       }
 
       try {
+        if (activeSource?.statusDetails?.statusReason === "capture_unavailable")
+          throw new Error("Exact capture version unavailable");
         if (activeSource?.webCapture)
           scope = await loadServicePromptSnapshot([], {
             signal: controller.signal
@@ -1844,13 +1847,14 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             isSelected ? "border border-primary/20 bg-primary/5" : ""
           }`}
         >
-          {source.url && onCaptureArticle && (
-            <Button size="small" onClick={() => onCaptureArticle(source)}>
-              {source.webCapture
-                ? t("playground:sources.refreshCapture", "Refresh capture")
-                : t("playground:sources.captureArticle", "Capture article")}
-            </Button>
-          )}
+          {isAbsoluteHttpUrl(source.webCapture?.requestedUrl || source.url) &&
+            onCaptureArticle && (
+              <Button size="small" onClick={() => onCaptureArticle(source)}>
+                {source.webCapture
+                  ? t("playground:sources.refreshCapture", "Refresh capture")
+                  : t("playground:sources.captureArticle", "Capture article")}
+              </Button>
+            )}
           <SourceFolderMembershipMenu
             sourceTitle={source.title}
             folderOptions={sourceFolderOptions}

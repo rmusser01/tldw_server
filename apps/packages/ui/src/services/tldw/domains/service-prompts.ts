@@ -73,6 +73,13 @@ export type ServicePromptRequestScope = Readonly<{
   userId: string | number | null
 }>
 
+/** Credential-free authority of an already captured, verified request scope. */
+export const servicePromptAuthorityKey = ({ config, userId }: ServicePromptRequestScope): string => JSON.stringify([
+  config.serverUrl.trim().replace(/\/+$/, ""), config.authMode,
+  config.authSource || "manual", config.orgId ?? null, userId,
+  config.expectedSingleUserApiKeyScope ?? null
+])
+
 type ServicePromptRequestOptions = {
   signal?: AbortSignal
   requestScope?: ServicePromptRequestScope

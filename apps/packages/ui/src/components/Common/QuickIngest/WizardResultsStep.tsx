@@ -374,7 +374,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const { t } = useTranslation(["option"])
   const { state, reset } = useIngestWizard()
   const { results, processingState } = state
-  const queueItems = state.queueItems ?? []
+  const queueItems = useMemo(() => state.queueItems ?? [], [state.queueItems]);
   const eligibleIds = new Set(getEligibleQueueItems(queueItems).map(item => item.id))
   const savedIds = getSavedMediaIds(results.filter(item => !queueItems.some(source => source.id === item.id) || eligibleIds.has(item.id) || queueItems.some(source => source.id === item.id && source.kind === "file" && !source.file)))
   const excludedItems = queueItems.filter(item => getQueueItemExclusionReason(item, queueItems) && !results.some(result => result.id === item.id))

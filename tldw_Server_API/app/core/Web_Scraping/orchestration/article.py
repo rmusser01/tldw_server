@@ -596,8 +596,6 @@ async def _run_article(
 
     plan = prepared.plan
     advised_backend = prepared.advised_backend
-    if credential_free and advised_backend != _PLAYWRIGHT:
-        advised_backend = "httpx"
     advised_method = prepared.advised_method
     cookies = prepared.cookies
     policy_config = prepared.policy_config
@@ -1114,13 +1112,7 @@ def _build_default_dependencies(
         executor=DEFAULT_EXTRACTION_EXECUTOR,
         extract=extract_article_with_pipeline,
         build_preflight_context=preflight_facade.build_execution_context,
-        preflight_options=lambda values: (
-            replace(
-                preflight_facade.PreflightOptions.from_mapping(values), external_tools_enabled=False, impersonate=False
-            )
-            if credential_free
-            else preflight_facade.PreflightOptions.from_mapping(values)
-        ),
+        preflight_options=preflight_facade.PreflightOptions.from_mapping,
         public_preflight_payload=preflight_facade.public_preflight_payload,
         resolve_handler=resolve_handler,
         js_required=_js_required,

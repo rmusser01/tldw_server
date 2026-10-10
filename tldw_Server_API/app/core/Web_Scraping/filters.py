@@ -266,7 +266,7 @@ class RobotsFilter:
                         http_fetch,
                         robots_url,
                         timeout=self.timeout,
-                        backend="httpx",
+                        backend=self.backend,
                         headers=build_browser_headers("chrome_120_win", accept_lang="en-US,en;q=0.9"),
                         follow_redirects=True,
                         trust_env=False,

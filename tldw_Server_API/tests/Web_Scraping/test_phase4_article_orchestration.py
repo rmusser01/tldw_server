@@ -1352,24 +1352,25 @@ async def test_credential_free_redirect_denial_never_acquires_private_target(mon
 
 
 @pytest.mark.asyncio
-async def test_credential_free_preflight_cannot_reintroduce_curl(monkeypatch):
+async def test_credential_free_preflight_preserves_governed_curl_advice(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping.orchestration import article
 
     harness = _harness(backend="curl")
     harness.apply_advice.side_effect = lambda result, **kwargs: ("curl", "auto", result)
     monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args, **_kwargs: harness.dependencies)
     await article.scrape_article(URL, credential_free=True)
-    assert harness.fetch.requests[0].backend == "httpx"
+    assert harness.fetch.requests[0].backend == "curl"
 
 
-def test_credential_free_default_dependencies_disable_external_probes():
+def test_credential_free_default_dependencies_preserve_probe_options():
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _build_default_dependencies
 
     dependencies = _build_default_dependencies((), credential_free=True)
     assert (
         dependencies.preflight_options({"web_scraper_preflight_enable_external_tools": True}).external_tools_enabled
-        is False
+        is True
     )
+    assert dependencies.preflight_options({"web_scraper_preflight_impersonate": True}).impersonate is True
 
 
 def test_credential_free_http_runtime_delegates_environment_and_pinning_to_central_transport(monkeypatch):
@@ -1404,10 +1405,9 @@ def test_credential_free_http_runtime_delegates_environment_and_pinning_to_centr
 
 @pytest.mark.asyncio
 async def test_credential_free_native_http_probe_disables_environment_state(monkeypatch):
-    from types import SimpleNamespace
-
     from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
     from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import http as adapter
+    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeHttpRequest
 
     calls = []
     client = object()
@@ -1424,18 +1424,18 @@ async def test_credential_free_native_http_probe_disables_environment_state(monk
     monkeypatch.setattr(adapter.http_client, "afetch", fetch)
     with public_url_policy_scope():
         await adapter.HttpxProbeTransport().send(
-            SimpleNamespace(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1)
+            ProbeHttpRequest(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1)
         )
     assert calls == [{"proxies": None, "trust_env": False}]
 
 
 @pytest.mark.asyncio
-async def test_credential_free_native_curl_probe_declined_before_session(monkeypatch):
+async def test_credential_free_native_curl_probe_declines_missing_security_capability(monkeypatch):
     from types import SimpleNamespace
 
     from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
     from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import http as adapter
-    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeUnavailable
+    from tldw_Server_API.app.core.Web_Scraping.preflight.probes import ProbeHttpRequest, ProbeUnavailable
 
     factory = Mock(side_effect=AssertionError("curl environment state must not be acquired"))
     monkeypatch.setattr(adapter, "_CurlOpt", SimpleNamespace(RESOLVE=1))
@@ -1445,6 +1445,6 @@ async def test_credential_free_native_curl_probe_declined_before_session(monkeyp
     )
     with public_url_policy_scope(), pytest.raises(ProbeUnavailable):
         await transport.send(
-            SimpleNamespace(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1, impersonate="chrome")
+            ProbeHttpRequest(proxies=None, url=URL, headers={}, cookies={}, timeout_s=1, impersonate="chrome")
         )
     factory.assert_not_called()

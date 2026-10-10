@@ -24,14 +24,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
     hasPersistentBackend: true,
+    getAll: async () => Object.fromEntries(mocks.values),
     get: async (key: string) => structuredClone(mocks.values.get(key)),
     set: async (key: string, value: unknown) => {
-      if (mocks.failStorage) throw Error("storage full")
-      mocks.values.set(key, structuredClone(value))
-      mocks.onStored?.(value)
-    }
-  })
-}))
+      if (mocks.failStorage) throw Error("storage full");
+      mocks.values.set(key, structuredClone(value));
+      mocks.onStored?.(value);
+    },
+  }),
+}));
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: async () => ({ serverUrl: mocks.owner }),
@@ -401,13 +402,9 @@ it.each(["complete accepted article", "newer changed article"])(
     act(() => first.result.current.open(original))
     await act(async () => first.result.current.extract())
     mocks.onStored = (value) => {
-      if (
-        Object.values(value as Record<string, { pin?: unknown }>).some(
-          (record) => record.pin
-        )
-      ) {
-        mocks.onStored = undefined
-        first.unmount()
+      if ((value as { pin?: unknown }).pin) {
+        mocks.onStored = undefined;
+        first.unmount();
       }
     }
     await act(async () => first.result.current.save())

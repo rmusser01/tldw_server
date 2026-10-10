@@ -45,7 +45,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 let latestContext: ReturnType<typeof useKnowledgeQA> | null = null
 
 function ContextProbe() {
-  latestContext = useKnowledgeQA()
+  const context = useKnowledgeQA();
+  React.useEffect(() => {
+    latestContext = context;
+  }, [context]);
   return null
 }
 

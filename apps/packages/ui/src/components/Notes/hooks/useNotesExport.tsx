@@ -1,4 +1,7 @@
-import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
+import {
+  type KnowledgeNoteHead,
+  retainKnowledgeNoteProvenance,
+} from "@/utils/knowledge-note-provenance";
 import React from 'react'
 import type { MessageInstance } from 'antd/es/message/interface'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
@@ -35,7 +38,16 @@ const EXPORT_PAGE_SIZE = 100
 const MAX_EXPORT_REQUESTS = 1000
 const EXPORT_PREFLIGHT_NOTE_THRESHOLD = MAX_EXPORT_REQUESTS * EXPORT_PAGE_SIZE
 
-type ExportPage = { items: any[]; total: number | null }
+type ExportNote = Omit<NoteListItem, "keywords"> &
+  KnowledgeNoteHead & {
+    keywords?: Array<string | { keyword?: string }>;
+  };
+type ExportResponse = {
+  items?: ExportNote[];
+  total?: unknown;
+  pagination?: { total?: unknown; total_items?: unknown };
+};
+type ExportPage = { items: ExportNote[]; total: number | null };
 
 type GatherResult = {
   arr: NoteListItem[]
@@ -47,20 +59,24 @@ type GatherResult = {
 }
 
 /** list_notes reports the library size as pagination.total (and a top-level total alias). */
-const readReportedTotal = (res: any): number | null => {
-  const raw = res?.pagination?.total ?? res?.total ?? res?.pagination?.total_items
-  if (raw == null) return null
-  const value = Number(raw)
-  return Number.isFinite(value) && value >= 0 ? value : null
-}
+const readReportedTotal = (
+  res: ExportResponse | ExportNote[],
+): number | null => {
+  if (Array.isArray(res)) return null;
+  const raw =
+    res?.pagination?.total ?? res?.total ?? res?.pagination?.total_items;
+  if (raw == null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+};
 
-const toExportNote = (n: any): NoteListItem => ({
+const toExportNote = (n: ExportNote): NoteListItem => ({
   id: n?.id,
   title: n?.title,
   content: retainKnowledgeNoteProvenance(String(n?.content || ""), n),
   updated_at: n?.updated_at,
-  keywords: extractKeywords(n)
-})
+  keywords: extractKeywords(n),
+});
 
 export interface UseNotesExportDeps {
   message: MessageInstance
@@ -174,12 +190,16 @@ export function useNotesExport(deps: UseNotesExportDeps) {
         sort_by: 'created_at',
         sort_order: 'asc'
       })
-      const res = await bgRequest<any>({
+      const res = await bgRequest<ExportResponse | ExportNote[]>({
         path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
-        method: 'GET' as any,
-        abortSignal: signal
-      })
-      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
+        method: "GET",
+        abortSignal: signal,
+      });
+      const items = Array.isArray(res)
+        ? res
+        : Array.isArray(res?.items)
+          ? res.items
+          : [];
       return { items, total: readReportedTotal(res) }
     }
 
