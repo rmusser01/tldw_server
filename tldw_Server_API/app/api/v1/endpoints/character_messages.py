@@ -33,6 +33,8 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageListResponse,
     MessageResponse,
     MessageUpdate,
+    RoleplayResumeUserAppendRequest,
+    RoleplayResumeUserAppendResponse,
 )
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
     _detect_image_mime_type,
@@ -62,6 +64,7 @@ from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -344,6 +347,43 @@ def _resolve_message_scope(
 # ========================================================================
 # Message Endpoints
 # ========================================================================
+
+
+@router.post(
+    "/chats/{chat_id}/roleplay/messages",
+    response_model=RoleplayResumeUserAppendResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Messages"],
+)
+async def append_roleplay_resume_input(
+    body: RoleplayResumeUserAppendRequest,
+    chat_id: str = Path(..., description="Chat session ID"),
+    scope_type: Literal["global", "workspace"] | None = Query(None),
+    workspace_id: str | None = Query(None),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+):
+    """Append exactly one owned global Resume input or replay its original receipt."""
+    scope = _resolve_message_scope(scope_type, workspace_id)
+    if scope.scope_type != "global" or scope.workspace_id is not None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    if _active_message_sync_service(current_user, scope) is not None:
+        raise HTTPException(status_code=409, detail=RoleplayResumeConflictError("resume_sync_unsupported").to_detail())
+    limiter = get_character_rate_limiter()
+    await limiter.check_message_send_rate(current_user.id)
+    try:
+        return await run_in_threadpool(
+            db.append_idempotent_user_message,
+            chat_id,
+            body.model_dump(mode="json"),
+            owner_client_id=str(current_user.id),
+            validate_message_count=lambda count: limiter.validate_message_limit(chat_id, count),
+        )
+    except RoleplayResumeConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
+    except (NotFoundError, InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Unable to append the Resume input.") from exc
+
 
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,

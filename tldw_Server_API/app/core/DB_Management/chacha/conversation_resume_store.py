@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Callable
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
@@ -450,6 +451,131 @@ class ConversationResumeStore:
         """Read and validate a stored snapshot; absence is explicitly legacy-missing."""
         with self._db.transaction() as conn:
             return self._get_snapshot(conversation_id, conn)
+
+    def append_idempotent_user_message(
+        self,
+        conversation_id: str,
+        request: dict[str, Any],
+        *,
+        owner_client_id: str,
+        validate_message_count: Callable[[int], object] | None = None,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Append one protected Resume input under the existing conversation lock.
+
+        Owner-only message authority retains the immutable original request digest
+        and receipt; later public message edits cannot rewrite retry intent.
+        """
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
+            RoleplayResumeUserAppendRequest,
+            RoleplayResumeUserAppendResponse,
+        )
+        from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
+            RoleplayResumeConflictError,
+            require_roleplay_resume_fence,
+            roleplay_resume_fence,
+        )
+
+        body = RoleplayResumeUserAppendRequest.model_validate(request).model_dump(mode="json")
+        message_store = self._db.message_store
+        intent = message_store._history_intent_digest(body)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            message_store._lock_history_owner(active, conversation_id, owner_client_id)
+            state = self.get_roleplay_resume_state(conversation_id, conn=active, owner_client_id=owner_client_id)
+            conversation = state["conversation"]
+            if conversation.get("scope_type") not in (None, "global") or conversation.get("workspace_id") is not None:
+                raise NotFoundError("Conversation not found.")
+            scope = {"scope_type": "global", "workspace_id": None}
+            row = active.execute(
+                "SELECT conversation_id, client_id, history_admission_json FROM messages WHERE id = ?",
+                (body["message_id"],),
+            ).fetchone()
+            if row is not None:
+                existing = self._row_to_dict(row, ("conversation_id", "client_id", "history_admission_json"))
+                if str(existing["client_id"]) != owner_client_id:
+                    raise NotFoundError("Message not found.")
+                try:
+                    authority = json.loads(existing["history_admission_json"] or "null")
+                    original = authority.get("roleplay_resume_v1") if isinstance(authority, dict) else None
+                    if (
+                        existing["conversation_id"] != conversation_id
+                        or not isinstance(original, dict)
+                        or type(authority.get("version")) is not int
+                        or authority["version"] != 1
+                        or authority.get("settled") is not True
+                        or authority.get("interpretation") != {"kind": "parent_graph_v1"}
+                        or original.get("owner_client_id") != owner_client_id
+                        or original.get("scope") != scope
+                        or original.get("intent_digest") != intent
+                    ):
+                        raise RoleplayResumeConflictError("idempotency_conflict")
+                    receipt = RoleplayResumeUserAppendResponse.model_validate(original["receipt"]).model_dump(
+                        mode="json"
+                    )
+                    expected_receipt = {
+                        "version": 1,
+                        "conversation_id": conversation_id,
+                        "message_id": body["message_id"],
+                        "message_version": 1,
+                        "parent_message_id": body["expected"]["tail"]["message_id"],
+                        "fence": {
+                            **body["expected"],
+                            "history_version": body["expected"]["history_version"] + 1,
+                            "tail": {"message_id": body["message_id"], "message_version": 1},
+                        },
+                    }
+                    if receipt != expected_receipt:
+                        raise RoleplayResumeConflictError("idempotency_conflict")
+                    return receipt
+                except (KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
+                    raise RoleplayResumeConflictError("idempotency_conflict") from exc
+            require_roleplay_resume_fence(state, body["expected"])
+            if validate_message_count is not None:
+                validate_message_count(state["message_count"] + 1)
+            mid = self._db.add_message(
+                {
+                    "id": body["message_id"],
+                    "conversation_id": conversation_id,
+                    "client_id": owner_client_id,
+                    "sender": "user",
+                    "content": body["content"],
+                    "parent_message_id": state["tail"]["message_id"],
+                },
+                conn=active,
+            )
+            if mid != body["message_id"]:
+                raise InputError("Resume input was not inserted.")
+            admitted = self.get_roleplay_resume_state(conversation_id, conn=active, owner_client_id=owner_client_id)
+            if admitted["tail"] != {"message_id": mid, "message_version": 1}:
+                raise RoleplayResumeConflictError("history_fence_changed")
+            receipt = RoleplayResumeUserAppendResponse.model_validate(
+                {
+                    "version": 1,
+                    "conversation_id": conversation_id,
+                    "message_id": mid,
+                    "message_version": 1,
+                    "parent_message_id": state["tail"]["message_id"],
+                    "fence": roleplay_resume_fence(admitted),
+                }
+            ).model_dump(mode="json")
+            message_store._write_history_authority(
+                active,
+                mid,
+                {
+                    "version": 1,
+                    "settled": True,
+                    "interpretation": {"kind": "parent_graph_v1"},
+                    "roleplay_resume_v1": {
+                        "owner_client_id": owner_client_id,
+                        "scope": scope,
+                        "intent_digest": intent,
+                        "receipt": receipt,
+                    },
+                },
+            )
+            return receipt
 
     def get_roleplay_resume_state(
         self,

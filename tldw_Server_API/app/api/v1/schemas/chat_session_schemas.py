@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, StrictBool, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, Field, StrictBool, StrictInt, field_validator, model_serializer, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HISTORY_BRANCH_FIELD_DESCRIPTION,
@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HistoryAdmissionV1,
     HistoryEditTargetV1,
     HistorySelectionV1,
+    HistoryWireModel,
 )
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
@@ -435,6 +436,49 @@ class ChatSettingsResponse(BaseModel):
 # ========================================================================
 # Message Schemas
 # ========================================================================
+
+
+class RoleplayResumeTailV1(HistoryWireModel):
+    """Exact prior tail; empty chats require both fields to be null."""
+
+    message_id: str | None = Field(..., min_length=1, max_length=255)
+    message_version: StrictInt | None = Field(..., ge=1)
+
+    @model_validator(mode="after")
+    def _require_complete_tail(self) -> "RoleplayResumeTailV1":
+        if (self.message_id is None) != (self.message_version is None):
+            raise ValueError("Resume tail identity and version must be provided together")
+        return self
+
+
+class RoleplayResumeFenceV1(HistoryWireModel):
+    """Complete saved behavior and history expected by an original Resume command."""
+
+    version: StrictInt = Field(ge=1, le=1)
+    snapshot_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    settings_version: StrictInt = Field(ge=1)
+    history_version: StrictInt = Field(ge=1)
+    tail: RoleplayResumeTailV1
+
+
+class RoleplayResumeUserAppendRequest(HistoryWireModel):
+    """Caller-ID text append; generation and behavior overrides are separate."""
+
+    message_id: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=1_000_000)
+    expected: RoleplayResumeFenceV1
+
+
+class RoleplayResumeUserAppendResponse(HistoryWireModel):
+    """Immutable original admission receipt, including the resulting full fence."""
+
+    version: StrictInt = Field(ge=1, le=1)
+    conversation_id: str = Field(min_length=1)
+    message_id: str = Field(min_length=1)
+    message_version: StrictInt = Field(ge=1)
+    parent_message_id: str | None
+    fence: RoleplayResumeFenceV1
+
 
 class MessageCreate(BaseModel):
     """Schema for creating a new message."""

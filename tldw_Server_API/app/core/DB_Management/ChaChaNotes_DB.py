@@ -45977,6 +45977,7 @@ for _conversation_store_method in (
 
 
 for _conversation_resume_store_method in (
+    "append_idempotent_user_message",
     "put_behavior_snapshot",
     "get_conversation_behavior_snapshot",
     "get_roleplay_resume_state",
