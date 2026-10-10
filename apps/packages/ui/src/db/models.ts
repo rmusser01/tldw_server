@@ -169,9 +169,31 @@ export class ModelDb {
 
   private ensureIndex = async (): Promise<string[]> => {
     if (this.indexIds) return this.indexIds
-    const stored = await readIndex(this.db).catch(() => null)
-    this.indexIds =
-      stored?.ids ?? (await migrateLegacyRecords(this.db).catch(() => []))
+    const stored = await readIndex(this.db).catch((error) => {
+      console.warn("[ModelDb] failed to read the model index", error)
+      return null
+    })
+    if (stored) {
+      this.indexIds = stored.ids
+      return this.indexIds
+    }
+    try {
+      this.indexIds = await migrateLegacyRecords(this.db)
+    } catch (error) {
+      // A failed migration must never be cached as an empty index: a later
+      // persistRecords would then write [] over the real index and orphan
+      // every migrated record. Propagate so the caller fails loudly and the
+      // next operation retries (PR #3210 review follow-up).
+      console.warn(
+        "[ModelDb] model index migration failed; refusing to cache an empty index",
+        error
+      )
+      throw error instanceof Error
+        ? error
+        : new Error(
+            (error as { message?: string } | null)?.message ?? String(error)
+          )
+    }
     return this.indexIds
   }
 

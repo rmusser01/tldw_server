@@ -958,8 +958,9 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load keyword suggestions
-  const loadKeywordSuggestions = useCallback(async (searchText?: string) => {
+  // Load keyword suggestions (internal; the exported loadKeywordSuggestions
+  // below debounces this per-keystroke entry point).
+  const runLoadKeywordSuggestions = useCallback(async (searchText?: string) => {
     const signal = lifetime.current.signal
     if (signal.aborted) return
     const normalizeKeywords = (items: any[]): string[] => {
@@ -1092,6 +1093,45 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
 
     applyKeywordResultsFallback()
   }, [mediaApiUnavailable, results, lifetime, scopedRequest])
+
+  // Debounced entry point (PR #3210 review follow-up): the filter sidebar's
+  // Select fires onSearch per keystroke, which used to hit
+  // /api/v1/media/keywords on every key. Non-empty searches coalesce into one
+  // request per 300ms window; superseded inputs are dropped before dispatch.
+  const KEYWORD_SUGGESTION_DEBOUNCE_MS = 300
+  const keywordSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const keywordSuggestionSeqRef = useRef(0)
+  useEffect(() => {
+    return () => {
+      if (keywordSuggestionTimerRef.current) {
+        clearTimeout(keywordSuggestionTimerRef.current)
+      }
+    }
+  }, [])
+  const loadKeywordSuggestions = useCallback(
+    (searchText?: string) => {
+      const trimmed = typeof searchText === 'string' ? searchText.trim() : ''
+      if (keywordSuggestionTimerRef.current) {
+        clearTimeout(keywordSuggestionTimerRef.current)
+        keywordSuggestionTimerRef.current = null
+      }
+      if (!trimmed) {
+        // Empty input restores local options immediately (also the mount/
+        // results-sync path), so it bypasses the debounce entirely.
+        keywordSuggestionSeqRef.current += 1
+        void runLoadKeywordSuggestions(searchText)
+        return
+      }
+      const seq = ++keywordSuggestionSeqRef.current
+      keywordSuggestionTimerRef.current = setTimeout(() => {
+        keywordSuggestionTimerRef.current = null
+        if (lifetime.current.signal.aborted) return
+        if (seq !== keywordSuggestionSeqRef.current) return
+        void runLoadKeywordSuggestions(searchText)
+      }, KEYWORD_SUGGESTION_DEBOUNCE_MS)
+    },
+    [lifetime, runLoadKeywordSuggestions]
+  )
 
   // Keep keyword suggestions in sync with results
   useEffect(() => {
