@@ -51,6 +51,20 @@ async def emit_admin_account_audit_event(
     await _persist_admin_account_audit_event(**payload)
 
 
+async def emit_storage_quota_audit_event(*, actor_id: int | None, target_user_id: int, quota_mb: int | None) -> None:
+    """Audit a per-user storage quota edit with the same event PUT /admin/users/{id} emits."""
+    await emit_admin_account_audit_event(
+        actor_id=actor_id,
+        target_user_id=target_user_id,
+        event_type=AuditEventType.USER_UPDATED,
+        category=AuditEventCategory.AUTHORIZATION,
+        resource_type="user_account",
+        resource_id=str(target_user_id),
+        action="admin.user.update",
+        metadata={"storage_quota_mb": quota_mb},
+    )
+
+
 async def _persist_admin_account_audit_event(
     *,
     actor_id: int | None,
