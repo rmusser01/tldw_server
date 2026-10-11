@@ -79,6 +79,7 @@ from tldw_Server_API.app.core.RAG.rag_service.types import (
     SourceAuthority,
     VerificationStatus,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS = (
@@ -834,21 +835,22 @@ class LLMBasedClaimExtractor:
                 return await HeuristicSentenceExtractor().extract(answer, max_claims)
         try:
             start_time = time.time()
-            raw = await _run_bounded_claims_analyze(
-                self._analyze,
-                provider or "openai",
-                answer,
-                prompt,
-                None,
-                system,
-                temperature,
-                streaming=False,
-                recursive_summarization=False,
-                chunked_summarization=False,
-                chunk_options=None,
-                model_override=model_override,
-                response_format=response_format,
-            )
+            with llm_call_context(records_itself=True):
+                raw = await _run_bounded_claims_analyze(
+                    self._analyze,
+                    provider or "openai",
+                    answer,
+                    prompt,
+                    None,
+                    system,
+                    temperature,
+                    streaming=False,
+                    recursive_summarization=False,
+                    chunked_summarization=False,
+                    chunk_options=None,
+                    model_override=model_override,
+                    response_format=response_format,
+                )
             latency_s = time.time() - start_time
             record_claims_provider_request(
                 provider=provider or "openai",
@@ -1199,17 +1201,18 @@ class HybridClaimVerifier:
                 )
         try:
             start_time = time.time()
-            raw = await _run_bounded_claims_analyze(
-                self._analyze,
-                provider or "openai",
-                claim_text,
-                judge_prompt,
-                None,
-                system,
-                temperature,
-                model_override=model_override,
-                response_format=response_format,
-            )
+            with llm_call_context(records_itself=True):
+                raw = await _run_bounded_claims_analyze(
+                    self._analyze,
+                    provider or "openai",
+                    claim_text,
+                    judge_prompt,
+                    None,
+                    system,
+                    temperature,
+                    model_override=model_override,
+                    response_format=response_format,
+                )
             latency_s = time.time() - start_time
             record_claims_provider_request(
                 provider=provider or "openai",

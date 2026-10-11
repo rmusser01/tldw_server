@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.TTS.gateway_catalog import (
     _parse_discovered_models,
 )
 from tldw_Server_API.app.core.TTS.gateway_config import build_gateway_url
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 
 _INVALID_TEST_KEY_PREFIXES = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
 PROVIDER_CREDENTIAL_VALIDATION_TIMEOUT_SECONDS = 10.0
@@ -648,11 +649,12 @@ async def test_provider_credentials(
                     enforce_authoritative_egress()
                     return adapter.chat(request, timeout=effective_timeout)
 
-                result = await _run_bounded_health_call(
-                    call_adapter,
-                    provider=provider_norm,
-                    timeout_seconds=effective_timeout,
-                )
+                with llm_call_context(exempt=True):
+                    result = await _run_bounded_health_call(
+                        call_adapter,
+                        provider=provider_norm,
+                        timeout_seconds=effective_timeout,
+                    )
             else:
                 def call_legacy_provider() -> Any:
                     enforce_authoritative_egress()
@@ -672,11 +674,12 @@ async def test_provider_credentials(
                         },
                     )
 
-                result = await _run_bounded_health_call(
-                    call_legacy_provider,
-                    provider=provider_norm,
-                    timeout_seconds=effective_timeout,
-                )
+                with llm_call_context(exempt=True):
+                    result = await _run_bounded_health_call(
+                        call_legacy_provider,
+                        provider=provider_norm,
+                        timeout_seconds=effective_timeout,
+                    )
         except ChatAPIError as exc:
             raise_detached_error(provider_validation_public_error(exc))
         except Exception as exc:

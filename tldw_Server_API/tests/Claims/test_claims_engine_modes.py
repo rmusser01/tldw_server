@@ -773,3 +773,46 @@ async def test_aps_extraction_deadline_keeps_event_loop_responsive_and_degrades(
         "capacity-release",
     ]
     assert pool.active_count == 0
+
+
+def _flag_probe_stub(seen: list[bool]):
+    """Build an analyze stub that records the records_itself flag it sees on its pool thread."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+
+    def _stub(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
+              api_key: Optional[str] = None, system_message: Optional[str] = None,
+              temp: Optional[float] = None, **kwargs):
+        seen.append(current_llm_call_context().records_itself)
+        return _analyze_stub(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+
+    return _stub
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_extract_call_is_marked_self_recorded():
+    """The LLM extractor's provider call runs with records_itself=True."""
+    seen: list[bool] = []
+    engine = ClaimsEngine(_flag_probe_stub(seen))
+
+    await engine.extract_claims_only("Alpha is true. Beta is true.", claim_extractor="llm", claims_max=2)
+
+    assert seen == [True]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_verify_call_is_marked_self_recorded():
+    """The LLM verifier's provider call runs with records_itself=True."""
+    seen: list[bool] = []
+    engine = ClaimsEngine(_flag_probe_stub(seen))
+
+    await engine.verify_claims_only(
+        [Claim(id="c1", text="Alpha is true.")],
+        "Q",
+        [Doc("d1", "Alpha is true context", 0.5)],
+        claim_verifier="llm",
+        claims_top_k=1,
+    )
+
+    assert seen == [True]
