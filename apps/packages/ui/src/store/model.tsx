@@ -91,7 +91,7 @@ type ChatModelSettingsStore = ChatModelSettings & {
     value: ChatModelSettings[K],
   ) => void;
   updateSettings: (updates: Partial<ChatModelSettings>) => void;
-  reset: () => void;
+  reset: (apiProvider?: string) => void;
 
   // Individual setters (for backwards compatibility)
   setF16KV: (value: boolean) => void;
@@ -359,11 +359,12 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
       set((state) => applyActiveSettingsUpdate(state, { [key]: value })),
     updateSettings: (updates) =>
       set((state) => applyActiveSettingsUpdate(state, updates)),
-    reset: () =>
+    reset: (apiProvider) =>
       set({
         ...INITIAL_STATE,
+        apiProvider,
         activeSettingsScope: undefined,
-        globalSettings: EMPTY_GLOBAL_SETTINGS,
+        globalSettings: apiProvider === undefined ? EMPTY_GLOBAL_SETTINGS : { apiProvider },
         scopedSettingsByModelKey: {}
       }),
 

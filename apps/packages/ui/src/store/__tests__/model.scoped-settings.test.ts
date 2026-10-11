@@ -11,6 +11,64 @@ describe("provider:model scoped chat model settings", () => {
     useStoreChatModelSettings.getState().reset()
   })
 
+  it.each(['custom', 'anthropic', ''])(
+    'seeds only provider %s into a fresh conversation reset',
+    (provider) => {
+      const store = useStoreChatModelSettings.getState();
+      store.updateSettings({
+        apiProvider: 'openai',
+        systemPrompt: 'Prior instructions',
+        extraHeaders: 'prior headers',
+        extraBody: 'prior body',
+      });
+      store.setActiveSettingsScope('custom:shared');
+      useStoreChatModelSettings
+        .getState()
+        .updateSettings({ apiProvider: provider, temperature: 0.2 });
+      useStoreChatModelSettings.getState().reset(provider);
+      expect(useStoreChatModelSettings.getState()).toMatchObject({
+        apiProvider: provider,
+        globalSettings: { apiProvider: provider },
+        activeSettingsScope: undefined,
+        scopedSettingsByModelKey: {},
+        systemPrompt: undefined,
+        extraHeaders: undefined,
+        extraBody: undefined,
+        temperature: undefined,
+      });
+      useStoreChatModelSettings.getState().setActiveSettingsScope('custom:shared');
+      expect(useStoreChatModelSettings.getState().apiProvider).toBe(provider);
+    }
+  );
+
+  it('does not restore the seeded provider after a subscriber makes a newer selection', () => {
+    useStoreChatModelSettings
+      .getState()
+      .updateSettings({ apiProvider: 'custom', systemPrompt: 'Prior instructions' });
+    let armed = true;
+    const stop = useStoreChatModelSettings.subscribe((state) => {
+      if (!armed || state.systemPrompt !== undefined) return;
+      armed = false;
+      state.setApiProvider('anthropic');
+    });
+    try {
+      useStoreChatModelSettings.getState().reset('custom');
+      expect(useStoreChatModelSettings.getState().apiProvider).toBe('anthropic');
+    } finally {
+      stop();
+    }
+  });
+
+  it('keeps an explicit full reset free of the prior provider', () => {
+    useStoreChatModelSettings.getState().setApiProvider('custom');
+    useStoreChatModelSettings.getState().reset();
+    expect(useStoreChatModelSettings.getState()).toMatchObject({
+      apiProvider: undefined,
+      globalSettings: {},
+      scopedSettingsByModelKey: {},
+    });
+  });
+
   it("normalizes provider:model setting scope keys", () => {
     expect(normalizeModelSettingsScope(" OpenAI ", " gpt-4o ")).toBe(
       "openai:gpt-4o"

@@ -672,6 +672,78 @@ const awaitNoteGate = async (
   ])
 }
 
+describe('Compact New preserves the current model/provider pair', () => {
+  it('sends a retained bare model through its chosen provider after New', async () => {
+    const consumer = await mountOriginalScene(false, false);
+    try {
+      act(() => {
+        useStoreChatModelSettings
+          .getState()
+          .updateSettings({
+            apiProvider: 'custom',
+            systemPrompt: 'Old private instructions',
+            extraHeaders: 'old headers',
+            extraBody: 'old body',
+          });
+      });
+      act(() => expect(consumer.mounted.result.current.actions.clearChat()).toBe(true));
+      let result!: ChatSubmitResult;
+      await act(async () => {
+        result = await consumer.mounted.result.current.actions.onSubmit({
+          message: 'Fresh bare-model question',
+          image: '',
+          messageType: 'summary',
+        });
+      });
+      expect(normalizeChatSubmitResult(result)).toMatchObject({ status: 'submitted' });
+      expect(wires).toHaveLength(1);
+      expect(wires[0].body).toMatchObject({ model: 'test', api_provider: 'custom' });
+      expect(JSON.stringify(wires[0].body.messages)).not.toContain('Old private instructions');
+    } finally {
+      consumer.unmount();
+    }
+  });
+
+  it('keeps the execution-time provider after the rendered selection changes', async () => {
+    const consumer = await mountOriginalScene(false, false);
+    try {
+      act(() => {
+        useStoreChatModelSettings
+          .getState()
+          .updateSettings({
+            apiProvider: 'custom',
+            systemPrompt: 'Prior instructions',
+            extraHeaders: 'old headers',
+            extraBody: 'old body',
+            temperature: 0.2,
+          });
+      });
+      const originalNew = consumer.mounted.result.current.actions.clearChat;
+      act(() => {
+        useStoreMessageOption.getState().setSelectedModel('anthropic:shared');
+        useStoreChatModelSettings.getState().setApiProvider('anthropic');
+      });
+      act(() => expect(originalNew()).toBe(true));
+      expect(useStoreMessageOption.getState().selectedModel).toBe('anthropic:shared');
+      expect(useStoreChatModelSettings.getState()).toMatchObject({
+        apiProvider: 'anthropic',
+        globalSettings: { apiProvider: 'anthropic' },
+        systemPrompt: undefined,
+        extraHeaders: undefined,
+        extraBody: undefined,
+        temperature: undefined,
+      });
+      act(() => {
+        useStoreChatModelSettings.getState().setActiveSettingsScope('anthropic:shared');
+      });
+      expect(useStoreChatModelSettings.getState().apiProvider).toBe('anthropic');
+      expect(wires).toHaveLength(0);
+    } finally {
+      consumer.unmount();
+    }
+  });
+});
+
 describe("compact frozen Scene notes through the actual request", () => {
   for (const temporary of [false, true])
     for (const mode of ["vision", "preset"] as const) {

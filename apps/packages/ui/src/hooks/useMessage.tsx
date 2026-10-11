@@ -483,7 +483,7 @@ export const useMessage = () => {
     setIsProcessing(false);
     setStreaming(false);
     updatePageTitle();
-    currentChatModelSettings.reset();
+    currentChatModelSettings.reset(useStoreChatModelSettings.getState().apiProvider);
     setServerChatId(null);
     if (defaultInternetSearchOn) {
       setWebSearch(true);

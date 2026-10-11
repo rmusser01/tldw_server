@@ -36,30 +36,68 @@ import { SETTINGS_SERVER_CHAT_ID_PARAM } from "@/utils/settings-return"
 import type { PlaygroundSessionRestoreOutcome } from "@/hooks/usePlaygroundSessionPersistence"
 import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
 import { useChatActions } from "@/hooks/chat/useChatActions"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { captureActorSceneSendForTarget } from "@/hooks/chat/actor-scene-source"
+import { useStoreChatModelSettings } from "@/store/model"
 
-const ordinaryCompletion = vi.hoisted(() => ({ owner: "A", complete: vi.fn(), save: vi.fn(async () => "bob-history") }))
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({ normalChatMode: (...args: unknown[]) => ordinaryCompletion.complete(...args) }))
+const ordinaryCompletion = vi.hoisted(() => ({ owner: "A", result: null as ChatSubmitResult | null, complete: vi.fn(), save: vi.fn(async (_data: unknown) => "bob-history") }))
+vi.mock("@/hooks/chat-modes/normalChatMode", async original => ({
+  ...await original<typeof import("@/hooks/chat-modes/normalChatMode")>(),
+  normalChatMode: (...args: unknown[]) => ordinaryCompletion.complete(...args)
+}))
 vi.mock("@/hooks/utils/messageHelpers", async original => ({
   ...await original<typeof import("@/hooks/utils/messageHelpers")>(),
   createSaveMessageOnSuccess: () => ordinaryCompletion.save,
   validateBeforeSubmit: () => true
 }))
-vi.mock("@/services/actor-settings", () => ({ getActorSettingsForChat: async () => null }))
 vi.mock("@/services/tldw/server-capabilities", () => ({ getServerCapabilities: async () => ({ hasChatSaveToDb: true }) }))
 
 const OrdinarySend = () => {
   const state = useStoreMessageOption()
+  const owner = useChatDraftOwner(() => undefined)
+  const mounted = React.useRef(false)
+  React.useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  React.useLayoutEffect(() => {
+    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft()
+  }, [state.chatDraftAddress])
+  const ensureServerChatHistoryId: Parameters<typeof useChatActions>[0]["ensureServerChatHistoryId"] = async (_chatId, _title, _signal, _snapshot, sceneSend) => {
+    if (sceneSend?.acceptHistoryMirror?.("bob-history") !== true) throw new Error("actor_settings_scope_changed")
+    useStoreMessageOption.getState().setHistoryId("bob-history", { preserveServerChatId: true })
+    if (!sceneSend.isCurrent() || useStoreMessageOption.getState().historyId !== "bob-history") throw new Error("actor_settings_scope_changed")
+    return "bob-history"
+  }
   const actions = useChatActions({
     ...state, t: stableTranslation, notification: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() },
     abortController: null, setAbortController: vi.fn(), setIsSearchingInternet: vi.fn(),
     contextFiles: [], setContextFiles: vi.fn(), documentContext: null, setDocumentContext: vi.fn(),
-    currentChatModelSettings: {}, ensureServerChatHistoryId: async () => "bob-history",
+    currentChatModelSettings: useStoreChatModelSettings(), ensureServerChatHistoryId,
     selectedCharacter: null, selectedAssistant: null, compareModeActive: false, compareSelectedModels: [],
     compareMaxModels: 3, markCompareHistoryCreated: vi.fn(), invalidateServerChatHistory: vi.fn(),
     clearReplyTarget: vi.fn(), clearMessageSteering: vi.fn(), replyTarget: null,
     messageSteeringMode: "none", messageSteeringForceNarrate: false, messageSteeringPrompts: null
   } as unknown as Parameters<typeof useChatActions>[0])
-  return <button onClick={() => void actions.onSubmit({ message: "Bob ordinary question", image: "" })}>Send ordinary turn</button>
+  // This standalone consumer declares the existing SDK lane, outside the Full H1 provider.
+  return <button disabled={!owner.isCurrent()} onClick={async () => {
+    const original = useStoreMessageOption.getState()
+    const session = usePlaygroundSessionStore.getState()
+    const commandIsCurrent = () => {
+      const current = useStoreMessageOption.getState()
+      const currentSession = usePlaygroundSessionStore.getState()
+      return mounted.current && owner.isCurrent() && current.chatDraftAddress === original.chatDraftAddress &&
+        current.chatDraftRevision === original.chatDraftRevision && current.temporaryChat === original.temporaryChat &&
+        currentSession.restoreRevision === session.restoreRevision && currentSession.sourceSelectionRevision === session.sourceSelectionRevision
+    }
+    const source = captureChatDraftSource(commandIsCurrent)
+    const target = captureActorSettingsTarget({ address: original.chatDraftAddress, requestScope: owner.requestScope,
+      accountIsCurrent: owner.isCurrent, isCurrent: source.isCurrent })
+    const capture = captureActorSceneSendForTarget(target, target?.account, source.isCurrent, commandIsCurrent)
+    ordinaryCompletion.result = capture
+      ? await actions.onSubmit({ message: "Bob ordinary question", image: "", actorSceneSend: await capture.read() })
+      : { status: "failed", errorMessage: "Missing original SDK Scene" }
+  }}>Send ordinary turn</button>
 }
 
 const useMessageOptionMock = vi.hoisted(() => vi.fn())
@@ -332,10 +370,6 @@ vi.mock("@/db/dexie/helpers", async () => ({
   getRecentChatFromWebUI: vi.fn(async () => null)
 }))
 
-const modelSettingsState = vi.hoisted(() => ({ setSystemPrompt: vi.fn(), reset: vi.fn() }))
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => modelSettingsState
-}))
 
 vi.mock("@/components/Layouts/HeaderShortcuts", () => ({ HeaderShortcuts: () => null }))
 vi.mock("@/hooks/useActiveChatTitle", () => ({ useActiveChatTitle: () => ({ title: "Saved Chat", ready: true, owner: { saving: false }, renameTitle: vi.fn() }) }))
@@ -599,6 +633,8 @@ describe("Playground coordinator integration", () => {
 
   beforeEach(() => {
     ordinaryCompletion.owner = "A"
+    ordinaryCompletion.result = null
+    useStoreChatModelSettings.getState().reset()
     ordinaryCompletion.save.mockClear()
     tldwClientState.createChat.mockResolvedValue({ id: "bob-created", title: "Bob chat", source: "webui-chat" })
     realLoader.session = false
@@ -678,7 +714,7 @@ describe("Playground coordinator integration", () => {
     })
   })
 
-  it("uses ordinary workflow immediately after Bob creates and completes a chat following account clear", async () => {
+  it("uses ordinary workflow after a declared SDK chat completes for Bob following account clear", async () => {
     realLoader.enabled = realLoader.webStorage = true
     localStorage.clear()
     await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
@@ -700,11 +736,18 @@ describe("Playground coordinator integration", () => {
       await waitFor(() => expect(screen.getByTestId("playground-form")).toHaveAttribute("data-character-workflow", "true"))
       ordinaryCompletion.complete.mockImplementation(async (_message, _image, _regenerate, _messages, _history, _signal, params) => {
         params.setMessages([{ id: "bob-user", isBot: false, message: "Bob ordinary question", sources: [] }, { id: "bob-answer", isBot: true, message: "Bob answer", sources: [] }])
-        await params.saveMessageOnSuccess({ message: "Bob ordinary question", fullText: "Bob answer", saveToDb: true, conversationId: params.serverChatId, userServerMessageId: "user-receipt", assistantServerMessageId: "answer-receipt" })
+        await params.saveMessageOnSuccess({ message: "Bob ordinary question", fullText: "Bob answer", saveToDb: true, conversationId: params.serverChatId, userServerMessageId: "user-receipt", assistantServerMessageId: "answer-receipt",
+          requestScope: params.servicePromptSnapshot.requestScope, scopeSignal: params.servicePromptSnapshot.scopeSignal,
+          scopeInvalidatedSignal: params.servicePromptSnapshot.scopeInvalidatedSignal })
         return { status: "submitted" }
       })
+      await waitFor(() => expect(screen.getByRole("button", { name: "Send ordinary turn" })).toBeEnabled())
       fireEvent.click(screen.getByRole("button", { name: "Send ordinary turn" }))
+      await waitFor(() => expect(ordinaryCompletion.result).toEqual({ status: "submitted" }))
       await waitFor(() => expect(ordinaryCompletion.save).toHaveBeenCalledTimes(1))
+      const saved = ordinaryCompletion.save.mock.calls[0]?.[0]
+      const prepared = ordinaryCompletion.complete.mock.calls[0]?.[6].servicePromptSnapshot
+      expect(saved).toMatchObject({ requestScope: { userId: "B" }, scopeSignal: prepared.scopeSignal, scopeInvalidatedSignal: prepared.scopeInvalidatedSignal })
       expect(tldwClientState.createChat).toHaveBeenCalledTimes(1)
       expect(tldwClientState.createChat.mock.calls[0][1]).toMatchObject({ requestScope: { userId: "B" } })
       expect(useStoreMessageOption.getState().serverChatId).toBe("bob-created")

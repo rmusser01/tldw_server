@@ -3,22 +3,24 @@ import React from "react"
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useClearChat } from "../useClearChat"
+import { useClearChat } from '../useClearChat';
+import { useStoreChatModelSettings } from '@/store/model';
 import {
   SETTINGS_NAVIGATION_REQUEST_EVENT,
   type SettingsNavigationRequestDetail
 } from "@/utils/settings-return"
 
-const navigateMock = vi.hoisted(() => vi.fn())
-const destroyAllMock = vi.hoisted(() => vi.fn())
-const cleanupOverlaysMock = vi.hoisted(() => vi.fn())
-const updatePageTitleMock = vi.hoisted(() => vi.fn())
-const focusTextAreaMock = vi.hoisted(() => vi.fn())
-const resetModelSettingsMock = vi.hoisted(() => vi.fn())
-const clearSessionMock = vi.hoisted(() => vi.fn())
-const optionStoreSetStateMock = vi.hoisted(() => vi.fn())
-const historySelectionResetMock = vi.hoisted(() => vi.fn())
-const historySelectionContextMock = vi.hoisted(() => vi.fn())
+const navigateMock = vi.hoisted(() => vi.fn());
+const destroyAllMock = vi.hoisted(() => vi.fn());
+const cleanupOverlaysMock = vi.hoisted(() => vi.fn());
+const updatePageTitleMock = vi.hoisted(() => vi.fn());
+const focusTextAreaMock = vi.hoisted(() => vi.fn());
+const resetModelSettingsMock = vi.hoisted(() => vi.fn());
+const modelFixture = vi.hoisted(() => ({ real: false }));
+const clearSessionMock = vi.hoisted(() => vi.fn());
+const optionStoreSetStateMock = vi.hoisted(() => vi.fn());
+const historySelectionResetMock = vi.hoisted(() => vi.fn());
+const historySelectionContextMock = vi.hoisted(() => vi.fn());
 
 const baseState = vi.hoisted(() => ({
   setMessages: vi.fn(),
@@ -101,9 +103,17 @@ vi.mock("@/store/playground-session", () => ({
   }
 }))
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({ reset: resetModelSettingsMock })
-}))
+vi.mock('@/store/model', async (original) => {
+  const actual = await original<typeof import('@/store/model')>();
+  return {
+    ...actual,
+    useStoreChatModelSettings: Object.assign(
+      () =>
+        modelFixture.real ? actual.useStoreChatModelSettings() : { reset: resetModelSettingsMock },
+      { getState: actual.useStoreChatModelSettings.getState }
+    ),
+  };
+});
 
 vi.mock("@/utils/cleanup-ant-overlays", () => ({
   cleanupAntOverlays: cleanupOverlaysMock
@@ -115,14 +125,80 @@ vi.mock("@/utils/update-page-title", () => ({
 
 describe("useClearChat settings navigation", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    Object.assign(optionState, { temporaryChat: false, messages: [], history: [], serverChatId: "saved", historyId: "local", chatDraftAddress: null, chatDraftRevision: 1 })
-    vi.spyOn(window, "confirm").mockReturnValue(false)
-    historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock })
-    window.history.replaceState({}, "", "/settings/prompt")
-  })
+    vi.clearAllMocks();
+    modelFixture.real = false;
+    useStoreChatModelSettings.getState().reset();
+    Object.assign(optionState, {
+      temporaryChat: false,
+      messages: [],
+      history: [],
+      serverChatId: 'saved',
+      historyId: 'local',
+      chatDraftAddress: null,
+      chatDraftRevision: 1,
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    historySelectionContextMock.mockReturnValue({ reset: historySelectionResetMock });
+    window.history.replaceState({}, '', '/settings/prompt');
+  });
 
   afterEach(() => vi.restoreAllMocks())
+
+  it('keeps the live provider with a retained model and clears old conversation settings', () => {
+    modelFixture.real = true;
+    useStoreChatModelSettings
+      .getState()
+      .updateSettings({
+        apiProvider: 'custom',
+        systemPrompt: 'Old instructions',
+        extraHeaders: 'old headers',
+        extraBody: 'old body',
+        temperature: 0.2,
+      });
+    const { result } = renderHook(() => useClearChat());
+    const originalNew = result.current;
+    act(() => {
+      useStoreChatModelSettings.getState().setApiProvider('anthropic');
+    });
+    act(() => expect(originalNew()).toBe(true));
+    expect(useStoreChatModelSettings.getState()).toMatchObject({
+      apiProvider: 'anthropic',
+      globalSettings: { apiProvider: 'anthropic' },
+      systemPrompt: undefined,
+      extraHeaders: undefined,
+      extraBody: undefined,
+      temperature: undefined,
+    });
+    act(() => {
+      useStoreChatModelSettings.getState().setActiveSettingsScope('anthropic:shared');
+    });
+    expect(useStoreChatModelSettings.getState().apiProvider).toBe('anthropic');
+  });
+
+  it.each([undefined, ''])('keeps Default provider %s when starting a new chat', (provider) => {
+    modelFixture.real = true;
+    useStoreChatModelSettings
+      .getState()
+      .updateSettings({ apiProvider: provider, systemPrompt: 'Old instructions' });
+    const { result } = renderHook(() => useClearChat());
+    act(() => expect(result.current()).toBe(true));
+    expect(useStoreChatModelSettings.getState().apiProvider).toBe(provider);
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined();
+  });
+
+  it('preserves the exact settings when New is refused', () => {
+    modelFixture.real = true;
+    useStoreChatModelSettings
+      .getState()
+      .updateSettings({ apiProvider: 'custom', systemPrompt: 'Keep original instructions' });
+    const before = useStoreChatModelSettings.getState();
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, (event) => event.preventDefault(), {
+      once: true,
+    });
+    const { result } = renderHook(() => useClearChat());
+    act(() => expect(result.current()).toBe(false));
+    expect(useStoreChatModelSettings.getState()).toBe(before);
+  });
 
   it("does nothing when the mounted settings editor declines navigation", () => {
     const declineNavigation = vi.fn((event: Event) => event.preventDefault())

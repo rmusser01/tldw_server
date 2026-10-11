@@ -132,7 +132,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     setServerChatVersion(null)
     setContextFiles([])
     updatePageTitle()
-    currentChatModelSettings.reset()
+    currentChatModelSettings.reset(useStoreChatModelSettings.getState().apiProvider)
     if (defaultInternetSearchOn) {
       setWebSearch(true)
     }

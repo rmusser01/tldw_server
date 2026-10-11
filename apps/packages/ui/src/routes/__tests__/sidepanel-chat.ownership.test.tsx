@@ -2668,6 +2668,26 @@ describe.each([
     await screen.findByText("alice first")
   })
 
+  it.each([undefined, 'anthropic'])(
+    'restores a saved tab provider %s without borrowing the departing pair',
+    async (provider) => {
+      const saved = tabsState();
+      saved.snapshotsById['alice-one'].modelSettings.apiProvider = 'custom';
+      saved.snapshotsById['alice-two'].modelSettings = {
+        apiProvider: provider,
+        systemPrompt: 'Destination instructions',
+      };
+      io.data.set(storedKey('alice'), saved);
+      render(<Route />);
+      await screen.findByText('alice first');
+      expect(useStoreChatModelSettings.getState().apiProvider).toBe('custom');
+      fireEvent.click(await screen.findByRole('button', { name: 'alice two' }));
+      await screen.findByText('alice inactive');
+      expect(useStoreChatModelSettings.getState().apiProvider).toBe(provider);
+      expect(useStoreChatModelSettings.getState().systemPrompt).toBe('Destination instructions');
+    }
+  );
+
   it("restores the last selected owned tab after a fresh mount", async () => {
     io.data.set(storedKey("alice"), tabsState())
     const view = render(<Route />)
