@@ -63,13 +63,19 @@ async def test_a_queued_stream_factory_runs_with_the_enqueuer_s_call_state() -> 
         return iter(())
 
     channel: asyncio.Queue[Any] = asyncio.Queue()
+    bare_channel: asyncio.Queue[Any] = asyncio.Queue()
     try:
         with llm_call_context(user_id=4, records_itself=True):
             future = await queue.enqueue(
                 "req-stream", {}, "client", RequestPriority.NORMAL,
                 processor=_factory, streaming=True, stream_channel=channel,
             )
+        bare_future = await queue.enqueue(
+            "req-stream-bare", {}, "client", RequestPriority.NORMAL,
+            processor=_factory, streaming=True, stream_channel=bare_channel,
+        )
         await asyncio.wait_for(asyncio.shield(future), timeout=5)
+        await asyncio.wait_for(asyncio.shield(bare_future), timeout=5)
     finally:
         await queue.stop()
-    assert seen == [(4, True, False)]
+    assert seen == [(4, True, False), (None, False, False)]

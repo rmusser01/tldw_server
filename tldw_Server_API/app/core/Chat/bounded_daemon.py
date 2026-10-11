@@ -133,9 +133,9 @@ class BoundedDaemonPool:
     ) -> threading.Thread:
         """Start *target* as a daemon or fail closed without invoking it."""
 
-        self._acquire_capacity(exhaustion_message)
         # Only the LLM call state crosses into the thread; no other context does.
         llm_state = capture_llm_call_state()
+        self._acquire_capacity(exhaustion_message)
 
         def guarded_target() -> None:
             try:

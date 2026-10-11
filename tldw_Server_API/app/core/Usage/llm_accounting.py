@@ -70,7 +70,7 @@ def submit_accounting(make_coro: Callable[[], Awaitable[Any]]) -> bool:
 
 
 async def drain_accounting(timeout: float = 5.0) -> None:
-    """Wait until scheduled writes have finished (tests and shutdown)."""
+    """Wait until scheduled writes have finished. For tests: nothing drains at shutdown."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while _pending and loop.time() < deadline:

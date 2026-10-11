@@ -10,6 +10,7 @@ import functools
 import inspect
 import json
 import math
+import re
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
@@ -51,8 +52,8 @@ def _plan_call() -> _CallPlan | None:
         if user_id is None:
             return None
         return _CallPlan(user_id=int(user_id), operation=context.operation, endpoint=context.endpoint)
-    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
-        logger.opt(exception=True).debug("LLM usage accounting plan failed")
+    except Exception as error:  # noqa: BLE001 - accounting must never break an LLM call
+        logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting plan failed")
         return None
 
 
@@ -61,11 +62,20 @@ def _approx_tokens(char_count: int) -> int:
     return max(1, char_count // 4) if char_count > 0 else 0
 
 
+# The same redaction the chat endpoint's estimator applies (chat_service._DATA_URI_RE).
+_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
+
+
 def _prompt_estimate(request: Any) -> int:
-    """Estimated prompt tokens from the request's messages."""
+    """Estimated prompt tokens: the messages plus the system prompt, with image payloads redacted."""
     try:
-        messages = request.get("messages") if isinstance(request, dict) else None
-        return max(1, len(json.dumps(messages, default=str)) // 4)
+        if not isinstance(request, dict):
+            return 1
+        text = json.dumps(request.get("messages"), default=str)
+        system_message = request.get("system_message")
+        if isinstance(system_message, str):
+            text += system_message
+        return max(1, len(_DATA_URI_RE.sub(r"\1<omitted>", text)) // 4)
     except Exception:  # noqa: BLE001 - an estimate must never fail a call
         return 1
 
@@ -115,7 +125,13 @@ class _StreamUsage:
                 payload = line[5:].strip()
                 if not payload or payload == "[DONE]":
                     continue
-                data = json.loads(payload)
+                # "reasoning_content" does not contain the substring '"content"', so it is listed too.
+                if not any(key in payload for key in ('"usage"', '"content"', '"reasoning_content"', '"arguments"')):
+                    continue
+                try:
+                    data = json.loads(payload)
+                except ValueError:
+                    continue
                 if not isinstance(data, dict):
                     continue
                 usage = data.get("usage")
@@ -123,9 +139,17 @@ class _StreamUsage:
                     self.usage = usage
                 for choice in data.get("choices") or []:
                     delta = choice.get("delta") if isinstance(choice, dict) else None
-                    content = delta.get("content") if isinstance(delta, dict) else None
-                    if isinstance(content, str):
-                        self.chars += len(content)
+                    if not isinstance(delta, dict):
+                        continue
+                    for text_field in (delta.get("content"), delta.get("reasoning_content")):
+                        if isinstance(text_field, str):
+                            self.chars += len(text_field)
+                    tool_calls = delta.get("tool_calls")
+                    for tool_call in tool_calls if isinstance(tool_calls, list) else []:
+                        function = tool_call.get("function") if isinstance(tool_call, dict) else None
+                        arguments = function.get("arguments") if isinstance(function, dict) else None
+                        if isinstance(arguments, str):
+                            self.chars += len(arguments)
         except Exception:  # noqa: BLE001 - a malformed chunk must never fail a stream
             return
 
@@ -168,8 +192,8 @@ def _submit_record(
             )
 
         submit_accounting(_write)
-    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
-        logger.opt(exception=True).debug("LLM usage accounting record failed")
+    except Exception as error:  # noqa: BLE001 - accounting must never break an LLM call
+        logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting record failed")
 
 
 def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any, started: float) -> None:
@@ -178,18 +202,19 @@ def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any
         usage = response.get("usage") if isinstance(response, dict) else None
         if isinstance(usage, dict) and usage:
             prompt_tokens, completion_tokens = _usage_tokens(usage)
-            _submit_record(
-                provider, plan, request, usage=usage, prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens, started=started, estimate_source=None,
-            )
-            return
+            if (prompt_tokens, completion_tokens) != (0, 0):
+                _submit_record(
+                    provider, plan, request, usage=usage, prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens, started=started, estimate_source=None,
+                )
+                return
         _submit_record(
             provider, plan, request, usage=None, prompt_tokens=_prompt_estimate(request),
             completion_tokens=_approx_tokens(_response_chars(response)), started=started,
             estimate_source="response_estimate",
         )
-    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
-        logger.opt(exception=True).debug("LLM usage accounting record failed")
+    except Exception as error:  # noqa: BLE001 - accounting must never break an LLM call
+        logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting record failed")
 
 
 def _record_stream(provider: Any, plan: _CallPlan, request: Any, seen: _StreamUsage, started: float) -> None:
@@ -197,17 +222,18 @@ def _record_stream(provider: Any, plan: _CallPlan, request: Any, seen: _StreamUs
     try:
         if seen.usage is not None:
             prompt_tokens, completion_tokens = _usage_tokens(seen.usage)
-            _submit_record(
-                provider, plan, request, usage=seen.usage, prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens, started=started, estimate_source=None,
-            )
-            return
+            if (prompt_tokens, completion_tokens) != (0, 0):
+                _submit_record(
+                    provider, plan, request, usage=seen.usage, prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens, started=started, estimate_source=None,
+                )
+                return
         _submit_record(
             provider, plan, request, usage=None, prompt_tokens=_prompt_estimate(request),
             completion_tokens=_approx_tokens(seen.chars), started=started, estimate_source="stream_estimate",
         )
-    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
-        logger.opt(exception=True).debug("LLM usage accounting record failed")
+    except Exception as error:  # noqa: BLE001 - accounting must never break an LLM call
+        logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting record failed")
 
 
 def _accounted_sync_stream(provider: Any, plan: _CallPlan, request: Any, inner: Any, started: float) -> Iterator[Any]:
@@ -332,6 +358,8 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
             return inner  # a broken provider's result reaches the caller's own check unchanged
         return _accounted_async_stream(self, plan, request, inner, started)
 
+    if inspect.iscoroutinefunction(fn):
+        inspect.markcoroutinefunction(astream)
     return astream
 
 

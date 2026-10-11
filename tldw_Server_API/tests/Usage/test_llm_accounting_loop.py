@@ -69,14 +69,14 @@ async def test_a_write_from_a_thread_with_its_own_loop_still_runs_on_the_account
 def test_with_no_loop_anywhere_nothing_is_scheduled(monkeypatch: pytest.MonkeyPatch) -> None:
     """With no accounting loop and no running loop, the write is skipped and nothing raises."""
     monkeypatch.setattr(llm_accounting, "_accounting_loop", None)
-    made: list[int] = []
+    called: list[int] = []
 
-    async def _write() -> None:
-        """Never runs."""
-        made.append(1)
+    def _make_coro() -> None:
+        """Must never be called: nothing is built when there is nowhere to run it."""
+        called.append(1)
 
-    assert llm_accounting.submit_accounting(_write) is False
-    assert made == []
+    assert llm_accounting.submit_accounting(_make_coro) is False  # type: ignore[arg-type]
+    assert called == []
 
 
 async def test_a_failing_write_is_logged_and_never_raises(accounting_loop) -> None:
@@ -88,6 +88,17 @@ async def test_a_failing_write_is_logged_and_never_raises(accounting_loop) -> No
 
     assert llm_accounting.submit_accounting(_boom) is True
     await llm_accounting.drain_accounting()
+    assert not llm_accounting._pending
+
+
+async def test_a_make_coro_that_raises_returns_false_and_raises_nothing(accounting_loop) -> None:
+    """A factory that fails is reported as not scheduled, with the loop set."""
+
+    def _make_coro() -> None:
+        """Fail while building the coroutine."""
+        raise RuntimeError("bad factory")
+
+    assert llm_accounting.submit_accounting(_make_coro) is False  # type: ignore[arg-type]
 
 
 def test_a_closed_accounting_loop_is_treated_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:

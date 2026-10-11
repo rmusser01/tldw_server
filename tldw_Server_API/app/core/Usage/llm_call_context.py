@@ -61,7 +61,11 @@ def llm_call_context(**overrides: Any) -> Iterator[LLMCallContext]:
 
 
 async def with_llm_call_context(awaitable: Awaitable[Any], **overrides: Any) -> Any:
-    """Await ``awaitable`` with the overrides applied; for marking a long call without re-indenting it."""
+    """Await ``awaitable`` with the overrides applied; for marking a long call without re-indenting it.
+
+    The overrides apply to a coroutine this function awaits itself. A task that was
+    started earlier has already copied its context and does not see them.
+    """
     with llm_call_context(**overrides):
         return await awaitable
 

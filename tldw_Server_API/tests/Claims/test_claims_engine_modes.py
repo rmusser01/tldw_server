@@ -816,3 +816,50 @@ async def test_claims_verify_call_is_marked_self_recorded():
     )
 
     assert seen == [True]
+
+
+@pytest.fixture
+def claims_rows(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Capture the usage rows the claims recorder writes."""
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_log(**kwargs: Any) -> None:
+        """Keep the row instead of writing it."""
+        captured.append(kwargs)
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.usage_tracker.log_llm_usage", _fake_log)
+    return captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_extract_row_falls_back_to_the_context_user(claims_rows):
+    """With no job context, the extract row is attributed to the scope user."""
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    engine = ClaimsEngine(_analyze_stub)
+    with scoped_context(user_id=9):
+        await engine.extract_claims_only("Alpha is true. Beta is true.", claim_extractor="llm", claims_max=2)
+
+    (row,) = claims_rows
+    assert (row["operation"], row["user_id"]) == ("claims_extract", 9)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_verify_row_falls_back_to_the_context_user(claims_rows):
+    """With no job context, the verify row is attributed to the scope user."""
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    engine = ClaimsEngine(_analyze_stub)
+    with scoped_context(user_id=9):
+        await engine.verify_claims_only(
+            [Claim(id="c1", text="Alpha is true.")],
+            "Q",
+            [Doc("d1", "Alpha is true context", 0.5)],
+            claim_verifier="llm",
+            claims_top_k=1,
+        )
+
+    (row,) = claims_rows
+    assert (row["operation"], row["user_id"]) == ("claims_verify", 9)

@@ -79,7 +79,7 @@ from tldw_Server_API.app.core.RAG.rag_service.types import (
     SourceAuthority,
     VerificationStatus,
 )
-from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id, llm_call_context
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS = (
@@ -677,6 +677,8 @@ async def _log_claims_llm_usage(
         user_id = job_context.user_id if job_context else None
     except _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS:
         user_id = None
+    if user_id is None:
+        user_id = current_llm_user_id()
     try:
         api_key_id = job_context.api_key_id if job_context else None
     except _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS:

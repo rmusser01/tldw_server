@@ -369,3 +369,94 @@ async def test_a_stream_item_holding_two_events_counts_both(rows) -> None:
     (row,) = await _settled(rows)
     assert (row["prompt_tokens"], row["completion_tokens"]) == (5, 2)
     assert row["usage_metadata"] == {"prompt_tokens": 5, "completion_tokens": 2}
+
+
+async def test_image_payload_bytes_are_not_counted_in_the_prompt_estimate(rows) -> None:
+    """A base64 image in the messages is redacted before the estimate is taken."""
+    image = "data:image/png;base64," + "A" * 100_000
+    request = {
+        "model": "m1",
+        "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": image}}]}],
+    }
+    with llm_call_context(user_id=7):
+        _NoUsageProvider().chat(request)
+    (row,) = await _settled(rows)
+    assert row["prompt_tokens"] < 100
+
+
+async def test_the_system_prompt_is_counted_in_the_prompt_estimate(rows) -> None:
+    """The adapter request's separate system_message adds to the estimate."""
+    request = {"model": "m1", "messages": [{"role": "user", "content": "twenty chars here.."}], "system_message": "s" * 4000}
+    with llm_call_context(user_id=7):
+        _NoUsageProvider().chat(request)
+    (row,) = await _settled(rows)
+    assert 1000 <= row["prompt_tokens"] <= 1030
+
+
+async def test_a_usage_block_without_token_fields_is_estimated(rows) -> None:
+    """A block holding only total_tokens is not recorded as real provider usage of zero."""
+
+    class _TotalOnlyProvider(_FakeProvider):
+        """Reports only a total."""
+
+        name = "fake-total-only"
+
+        def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+            """Return a usage block with no prompt or completion count."""
+            return {"choices": [{"message": {"content": "hello"}}], "usage": {"total_tokens": 50}}
+
+    with llm_call_context(user_id=7):
+        _TotalOnlyProvider().chat(REQUEST)
+    (row,) = await _settled(rows)
+    assert row["estimated"] is True and row["estimate_source"] == "response_estimate"
+    assert row["usage_metadata"] is None
+
+
+async def test_the_stream_estimate_counts_reasoning_and_tool_call_arguments(rows) -> None:
+    """Tool-call arguments and reasoning text count toward the completion estimate."""
+
+    class _ToolStreamProvider(_FakeProvider):
+        """Streams tool arguments and reasoning, with no usage chunk."""
+
+        name = "fake-tool-stream"
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield an arguments delta and a reasoning delta."""
+            args = "x" * 40
+            yield 'data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"' + args + '"}}]}}]}\n\n'
+            yield 'data: {"choices":[{"delta":{"reasoning_content":"' + "y" * 40 + '"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+    with llm_call_context(user_id=7):
+        list(_ToolStreamProvider().stream(REQUEST))
+    (row,) = await _settled(rows)
+    assert row["completion_tokens"] == 20
+
+
+async def test_a_malformed_line_does_not_hide_a_later_usage_line(rows) -> None:
+    """Each line is parsed on its own; role-only chunks change nothing."""
+
+    class _NoisyProvider(_FakeProvider):
+        """One item holding a role-only chunk, a broken line and a usage line."""
+
+        name = "fake-noisy"
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield one batched item."""
+            yield (
+                'data: {"choices":[{"delta":{"role":"assistant"}}]}\n'
+                "data: {not json\n"
+                'data: {"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n'
+            )
+
+    with llm_call_context(user_id=7):
+        list(_NoisyProvider().stream(REQUEST))
+    (row,) = await _settled(rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (5, 2)
+    assert row["usage_metadata"] == {"prompt_tokens": 5, "completion_tokens": 2}
+
+
+def test_a_coroutine_astream_stays_a_coroutine_function() -> None:
+    """The wrapped astream keeps the kind of the method it wraps."""
+    assert inspect.iscoroutinefunction(_AwaitableAstreamProvider.astream)
+    assert not inspect.iscoroutinefunction(_FakeProvider.astream)
