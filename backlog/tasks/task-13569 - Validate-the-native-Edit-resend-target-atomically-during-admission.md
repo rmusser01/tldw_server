@@ -1,7 +1,7 @@
 ---
 id: TASK-13569
 title: Validate the native Edit-resend target atomically during admission
-status: In Progress
+status: Done
 labels:
 - chat
 - webui
@@ -26,7 +26,7 @@ Protect Edit and resend against target-only changes between capture and admissio
 - [x] #3 Unchanged target admits the intended edited sibling once; generic Branch, ordinary Send and protected Regenerate remain valid.
 - [x] #4 Acknowledged existing-ID replay validates original immutable operation intent without retroactively rejecting a later target edit; conflicting intent is refused.
 - [x] #5 Schema/docs/client capability qualify the added precondition; older servers refuse protected Edit and resend before mutation without an unguarded fallback.
-- [ ] #6 Real database and authenticated ordinary/character HTTP regressions, clients, touched security/static and current native evidence meet the declared contract.
+- [x] #6 Real database and authenticated ordinary/character HTTP regressions, clients, touched security/static and current native evidence meet the declared contract.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -37,19 +37,21 @@ Two independent source reviews confirmed the target-only TOCTOU. Do not reopen13
 Design: retain the explicit edited target ID, opaque revision and direct parent as a strict optional version1 admission precondition carried only by protected Edit and resend. Both single-input and server-owned input-chain admission check it inside the existing owner transaction. Existing-ID replay compares immutable intent including the precondition before a fresh target check. Generic Send/Branch/Regenerate keep their behavior. Clients require exact schema capability before journal or POST and preserve the proposal on refusal. ADR assessment: existing049/050/059 apply; no new storage owner, table, recovery mechanism or durable architecture rule. Plan: Docs/Design/IMPLEMENTATION_PLAN_chat_atomic_edit_target_13569.md. Implementation begins after the current13549 consumer unit is verified and committed; In Progress records the authorized design work, not completion.
 Stage1 now In Progress after Scene commit4932748894 and bounded current bundle. Both independent read-only assessments support strict optional3-field target precondition and existing owner-transaction validation; logical legacy predecessor remains independent of raw parent bound by opaque revision. Scope includes real metadata ABA/shared monotonic writer, immutable replay, exact primary operation capability and original echoed no-admission refusal through ordinary/Character/write tracking. All False metadata writers traced; PostgreSQL first-write placeholder must be controlled. Design/ADR assessment updated in Docs/Design/IMPLEMENTATION_PLAN_chat_atomic_edit_target_13569.md. Latest dev0c53973f17eede4074f4aa7894d0b42322340614 is included; no code/test result yet. ADR049/050/059 govern; no new durable architecture rule or dependency.
 Implementation verified: connected backend261 passed/104 official PostgreSQL skips; client11 suites577 passed, plus final three changed suites263 passed; final legacy8 passed/8 skips. Both WebUI and extension types exit0;20 TS scopes introduce0 ESLint findings;10 Python scopes introduce0 Ruff findings. Bandit scans10 files:3 unchanged existing findings,0 new production/other test findings;63 added B101 results are required pytest assertions. Owned TS/Python formatting preserves executable AST. Both independent final source reviews are bounded CLEAR. Latest dev0c53973f17eede4074f4aa7894d0b42322340614 is included. Evidence prefix /private/tmp/chat-atomic-edit-target-13569-. Current native bundle/packaged/physical AT/participants remain unqualified, so AC6 and task completion stay open. Original three-field revision binds raw parent; reviewed logical predecessor remains separate. No implicit Branch action is granted for a changed Edit target. ADR049/050/059 govern; no new durable owner or dependency.
+Native checkpoint: actual concurrent Edit returns exact echoed409 with literal proposal retained,0 rows/0 provider calls; actual Server finder reload then Edit succeeds once, preserves original2 rows, adds exact edited sibling/assistant pair with1 provider, and cold restores selected2-message branch with empty composer and canonical4 rows. Evidence /private/tmp/chat-atomic-edit-target-13569-native-proof.json and corresponding native logs/screenshots. Backend/client/type/static/Bandit evidence remains above. Explicit second Send established this baseline after separate first-bind race; TASK-13572 qualifies/fixes that issue. CSRF-helper and collapsed-sidebar prerequisite probes excluded. Packaged extension, physical AT/participants and official PostgreSQL skips remain qualified. ADR049/050/059 govern; no new architecture/dependency.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Protected Edit admission now checks the exact original target revision atomically, preserves immutable replay and original message graph, and retains edited input on refusal. Exact capability and structured refusal flow through ordinary/Character/Compact consumers. Connected database/API/client suites and native concurrent-edit plus explicit reload/positive/cold controls pass; unavailable PostgreSQL and packaged/physical/participant evidence are qualified rather than claimed. Implementation commit69e594c495; separate first-Send mirror defect continues as TASK-13572.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
