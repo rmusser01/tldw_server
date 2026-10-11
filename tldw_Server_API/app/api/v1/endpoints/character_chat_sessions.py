@@ -323,6 +323,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
@@ -1167,23 +1168,24 @@ async def _select_auto_character_llm_router_choice(
             if _extract_semantic_character_router_choice(result) is not None:
                 await credential_runtime.mark_used(provider_credentials)
 
-        result = await await_owned_worker(
-            perform_chat_api_call_async(
-                api_endpoint=router_model.provider,
-                messages_payload=router_messages,
-                api_key=provider_credentials.api_key,
-                model=router_model.model,
-                max_tokens=64,
-                streaming=False,
-                user_identifier=str(getattr(current_user, "id", "auto-router")),
-                app_config=provider_credentials.app_config,
-                credentials_resolved=provider_credentials.credentials_resolved,
-                **{
-                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
-                },
-            ),
-            on_cancel_result=_mark_late_router_choice,
-        )
+        with llm_call_context(records_itself=True):
+            result = await await_owned_worker(
+                perform_chat_api_call_async(
+                    api_endpoint=router_model.provider,
+                    messages_payload=router_messages,
+                    api_key=provider_credentials.api_key,
+                    model=router_model.model,
+                    max_tokens=64,
+                    streaming=False,
+                    user_identifier=str(getattr(current_user, "id", "auto-router")),
+                    app_config=provider_credentials.app_config,
+                    credentials_resolved=provider_credentials.credentials_resolved,
+                    **{
+                        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+                    },
+                ),
+                on_cancel_result=_mark_late_router_choice,
+            )
         if _extract_semantic_character_router_choice(result) is None:
             raise sanitized_provider_stream_exception(result)
         await await_owned_worker(credential_runtime.mark_used(provider_credentials))

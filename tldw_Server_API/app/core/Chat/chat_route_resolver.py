@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 
 _NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -184,16 +185,17 @@ async def _select_auto_llm_router_choice(
             fallback_resolver=fallback_resolver,
         )
         try:
-            return await perform_chat_api_call_async_fn(
-                api_endpoint=router_model.provider,
-                messages_payload=router_messages,
-                api_key=byok_resolution.api_key,
-                model=router_model.model,
-                max_tokens=64,
-                streaming=False,
-                user_identifier=str(getattr(current_user, "id", "auto-router")),
-                app_config=byok_resolution.app_config,
-            )
+            with llm_call_context(records_itself=True):
+                return await perform_chat_api_call_async_fn(
+                    api_endpoint=router_model.provider,
+                    messages_payload=router_messages,
+                    api_key=byok_resolution.api_key,
+                    model=router_model.model,
+                    max_tokens=64,
+                    streaming=False,
+                    user_identifier=str(getattr(current_user, "id", "auto-router")),
+                    app_config=byok_resolution.app_config,
+                )
         finally:
             await byok_resolution.touch_last_used()
 

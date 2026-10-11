@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
 from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.LLM_Calls.routing.decision_store import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 from tldw_Server_API.tests.Chat.integration.test_persona_backed_chat_conversations import (
     _create_persona_conversation,
 )
@@ -226,8 +227,11 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     )
     captured: dict[str, object] = {}
 
+    router_call_flags: list[bool] = []
+
     async def fake_router_call(**kwargs):
         captured["router_call"] = kwargs
+        router_call_flags.append(current_llm_call_context().records_itself)
         return {
             "choices": [
                 {
@@ -335,6 +339,7 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     }
     assert captured["router_call"]["model"] == "anthropic/claude-4.5-sonnet"
     assert captured["router_usage"][0]["provider"] == "openrouter"
+    assert router_call_flags == [True]
 
 
 @pytest.mark.integration

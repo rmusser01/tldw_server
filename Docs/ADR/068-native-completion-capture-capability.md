@@ -1,4 +1,4 @@
-# ADR-067: Owner-scoped native completion capture capability
+# ADR-068: Owner-scoped native completion capture capability
 
 **Status:** Proposed
 **Date:** 2026-10-10

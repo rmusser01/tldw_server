@@ -30,6 +30,11 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    LLMCallState,
+    capture_llm_call_state,
+    run_with_llm_call_state,
+)
 
 REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS = 0.05
 REQUEST_QUEUE_STREAM_CLEANUP_TIMEOUT_SECONDS = 0.05
@@ -382,6 +387,8 @@ class QueuedRequest:
     stream_channel: Optional[asyncio.Queue] = field(compare=False, default=None)
     stream_factory_timeout: float | None = field(compare=False, default=None)
     stream_terminal_error_emitted: bool = field(compare=False, default=False)
+    # The enqueuer's LLM call state; the queue's worker tasks have none of their own.
+    llm_state: Optional[LLMCallState] = field(compare=False, default=None)
 
 
 async def _emit_stream_terminal_error(
@@ -710,6 +717,8 @@ class RequestQueue:
         if not request.streaming:
             try:
                 fn = partial(
+                    run_with_llm_call_state,
+                    request.llm_state,
                     request.processor,
                     *request.processor_args,
                     **request.processor_kwargs,
@@ -907,6 +916,8 @@ class RequestQueue:
         # Run the processor to obtain the stream (potentially blocking)
         try:
             fn = partial(
+                run_with_llm_call_state,
+                request.llm_state,
                 request.processor,
                 *request.processor_args,
                 **request.processor_kwargs,
@@ -1091,6 +1102,7 @@ class RequestQueue:
                     if streaming and stream_factory_timeout is not None
                     else None
                 ),
+                llm_state=capture_llm_call_state(),
             )
 
             # Add to priority queue
