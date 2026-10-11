@@ -1,3 +1,4 @@
+import { captureSavedComposerInput } from "@/services/chat-composer-settlement"
 import { usePageAssist } from "@/context"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
@@ -489,6 +490,7 @@ export function HistorySelectionReview({
       useStoreMessageOption.getState().isProcessing
     )
       return
+    const acknowledgeInput = captureSavedComposerInput(entry.turn.input_text)
     const abort = new AbortController()
     retryAbort.current = abort
     const activity = {
@@ -518,6 +520,7 @@ export function HistorySelectionReview({
         originIsCurrent,
         sourceIsCurrent,
         message: entry.turn.input_text,
+        acknowledgeInput,
         retry: entry,
         serverChatId: entry.turn.conversation_id,
         setMessages: useStoreMessageOption.getState().setMessages

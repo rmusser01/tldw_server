@@ -850,3 +850,93 @@ it("private saved Roleplay preserves its original view across a held creation-re
     read.mockRestore()
   }
 })
+
+
+describe("saved Roleplay Retry input receipt boundary", () => {
+  it.each(["put", "read"] as const)(
+    "acknowledges the confirmed input even if completed recovery %s fails",
+    async (failure) => {
+      const mounted = await prepare()
+      io.complete.mockRejectedValueOnce(
+        new Error("Original completion response lost")
+      )
+      await sendSavedRoleplay(mounted.params).catch(() => undefined)
+      const [entry] = await loadHistoryTurnRecoveries(
+        { profile_id: "profile", client_session_id: "reopen" },
+        mounted.view
+      )
+      expect(entry.turn.roleplay_resume?.append).toBeTruthy()
+      const { memory } = await import("./local-history-fixture")
+      const originalPut = memory.historySelections.put
+      const read = vi.spyOn(memory.historySelections, "get")
+      let failed = false
+      const put = vi
+        .spyOn(memory.historySelections, "put")
+        .mockImplementation(async (value: HistoryBookmark) => {
+          const saved = Object.values(value.pending_turns ?? {}).some(
+            (turn) => turn.roleplay_resume?.completion?.saved
+          )
+          if (saved && !failed) {
+            failed = true
+            if (failure === "put")
+              throw new DOMException("storage full", "QuotaExceededError")
+            const result = await originalPut(value)
+            read.mockRejectedValueOnce(
+              new Error("Completed recovery read unavailable")
+            )
+            return result
+          }
+          return originalPut(value)
+        })
+      const acknowledgeInput = vi.fn(() => true)
+      try {
+        expect(
+          await sendSavedRoleplay({
+            ...mounted.params,
+            retry: entry,
+            acknowledgeInput
+          })
+        ).toBe(true)
+        expect(failed).toBe(true)
+        expect(acknowledgeInput).toHaveBeenCalledOnce()
+      } finally {
+        put.mockRestore()
+        read.mockRestore()
+      }
+    }
+  )
+
+  it("acknowledges the original selected input before its own canonical follow", async () => {
+    const mounted = await prepare()
+    const acknowledgeInput = vi.fn(() => {
+      expect(mounted.controller.getCurrent().view).toBe(mounted.view)
+      expect(mounted.follow).not.toHaveBeenCalled()
+      return true
+    })
+    expect(
+      await sendSavedRoleplay({ ...mounted.params, acknowledgeInput })
+    ).toBe(true)
+    expect(acknowledgeInput).toHaveBeenCalledOnce()
+    expect(mounted.follow).toHaveBeenCalledOnce()
+  })
+  it.each(["boundary", "New", "account", "Stop"] as const)(
+    "retains the composer when physical saved completion arrives after %s",
+    async (boundary) => {
+      const mounted = await prepare(),
+        complete = io.complete.getMockImplementation()!,
+        acknowledgeInput = vi.fn(() => true)
+      io.complete.mockImplementationOnce(async (...args) => {
+        const result = await complete(...args)
+        if (boundary === "boundary") mounted.earlier()
+        if (boundary === "New") mounted.retire()
+        if (boundary === "account") mounted.auth.abort()
+        if (boundary === "Stop") mounted.stop.abort()
+        return result
+      })
+      await sendSavedRoleplay({ ...mounted.params, acknowledgeInput }).catch(
+        () => undefined
+      )
+      expect(acknowledgeInput).not.toHaveBeenCalled()
+    }
+  )
+})

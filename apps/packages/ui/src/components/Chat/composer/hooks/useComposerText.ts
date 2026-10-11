@@ -1,3 +1,4 @@
+import { CAPTURE_SAVED_COMPOSER_INPUT_EVENT, type SavedComposerInputCapture } from "@/services/chat-composer-settlement"
 import { readChatCreationRecovery, listChatCreationRecovery, copyChatCreationRecovery, watchChatCreationRecovery, type ChatCreationRecovery } from "@/services/pending-chat-promotion"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { reviewNativeChatCreation } from "@/hooks/chat/native-history-character-send"
@@ -682,6 +683,52 @@ export function useComposerText(
     getDraftMetadata,
     isCurrent,
     promptAssistMutation.revision
+  ])
+
+  React.useLayoutEffect(() => {
+    const capture = (event: Event) => {
+      const detail = (event as CustomEvent<SavedComposerInputCapture>).detail
+      if (
+        typeof detail?.inputText !== "string" ||
+        typeof detail.capture !== "function"
+      )
+        return
+      const inputText = detail.inputText
+      const sourceIsCurrent = captureCompletionGuard()
+      const inputRevision = getRevision()
+      const attemptId = nextPromptAssistAttemptIdRef.current
+      const values = getValues()
+      if (!sourceIsCurrent() || values.message !== inputText || values.image)
+        return
+      let consumed = false
+      detail.capture(() => {
+        if (consumed) return false
+        consumed = true
+        const current = getValues()
+        if (
+          !sourceIsCurrent() ||
+          getRevision() !== inputRevision ||
+          nextPromptAssistAttemptIdRef.current !== attemptId ||
+          current.message !== inputText ||
+          current.image
+        )
+          return false
+        const savedAttemptId = beginPromptAssistReset()
+        markPromptAssistAttemptSaved(savedAttemptId, true)
+        restoreWithMetadata?.("", undefined)
+        return true
+      })
+    }
+    window.addEventListener(CAPTURE_SAVED_COMPOSER_INPUT_EVENT, capture)
+    return () =>
+      window.removeEventListener(CAPTURE_SAVED_COMPOSER_INPUT_EVENT, capture)
+  }, [
+    captureCompletionGuard,
+    getRevision,
+    getValues,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    restoreWithMetadata
   ])
 
   const restorePromptAssistAttempt = React.useCallback((attemptId: number) => {

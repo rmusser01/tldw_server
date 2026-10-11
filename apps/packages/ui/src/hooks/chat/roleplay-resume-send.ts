@@ -53,6 +53,7 @@ export type SavedRoleplaySendParams = {
   serverChatId?: string | null
   historyId?: string | null
   setMessages: Dispatch<SetStateAction<Message[]>>
+  acknowledgeInput?: () => boolean
   retry?: { scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }
 }
 
@@ -135,6 +136,8 @@ export const sendSavedRoleplay = async (
   const finishSaved = async () => {
     const response = protocol!.completion!
     settled = true
+    // Own following advances H1; acknowledge only the still-selected original input.
+    if (preparingIsCurrent()) params.acknowledgeInput?.()
     await retain("generated_unsaved", {
       outcome: "complete",
       settled_message_id: response.assistant_message_id!,

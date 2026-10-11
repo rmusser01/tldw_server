@@ -1,9 +1,26 @@
 import React from "react"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 import { parseRoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 const roleplayRetry = vi.hoisted(() => ({ send: vi.fn() }))
+const draftAuthority = vi.hoisted(() => ({ user: "alice" }))
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
+)
+vi.mock("@/services/service-prompts", async (original) => ({
+  ...(await original<typeof import("@/services/service-prompts")>()),
+  resolveServicePromptScope: async () => ({
+    userId: draftAuthority.user,
+    config: { serverUrl: "http://retry.test", authMode: "multi-user" as const }
+  })
+}))
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
+import { conversationDraftKey, type ChatDraftAddress } from "@/utils/chat-draft-address"
+import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
+
 vi.mock("@/hooks/chat/roleplay-resume-send", () => ({
   sendSavedRoleplay: roleplayRetry.send
 }))
@@ -1398,14 +1415,14 @@ describe("acknowledged recovery actions", () => {
 })
 
 
-const roleplaySelection = (saved: boolean) => {
+const roleplaySelection = (saved: boolean, inputText = "Exact original input") => {
   const selection = completedEditedSelection()
   const original = {
     version: 1,
     conversation_id: "review-resume",
     input: {
       message_id: "resume-input",
-      content: "Exact original input",
+      content: inputText,
       expected: {
         version: 1,
         snapshot_digest: "sha256:" + "c".repeat(64),
@@ -1531,4 +1548,179 @@ it("Retry owns shared response activity and keeps dismissal disabled until its o
   })
   expect(useStoreMessageOption.getState().isProcessing).toBe(false)
   expect(useStoreMessageOption.getState().streaming).toBe(false)
+})
+
+
+describe("saved Roleplay Retry original composer acknowledgement", () => {
+  const literal = "  Original retry input.\nKeep literal spaces.  "
+  const address: ChatDraftAddress = {
+    kind: "native",
+    id: "review-resume",
+    ownerKey: "resume-owner",
+    scope: { type: "global" }
+  }
+  const settleDraft = async () => {
+    await act(async () => {
+      await vi.dynamicImportSettled()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(
+        COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS + 1
+      )
+    })
+  }
+  const composer = (surface: string) =>
+    renderHook(() => {
+      const source = useStoreMessageOption((state) => state.chatDraftAddress)
+      return useComposerText({
+        draftKey: source ? conversationDraftKey(surface, source) : surface,
+        draftAddress: source ?? undefined,
+        draftEnabled: source !== null,
+        tabScopedDraft: true,
+        textareaRef: React.createRef<HTMLTextAreaElement>()
+      })
+    })
+  const startRetry = async (
+    selection: HistorySelectionController,
+    saved = true
+  ) => {
+    let finish!: () => void
+    roleplayRetry.send.mockImplementationOnce(
+      (params) =>
+        new Promise<boolean>((resolve) => {
+          finish = () => {
+            if (saved) params.acknowledgeInput?.()
+            resolve(saved)
+          }
+        })
+    )
+    const review = render(<HistorySelectionReview selection={selection} />)
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Retry original request" })
+      )
+      await vi.dynamicImportSettled()
+    })
+    expect(roleplayRetry.send).toHaveBeenCalledOnce()
+    return { finish, review }
+  }
+  beforeEach(() => {
+    vi.useFakeTimers()
+    localStorage.clear()
+    sessionStorage.clear()
+    draftAuthority.user = "alice"
+    roleplayRetry.send.mockReset()
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    useStoreMessageOption.getState().setChatDraftAddress(address)
+    useStoreMessageOption.setState({
+      serverChatId: address.id,
+      streaming: false,
+      isProcessing: false,
+      detachedHistoryResponse: null
+    })
+  })
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+  it.each(["tldw:playgroundChatDraft", "tldw:sidepanelChatDraft:tab-one"])(
+    "clears only acknowledged %s literal and does not restore it cold",
+    async (surface) => {
+      const input = composer(surface)
+      await settleDraft()
+      act(() => input.result.current.setMessageValue(literal))
+      await settleDraft()
+      const retry = await startRetry(roleplaySelection(false, literal))
+      await act(async () => retry.finish())
+      await settleDraft()
+      expect(input.result.current.form.values.message).toBe("")
+      retry.review.unmount()
+      input.unmount()
+      sessionStorage.clear()
+      const cold = composer(surface)
+      await settleDraft()
+      expect(cold.result.current.form.values.message).toBe("")
+    }
+  )
+  it.each([
+    "newer",
+    "input-undo",
+    "image",
+    "new-same-id",
+    "account",
+    "unmount"
+  ] as const)(
+    "keeps a newer original-draft intent after %s while the saved reply arrives",
+    async (boundary) => {
+      const input = composer("tldw:playgroundChatDraft")
+      await settleDraft()
+      act(() => input.result.current.setMessageValue(literal))
+      await settleDraft()
+      const retry = await startRetry(roleplaySelection(false, literal))
+      let expected = literal
+      act(() => {
+        if (boundary === "newer") {
+          expected = "New unsent proposal"
+          input.result.current.setMessageValue(expected)
+        }
+        if (boundary === "input-undo") {
+          input.result.current.setMessageValue("Edit")
+          input.result.current.setMessageValue(literal)
+        }
+        if (boundary === "image")
+          input.result.current.form.setFieldValue("image", "new-image")
+        if (boundary === "new-same-id") {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          useStoreMessageOption.getState().setChatDraftAddress(address)
+          input.result.current.setMessageValue(literal)
+        }
+        if (boundary === "account") {
+          draftAuthority.user = "bob"
+          window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+        }
+      })
+      if (boundary === "account") {
+        await settleDraft()
+        act(() => input.result.current.setMessageValue("Bob's unsent input"))
+        expected = "Bob's unsent input"
+      }
+      if (boundary === "unmount") input.unmount()
+      await act(async () => retry.finish())
+      await settleDraft()
+      if (boundary !== "unmount")
+        expect(input.result.current.form.values.message).toBe(expected)
+      else {
+        const cold = composer("tldw:playgroundChatDraft")
+        await settleDraft()
+        expect(cold.result.current.form.values.message).toBe(literal)
+      }
+    }
+  )
+  it("keeps original literal after a generated unsaved retry", async () => {
+    const input = composer("tldw:playgroundChatDraft")
+    await settleDraft()
+    act(() => input.result.current.setMessageValue(literal))
+    await settleDraft()
+    const retry = await startRetry(roleplaySelection(false, literal), false)
+    await act(async () => retry.finish())
+    await settleDraft()
+    expect(input.result.current.form.values.message).toBe(literal)
+  })
+  it("does not clear either composer when capture is ambiguous", async () => {
+    const first = composer("tldw:playgroundChatDraft"),
+      second = composer("tldw:sidepanelChatDraft:tab-two")
+    await settleDraft()
+    act(() => {
+      first.result.current.setMessageValue(literal)
+      second.result.current.setMessageValue(literal)
+    })
+    await settleDraft()
+    const retry = await startRetry(roleplaySelection(false, literal))
+    await act(async () => retry.finish())
+    await settleDraft()
+    expect([
+      first.result.current.form.values.message,
+      second.result.current.form.values.message
+    ]).toEqual([literal, literal])
+  })
 })
