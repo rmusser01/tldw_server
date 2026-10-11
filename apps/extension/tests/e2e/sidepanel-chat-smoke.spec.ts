@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
-import http from "node:http"
-import { AddressInfo } from "node:net"
 import path from "path"
 import { launchWithExtension } from "./utils/extension"
 import {
@@ -10,6 +8,10 @@ import {
   waitForConnectionStore
 } from "./utils/connection"
 import { grantHostPermission } from "./utils/permissions"
+import {
+  startSidepanelMockServer,
+  stopSidepanelMockServer
+} from "./utils/sidepanel-mock-server"
 
 const EXT_PATH = path.resolve(
   process.env.TLDW_E2E_EXTENSION_PATH || "build/chrome-mv3"
@@ -33,74 +35,11 @@ const buildSeedConfig = (
   ...extra
 })
 
-const readBody = (req: http.IncomingMessage) =>
-  new Promise<string>((resolve) => {
-    let body = ""
-    req.on("data", (chunk) => {
-      body += chunk
-    })
-    req.on("end", () => resolve(body))
-  })
-
-const startChatMockServer = async () => {
-  const server = http.createServer(async (req, res) => {
-    const method = (req.method || "GET").toUpperCase()
-    const url = req.url || "/"
-
-    const sendJson = (code: number, payload: unknown) => {
-      res.writeHead(code, {
-        "content-type": "application/json",
-        "access-control-allow-origin": "http://127.0.0.1",
-        "access-control-allow-credentials": "true"
-      })
-      res.end(JSON.stringify(payload))
-    }
-
-    if (method === "OPTIONS") {
-      res.writeHead(204, {
-        "access-control-allow-origin": "http://127.0.0.1",
-        "access-control-allow-credentials": "true",
-        "access-control-allow-headers":
-          "content-type, x-api-key, authorization"
-      })
-      return res.end()
-    }
-
-    if (url === "/api/v1/health" && method === "GET") {
-      return sendJson(200, { status: "ok" })
-    }
-
-    if (url === "/api/v1/llm/models/metadata" && method === "GET") {
-      return sendJson(200, [
-        {
-          id: MODEL_ID,
-          name: "Mock Model",
-          provider: "mock",
-          context_length: 4096,
-          capabilities: ["chat"]
-        }
-      ])
-    }
-
-    if (url === "/api/v1/llm/models" && method === "GET") {
-      return sendJson(200, [MODEL_ID])
-    }
-
-    if (url === "/openapi.json" && method === "GET") {
-      return sendJson(200, {
-        openapi: "3.0.0",
-        info: { version: "mock" },
-        paths: {
-          "/api/v1/health": {},
-          "/api/v1/chat/completions": {},
-          "/api/v1/llm/models": {},
-          "/api/v1/llm/models/metadata": {}
-        }
-      })
-    }
-
-    if (url === "/api/v1/chat/completions" && method === "POST") {
-      const body = await readBody(req)
+const startChatMockServer = () =>
+  startSidepanelMockServer({
+    modelId: MODEL_ID,
+    modelName: "Mock Model",
+    handleChatCompletions: async ({ body, res, sendJson }) => {
       let stream = true
       try {
         const parsed = JSON.parse(body || "{}")
@@ -136,32 +75,7 @@ const startChatMockServer = async () => {
       res.write("data: [DONE]\n\n")
       return res.end()
     }
-
-    return sendJson(404, { detail: "not found" })
   })
-
-  await new Promise<void>((resolve) =>
-    server.listen(0, "127.0.0.1", resolve)
-  )
-  const addr = server.address() as AddressInfo
-  return { server, baseUrl: `http://127.0.0.1:${addr.port}` }
-}
-
-const stopChatMockServer = async (server: http.Server) => {
-  await new Promise<void>((resolve) => {
-    let settled = false
-    const done = () => {
-      if (settled) return
-      settled = true
-      resolve()
-    }
-
-    server.close(done)
-    server.closeAllConnections?.()
-    const fallback = setTimeout(done, 1000)
-    fallback.unref?.()
-  })
-}
 
 const ensureChatInput = async (page: Page) => {
   const startButton = page.getByRole("button", { name: /Start chatting/i })
@@ -254,7 +168,7 @@ test.describe("Sidepanel chat smoke", () => {
       expect(metrics.send?.right).toBeLessThanOrEqual(390)
     } finally {
       await context.close()
-      await stopChatMockServer(server)
+      await stopSidepanelMockServer(server)
     }
   })
 
@@ -325,7 +239,7 @@ test.describe("Sidepanel chat smoke", () => {
       expect(new URLSearchParams(openedUrl.hash.slice(1)).get("handoff")).toBeTruthy()
     } finally {
       await context.close()
-      await stopChatMockServer(server)
+      await stopSidepanelMockServer(server)
     }
   })
 
@@ -385,7 +299,7 @@ test.describe("Sidepanel chat smoke", () => {
       await expect(assistantMessage).toBeVisible({ timeout: 20000 })
     } finally {
       await context.close()
-      await stopChatMockServer(server)
+      await stopSidepanelMockServer(server)
     }
   })
 })
