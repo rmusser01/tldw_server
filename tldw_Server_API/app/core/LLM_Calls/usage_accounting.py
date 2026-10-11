@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import math
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
@@ -87,7 +88,7 @@ def _usage_tokens(usage: dict[str, Any]) -> tuple[int, int]:
         """The first numeric value among ``keys``."""
         for key in keys:
             value = usage.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
                 return int(value)
         return 0
 
@@ -102,28 +103,29 @@ class _StreamUsage:
         self.chars = 0
 
     def feed(self, item: Any) -> None:
-        """Read one SSE line."""
+        """Read one yielded item, which may hold several SSE lines."""
         try:
-            line = item.decode("utf-8", "ignore") if isinstance(item, (bytes, bytearray)) else item
-            if not isinstance(line, str):
+            text = item.decode("utf-8", "ignore") if isinstance(item, (bytes, bytearray)) else item
+            if not isinstance(text, str):
                 return
-            line = line.strip()
-            if not line.startswith("data:"):
-                return
-            payload = line[5:].strip()
-            if not payload or payload == "[DONE]":
-                return
-            data = json.loads(payload)
-            if not isinstance(data, dict):
-                return
-            usage = data.get("usage")
-            if isinstance(usage, dict) and usage:
-                self.usage = usage
-            for choice in data.get("choices") or []:
-                delta = choice.get("delta") if isinstance(choice, dict) else None
-                content = delta.get("content") if isinstance(delta, dict) else None
-                if isinstance(content, str):
-                    self.chars += len(content)
+            for part in text.splitlines():
+                line = part.strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                data = json.loads(payload)
+                if not isinstance(data, dict):
+                    continue
+                usage = data.get("usage")
+                if isinstance(usage, dict) and usage:
+                    self.usage = usage
+                for choice in data.get("choices") or []:
+                    delta = choice.get("delta") if isinstance(choice, dict) else None
+                    content = delta.get("content") if isinstance(delta, dict) else None
+                    if isinstance(content, str):
+                        self.chars += len(content)
         except Exception:  # noqa: BLE001 - a malformed chunk must never fail a stream
             return
 
@@ -171,35 +173,41 @@ def _submit_record(
 
 
 def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any, started: float) -> None:
-    """Record a non-streaming call from its usage block, or an estimate."""
-    usage = response.get("usage") if isinstance(response, dict) else None
-    if isinstance(usage, dict) and usage:
-        prompt_tokens, completion_tokens = _usage_tokens(usage)
+    """Record a non-streaming call from its usage block, or an estimate; never raises."""
+    try:
+        usage = response.get("usage") if isinstance(response, dict) else None
+        if isinstance(usage, dict) and usage:
+            prompt_tokens, completion_tokens = _usage_tokens(usage)
+            _submit_record(
+                provider, plan, request, usage=usage, prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens, started=started, estimate_source=None,
+            )
+            return
         _submit_record(
-            provider, plan, request, usage=usage, prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens, started=started, estimate_source=None,
+            provider, plan, request, usage=None, prompt_tokens=_prompt_estimate(request),
+            completion_tokens=_approx_tokens(_response_chars(response)), started=started,
+            estimate_source="response_estimate",
         )
-        return
-    _submit_record(
-        provider, plan, request, usage=None, prompt_tokens=_prompt_estimate(request),
-        completion_tokens=_approx_tokens(_response_chars(response)), started=started,
-        estimate_source="response_estimate",
-    )
+    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
+        logger.opt(exception=True).debug("LLM usage accounting record failed")
 
 
 def _record_stream(provider: Any, plan: _CallPlan, request: Any, seen: _StreamUsage, started: float) -> None:
-    """Record a stream from its usage chunk, or an estimate of what was received."""
-    if seen.usage is not None:
-        prompt_tokens, completion_tokens = _usage_tokens(seen.usage)
+    """Record a stream from its usage chunk, or an estimate of what was received; never raises."""
+    try:
+        if seen.usage is not None:
+            prompt_tokens, completion_tokens = _usage_tokens(seen.usage)
+            _submit_record(
+                provider, plan, request, usage=seen.usage, prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens, started=started, estimate_source=None,
+            )
+            return
         _submit_record(
-            provider, plan, request, usage=seen.usage, prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens, started=started, estimate_source=None,
+            provider, plan, request, usage=None, prompt_tokens=_prompt_estimate(request),
+            completion_tokens=_approx_tokens(seen.chars), started=started, estimate_source="stream_estimate",
         )
-        return
-    _submit_record(
-        provider, plan, request, usage=None, prompt_tokens=_prompt_estimate(request),
-        completion_tokens=_approx_tokens(seen.chars), started=started, estimate_source="stream_estimate",
-    )
+    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
+        logger.opt(exception=True).debug("LLM usage accounting record failed")
 
 
 def _accounted_sync_stream(provider: Any, plan: _CallPlan, request: Any, inner: Any, started: float) -> Iterator[Any]:

@@ -289,3 +289,83 @@ def test_instrumenting_keeps_type_identity_and_abstractness() -> None:
 
     with pytest.raises(TypeError):
         _StillAbstract()  # type: ignore[abstract]
+
+
+async def test_non_finite_usage_never_raises_and_counts_as_zero(rows) -> None:
+    """An inf or NaN token count is skipped like a missing one, and the call is unaffected."""
+
+    class _NonFiniteProvider(_FakeProvider):
+        """Reports non-finite prompt tokens."""
+
+        name = "fake-non-finite"
+
+        def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+            """Return inf prompt tokens."""
+            return {
+                "choices": [{"message": {"content": "hello"}}],
+                "usage": {"prompt_tokens": float("inf"), "completion_tokens": 7},
+            }
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield a usage chunk with NaN prompt tokens."""
+            yield 'data: {"choices":[{"delta":{"content":"hi"}}],"usage":{"prompt_tokens":NaN,"completion_tokens":2}}\n\n'
+            yield "data: [DONE]\n\n"
+
+    with llm_call_context(user_id=7):
+        assert _NonFiniteProvider().chat(REQUEST)["usage"]["completion_tokens"] == 7
+        assert len(list(_NonFiniteProvider().stream(REQUEST))) == 2
+    chat_row, stream_row = await _settled(rows)
+    assert (chat_row["prompt_tokens"], chat_row["completion_tokens"]) == (0, 7)
+    assert (stream_row["prompt_tokens"], stream_row["completion_tokens"]) == (0, 2)
+
+
+async def test_a_recorder_bug_never_reaches_the_caller(monkeypatch: pytest.MonkeyPatch, rows) -> None:
+    """A failure inside the recorder neither changes a result nor masks a provider exception."""
+    from tldw_Server_API.app.core.LLM_Calls import usage_accounting
+
+    def _bug(*args: Any, **kwargs: Any) -> None:
+        """Fail like a bug in the recorder."""
+        raise RuntimeError("recorder bug")
+
+    monkeypatch.setattr(usage_accounting, "_submit_record", _bug)
+    failure = ValueError("upstream broke")
+
+    class _FailingStreamProvider(_FakeProvider):
+        """Yields one chunk, then fails."""
+
+        name = "fake-failing-stream-2"
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield one content chunk and raise."""
+            yield LINES[0]
+            raise failure
+
+    with llm_call_context(user_id=7):
+        assert _FakeProvider().chat(REQUEST)["usage"] == USAGE
+        assert list(_FakeProvider().stream(REQUEST)) == LINES
+        stream = _FailingStreamProvider().stream(REQUEST)
+        assert next(stream) == LINES[0]
+        with pytest.raises(ValueError) as raised:
+            next(stream)
+        assert raised.value is failure
+        assert [line async for line in _FakeProvider().astream(REQUEST)] == LINES
+
+
+async def test_a_stream_item_holding_two_events_counts_both(rows) -> None:
+    """One yielded string carrying several SSE lines is parsed line by line."""
+
+    class _BatchedProvider(_FakeProvider):
+        """Yields two events in one string."""
+
+        name = "fake-batched"
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield a batched item, then DONE."""
+            yield LINES[0] + LINES[1]
+            yield LINES[2]
+
+    with llm_call_context(user_id=7):
+        list(_BatchedProvider().stream(REQUEST))
+    (row,) = await _settled(rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (5, 2)
+    assert row["usage_metadata"] == {"prompt_tokens": 5, "completion_tokens": 2}
