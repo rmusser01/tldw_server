@@ -11,11 +11,14 @@
 import { test, expect, type Page } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import path from "path"
-import http from "node:http"
-import { AddressInfo } from "node:net"
 import { launchWithExtension } from "./utils/extension"
 import { waitForConnectionStore, forceConnected, setSelectedModel } from "./utils/connection"
 import { grantHostPermission } from "./utils/permissions"
+import {
+  startSidepanelMockServer,
+  stopSidepanelMockServer,
+  type SidepanelMockServer
+} from "./utils/sidepanel-mock-server"
 import {
   PerfTimer,
   measureStreamingThroughput,
@@ -400,7 +403,8 @@ test.describe("Sidepanel Streaming Performance", () => {
 // ---------------------------------------------------------------------------
 // Canned 100-chunk stream (TASK-13520, WebUI perf batch W0 Stage 1).
 //
-// Deterministic, no live LLM: a loopback HTTP mock (same mechanism as
+// Deterministic, no live LLM: a loopback HTTP mock (the shared
+// `startSidepanelMockServer` helper, also used by
 // sidepanel-chat-smoke.spec.ts) serves a paced SSE stream of exactly 100
 // token chunks into the sidepanel chat. The production per-chunk store path
 // (`setMessages((prev) => prev.map(...))` in useMessage.tsx) processes each
@@ -430,82 +434,17 @@ const CANNED_FULL_TEXT = Array.from(
 
 const round = (value: number, digits = 2) => Number(value.toFixed(digits))
 
-interface CannedStreamServer {
-  server: http.Server
-  baseUrl: string
+interface CannedStreamServer extends SidepanelMockServer {
   chunksServed: () => number
 }
-
-const readCannedRequestBody = (req: http.IncomingMessage) =>
-  new Promise<string>((resolve) => {
-    let body = ""
-    req.on("data", (chunk) => {
-      body += chunk
-    })
-    req.on("end", () => resolve(body))
-  })
 
 const startCannedStreamServer = async (): Promise<CannedStreamServer> => {
   let chunksServed = 0
 
-  const server = http.createServer(async (req, res) => {
-    const method = (req.method || "GET").toUpperCase()
-    const url = req.url || "/"
-
-    const sendJson = (code: number, payload: unknown) => {
-      res.writeHead(code, {
-        "content-type": "application/json",
-        "access-control-allow-origin": "http://127.0.0.1",
-        "access-control-allow-credentials": "true"
-      })
-      res.end(JSON.stringify(payload))
-    }
-
-    if (method === "OPTIONS") {
-      res.writeHead(204, {
-        "access-control-allow-origin": "http://127.0.0.1",
-        "access-control-allow-credentials": "true",
-        "access-control-allow-headers": "content-type, x-api-key, authorization"
-      })
-      return res.end()
-    }
-
-    if (url === "/api/v1/health" && method === "GET") {
-      return sendJson(200, { status: "ok" })
-    }
-
-    if (url === "/api/v1/llm/models/metadata" && method === "GET") {
-      return sendJson(200, [
-        {
-          id: CANNED_MODEL_ID,
-          name: "Perf Stream Mock Model",
-          provider: "mock",
-          context_length: 4096,
-          capabilities: ["chat"]
-        }
-      ])
-    }
-
-    if (url === "/api/v1/llm/models" && method === "GET") {
-      return sendJson(200, [CANNED_MODEL_ID])
-    }
-
-    if (url === "/openapi.json" && method === "GET") {
-      return sendJson(200, {
-        openapi: "3.0.0",
-        info: { version: "mock" },
-        paths: {
-          "/api/v1/health": {},
-          "/api/v1/chat/completions": {},
-          "/api/v1/llm/models": {},
-          "/api/v1/llm/models/metadata": {}
-        }
-      })
-    }
-
-    if (url === "/api/v1/chat/completions" && method === "POST") {
-      await readCannedRequestBody(req)
-
+  const { server, baseUrl } = await startSidepanelMockServer({
+    modelId: CANNED_MODEL_ID,
+    modelName: "Perf Stream Mock Model",
+    handleChatCompletions: async ({ res }) => {
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -528,32 +467,9 @@ const startCannedStreamServer = async (): Promise<CannedStreamServer> => {
       res.write("data: [DONE]\n\n")
       return res.end()
     }
-
-    return sendJson(404, { detail: "not found" })
-  })
-  server.on("error", () => {
-    // Ignore socket errors after the test closes the browser context.
   })
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  const addr = server.address() as AddressInfo
-  return { server, baseUrl: `http://127.0.0.1:${addr.port}`, chunksServed: () => chunksServed }
-}
-
-const stopCannedStreamServer = async (server: http.Server) => {
-  await new Promise<void>((resolve) => {
-    let settled = false
-    const done = () => {
-      if (settled) return
-      settled = true
-      resolve()
-    }
-
-    server.close(done)
-    server.closeAllConnections?.()
-    const fallback = setTimeout(done, 1000)
-    fallback.unref?.()
-  })
+  return { server, baseUrl, chunksServed: () => chunksServed }
 }
 
 interface CannedStreamPageResult {
@@ -894,7 +810,7 @@ test.describe("Canned 100-chunk stream (no live LLM)", () => {
         // Page may already be closed.
       }
       await context.close()
-      await stopCannedStreamServer(canned.server)
+      await stopSidepanelMockServer(canned.server)
     }
   })
 })

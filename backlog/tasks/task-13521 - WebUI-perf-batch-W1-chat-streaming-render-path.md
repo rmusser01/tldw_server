@@ -1,7 +1,7 @@
 ---
 id: TASK-13521
 title: 'WebUI perf batch W1: chat streaming render path'
-status: To Do
+status: In Progress
 created_date: 2026-10-07 04:14
 ---
 
@@ -18,7 +18,7 @@ WebUI/extension perf program. Index: Docs/Plans/2026-10-06-webui-perf-remediatio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 0 (pre-Stage-1 prep): extracted shared sidepanel mock-server helper apps/extension/tests/e2e/utils/sidepanel-mock-server.ts (startSidepanelMockServer/stopSidepanelMockServer); refactored performance-streaming.spec.ts canned suite and sidepanel-chat-smoke.spec.ts to consume it, behavior-preserving (same routes/headers/lifecycle; chat-completions payload differences kept per-spec via handleChatCompletions opt). Verified: scoped perf spec 1 passed (canned 100-chunk) + 5 live tests skip env-gated unchanged; scoped smoke spec 2 passed + 1 pre-existing failure (handoff title assertion fails identically on pristine tree, stash-verified). No product code.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
