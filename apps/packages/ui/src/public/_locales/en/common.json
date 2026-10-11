@@ -2052,5 +2052,11 @@
   },
   "shortcuts_groups_messageCards": {
     "message": "Message cards"
+  },
+  "chatSidebar_tabs_serverTotal": {
+    "message": "Server ({{count}} total)"
+  },
+  "chatSidebar_tabs_foldersChats": {
+    "message": "Folders ({count, plural, one {# chat} other {# chats}})"
   }
 }

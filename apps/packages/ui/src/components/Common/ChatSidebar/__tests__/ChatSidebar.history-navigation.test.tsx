@@ -11,6 +11,7 @@ import {
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18next from "i18next";
+import ICU from "@/i18n/icu-format";
 import { I18nextProvider } from "react-i18next";
 import common from "@/assets/locale/en/common.json";
 import { ChatSidebar } from "../../ChatSidebar";
@@ -25,6 +26,7 @@ const io = vi.hoisted(() => ({
   reads: new Map<string, () => Promise<unknown>>(),
   writes: vi.fn(),
   history: vi.fn(),
+  historyTotal: 0,
   temporary: false,
   ownerCurrent: true,
   verificationState: "ready",
@@ -80,7 +82,7 @@ vi.mock("@/hooks/useServerChatHistory", () => ({
   SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE: 25,
   useServerChatHistory: (...args: unknown[]) => {
     io.history(...args);
-    return { data: [], total: 0 };
+    return { data: [], total: io.historyTotal };
   },
 }));
 vi.mock("@/hooks/chat/useClearChat", () => ({ useClearChat: () => vi.fn() }));
@@ -147,7 +149,7 @@ vi.mock("@/components/Sidepanel/Chat/ModeToggle", () => ({
   ModeToggle: () => null,
 }));
 
-const translations = i18next.createInstance();
+const translations = i18next.createInstance().use(ICU);
 await translations.init({
   lng: "en",
   fallbackLng: "en",
@@ -158,9 +160,10 @@ const recentKey = "tldw:sidebar:recentCollapsed";
 const shortcutsKey = "tldw:sidebar:shortcutsCollapsed";
 const renderSidebar = (
   props: Partial<React.ComponentProps<typeof ChatSidebar>> = {},
+  translator = translations,
 ) =>
   render(
-    <I18nextProvider i18n={translations}>
+    <I18nextProvider i18n={translator}>
       <MemoryRouter initialEntries={["/chat"]}>
         <ChatSidebar collapsed={false} {...props} />
       </MemoryRouter>
@@ -181,6 +184,7 @@ describe("history-first sidebar navigation", () => {
     io.reads.clear();
     io.writes.mockClear();
     io.history.mockClear();
+    io.historyTotal = 0;
     io.temporary = false;
     io.ownerCurrent = true; io.verificationState = "ready";
     io.folderProps.mockClear(); io.verify.mockClear();
@@ -202,6 +206,51 @@ describe("history-first sidebar navigation", () => {
         "model-catalog": false,
       },
     });
+  });
+
+  it("names the global Server total while searching both sources", async () => {
+    io.historyTotal = 60;
+    renderSidebar();
+    await screen.findByRole("radio", { name: "Server (60 total)" });
+    fireEvent.change(findInput(), { target: { value: "needle" } });
+    expect(screen.getByRole("radio", { name: "Server (60 total)" })).toBeInTheDocument();
+    expect(screen.getByTestId("server-chat-list")).toHaveAttribute("data-query", "needle");
+    expect(screen.getByTestId("local-chat-list")).toHaveAttribute("data-query", "needle");
+  });
+
+  it.each(["zero", "unverified", "retired"])("omits an unavailable Server total (%s)", async (state) => {
+    io.historyTotal = state === "zero" ? 0 : 60;
+    if (state === "unverified") io.verificationState = "error";
+    if (state === "retired") io.ownerCurrent = false;
+    renderSidebar();
+    expect(await screen.findByRole("radio", { name: "Server", exact: true })).toBeInTheDocument();
+  });
+
+  it.each([{ count: 1, label: "Folders (1 chat)" }, { count: 2, label: "Folders (2 chats)" }])(
+    "names $count unique chats across folders with actual ICU", async ({ count, label }) => {
+      io.folderData = { folders: [{id: 1, deleted: false}, {id: 2, deleted: false}], keywords: [], folderKeywordLinks: [],
+        conversationKeywordLinks: [], getConversationsForFolder: () => count === 1 ? ["a", "a"] : ["a", "a", "b"],
+        serverDataScope: {requestScope: io.requestScope, isCurrent: () => true},
+        isLoading: false, error: null, folderApiAvailable: true };
+      io.values.set("tldw:sidebar:activeTab", "folders");
+      renderSidebar();
+      expect(await screen.findByRole("radio", { name: label })).toBeInTheDocument();
+    },
+  );
+
+  it("formats missing count keys through the component ICU fallback", async () => {
+    const missingKeys = structuredClone(common);
+    delete (missingKeys.chatSidebar.tabs as Record<string, unknown>).serverTotal;
+    delete (missingKeys.chatSidebar.tabs as Record<string, unknown>).foldersChats;
+    const missing = i18next.createInstance().use(ICU);
+    await missing.init({ lng: "en", fallbackLng: false, resources: {en: {common: missingKeys}}, interpolation: {escapeValue: false} });
+    io.historyTotal = 60;
+    io.folderData = { folders: [{id: 1, deleted: false}], keywords: [], folderKeywordLinks: [], conversationKeywordLinks: [],
+      getConversationsForFolder: () => ["a"], serverDataScope: {requestScope: io.requestScope, isCurrent: () => true},
+      isLoading: false, error: null, folderApiAvailable: true };
+    renderSidebar({}, missing);
+    expect(await screen.findByRole("radio", { name: "Server (60 total)" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Folders (1 chat)" })).toBeInTheDocument();
   });
 
   it("uses All on first use so one query reaches Server and On this device without replacing an explicit preference", async () => {
@@ -229,7 +278,7 @@ describe("history-first sidebar navigation", () => {
     renderSidebar();
     await screen.findByTestId("server-chat-list");
     expect(recentToggle()).toHaveAttribute("aria-expanded", "true");
-    const shortcuts = screen.getByRole("button", { name: "Shortcuts" });
+    const shortcuts = screen.getByRole("button", { name: "Navigation" });
     expect(
       findInput().compareDocumentPosition(recentToggle()) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -324,7 +373,7 @@ describe("history-first sidebar navigation", () => {
       view.rerender(shell(true, 1));
       view.rerender(shell(false, 2));
       expect(recentToggle()).toHaveAttribute("aria-expanded", String(!closed));
-      expect(screen.getByRole("button", { name: "Shortcuts" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Navigation" })).toHaveAttribute(
         "aria-expanded",
         String(!closed),
       );
@@ -355,7 +404,7 @@ describe("history-first sidebar navigation", () => {
       expect(recentToggle()).toHaveAttribute("aria-expanded", "false"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Change page" }));
-    expect(screen.getByRole("button", { name: "Shortcuts" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Navigation" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
@@ -542,7 +591,7 @@ describe("history-first sidebar navigation", () => {
       if (state === "unverified") io.verificationState = "error";
       io.values.set("tldw:sidebar:activeTab", "folders"); renderSidebar();
       await screen.findByTestId("folder-chat-list");
-      expect(screen.queryByText("Folders (2)") !== null).toBe(state === "current");
+      expect(screen.queryByText("Folders (2 chats)") !== null).toBe(state === "current");
     },
   );
 

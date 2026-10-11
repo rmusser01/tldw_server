@@ -289,22 +289,31 @@ export function ChatSidebar({
   const tabOptions: Array<{ value: SidebarTab; label: string }> = [
     { value: "all", label: t("common:chatSidebar.tabs.all", "All") },
     {
-      value: "server",
-      label: `${t("common:chatSidebar.tabs.server", "Server")}${ownerReady && serverChatCount > 0 ? ` (${serverChatCount})` : ""}`
+      value: 'server',
+      label:
+        ownerReady && serverChatCount > 0
+          ? t('common:chatSidebar.tabs.serverTotal', 'Server ({{count}} total)', {
+              count: serverChatCount,
+            })
+          : t('common:chatSidebar.tabs.server', 'Server'),
     },
     {
       value: "local",
       label: t("common:chatSidebar.tabs.local", "On this device")
     },
     {
-      value: "folders",
-      label: `${t("common:chatSidebar.tabs.folders", "Folders")}${folderConversationCount > 0 ? ` (${folderConversationCount})` : ""}`
-    }
-  ]
-  const settingsShortcutActive = isSidebarShortcutRouteActive(
-    "/settings",
-    location.pathname
-  )
+      value: 'folders',
+      label:
+        folderConversationCount > 0
+          ? t(
+              'common:chatSidebar.tabs.foldersChats',
+              'Folders ({count, plural, one {# chat} other {# chats}})',
+              { count: folderConversationCount }
+            )
+          : t('common:chatSidebar.tabs.folders', 'Folders'),
+    },
+  ];
+  const settingsShortcutActive = isSidebarShortcutRouteActive('/settings', location.pathname);
   const focusRingClasses =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
   const recentConversationsExpanded = recentHistoryVisible
@@ -589,8 +598,11 @@ export function ChatSidebar({
                 }}
                 options={tabOptions}
                 block
-                size="small"
-                className="w-full [&_.ant-segmented-item-label]:px-2 [&_.ant-segmented-item-label]:whitespace-normal"
+                orientation="vertical"
+                className="w-full [&_.ant-segmented-item-label]:px-2"
+                styles={{
+                  label: { whiteSpace: 'normal', overflowWrap: 'anywhere', textAlign: 'left' },
+                }}
                 aria-labelledby="chat-sidebar-tab-label"
               />
             </div>

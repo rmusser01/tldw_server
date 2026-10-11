@@ -554,7 +554,9 @@
       "local": "On this device",
       "server": "Server",
       "folders": "Folders",
-      "all": "All"
+      "all": "All",
+      "serverTotal": "Server ({{count}} total)",
+      "foldersChats": "Folders ({count, plural, one {# chat} other {# chats}})"
     },
     "noServerChats": "No server chats yet",
     "foldersRequireConnection": "Folders require a server connection",

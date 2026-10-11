@@ -141,6 +141,7 @@ describe("deriveServerChatHistoryViewState", () => {
 
     const result = deriveServerChatHistoryViewState({
       previousData: previous,
+      total: 60,
       error: Object.assign(new Error("rate_limited"), { status: 429 })
     })
 
@@ -153,6 +154,7 @@ describe("deriveServerChatHistoryViewState", () => {
   it("returns unavailable recoverable state when no data was previously loaded", () => {
     const result = deriveServerChatHistoryViewState({
       previousData: [],
+      total: 0,
       error: new Error("The operation was aborted.")
     })
 
@@ -486,11 +488,11 @@ describe("useServerChatHistory", () => {
     queryClient.clear()
   })
 
-  it("keeps previously rendered chat rows visible after a recoverable refresh failure", async () => {
+  it('retains the acknowledged paged total and cached rows after a recoverable refresh failure', async () => {
     listChatsWithMetaMock
       .mockResolvedValueOnce({
-        chats: [createChat(1), createChat(2)],
-        total: 2
+        chats: Array.from({ length: 25 }, (_, index) => createChat(index + 1)),
+        total: 60,
       })
       .mockRejectedValueOnce(
         Object.assign(new Error("rate_limited (GET /api/v1/chats/)"), { status: 429 })
@@ -499,19 +501,23 @@ describe("useServerChatHistory", () => {
     const { queryClient, wrapper } = createWrapper()
     const { result } = renderHook(() => useServerChatHistory(""), { wrapper })
 
-    await waitFor(() => expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-1", "chat-2"]))
-    expect(result.current.sidebarRefreshState).toBe("ready")
-    expect(result.current.hasUsableData).toBe(true)
-    expect(result.current.isShowingStaleData).toBe(false)
+    await waitFor(() => expect(result.current.data).toHaveLength(25));
+    expect(result.current.total).toBe(60);
+    expect(result.current.data.slice(0, 2).map((chat) => chat.id)).toEqual(['chat-1', 'chat-2']);
+    expect(result.current.sidebarRefreshState).toBe('ready');
+    expect(result.current.hasUsableData).toBe(true);
+    expect(result.current.isShowingStaleData).toBe(false);
 
     await result.current.refetch()
 
     await waitFor(() => {
-      expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-1", "chat-2"])
-      expect(result.current.sidebarRefreshState).toBe("recoverable-error")
-      expect(result.current.hasUsableData).toBe(true)
-      expect(result.current.isShowingStaleData).toBe(true)
-    })
+      expect(result.current.data).toHaveLength(25);
+      expect(result.current.total).toBe(60);
+      expect(result.current.data.slice(0, 2).map((chat) => chat.id)).toEqual(['chat-1', 'chat-2']);
+      expect(result.current.sidebarRefreshState).toBe('recoverable-error');
+      expect(result.current.hasUsableData).toBe(true);
+      expect(result.current.isShowingStaleData).toBe(true);
+    });
 
     queryClient.clear()
   })

@@ -106,10 +106,12 @@ export const filterServerChatHistoryItems = (
 
 export const deriveServerChatHistoryViewState = ({
   previousData,
+  total,
   error
 }: {
-  previousData: ServerChatHistoryItem[]
-  error: unknown
+  total: number;
+  previousData: ServerChatHistoryItem[];
+  error: unknown;
 }): {
   data: ServerChatHistoryItem[]
   total: number
@@ -118,7 +120,7 @@ export const deriveServerChatHistoryViewState = ({
   isShowingStaleData: boolean
 } => ({
   data: previousData,
-  total: previousData.length,
+  total,
   sidebarRefreshState: "recoverable-error",
   hasUsableData: previousData.length > 0,
   isShowingStaleData: previousData.length > 0
@@ -424,6 +426,7 @@ export const useServerChatHistory = (
       if (isRecoverableServerChatHistoryError(query.error)) {
         return deriveServerChatHistoryViewState({
           previousData: filteredData,
+          total: resolvedTotal,
           error: query.error
         })
       }
