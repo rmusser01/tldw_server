@@ -359,6 +359,7 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, with_llm_call_context
 from tldw_Server_API.app.core.Usage.quota_checks import (
     as_quota_user_id,
     check_usage,
@@ -1613,25 +1614,26 @@ async def _select_auto_chat_llm_router_choice(
                 await _record_router_use_once(handle)
 
         try:
-            response = await await_owned_worker(
-                perform_chat_api_call_async(
-                    api_endpoint=router_model.provider,
-                    messages_payload=router_messages,
-                    api_key=handle.api_key,
-                    model=router_model.model,
-                    max_tokens=64,
-                    streaming=False,
-                    user_identifier=str(getattr(current_user, "id", "auto-router")),
-                    app_config=handle.app_config,
-                    credentials_resolved=handle.credentials_resolved,
-                    _endpoint_provenance=_derive_endpoint_provenance(
-                        handle,
-                        request_override=False,
+            with llm_call_context(records_itself=True):
+                response = await await_owned_worker(
+                    perform_chat_api_call_async(
+                        api_endpoint=router_model.provider,
+                        messages_payload=router_messages,
+                        api_key=handle.api_key,
+                        model=router_model.model,
+                        max_tokens=64,
+                        streaming=False,
+                        user_identifier=str(getattr(current_user, "id", "auto-router")),
+                        app_config=handle.app_config,
+                        credentials_resolved=handle.credentials_resolved,
+                        _endpoint_provenance=_derive_endpoint_provenance(
+                            handle,
+                            request_override=False,
+                        ),
+                        **{PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle},
                     ),
-                    **{PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle},
-                ),
-                on_cancel_result=_mark_late_router_choice,
-            )
+                    on_cancel_result=_mark_late_router_choice,
+                )
             if not _router_result_is_usable(response):
                 raise_detached_error(
                     sanitized_provider_stream_exception("provider_unavailable")
@@ -5477,7 +5479,7 @@ async def create_chat_completion(
                         error_state: dict[str, Any],
                         stream_attempt_index: int,
                     ):
-                        return await execute_streaming_call(
+                        return await with_llm_call_context(execute_streaming_call(
                             current_loop=current_loop,
                             cleaned_args=cleaned_args,
                             selected_provider=selected_provider,
@@ -5536,7 +5538,7 @@ async def create_chat_completion(
                                 0.0,
                                 _provider_stream_prime_remaining(error_state),
                             ),
-                        )
+                        ), records_itself=True)
 
                     attempted_providers: list[str] = []
                     stream_attempt_index = 0
@@ -5779,7 +5781,7 @@ async def create_chat_completion(
                 else:  # Non-streaming
 
                     async def _execute_non_stream_response():
-                        return await execute_non_stream_call(
+                        return await with_llm_call_context(execute_non_stream_call(
                             current_loop=current_loop,
                             cleaned_args=cleaned_args,
                             selected_provider=selected_provider,
@@ -5809,7 +5811,7 @@ async def create_chat_completion(
                             self_monitoring_service=_self_mon_service,
                             assistant_parent_message_id=assistant_parent_message_id,
                             continuation_metadata=continuation_meta,
-                        )
+                        ), records_itself=True)
 
                     while True:
                         try:

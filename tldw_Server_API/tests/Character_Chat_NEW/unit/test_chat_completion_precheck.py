@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing.models import (
     RoutingDecision,
     RoutingPolicy,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 
 
 @pytest.mark.integration
@@ -99,8 +100,11 @@ async def test_auto_router_dispatch_keeps_one_static_credential_snapshot(
         async def close(self) -> None:
             lifecycle.append("close")
 
+    router_flags: list[bool] = []
+
     async def provider_call(**kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
+        router_flags.append(current_llm_call_context().records_itself)
         return {
             "choices": [{"message": {"content": '{"provider":"local-llm","model":"routed"}'}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
@@ -155,6 +159,8 @@ async def test_auto_router_dispatch_keeps_one_static_credential_snapshot(
         current_user=SimpleNamespace(id=1),
     )
 
+    assert router_flags
+    assert all(router_flags)
     assert captured["api_key"] == captured_key
     assert captured["app_config"] == config_a
     assert captured["credentials_resolved"] is True
