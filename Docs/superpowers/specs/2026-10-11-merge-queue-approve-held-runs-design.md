@@ -155,8 +155,9 @@ check does not count (S5).
   `ci.yml`'s held run never approved and is deleted; a run held for another actor or from a fork never approved; no call
   ever dispatches a gate workflow except the kick; a transient error disarms nobody.
 - One boundary test against the real `Gh` class's argument building, for the approve and re-run calls.
-- Workflow-shape tests: the kick runs only on `refs/heads/dev` with the flag and skips every gate job; the kick job's concurrency never cancels; each `queue-tick` only sends a kick; the
-  `frontend-required` guard has no exemption.
+- Workflow-shape tests: the kick runs only on `refs/heads/dev` with the flag and skips every gate job; the kick
+  job's concurrency never cancels; each `queue-tick` only sends a kick; the `frontend-required` guard has no
+  exemption.
 - Each new guard is mutation-checked: break the rule, see the test fail.
 - The six `test_merge_queue_*` files stay in `backend-required`'s contract step.
 
