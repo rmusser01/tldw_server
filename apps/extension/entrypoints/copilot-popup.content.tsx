@@ -15,10 +15,10 @@ import { defineContentScript } from "wxt/utils/define-content-script"
  *      web-accessible `copilot-popup-main.js` chunk via a runtime URL the
  *      bundler cannot inline, then delegates to the registered handler.
  *
- * Top-frame only: the background addresses the popup via
- * `tabs.sendMessage(tabId, ..., { frameId })` from the `contextual-popup-pa`
- * context-menu handler, and frame 0 (top frame) is where the popup is
- * expected to render.
+ * Top-frame only: the background delivers the popup-open message to the
+ * whole tab (no frameId targeting) from the `contextual-popup-pa`
+ * context-menu handler; this top-frame listener is the only one, and the
+ * iframe's selection arrives via `payload.selectionText`.
  */
 
 const COPILOT_POPUP_CHUNK_RESOURCE = "copilot-popup-main.js"
@@ -74,9 +74,10 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener((message: any) => {
       if (message?.type !== "tldw:popup:open") return
-      void handlePopupMessage(message.payload || {}).catch(() => {
-        // Loading or popup failure is surfaced by the popup itself; the
-        // message acknowledgement below still satisfies the sender.
+      void handlePopupMessage(message.payload || {}).catch((error) => {
+        // Popup failures are surfaced by the popup itself, but a chunk-load
+        // failure has no popup to show anything — leave a breadcrumb.
+        console.warn("[tldw-copilot] failed to load popup chunk", error)
       })
       return Promise.resolve({ ok: true })
     })
