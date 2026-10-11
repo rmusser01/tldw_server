@@ -574,39 +574,39 @@ export const createEditMessage = (options: {
 
 export const createBranchMessage =
   (options: {
-    setMessages: (messages: Message[]) => void
-    setHistory: (history: ChatHistory) => void
-    historyId: string | null
-    setHistoryId: (id: string | null) => void
-    setSelectedSystemPrompt?: (prompt: string) => void
-    setSystemPrompt?: (prompt: string) => void
-    setContext?: (context: UploadedFile[]) => void
-    serverChatId?: string | null
-    scope?: ChatScope
-    setServerChatId?: (id: string | null) => void
-    setServerChatState?: (state: ConversationState | null) => void
-    setServerChatVersion?: (version: number | null) => void
-    setServerChatTitle?: (title: string | null) => void
-    setServerChatCharacterId?: (id: string | number | null) => void
-    setServerChatMetaLoaded?: (loaded: boolean) => void
-    setServerChatTopic?: (topic: string | null) => void
-    setServerChatClusterId?: (clusterId: string | null) => void
-    setServerChatSource?: (source: string | null) => void
-    setServerChatExternalRef?: (ref: string | null) => void
-    characterId?: string | number | null
-    chatTitle?: string | null
-    serverChatState?: ConversationState | null
-    serverChatTopic?: string | null
-    serverChatClusterId?: string | null
-    serverChatSource?: string | null
-    serverChatExternalRef?: string | null
-    messages?: Message[]
-    history?: ChatHistory
-    onServerChatMutated?: () => void
-    serverOnly?: boolean
-    historySelection?: HistorySelectionController | null
-    onOpened?: (childId: string) => void
-    notification: NotificationInstance
+    setMessages: (messages: Message[]) => void;
+    setHistory: (history: ChatHistory) => void;
+    historyId: string | null;
+    setHistoryId: (id: string | null) => void;
+    setSelectedSystemPrompt?: (prompt: string) => void;
+    setSystemPrompt?: (prompt: string) => void;
+    setContext?: (context: UploadedFile[]) => void;
+    serverChatId?: string | null;
+    scope?: ChatScope;
+    setServerChatId?: (id: string | null) => void;
+    setServerChatState?: (state: ConversationState | null) => void;
+    setServerChatVersion?: (version: number | null) => void;
+    setServerChatTitle?: (title: string | null) => void;
+    setServerChatCharacterId?: (id: string | number | null) => void;
+    setServerChatMetaLoaded?: (loaded: boolean) => void;
+    setServerChatTopic?: (topic: string | null) => void;
+    setServerChatClusterId?: (clusterId: string | null) => void;
+    setServerChatSource?: (source: string | null) => void;
+    setServerChatExternalRef?: (ref: string | null) => void;
+    characterId?: string | number | null;
+    chatTitle?: string | null;
+    serverChatState?: ConversationState | null;
+    serverChatTopic?: string | null;
+    serverChatClusterId?: string | null;
+    serverChatSource?: string | null;
+    serverChatExternalRef?: string | null;
+    messages?: Message[];
+    history?: ChatHistory;
+    onServerChatMutated?: (isCurrent: () => boolean) => void | Promise<void>;
+    serverOnly?: boolean;
+    historySelection?: HistorySelectionController | null;
+    onOpened?: (childId: string) => void;
+    notification: NotificationInstance;
 
     captureViewFence?: () => () => boolean
   }) =>
@@ -637,12 +637,31 @@ export const createBranchMessage =
     )
       return {
         ...binding,
-        state: "rejected",
-        code: "owner_conversation_mismatch"
+        state: 'rejected',
+        code: 'owner_conversation_mismatch',
+      };
+    const account = options.historySelection?.draftAccount;
+    const accountIsCurrent =
+      native &&
+      account?.requestScope &&
+      serverChatMirrorOwnerKey({ requestScope: native.request_scope }) ===
+        serverChatMirrorOwnerKey({ requestScope: account.requestScope })
+        ? account.isCurrent
+        : () => false;
+    const notifyServerMutation = () => {
+      if (!accountIsCurrent() || !options.onServerChatMutated) return;
+      try {
+        void Promise.resolve(options.onServerChatMutated(accountIsCurrent)).catch(() =>
+          console.warn('Could not refresh the server conversation list.')
+        );
+      } catch {
+        console.warn('Could not refresh the server conversation list.');
       }
-    let observed: ForkResultV1 | undefined
-    let outcomeRecorded = false
-    let claim: ForkDispatchClaim | null = null
+    };
+    let candidateChild: string | undefined;
+    let observed: ForkResultV1 | undefined;
+    let outcomeRecorded = false;
+    let claim: ForkDispatchClaim | null = null;
     try {
       const operation = await prepareForkOperation(request, {
         kind: native ? "native" : "local",
@@ -663,21 +682,29 @@ export const createBranchMessage =
       const result = native
         ? await commitNativeFork(
             prepared as Awaited<ReturnType<typeof prepareNativeFork>>,
-            (childId) => recordForkCandidate(claim!, childId)
+            async (childId) => {
+              candidateChild = childId;
+              notifyServerMutation();
+              await recordForkCandidate(claim!, childId);
+            }
           )
-        : await commitLocalFork(
-            prepared as Awaited<ReturnType<typeof prepareLocalFork>>
-          )
-      observed = result
-      await finishForkOperation(claim, result)
-      outcomeRecorded = true
+        : await commitLocalFork(prepared as Awaited<ReturnType<typeof prepareLocalFork>>);
+      observed = result;
       if (
-        (result.state !== "committed" && result.state !== "legacy_completed") ||
-        !current()
+        native &&
+        candidateChild &&
+        result.operation_id === binding.operation_id &&
+        result.owner_key === binding.owner_key &&
+        ((result.state === 'legacy_completed' && result.child_id === candidateChild) ||
+          (result.state === 'partial' && result.candidate_child_id === candidateChild))
       )
-        return result
-      const controller = options.historySelection
-      if (!controller) return result
+        notifyServerMutation();
+      await finishForkOperation(claim, result);
+      outcomeRecorded = true;
+      if ((result.state !== 'committed' && result.state !== 'legacy_completed') || !current())
+        return result;
+      const controller = options.historySelection;
+      if (!controller) return result;
       await controller.loadConversation(
         native
           ? { serverChatId: result.child_id, scope: native.scope, isCurrent: acceptDraft.isCurrent }

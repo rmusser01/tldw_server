@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client"
-import { createElement, useEffect, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react"
+import { createElement, useContext, useEffect, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { App } from "antd"
@@ -38,7 +38,7 @@ const storage = vi.hoisted(() => {
     const rows = new Map<string, Row>()
     const key = (row: Row) => JSON.stringify(name === "historySelections"
       ? [row.profile_id, row.client_session_id, row.owner_key, row.conversation_id]
-      : row.id)
+      : name === "forkOperations" ? [row.owner_key, row.operation_id] : row.id)
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),
       and: predicate => collection(row => matches(row) && predicate(row)),
@@ -120,6 +120,7 @@ import { useChatActions } from "@/hooks/chat/useChatActions"
 import { useServerChatHistoryId } from "@/hooks/chat/useServerChatHistoryId"
 import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns"
 import { useMessage } from "@/hooks/useMessage"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
 import { normalizeChatSubmitResult, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
@@ -2103,6 +2104,7 @@ describe("real full and compact Scene consumers across persistence and steering"
     }) => Promise<ChatSubmitResult | void>
     sendPerModelReply?: FullActions["sendPerModelReply"]
     regenerateLastMessage?: FullActions["regenerateLastMessage"]
+    createChatBranch?: FullActions["createChatBranch"]
     stopStreamingRequest: ReturnType<typeof useMessage>["stopStreamingRequest"]
     clearChat?: ReturnType<typeof useMessage>["clearChat"]
     composer?: ReturnType<typeof useComposerText>
@@ -2277,6 +2279,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       keepInterruptedTurns?: boolean
       actualOption?: boolean
       withComposer?: boolean
+      realAccount?: boolean
     } = {}
   ) => {
     let mountedOrigin = true
@@ -2303,6 +2306,13 @@ describe("real full and compact Scene consumers across persistence and steering"
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } }
     })
+    const VerifiedAccount = ({ children }: PropsWithChildren) => {
+      const base = useContext(HistorySelectionContext)!
+      const account = useChatDraftOwner(() => {})
+      const value = useMemo(() => ({ ...base, draftAccount: account }), [base, account])
+      useLayoutEffect(() => { selection = value }, [value])
+      return createElement(HistorySelectionContext.Provider, { value }, children)
+    }
     const Wrapper = ({ children }: PropsWithChildren) => {
       useEffect(
         () => () => {
@@ -2340,7 +2350,7 @@ describe("real full and compact Scene consumers across persistence and steering"
         [controller]
       )
       useLayoutEffect(() => {
-        selection = value
+        if (!options.realAccount) selection = value
       }, [value])
       const wrapped = createElement(
         QueryClientProvider,
@@ -2351,7 +2361,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           createElement(
             PageAssistProvider,
             null,
-            createElement(HistorySelectionContext.Provider, { value }, children)
+            createElement(HistorySelectionContext.Provider, { value }, options.realAccount ? createElement(VerifiedAccount, null, children) : children)
           )
         )
       )
@@ -2406,6 +2416,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       })
       return {
         onSubmit: actions.onSubmit,
+        createChatBranch: actions.createChatBranch,
         sendPerModelReply: actions.sendPerModelReply,
         regenerateLastMessage: actions.regenerateLastMessage,
         stopStreamingRequest: actions.stopStreamingRequest
@@ -2415,6 +2426,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       const compact = useMessage()
       return {
         onSubmit: compact.onSubmit,
+        createChatBranch: compact.createChatBranch,
         stopStreamingRequest: compact.stopStreamingRequest,
         clearChat: compact.clearChat,
         sendPerModelReply: undefined as
@@ -2484,6 +2496,93 @@ describe("real full and compact Scene consumers across persistence and steering"
       }
     }
   }
+
+
+  it.each(["full", "compact"] as const)("%s native Copy uses the actual independent account across saved, partial, New, ABA and unmount", async surface => {
+    for (const outcome of ["saved", "partial", "New", "ABA", "unmount"] as const) {
+      storage.tables.forkOperations.rows.clear()
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      useStoreMessageOption.setState({ historyId: null, serverChatId: "copy-source", messages: [], history: [], temporaryChat: false })
+      type CopyRow = { id: string; role: string; content: string; parent_message_id: string | null }
+      const source: CopyRow[] = [{ id: "copy-u", role: "user", content: "Exact original", parent_message_id: null }, { id: "copy-a", role: "assistant", content: "Exact reply", parent_message_id: "copy-u" }]
+      const graphs = new Map<string, CopyRow[]>([["copy-source", structuredClone(source)]])
+      const childId = "copy-child-" + outcome
+      let releaseCreate!: () => void
+      const createHeld = outcome === "New" || outcome === "ABA" || outcome === "unmount"
+      const create = vi.spyOn(tldwClient, "createChat").mockImplementation(async () => {
+        if (createHeld) await new Promise<void>(resolve => { releaseCreate = resolve })
+        graphs.set(childId, [])
+        return { id: childId } as never
+      })
+      const append = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (id, body) => {
+        const rows = graphs.get(id)!
+        if (outcome === "partial" && rows.length === 1) throw new Error("Declared second ACK loss")
+        const row = { id: id + "-" + (rows.length + 1), role: body.role, content: body.content!, parent_message_id: body.parent_message_id ?? null }
+        rows.push(row)
+        return { id: row.id, conversation_id: id, parent_message_id: row.parent_message_id, sender: row.role } as never
+      })
+      vi.spyOn(tldwClient, "getChatSettings").mockImplementation(async id => ({ conversation_id: id, settings: {} }) as never)
+      vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (id, request) => {
+        const all = graphs.get(id) ?? []
+        const view = { ...request.view, owner_key: "copy-account-owner" }
+        const nodes = all.map(row => ({ id: row.id, role: row.role, parent_id: row.parent_message_id, revision: "1", settled: true }))
+        const selected = view.cursor.kind === "empty" ? [] : all.slice(0, all.findIndex(row => view.cursor.kind !== "empty" && row.id === view.cursor.message_id) + (view.cursor.kind === "before_message" ? 0 : 1))
+        return { status: "captured", purpose: request.purpose, view,
+          snapshot: { version: 1, owner_key: view.owner_key, conversation_id: id, nodes, fences: { conversation: "1", history: "1", settings: "1" }, source_digest: id + "-source", storage_context_digest: id + "-storage", interpretation_status: { kind: "parent_graph_v1" }, native_fork_context: { policy: "plain_v1", supported: true, storage_context_digest: id + "-storage" } },
+          rows: nodes.filter(node => selected.some(row => row.id === node.id)), selected_content: selected.map(row => ({ id: row.id, revision: "1", message: row.content, images: [] })), storage_context_digest: id + "-storage" } as never
+      })
+      const consumer = mountConsumer(surface, snapshot(), { realAccount: true })
+      const refresh = vi.spyOn(consumer.queryClient, "invalidateQueries")
+      try {
+        await waitFor(() => expect(consumer.selection.draftAccount?.isCurrent()).toBe(true))
+        await act(async () => { await consumer.selection.loadConversation({ serverChatId: "copy-source" }); await consumer.selection.choose({ kind: "after_message", message_id: "copy-a" }) })
+        const original = consumer.selection.getCurrent().owner!
+        const account = consumer.selection.draftAccount!
+        let copied!: Awaited<ReturnType<NonNullable<Consumer["createChatBranch"]>>>
+        let pending!: Promise<typeof copied>
+        await act(async () => {
+          pending = consumer.mounted.result.current.createChatBranch!("copy-a")
+          if (createHeld) await vi.waitFor(() => expect(create).toHaveBeenCalledOnce())
+          else copied = await pending
+        })
+        if (createHeld) {
+          if (outcome === "New") await act(async () => { consumer.selection.reset(); useStoreMessageOption.getState().startNewChatDraft(false); useStoreMessageOption.setState({ historyId: null, serverChatId: null, messages: [], history: [] }) })
+          else if (outcome === "ABA") {
+            await act(async () => { window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")) })
+            await waitFor(() => expect(consumer.selection.draftAccount?.isCurrent()).toBe(true))
+            expect(consumer.selection.draftAccount?.requestScope).toEqual(account.requestScope)
+            expect(consumer.selection.draftAccount).not.toBe(account)
+            expect(account.isCurrent()).toBe(false)
+          } else consumer.mounted.unmount()
+          await act(async () => { releaseCreate(); copied = await pending })
+        }
+        expect(copied.state).toBe(outcome === "saved" ? "legacy_completed" : "partial")
+        expect(create).toHaveBeenCalledOnce()
+        expect(refresh).toHaveBeenCalledTimes(outcome === "ABA" || outcome === "unmount" ? 0 : 2)
+        expect(graphs.get("copy-source")).toEqual(source)
+        if (outcome === "saved") {
+          expect(consumer.selection.getCurrent().owner?.conversation_id).toBe(childId)
+          expect(account.isCurrent()).toBe(true)
+          expect(original.kind !== "unavailable" && original.validate_lease?.()).toBe(false)
+          expect(append).toHaveBeenCalledTimes(2)
+        } else if (outcome === "New") {
+          expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+          expect(useStoreMessageOption.getState().messages).toEqual([])
+          expect(append).not.toHaveBeenCalled()
+        } else if (outcome === "ABA" || outcome === "unmount") {
+          expect(account.isCurrent()).toBe(false)
+          expect(append).not.toHaveBeenCalled()
+        } else {
+          expect(consumer.selection.getCurrent().owner?.conversation_id).toBe("copy-source")
+          let recorded!: typeof copied
+          await act(async () => { recorded = await consumer.mounted.result.current.createChatBranch!("copy-a") })
+          expect(recorded.operation_id).toBe(copied.operation_id)
+          expect(create).toHaveBeenCalledOnce()
+          expect(refresh).toHaveBeenCalledTimes(2)
+        }
+      } finally { consumer.unmount(); vi.restoreAllMocks() }
+    }
+  })
 
   const declareNativeMirrorTransport = (serverCompletion: boolean | "unsupported" = false) => {
     const rows: Array<{

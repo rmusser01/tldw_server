@@ -6802,3 +6802,64 @@ it("an acknowledged workspace character creation keeps its existing native path"
     send.mockRestore()
   }
 })
+
+it.each(['saved', 'partial', 'missing creation'])(
+  'actual Full native Copy refreshes only acknowledged finder changes (%s)',
+  async (outcome) => {
+    const { memory } = await import('./local-history-fixture');
+    const { createQueryClient, invalidateServerChatHistory } =
+      await import('@/services/query-client');
+    memory.forkOperations.rows.clear();
+    const projector =
+      await vi.importActual<typeof import('@/db/dexie/branch')>('@/db/dexie/branch');
+    localForks.digest = projector.forkRequestDigest;
+    h1.capture.mockImplementation(async (_id, request) => ({
+      ...captureFor(request.view),
+      purpose: request.purpose,
+      snapshot: {
+        ...captureFor(request.view).snapshot,
+        native_fork_context: {
+          policy: 'plain_v1',
+          supported: true,
+          storage_context_digest: 'storage',
+        },
+      },
+    }));
+    createChatMock.mockImplementation(async () => {
+      if (outcome === 'missing creation') throw new Error('creation acknowledgement lost');
+      return { id: 'finder-copy-child' };
+    });
+    let appended = 0;
+    addChatMessageMock.mockImplementation(async (cid, row) => {
+      if (++appended === 2 && outcome === 'partial') throw new Error('reply acknowledgement lost');
+      return {
+        id: 'copied-' + appended,
+        conversation_id: cid,
+        parent_message_id: row.parent_message_id,
+        sender: row.role,
+      };
+    });
+    installAcceptedSource(h1.controller.getCurrent(), null);
+    const client = createQueryClient();
+    const refresh = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() =>
+      useChatActions({
+        ...ordinaryOptions(),
+        historyId: null,
+        invalidateServerChatHistory: (isCurrent?: () => boolean) =>
+          invalidateServerChatHistory(client, isCurrent),
+      } as Parameters<typeof useChatActions>[0])
+    );
+    let copied: Awaited<ReturnType<typeof result.current.createChatBranch>> | undefined;
+    await act(async () => {
+      copied = await result.current.createChatBranch('a1');
+    });
+    expect(copied?.state).toBe(
+      outcome === 'saved' ? 'legacy_completed' : outcome === 'partial' ? 'partial' : 'unknown'
+    );
+    expect(createChatMock).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledTimes(outcome === 'missing creation' ? 0 : 2);
+    expect(localForks.commit).not.toHaveBeenCalled();
+    client.clear();
+  }
+);

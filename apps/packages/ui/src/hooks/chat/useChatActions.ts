@@ -508,33 +508,33 @@ type UseChatActionsOptions = {
     scopeInvalidatedSignal?: AbortSignal,
     snapshot?: ServicePromptSnapshot,
     sceneSend?: ActorSceneSend
-  ) => Promise<string | null>
-  contextFiles: UploadedFile[]
-  setContextFiles: (files: UploadedFile[]) => void
-  documentContext: ChatDocuments | null
-  setDocumentContext: (docs: ChatDocuments) => void
-  uploadedFiles: UploadedFile[]
-  compareModeActive: boolean
-  compareSelectedModels: string[]
-  compareMaxModels: number
-  compareFeatureEnabled: boolean
-  markCompareHistoryCreated: (historyId: string) => void
-  replyTarget: ReplyTarget | null
-  clearReplyTarget: () => void
-  messageSteeringPrompts: MessageSteeringPromptTemplates | null
-  setSelectedQuickPrompt: (prompt: string | null) => void
-  setSelectedSystemPrompt: (prompt: string) => void
-  invalidateServerChatHistory: () => void
-  selectedCharacter: Character | null
-  selectedAssistant: AssistantSelection | null
-  inheritedAssistant?: AssistantSelection | null
-  inheritedPersonaMemoryMode?: PersonaMemoryMode | null
-  messageSteeringMode: MessageSteeringMode
-  messageSteeringForceNarrate: boolean
-  clearMessageSteering: (options?: { expectedRevision?: number }) => void
-  visualIdentityManualExpressionOverride?: string | null
-  setVisualIdentityManualExpressionOverride?: (expressionKey: string) => void
-}
+  ) => Promise<string | null>;
+  contextFiles: UploadedFile[];
+  setContextFiles: (files: UploadedFile[]) => void;
+  documentContext: ChatDocuments | null;
+  setDocumentContext: (docs: ChatDocuments) => void;
+  uploadedFiles: UploadedFile[];
+  compareModeActive: boolean;
+  compareSelectedModels: string[];
+  compareMaxModels: number;
+  compareFeatureEnabled: boolean;
+  markCompareHistoryCreated: (historyId: string) => void;
+  replyTarget: ReplyTarget | null;
+  clearReplyTarget: () => void;
+  messageSteeringPrompts: MessageSteeringPromptTemplates | null;
+  setSelectedQuickPrompt: (prompt: string | null) => void;
+  setSelectedSystemPrompt: (prompt: string) => void;
+  invalidateServerChatHistory: (isCurrent?: () => boolean) => void | Promise<void>;
+  selectedCharacter: Character | null;
+  selectedAssistant: AssistantSelection | null;
+  inheritedAssistant?: AssistantSelection | null;
+  inheritedPersonaMemoryMode?: PersonaMemoryMode | null;
+  messageSteeringMode: MessageSteeringMode;
+  messageSteeringForceNarrate: boolean;
+  clearMessageSteering: (options?: { expectedRevision?: number }) => void;
+  visualIdentityManualExpressionOverride?: string | null;
+  setVisualIdentityManualExpressionOverride?: (expressionKey: string) => void;
+};
 
 export const useChatActions = ({
   t,

@@ -240,8 +240,9 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+const nativeCopyQueries = vi.hoisted(() => ({ cancel: vi.fn(async () => {}), refresh: vi.fn(async () => {}) }))
 vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => ({ cancelQueries: vi.fn(), invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ cancelQueries: nativeCopyQueries.cancel, invalidateQueries: nativeCopyQueries.refresh }),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -5445,4 +5446,32 @@ it.each(["append", "completion"])("mounted Compact global saved Roleplay rejects
   expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ conversation_id: nativeChatId, input_text: "  Original owned input  ", state: boundary === "append" ? "unknown" : "generated_unsaved" })
   expect(h1.dismiss).not.toHaveBeenCalled()
   expect(h1.wire).not.toHaveBeenCalled()
+})
+
+
+it.each(["saved", "partial", "missing creation"])("actual Compact native Copy refreshes only acknowledged finder changes (%s)", async outcome => {
+  const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+  memory.forkOperations.rows.clear()
+  const projector = await vi.importActual<typeof import("@/db/dexie/branch")>("@/db/dexie/branch")
+  localForks.digest = projector.forkRequestDigest
+  h1.capture.mockImplementation(async (_id, request) => ({ ...captureFor(request.view), purpose: request.purpose,
+    snapshot: { ...captureFor(request.view).snapshot, native_fork_context: { policy: "plain_v1", supported: true, storage_context_digest: "storage" } } }))
+  h1.create.mockImplementation(async () => {
+    if (outcome === "missing creation") throw new Error("creation acknowledgement lost")
+    return { id: "finder-copy-child" }
+  })
+  let appended = 0
+  h1.append.mockImplementation(async (cid, row) => {
+    if (++appended === 2 && outcome === "partial") throw new Error("reply acknowledgement lost")
+    return { id: "copied-" + appended, conversation_id: cid, parent_message_id: row.parent_message_id, sender: row.role }
+  })
+  mocks.chatBaseState.historyId = null
+  const { result } = renderHook(() => useMessage())
+  let copied: Awaited<ReturnType<typeof result.current.createChatBranch>> | undefined
+  await act(async () => { copied = await result.current.createChatBranch("a1") })
+  expect(copied?.state).toBe(outcome === "saved" ? "legacy_completed" : outcome === "partial" ? "partial" : "unknown")
+  expect(h1.create).toHaveBeenCalledOnce()
+  expect(nativeCopyQueries.cancel).toHaveBeenCalledTimes(outcome === "missing creation" ? 0 : 2)
+  expect(nativeCopyQueries.refresh).toHaveBeenCalledTimes(outcome === "missing creation" ? 0 : 2)
+  expect(localForks.commit).not.toHaveBeenCalled()
 })
