@@ -23,6 +23,8 @@
 - **Commits** end with exactly `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. Never `git stash`. Never `--no-verify`.
 - **Python:** `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python` (written `$PY` below). Tests run with `TLDW_TEST_NO_DOCKER=1`.
 - **Three test files flake under parallel load on this machine with none of these changes:** `tests/Admin/test_admin_llm_provider_test_runtime.py`, `tests/LLM_Calls/test_mlx_provider.py`, `tests/Web_Scraping/test_phase4_safe_regex.py`. Re-run one alone before reporting it.
+- **One test fails on `dev` in this environment:** `tests/Jobs/test_retry_admission_fixture_registration.py::test_bridge_resolution_preserves_jobs_loop_and_isolation`, with `ValueError: Pytest terminal summary report not found`. It fails the same way with and without this plan's changes.
+- **`tests/Jobs` cannot run under xdist as a whole.** Two files put random UUIDs in their parametrized ids. Task 2 Step 5 gives the commands that work.
 
 ## Review Focus
 
@@ -456,7 +458,17 @@ Expected: all pass, and no existing test in the two existing files changes resul
 
 - [ ] **Step 5: Run the Jobs suite for regressions**
 
-Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -n 4 -p no:cacheprovider tldw_Server_API/tests/Jobs`
+Two files in `tests/Jobs` put random UUIDs in their parametrized test ids, so xdist workers collect different ids and a parallel run of the directory aborts with "Different tests were collected". This is the case on `dev`, with none of these changes. Run the directory in parallel without those two files, then run the two serially:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -n 4 -p no:cacheprovider tldw_Server_API/tests/Jobs \
+  --ignore=tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
+  --ignore=tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py
+TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider \
+  tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py
+```
+
 Expected: the same pass and fail counts as on the task's base commit.
 
 - [ ] **Step 6: Commit**
@@ -1051,8 +1063,12 @@ git grep -l -e WorkerSDK -e worker_sdk -e start_run -e continue_run -e WorkflowS
   -e Article_Extractor_Lib -e llm_call_root -e run_in_executor -- 'tldw_Server_API/tests/**/test_*.py' > <scratchpad>/pr1b_tests.txt
 TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -n 4 -p no:cacheprovider --timeout=600 $(cat <scratchpad>/pr1b_tests.txt) \
   tldw_Server_API/tests/Usage tldw_Server_API/tests/Jobs tldw_Server_API/tests/Workflows \
-  tldw_Server_API/tests/LLM_Calls tldw_Server_API/tests/Docs tldw_Server_API/tests/lint
+  tldw_Server_API/tests/LLM_Calls tldw_Server_API/tests/Docs tldw_Server_API/tests/lint \
+  --ignore=tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
+  --ignore=tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py
 ```
+
+Drop those two files from the contract list as well if `git grep` put them there, and run them serially afterwards. Their parametrized ids hold random UUIDs, so a parallel run that includes them aborts at collection (see Task 2 Step 5).
 
 Every failure needs evidence before it is called pre-existing: it fails the same way at `origin/dev` in a detached worktree, or its execution path touches no changed file. A failure that passes alone is a load flake only if it also passes alone at `origin/dev`.
 
