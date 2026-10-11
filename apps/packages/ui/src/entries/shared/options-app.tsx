@@ -4,6 +4,7 @@ import { platformConfig } from "@/config/platform"
 import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
 import { AppShell } from "./AppShell"
 import { OptionsRouteShell } from "@/routes/options-route-shell"
+import { IndependentBuddyHost } from "@/components/Common/PersonaBuddy/IndependentBuddyHost"
 import { resolveRouter } from "./router-utils"
 
 const WorkflowIntegrationHost = React.lazy(() =>
@@ -40,6 +41,7 @@ export const OptionsApp: React.FC = () => {
       emptyDescription={t("common:noData", { defaultValue: "No data" })}
       suspendWhenHidden={platformConfig.features.suspendOptionsWhenHidden}
       includeAntdApp={platformConfig.features.includeAntdApp}
+      extras={<IndependentBuddyHost />}
     >
       <OptionsRouteShell />
       <React.Suspense fallback={null}>
