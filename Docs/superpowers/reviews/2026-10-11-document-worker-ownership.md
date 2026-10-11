@@ -44,3 +44,17 @@ target lifecycle proof is separate. Scoped ESLint/Prettier and whole-web `tsc --
 pass, including the final churn fixture. No S Python changed, so server Bandit is N/A.
 No full suite or production Next build was run. WXT qualification build passed its
 normal token checks. I3 service/factory wiring and I5 production packaging remain gates.
+
+## Coordinated review fix1
+
+I2 fixed once in shared createCheckResult: zero-range refusals never enumerate source;
+nonzero range validation counts only through the furthest required Unicode scalar
+endpoint, without allocating a scalar array. Oversize/excerpt/unsupported Check and
+Format refuse without Worker construction or source iteration/encoding. Emoji,
+combining marks, CRLF, EOF and out-of-bounds controls remain valid.186targeted tests
+cover all affected constructor callers; scoped ESLint/Prettier and whole-web types
+exit0 with exact invocation/output/status records under task10 evidence/fix1. Original
+silent exits remain Cannot Verify; the old148-record index is unchanged. Seven Node
+localStorage notices and the ESLint pages notice remain visible, not proven inherited.
+No browser build/lifecycle/benchmark replay or engine rewrite. ADR065/R39–R42 and
+all seven integration/platform/evidence dispositions remain; task In Progress.

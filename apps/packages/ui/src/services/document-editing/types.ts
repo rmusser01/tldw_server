@@ -78,8 +78,18 @@ export function createCheckResult(
     throw new Error("Excerpts cannot report successful whole-document checks");
   }
   const diagnostics = Object.freeze(fields.diagnostics.map(createDiagnostic));
-  const sourceLength = Array.from(request.text).length;
-  if (diagnostics.some((d) => d.end > sourceLength))
+  const requiredLength = diagnostics.reduce(
+    (end, d) => Math.max(end, d.end),
+    0,
+  );
+  let sourceLength = 0;
+  let offset = 0;
+  // Prove only the furthest endpoint; zero-range refusals never scan source.
+  while (sourceLength < requiredLength && offset < request.text.length) {
+    offset += request.text.codePointAt(offset)! > 0xffff ? 2 : 1;
+    sourceLength++;
+  }
+  if (sourceLength < requiredLength)
     throw new Error("Diagnostic range exceeds source snapshot");
   const result = Object.freeze({
     ...fields,

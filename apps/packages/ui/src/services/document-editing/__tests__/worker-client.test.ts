@@ -101,3 +101,63 @@ it("validates reply identity, types, ranges and completion without trusting pros
     }),
   ).toThrow();
 });
+
+it.each([
+  ["json", false, "resource_limited"],
+  ["json", true, "unsupported"],
+  ["future-mode", false, "unsupported"],
+] as const)(
+  "refuses %s/excerpt=%s without scanning rejected source or starting a worker",
+  async (language, isExcerpt, state) => {
+    const { DocumentWorkerClient } = await import("../worker-client");
+    const source = "x".repeat(1024 * 1024 + 1);
+    const request = requestFor(source, language, { is_excerpt: isExcerpt });
+    const factory = vi.fn(() => {
+      throw new Error("Worker must not start");
+    });
+    const client = new DocumentWorkerClient(factory);
+    const iterator = String.prototype[Symbol.iterator];
+    const codePointAt = String.prototype.codePointAt;
+    const charCodeAt = String.prototype.charCodeAt;
+    const encode = TextEncoder.prototype.encode;
+    const visited: string[] = [];
+    vi.spyOn(String.prototype, Symbol.iterator).mockImplementation(function (
+      this: string,
+    ) {
+      if (String(this) === source) visited.push("iterator");
+      return iterator.call(this);
+    });
+    vi.spyOn(String.prototype, "codePointAt").mockImplementation(function (
+      this: string,
+      offset: number,
+    ) {
+      if (String(this) === source) visited.push("codePointAt");
+      return codePointAt.call(this, offset);
+    });
+    vi.spyOn(String.prototype, "charCodeAt").mockImplementation(function (
+      this: string,
+      offset: number,
+    ) {
+      if (String(this) === source) visited.push("charCodeAt");
+      return charCodeAt.call(this, offset);
+    });
+    vi.spyOn(TextEncoder.prototype, "encode").mockImplementation(function (
+      this: TextEncoder,
+      input?: string,
+    ) {
+      if (input === source) visited.push("encode");
+      return encode.call(this, input);
+    });
+    try {
+      expect((await client.check(request)).state).toBe(state);
+      expect((await client.format(request)).state).toBe(
+        state === "unsupported" ? "blocked" : state,
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(visited).toEqual([]);
+    } finally {
+      client.close();
+      vi.restoreAllMocks();
+    }
+  },
+);

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createCheckResult,
   createDiagnostic,
@@ -224,4 +224,68 @@ describe("document contracts", () => {
       createHash("sha256").update(raw).digest("hex"),
     );
   });
+});
+
+it.each([
+  ["", 0],
+  ["😀", 1],
+  ["e\u0301", 2],
+  ["a\r\n😀", 4],
+  ["😀e\u0301\r\n", 5],
+] as const)(
+  "validates scalar EOF and out-of-bounds ranges for %j",
+  (source, length) => {
+    const request = requestFor(source);
+    const diagnostic = (start: number, end: number) => ({
+      code: "syntax",
+      severity: "error" as const,
+      message: "Invalid",
+      start,
+      end,
+    });
+    const result = checked(request, {
+      format_allowed: false,
+      diagnostics: [diagnostic(length, length), diagnostic(0, 0)],
+    });
+    expect(result.diagnostics[0].end).toBe(length);
+    expect(() =>
+      checked(request, {
+        format_allowed: false,
+        diagnostics: [diagnostic(0, length + 1)],
+      }),
+    ).toThrow("Diagnostic range exceeds source snapshot");
+  },
+);
+
+it("stops range validation once a nonzero prefix endpoint is proven", () => {
+  const source = "😀" + "x".repeat(1024 * 1024);
+  const request = requestFor(source);
+  const original = String.prototype.codePointAt;
+  const visited: number[] = [];
+  vi.spyOn(String.prototype, "codePointAt").mockImplementation(function (
+    this: string,
+    offset: number,
+  ) {
+    if (String(this) === source) visited.push(offset);
+    return original.call(this, offset);
+  });
+  try {
+    expect(
+      checked(request, {
+        format_allowed: false,
+        diagnostics: [
+          {
+            code: "syntax",
+            severity: "error",
+            message: "Invalid",
+            start: 0,
+            end: 1,
+          },
+        ],
+      }).diagnostics[0].end,
+    ).toBe(1);
+    expect(visited).toEqual([0]);
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
