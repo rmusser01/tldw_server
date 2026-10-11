@@ -1,7 +1,7 @@
 ---
 id: TASK-13519
 title: Bound structured document checks with worker ownership and deadlines
-status: In Progress
+status: Done
 created_date: 2026-10-11 22:04
 dependencies:
 - TASK-13518
@@ -12,7 +12,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-11 23:20
+updated_date: 2026-10-11 23:28
 ---
 
 ## Description
@@ -23,12 +23,12 @@ Keep checks responsive and retire obsolete work safely during edits, navigation 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Checks and formatting share one active owner with one executing snapshot and only the latest pending snapshot; checks debounce400ms and inactive owners release resources.
-- [ ] #2 Whole-document admission enforces1MiB UTF-8 source, depth100,100 displayed diagnostics and a2-second deadline without false successful or incomplete states.
-- [ ] #3 Real child or browser workers terminate and settle pending requests on deadline/crash/close, with no credential or filesystem authority forwarding or source-bearing logs.
-- [ ] #4 Immutable authority/document/session/draft/language/request identities reject stale results across navigation and accounts; formatting uses the captured-source safety seam.
-- [ ] #5 Targeted real lifecycle, initialization, cancellation, malformed-reply, alias-heavy and scheduler tests plus boundary copy/startup measurements are recorded.
-- [ ] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+- [x] #1 Checks and formatting share one active owner with one executing snapshot and only the latest pending snapshot; checks debounce400ms and inactive owners release resources.
+- [x] #2 Whole-document admission enforces1MiB UTF-8 source, depth100,100 displayed diagnostics and a2-second deadline without false successful or incomplete states.
+- [x] #3 Real child or browser workers terminate and settle pending requests on deadline/crash/close, with no credential or filesystem authority forwarding or source-bearing logs.
+- [x] #4 Immutable authority/document/session/draft/language/request identities reject stale results across navigation and accounts; formatting uses the captured-source safety seam.
+- [x] #5 Targeted real lifecycle, initialization, cancellation, malformed-reply, alias-heavy and scheduler tests plus boundary copy/startup measurements are recorded.
+- [x] #6 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -56,19 +56,19 @@ Fix1 after original coordinated E4 review (both tasks already In Progress): exac
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented bounded local browser worker/client and permanent lease scheduler with trusted native host factory. ADR065/Rulings39–42 explicitly qualify WXT native imports, Next webpack module fixture and native asynchronous termination; default Turbopack plus self-only worker CSP remains I3/I5 gate.148 targeted tests, scoped ESLint/Prettier and whole-web typecheck pass; actual installed extension and Next webpack each create/destroy25workers, including real fault/init/churn controls with responsive UI and eventual cleanup. No production editor adoption or temporary qualification routes ship. Evidence: Docs/superpowers/reviews/2026-10-11-document-worker-ownership.md and C task10 durable report/evidence. Keep In Progress pending independent review.
 Fix1: corrected review I2 once in shared request-aware createCheckResult. Zero-range refusal performs no source enumeration, while nonzero Unicode range validation stops at the required endpoint without scalar-array allocation. Oversize/excerpt/unsupported Check+Format refuse without Worker/source scans; EOF/emoji/combining/CRLF/out-of-bounds tests pass.186 targeted affected-consumer tests, scoped ESLint/Prettier and whole-web types exit0 with exact current command/exit/output records under C task10-evidence/fix1. Original silent exits remain Cannot Verify, old index unchanged; seven localStorage notices/pages notice retained. ADR065/R39–R42 and all seven owner/platform gates unchanged; no browser build replay. Keep In Progress for fresh scoped review.
+Independent original coordinated review plus fresh scoped fix1 review accepted: both Important findings addressed, no new breakage. Original worker qualification and amended 23 Python / 186 browser controls, scoped static checks and exact current command/exit records retained. ADR194/065 and R39-R42 govern isolation, native factories, known default Turbopack gate and asynchronous browser cleanup. Historical silent exits/lost attachments remain unverified; actual editor ownership/save/history/IME/accessibility/production/platform qualification stays I2/I3/I5. No full sweep or unchanged build/lifecycle replay.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Bounded local worker and scheduler primitives completed and independently reviewed, including prompt immediate replacements/obsolete-source release and zero-scan oversized browser refusal. Current amended checks pass with durable exit records; actual editor integration and advertised production/platform gates remain separate.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
