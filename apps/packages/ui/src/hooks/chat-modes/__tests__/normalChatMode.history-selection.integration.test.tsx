@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { createElement, useEffect, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { MemoryRouter } from "react-router-dom"
 import { App } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ChatTldwOptions } from "@/models/ChatTldw"
@@ -116,6 +117,7 @@ import { useChatActions } from "@/hooks/chat/useChatActions"
 import { useServerChatHistoryId } from "@/hooks/chat/useServerChatHistoryId"
 import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns"
 import { useMessage } from "@/hooks/useMessage"
+import { useMessageOption } from "@/hooks/useMessageOption"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
 import { normalizeChatSubmitResult, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import * as tldwServer from "@/services/tldw-server"
@@ -137,12 +139,15 @@ import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { useStoreMessageOption } from "@/store/option"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { buildChatToolFilterState } from "@/utils/chat-tools"
 import { Storage } from "@plasmohq/storage"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { readChatCreationRecovery } from "@/services/pending-chat-promotion"
-import type { ChatDraftHandle } from "@/utils/chat-draft-address"
+import { conversationDraftKey, type ChatDraftHandle } from "@/utils/chat-draft-address"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import {
   getActorSceneForChat,
@@ -1079,7 +1084,9 @@ describe("normal Chat owned history creation and H1 admission", () => {
     } }
     const adopt = vi.fn(publishFixtureServerChatId)
     await act(async () => { await expect(send(changed, { setServerChatId: adopt, originIsCurrent: controller.fence() })).rejects.toThrow("stale_selection") })
-    expect(adopt).toHaveBeenCalledWith(newServerId)
+    expect(adopt).not.toHaveBeenCalled()
+    expect(await storage.tables.chatHistories.toArray()).toEqual([])
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("fresh")
     expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
     const owner = mounted.result.current.getCurrent().owner
     expect(owner?.kind === "native" && owner.validate_lease()).toBe(false)
@@ -2096,6 +2103,7 @@ describe("real full and compact Scene consumers across persistence and steering"
     regenerateLastMessage?: FullActions["regenerateLastMessage"]
     stopStreamingRequest: ReturnType<typeof useMessage>["stopStreamingRequest"]
     clearChat?: ReturnType<typeof useMessage>["clearChat"]
+    composer?: ReturnType<typeof useComposerText>
   }
   let initialCore: ReturnType<typeof useStoreMessageOption.getState>
 
@@ -2263,7 +2271,11 @@ describe("real full and compact Scene consumers across persistence and steering"
   const mountConsumer = (
     surface: Surface,
     scoped: ServicePromptSnapshot,
-    options: { keepInterruptedTurns?: boolean } = {}
+    options: {
+      keepInterruptedTurns?: boolean
+      actualOption?: boolean
+      withComposer?: boolean
+    } = {}
   ) => {
     let mountedOrigin = true
     const originalScope = structuredClone(scoped.requestScope)
@@ -2328,7 +2340,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       useLayoutEffect(() => {
         selection = value
       }, [value])
-      return createElement(
+      const wrapped = createElement(
         QueryClientProvider,
         { client: queryClient },
         createElement(
@@ -2341,6 +2353,9 @@ describe("real full and compact Scene consumers across persistence and steering"
           )
         )
       )
+      return options.actualOption || options.withComposer
+        ? createElement(MemoryRouter, null, wrapped)
+        : wrapped
     }
     type ActionOptions = Parameters<typeof useChatActions>[0]
     const notification = {
@@ -2405,8 +2420,50 @@ describe("real full and compact Scene consumers across persistence and steering"
           | undefined
       }
     }
+    const useOptionConsumer = (): Consumer => {
+      const option = useMessageOption()
+      return {
+        onSubmit: option.onSubmit,
+        sendPerModelReply: option.sendPerModelReply,
+        regenerateLastMessage: option.regenerateLastMessage,
+        stopStreamingRequest: option.stopStreamingRequest,
+        clearChat: option.clearChat
+      }
+    }
+    const useSurfaceConsumer = options.actualOption
+      ? useOptionConsumer
+      : surface === "full"
+        ? useFullConsumer
+        : useCompactConsumer
+    const useRecoveryConsumer = (): Consumer => {
+      const consumer = useSurfaceConsumer()
+      const core = useStoreMessageOption()
+      const textareaRef = useMemo(
+        () => ({ current: null as HTMLTextAreaElement | null }),
+        []
+      )
+      const root =
+        surface === "full"
+          ? "tldw:playgroundChatDraft"
+          : "tldw:sidepanelChatDraft"
+      const address = core.chatDraftAddress
+      const composer = useComposerText({
+        draftKey: address ? conversationDraftKey(root, address) : root,
+        draftAddress: address ?? undefined,
+        draftEnabled: address !== null,
+        bindFromDraftKey:
+          core.chatDraftTransition?.kind === "bind" &&
+          core.chatDraftTransition.sourceAddress
+            ? conversationDraftKey(root, core.chatDraftTransition.sourceAddress)
+            : undefined,
+        recoverySurface: root,
+        tabScopedDraft: true,
+        textareaRef
+      })
+      return { ...consumer, composer }
+    }
     const mounted = renderHook(
-      surface === "full" ? useFullConsumer : useCompactConsumer,
+      options.withComposer ? useRecoveryConsumer : useSurfaceConsumer,
       { wrapper: Wrapper }
     )
     return {
@@ -2424,6 +2481,580 @@ describe("real full and compact Scene consumers across persistence and steering"
       }
     }
   }
+
+  const declareNativeMirrorTransport = () => {
+    const rows: Array<{
+      id: string
+      role: string
+      content: string
+      parent_message_id: string | null
+    }> = []
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => {
+        const view = { ...request.view, owner_key: "server-owner" }
+        const nodes = rows.map((row) => ({
+          id: row.id,
+          role: row.role,
+          parent_id: row.parent_message_id,
+          revision: "1",
+          settled: true
+        }))
+        return {
+          status: "captured",
+          purpose: request.purpose,
+          view,
+          snapshot: {
+            version: 1,
+            owner_key: view.owner_key,
+            conversation_id: newServerId,
+            nodes,
+            fences: { conversation: "1", history: "1", settings: "1" },
+            source_digest: "source",
+            storage_context_digest: "storage",
+            interpretation_status: { kind: "parent_graph_v1" }
+          },
+          rows: view.cursor.kind === "empty" ? [] : nodes,
+          selected_content:
+            view.cursor.kind === "empty"
+              ? []
+              : rows.map((row) => ({
+                  id: row.id,
+                  revision: "1",
+                  message: row.content,
+                  images: []
+                })),
+          storage_context_digest: "storage"
+        } as never
+      }
+    )
+    const append = vi
+      .spyOn(tldwClient, "addChatMessage")
+      .mockImplementation(async (_id, body) => {
+        rows.push({
+          id: body.id!,
+          role: body.role,
+          content: body.content!,
+          parent_message_id: body.parent_message_id ?? null
+        })
+        const selection = body.tldw_history_selection_v1
+        return {
+          id: body.id,
+          ...(selection
+            ? {
+                tldw_history_admission_v1: {
+                  version: 1,
+                  owner_key: "server-owner",
+                  conversation_id: newServerId,
+                  input_message_id: body.id,
+                  input_message_revision: "1",
+                  selection_digest: selection.selection_digest,
+                  messages: selection.messages,
+                  originating_selection_revision: selection.selection_revision
+                }
+              }
+            : {})
+        } as never
+      })
+    return { rows, append }
+  }
+
+  it.each(
+    (["full", "compact"] as const).flatMap((surface) =>
+      (
+        [
+          "unchanged",
+          "nested unrelated",
+          "historyId ABA",
+          "serverChatId ABA",
+          "historyId subscriber ABA",
+          "serverChatId subscriber ABA"
+        ] as const
+      ).map((boundary) => ({ surface, boundary }))
+    )
+  )(
+    "actual mounted $surface native mirror checks $boundary through its held bound record",
+    async ({ surface, boundary }) => {
+      const scoped = answerSnapshot()
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(
+        scoped
+      )
+      const { rows, append } = declareNativeMirrorTransport()
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({
+        state: {
+          ...initialConnection,
+          isConnected: true,
+          phase: ConnectionPhase.CONNECTED,
+          mode: "normal",
+          offlineBypass: false
+        }
+      })
+      const consumer = mountConsumer(surface, scoped, {
+        actualOption: surface === "full"
+      })
+      let unrelatedObserved = false
+      const restoreFromEarlierSubscriber = useStoreMessageOption.subscribe(
+        (next, previous) => {
+          if (
+            boundary === "nested unrelated" &&
+            !unrelatedObserved &&
+            next.historyId &&
+            !previous.historyId
+          ) {
+            unrelatedObserved = true
+            next.setServerChatTitle("Unrelated nested display title")
+          }
+          if (!boundary.includes("subscriber")) return
+          const field = boundary.startsWith("historyId")
+            ? "historyId"
+            : "serverChatId"
+          if (
+            next[field] !==
+            (field === "historyId" ? "foreign-mirror" : "foreign-conversation")
+          )
+            return
+          if (field === "historyId")
+            next.setHistoryId(previous[field], { preserveServerChatId: true })
+          else next.setServerChatId(previous[field])
+        }
+      )
+      const original = Storage.prototype.set
+      let enter!: () => void, release!: () => void
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      vi.spyOn(Storage.prototype, "set").mockImplementation(async function (
+        this: Storage,
+        key,
+        value
+      ) {
+        const result = await original.call(this, key, value)
+        if (
+          key.startsWith("registry:chat-creation:") &&
+          value?.value?.state === "bound"
+        ) {
+          enter()
+          await held
+        }
+        return result
+      })
+      let pending: Promise<ChatSubmitResult | void> | undefined
+      try {
+        act(() => {
+          pending = consumer.mounted.result.current.onSubmit({
+            message: "Original first native mirror question",
+            image: ""
+          })
+        })
+        await Promise.race([
+          entered,
+          pending!.then((result) => {
+            throw new Error(
+              "First Send settled before bound record: " + JSON.stringify(result)
+            )
+          })
+        ])
+        await waitFor(() =>
+          expect(useStoreMessageOption.getState().historyId).not.toBeNull()
+        )
+        const core = useStoreMessageOption.getState()
+        const receipt = consumer.receipts[0]
+        expect(core.serverChatId).toBe(newServerId)
+        expect(receipt.owner.kind).toBe("native")
+        expect(consumer.selection.getCurrent().owner).toBe(receipt.owner)
+        const mirrors = await storage.tables.chatHistories.toArray()
+        expect(mirrors).toEqual([
+          expect.objectContaining({
+            id: core.historyId,
+            server_chat_id: newServerId,
+            server_scope_key: ACCOUNT
+          })
+        ])
+        expect(append).not.toHaveBeenCalled()
+        await act(async () => {
+          if (boundary.includes("ABA")) {
+            const field = boundary.startsWith("historyId")
+              ? "historyId"
+              : "serverChatId"
+            const id = core[field]
+            if (field === "historyId") {
+              core.setHistoryId("foreign-mirror", { preserveServerChatId: true })
+              core.setHistoryId(id, { preserveServerChatId: true })
+            } else {
+              core.setServerChatId("foreign-conversation")
+              core.setServerChatId(id)
+            }
+          }
+          release()
+          const result = normalizeChatSubmitResult(await pending)
+          if (!boundary.includes("ABA"))
+            expect(result).toEqual({ status: "submitted" })
+          else expect(result.status).not.toBe("submitted")
+        })
+        if (!boundary.includes("ABA")) {
+          expect(rows.map((row) => [row.role, row.content])).toEqual([
+            ["user", "Original first native mirror question"],
+            ["assistant", "First answer"]
+          ])
+          expect(append).toHaveBeenCalledTimes(2)
+          expect(tldwChat.streamMessage).toHaveBeenCalledOnce()
+        } else {
+          expect(rows).toEqual([])
+          expect(append).not.toHaveBeenCalled()
+          expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+        }
+      } finally {
+        release?.()
+        if (pending)
+          await act(async () => {
+            await pending
+          })
+        restoreFromEarlierSubscriber()
+        consumer.unmount()
+        useConnectionStore.setState({ state: initialConnection })
+      }
+    }
+  )
+
+  it.each(
+    (["full", "compact"] as const).flatMap((surface) =>
+      (
+        [
+          "link failure",
+          "New",
+          "foreign alias",
+          "same-CID reload",
+          "account ABA",
+          "Stop",
+          "model",
+          "tools"
+        ] as const
+      ).map((boundary) => ({ surface, boundary }))
+    )
+  )(
+    "actual mounted $surface native mirror refuses $boundary during its original link",
+    async ({ surface, boundary }) => {
+      const scoped = answerSnapshot()
+      const auth = new AbortController()
+      scoped.scopeInvalidatedSignal = auth.signal
+      // Declared snapshot IO retains its parent's Stop, as the production lease does.
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockImplementation(
+        async (_ids, options) => ({
+          ...scoped,
+          scopeSignal: options?.signal ?? scoped.scopeSignal
+        })
+      )
+      const { rows, append } = declareNativeMirrorTransport()
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({
+        state: {
+          ...initialConnection,
+          isConnected: true,
+          phase: ConnectionPhase.CONNECTED,
+          mode: "normal",
+          offlineBypass: false
+        }
+      })
+      const consumer = mountConsumer(surface, scoped, {
+        actualOption: surface === "full"
+      })
+      const source = creationSource()
+      const originalAddress = useStoreMessageOption.getState().chatDraftAddress
+      let enter!: () => void, release!: () => void
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      storage.control.beforeHistoryAdd = async () => {
+        enter()
+        await held
+        if (boundary === "link failure")
+          throw new Error("Declared mirror storage failure")
+      }
+      let pending: Promise<ChatSubmitResult | void> | undefined
+      let replacement: Promise<unknown> | undefined
+      try {
+        act(() => {
+          pending = consumer.mounted.result.current.onSubmit({
+            message: "Retained original native mirror question",
+            image: ""
+          })
+        })
+        await Promise.race([
+          entered,
+          pending!.then((result) => {
+            throw new Error(
+              "First Send settled before mirror: " + JSON.stringify(result)
+            )
+          })
+        ])
+        expect(consumer.selection.getCurrent().owner).toMatchObject({
+          kind: "native",
+          conversation_id: newServerId
+        })
+        expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
+          originalAddress
+        )
+        expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+        await act(async () => {
+          if (boundary === "New")
+            useStoreMessageOption.getState().startNewChatDraft(false)
+          if (boundary === "foreign alias")
+            useStoreMessageOption.setState({ historyId: "foreign-mirror" })
+          if (boundary === "same-CID reload")
+            replacement = consumer.selection.loadConversation({
+              serverChatId: newServerId
+            })
+          if (boundary === "account ABA") {
+            prompt.scope.userId = "bob"
+            auth.abort()
+            prompt.scope.userId = "alice"
+          }
+          if (boundary === "Stop")
+            consumer.mounted.result.current.stopStreamingRequest()
+          if (boundary === "model")
+            useStoreMessageOption.getState().setSelectedModel("second-model")
+          if (boundary === "tools")
+            useStoreMessageOption.getState().setToolChoice("auto")
+          release()
+          expect(normalizeChatSubmitResult(await pending).status).not.toBe(
+            "submitted"
+          )
+          if (replacement) await replacement
+        })
+        expect(append).not.toHaveBeenCalled()
+        expect(rows).toEqual([])
+        expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+        expect(await storage.tables.chatHistories.toArray()).toEqual([])
+        expect(await readChatCreationRecovery(source)).toMatchObject({
+          state: "acknowledged",
+          chatId: newServerId,
+          inputText: "Retained original native mirror question"
+        })
+        if (boundary === "link failure")
+          expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
+            originalAddress
+          )
+      } finally {
+        release?.()
+        if (pending)
+          await act(async () => {
+            await pending
+            if (replacement) await replacement
+          })
+        storage.control.beforeHistoryAdd = undefined
+        consumer.unmount()
+        useConnectionStore.setState({ state: initialConnection })
+      }
+    }
+  )
+
+  it.each(
+    (["full", "compact"] as const).flatMap((surface) =>
+      (["historyId", "serverChatId"] as const).flatMap((field) =>
+        (
+          [
+            "New",
+            "foreign ID ABA",
+            "original ID ABA",
+            "recursive original ID ABA"
+          ] as const
+        ).map((boundary) => ({
+          surface,
+          field,
+          boundary
+        }))
+      )
+    )
+  )(
+    "actual mounted $surface native mirror retires $boundary inside its $field setter",
+    async ({ surface, field, boundary }) => {
+      const scoped = answerSnapshot()
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(
+        scoped
+      )
+      const { rows, append } = declareNativeMirrorTransport()
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({
+        state: {
+          ...initialConnection,
+          isConnected: true,
+          phase: ConnectionPhase.CONNECTED,
+          mode: "normal",
+          offlineBypass: false
+        }
+      })
+      const consumer = mountConsumer(surface, scoped, {
+        actualOption: surface === "full"
+      })
+      const source = creationSource()
+      let observed = false
+      let candidate: string | null = null
+      const unsubscribe = useStoreMessageOption.subscribe((next, previous) => {
+        if (
+          boundary === "recursive original ID ABA" &&
+          observed &&
+          next[field] === null &&
+          previous[field] === candidate
+        ) {
+          useStoreMessageOption.setState({ [field]: candidate })
+          return
+        }
+        if (observed || !next[field] || previous[field]) return
+        observed = true
+        candidate = next[field]
+        if (boundary === "New") next.startNewChatDraft(false)
+        else {
+          const original = next[field]
+          useStoreMessageOption.setState({
+            [field]:
+              boundary === "original ID ABA" ||
+              boundary === "recursive original ID ABA"
+                ? previous[field]
+                : "foreign-native-alias"
+          })
+          useStoreMessageOption.setState({ [field]: original })
+        }
+      })
+      try {
+        await act(async () => {
+          expect(
+            normalizeChatSubmitResult(
+              await consumer.mounted.result.current.onSubmit({
+                message: "Original native publication question",
+                image: ""
+              })
+            ).status
+          ).not.toBe("submitted")
+        })
+        expect(observed).toBe(true)
+        expect(append).not.toHaveBeenCalled()
+        expect(rows).toEqual([])
+        expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+        expect(await readChatCreationRecovery(source)).toMatchObject({
+          state: "acknowledged",
+          chatId: newServerId,
+          inputText: "Original native publication question"
+        })
+        if (field === "historyId")
+          expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+      } finally {
+        unsubscribe()
+        consumer.unmount()
+        useConnectionStore.setState({ state: initialConnection })
+      }
+    }
+  )
+
+  it.each(["full", "compact"] as const)(
+    "actual mounted %s failed mirror link can Review its original created chat before a later explicit Send",
+    async (surface) => {
+      const scoped = answerSnapshot()
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(
+        scoped
+      )
+      const { rows, append } = declareNativeMirrorTransport()
+      vi.spyOn(tldwClient, "getChat").mockImplementation(
+        async (id) => ({ id, title: "Recovered original chat" }) as never
+      )
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({
+        state: {
+          ...initialConnection,
+          isConnected: true,
+          phase: ConnectionPhase.CONNECTED,
+          mode: "normal",
+          offlineBypass: false
+        }
+      })
+      const consumer = mountConsumer(surface, scoped, {
+        actualOption: surface === "full",
+        withComposer: true
+      })
+      const input = "  Original failed mirror input.\nRetain this literal.  "
+      const originalAddress = useStoreMessageOption.getState().chatDraftAddress
+      const source = creationSource()
+      try {
+        await waitFor(() =>
+          expect(consumer.mounted.result.current.composer!.draftReady).toBe(true)
+        )
+        act(() =>
+          consumer.mounted.result.current.composer!.setMessageValue(input)
+        )
+        storage.control.beforeHistoryAdd = async () => {
+          throw new Error("Declared mirror storage failure")
+        }
+        await act(async () => {
+          const result = await consumer.mounted.result.current.onSubmit({
+            message: input,
+            image: ""
+          })
+          expect(normalizeChatSubmitResult(result).status).not.toBe("submitted")
+        })
+        storage.control.beforeHistoryAdd = undefined
+        expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
+          originalAddress
+        )
+        expect(
+          consumer.mounted.result.current.composer!.form.values.message
+        ).toBe(input)
+        await waitFor(() =>
+          expect(
+            consumer.mounted.result.current.composer!.creationRecovery.active
+          ).toMatchObject({ state: "acknowledged", chatId: newServerId })
+        )
+        const originalReceipt = consumer.selection.getCurrent().owner
+        await act(async () => {
+          expect(
+            await consumer.mounted.result.current.composer!.reviewCreatedChat()
+          ).toBe(true)
+        })
+        expect(consumer.selection.getCurrent().owner).not.toBe(originalReceipt)
+        expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({
+          kind: "native",
+          id: newServerId
+        })
+        expect(
+          consumer.mounted.result.current.composer!.form.values.message
+        ).toBe(input)
+        expect(await readChatCreationRecovery(source)).toMatchObject({
+          state: "bound",
+          chatId: newServerId
+        })
+        expect(rows).toEqual([])
+        expect(append).not.toHaveBeenCalled()
+        expect(tldwClient.createChat).toHaveBeenCalledOnce()
+        expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+        await act(async () => {
+          expect(
+            normalizeChatSubmitResult(
+              await consumer.mounted.result.current.onSubmit({
+                message: input,
+                image: ""
+              })
+            )
+          ).toEqual({ status: "submitted" })
+        })
+        expect(rows.map((row) => [row.role, row.content])).toEqual([
+          ["user", input],
+          ["assistant", "First answer"]
+        ])
+        expect(append).toHaveBeenCalledTimes(2)
+        expect(tldwClient.createChat).toHaveBeenCalledOnce()
+        expect(tldwChat.streamMessage).toHaveBeenCalledOnce()
+      } finally {
+        storage.control.beforeHistoryAdd = undefined
+        consumer.unmount()
+        useConnectionStore.setState({ state: initialConnection })
+      }
+    }
+  )
 
   const alternateCases = (["full", "compact"] as const).flatMap((surface) =>
     (["document", "tab", "local RAG"] as const).flatMap((mode) =>

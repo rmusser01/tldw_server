@@ -108,7 +108,7 @@ export type ChatModeParamsBase = {
   // rather than "Interrupted" (CS-04).
   wasStoppedByUser?: () => boolean
   historyId: string | null
-  setHistoryId: (id: string) => void
+  setHistoryId: (id: string, options?: { preserveServerChatId?: boolean }) => void
   actorSettings?: ActorSettings
   documents?: ChatDocuments
   clusterId?: string

@@ -61,6 +61,7 @@ import type { ActorSceneRead } from "@/services/actor-settings"
 import { bindActorSceneAfterLoad } from "@/hooks/chat/actor-scene-source"
 import { maybeInjectActorMessage } from "@/utils/actor"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { getSearchSettings } from "@/services/search"
 import { resolveImageBackendCandidates } from "@/utils/image-backends"
 import {
@@ -243,7 +244,7 @@ type NormalChatModeParams = {
   serverChatId?: string | null
   setServerChatId?: (id: string) => void
   scope?: ChatScope
-  setHistoryId: (id: string) => void
+  setHistoryId: (id: string, options?: { preserveServerChatId?: boolean }) => void
   uploadedFiles?: any[]
   actorSceneSend?: ActorSceneSend
   actorSettings?: ActorSettings
@@ -762,7 +763,8 @@ const captureNormalHistoryTurn = async (
   draftIsCurrent: () => boolean,
   acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
   sourceDraft: ChatDraftAddress | null,
-  stopSignal: AbortSignal
+  stopSignal: AbortSignal,
+  retainIdWatcher: (stop: () => void) => void
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
   let creationHandle: ChatDraftHandle | undefined
@@ -842,6 +844,7 @@ const captureNormalHistoryTurn = async (
     if (!originIsCurrent()) throw new Error("stale_selection")
     targetHistoryId = localId
     targetServerChatId = serverId
+    const ownsNativeMirror = Boolean(creationHandle && serverId && acceptDraftBind)
     let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
     const target = {
       historyId: localId, serverChatId: serverId, scope,
@@ -861,15 +864,15 @@ const captureNormalHistoryTurn = async (
         if (expectedId && (value.owner.kind !== expectedKind || value.owner.conversation_id !== expectedId)) return
         // Draft binding validates this owner's lease through the same guard.
         loadPhase = "preparing"
-        if (acceptDraftBind && !acceptDraftBind(value)) {
+        if (!ownsNativeMirror && acceptDraftBind && !acceptDraftBind(value)) {
           loadPhase = "rejected"
           return
         }
         receipt = value
         loadPhase = "accepted"
         adoptionIsCurrent = controller.fence()
-        if (serverId) params.setServerChatId?.(serverId)
-        if (acceptDraftBind) {
+        if (!ownsNativeMirror && serverId) params.setServerChatId?.(serverId)
+        if (!ownsNativeMirror && acceptDraftBind) {
           const bindingIsCurrent = params.historyPreparation!.draftIsCurrent
           let metadataRetired = false
           // Raw display IDs guard this command, independently of the accepted H1 load.
@@ -887,6 +890,112 @@ const captureNormalHistoryTurn = async (
         !adoptionIsCurrent?.() || !preparationIsCurrent() || receipt.owner.kind === "unavailable" || receipt.owner.validate_lease?.() === false)
         throw new Error("stale_selection")
       selectionCurrent = adoptionIsCurrent
+      if (ownsNativeMirror) {
+        const accepted = receipt
+        const acceptedOwner = accepted.owner
+        if (acceptedOwner.kind !== "native" || !serverId || !acceptDraftBind)
+          throw new Error("stale_selection")
+        const expectedIds = {
+          historyId: params.historyId ?? null,
+          serverChatId: params.serverChatId ?? null
+        }
+        let publication:
+          | {
+              field: keyof typeof expectedIds
+              id: string
+              observed: boolean
+              original: ReturnType<typeof useStoreMessageOption.getState>
+            }
+          | undefined
+        let metadataRetired = false
+        const metadataIsCurrent = () => {
+          const state = useStoreMessageOption.getState()
+          const matches = (field: keyof typeof expectedIds) => {
+            if (publication?.field !== field)
+              return state[field] === expectedIds[field]
+            if (state[field] === publication.id) {
+              publication.observed = true
+              return true
+            }
+            return !publication.observed && state[field] === expectedIds[field]
+          }
+          const valid =
+            !metadataRetired && matches("historyId") && matches("serverChatId")
+          if (!valid) metadataRetired = true
+          return valid
+        }
+        const mirrorIsCurrent = () =>
+          preparationIsCurrent() &&
+          metadataIsCurrent() &&
+          selectionCurrent() &&
+          controller.getCurrent().owner === accepted.owner &&
+          controller.getCurrent().view === accepted.view &&
+          acceptedOwner.validate_lease() !== false
+        // The creating command owns this alias before the background mirror effect sees its CID.
+        retainIdWatcher(
+          useStoreMessageOption.subscribe((_next, previous) => {
+            // A previous frame exposes replacements hidden by an earlier synchronous subscriber.
+            const previousMatches = (field: keyof typeof expectedIds) =>
+              publication?.field === field
+                ? previous === publication.original ||
+                  previous[field] === publication.id
+                : previous[field] === expectedIds[field]
+            if (!previousMatches("historyId") || !previousMatches("serverChatId"))
+              metadataRetired = true
+            if (publication && previous[publication.field] === publication.id)
+              publication.observed = true
+            metadataIsCurrent()
+          })
+        )
+        const mirrorId = await linkServerChatMirror({
+          chatId: serverId,
+          title: message.trim().slice(0, 80) || "Untitled Chat",
+          ownerKey: serverChatMirrorOwnerKey(snapshot),
+          scope: acceptedOwner.scope,
+          currentHistoryId: null,
+          signal,
+          validate_lease: mirrorIsCurrent
+        })
+        if (!mirrorIsCurrent() || !acceptDraftBind(accepted) || !mirrorIsCurrent())
+          throw new Error("stale_selection")
+        const bindingIsCurrent = params.historyPreparation!.draftIsCurrent
+        params.historyPreparation!.draftIsCurrent = () => {
+          const valid = !metadataRetired && bindingIsCurrent() && metadataIsCurrent()
+          if (!valid) metadataRetired = true
+          return valid
+        }
+        const publish = (
+          field: keyof typeof expectedIds,
+          id: string,
+          setter: () => void
+        ) => {
+          if (!mirrorIsCurrent()) throw new Error("stale_selection")
+          publication = {
+            field,
+            id,
+            observed: false,
+            original: useStoreMessageOption.getState()
+          }
+          try {
+            setter()
+            if (!mirrorIsCurrent() || useStoreMessageOption.getState()[field] !== id)
+              throw new Error("stale_selection")
+            expectedIds[field] = id
+          } catch (error) {
+            metadataRetired = true
+            throw error
+          } finally {
+            publication = undefined
+          }
+        }
+        publish("historyId", mirrorId, () =>
+          params.setHistoryId(mirrorId, { preserveServerChatId: true })
+        )
+        publish("serverChatId", serverId, () => params.setServerChatId?.(serverId!))
+        localId = mirrorId
+        targetHistoryId = mirrorId
+      }
+
       if (creationHandle && serverId) await markChatCreationBound(creationHandle, serverId)
       if (!selectionCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
       if (acceptDraftBind && params.actorScene) {
@@ -1298,6 +1407,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     ? servicePromptSnapshot.scopeSignal
     : signal
   let createdTurn: HistorySendTurn | undefined
+  let stopWatchingPreparationIds: (() => void) | undefined
   const settlement = params.historySelection
     ? beginChatTurnSettlement(signal)
     : undefined
@@ -1321,7 +1431,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
         () => params.historySelection?.sourceIsCurrent?.() !== false && preparation!.draftIsCurrent(),
         preparation!.acceptDraftBind,
         preparation!.sourceDraft,
-        signal
+        signal,
+        stop => { stopWatchingPreparationIds = stop }
       )
       createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
@@ -1422,6 +1533,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     }
     return result
   } finally {
+    stopWatchingPreparationIds?.()
     createdTurn?.release?.()
     settlement?.finish()
   }
