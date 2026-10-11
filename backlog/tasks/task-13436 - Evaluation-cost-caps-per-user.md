@@ -18,6 +18,7 @@ Deferred from spec 2. Cost caps never fired: every caller passes estimated_cost=
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Re-scoped by the owner on 2026-10-09: a general LLM cost quota (limits.llm_cost_per_day_usd and limits.llm_cost_per_month_usd) replaces evaluation-only cost caps, and the dead evaluation cost caps are deleted. Spec: Docs/Design/2026-10-09-llm-usage-accounting-design.md, sections 7 and 8; delivered in PR 2 and PR 3 of that spec.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
