@@ -144,7 +144,7 @@ The wrapper records with `log_llm_usage`, passing the context's user, `operation
 **The existing recorders stay.** They pass fields the base class can't know: the conversation id, the request's IP and user agent, `choice_count`, the router's scope. Each one's model call runs inside `llm_call_context(records_itself=True)`, so the wrapper skips it:
 - the `/chat/completions` pipeline (`execute_streaming_call` and `_execute_non_stream_call_impl`);
 - the three router call sites (`chat.py:1617`, `chat_route_resolver.py:187`, `character_chat_sessions.py:1046`);
-- the claims engine's four call sites.
+- the claims engine's two analyze calls, extract and verify (`claims_engine.py:837`, `:1202`), which its four recorder sites account for. Its third LLM call, the APS proposition extractor (`:1486`), has no recorder, so it is not marked and the base class records it.
 
 This keeps the claims budget guard working, which filters on the claims operations (`claims_service.py:1335-1380`). Router analytics, which break down by `<surface>_router`, keep working too.
 
@@ -179,7 +179,7 @@ It is called from three places:
 
 The check and the recorder are async and use the AuthNZ pool, which is bound to one loop. They must never run on another loop, and never through `asyncio.run`.
 
-- **The accounting loop** is the server's loop, captured once at application startup.
+- **The accounting loop** is the server's loop, captured once at application startup. A captured loop that has closed, or has stopped running, is treated as missing: a hand-off to a stopped loop would be accepted and never run.
 - **From an async method on the accounting loop:** await directly.
 - **From an async method on another loop** (a workflow engine thread): hand off with `asyncio.run_coroutine_threadsafe` and await the wrapped future.
 - **From a sync method on a thread that is not the accounting loop's thread:** hand off with `run_coroutine_threadsafe`.

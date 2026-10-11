@@ -17,7 +17,8 @@
 - **Never `asyncio.run`** in accounting code. Writes are scheduled with `submit_accounting`.
 - **Carry only LLM call state into threads.** Do not use `contextvars.copy_context()` for the bounded pools or the queue. Other context variables are not passed to those threads today.
 - **No caller changes** beyond the sites this plan names.
-- **Record only when a user is known** and the context is neither `exempt` nor `records_itself`. Record successful calls only.
+- **Record only when a user is known** and the context is neither `exempt` nor `records_itself`.
+- **What is recorded.** A non-streaming call is recorded only when it succeeds. A stream is recorded once however it ends (completion, a provider error or an early close), from what was received by then.
 - **Row defaults:** `operation="llm_call"`, `endpoint="internal"`, `key_id=None`, `status=200`.
 - **Embeddings predicate, verbatim:** `COALESCE(operation, '') <> 'embeddings'`.
 - **Test-first.** Each task's tests are written and seen failing before its code.
@@ -260,12 +261,24 @@ def test_a_closed_accounting_loop_is_treated_as_missing(monkeypatch: pytest.Monk
     loop.close()
     monkeypatch.setattr(llm_accounting, "_accounting_loop", loop)
     assert llm_accounting.get_accounting_loop() is None
+
+
+def test_a_stopped_accounting_loop_is_treated_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A captured loop that is no longer running is not used, so no write can sit forever."""
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(asyncio.sleep(0))
+    monkeypatch.setattr(llm_accounting, "_accounting_loop", loop)
+    try:
+        assert llm_accounting.get_accounting_loop() is None
+        assert llm_accounting.submit_accounting(lambda: asyncio.sleep(0)) is False
+    finally:
+        loop.close()
 ```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_call_context.py tldw_Server_API/tests/Usage/test_llm_accounting_loop.py`
-Expected: collection errors, `ModuleNotFoundError: ... llm_call_context` and `... llm_accounting`.
+Expected: two collection errors: `ModuleNotFoundError` for `llm_call_context`, and `ImportError: cannot import name 'llm_accounting'`.
 
 - [ ] **Step 3: Write `llm_call_context.py`**
 
@@ -303,7 +316,8 @@ class LLMCallState:
     in_accounted_call: bool
 
 
-_CTX: ContextVar[LLMCallContext] = ContextVar("llm_call_context", default=LLMCallContext())
+_DEFAULT_CONTEXT = LLMCallContext()
+_CTX: ContextVar[LLMCallContext] = ContextVar("llm_call_context", default=_DEFAULT_CONTEXT)
 _IN_ACCOUNTED_CALL: ContextVar[bool] = ContextVar("llm_in_accounted_call", default=False)
 
 
@@ -402,9 +416,10 @@ def set_accounting_loop(loop: asyncio.AbstractEventLoop | None) -> None:
 
 
 def get_accounting_loop() -> asyncio.AbstractEventLoop | None:
-    """The accounting loop, or None when none was set or it has closed."""
+    """The accounting loop, or None when none was set, it has closed, or it is not running."""
     loop = _accounting_loop
-    if loop is None or loop.is_closed():
+    # A stopped loop would accept a threadsafe hand-off and never run it.
+    if loop is None or loop.is_closed() or not loop.is_running():
         return None
     return loop
 
@@ -469,7 +484,7 @@ In `tldw_Server_API/app/main.py`, in `lifespan`, directly after the line `_start
 - [ ] **Step 6: Run the tests and confirm they pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_call_context.py tldw_Server_API/tests/Usage/test_llm_accounting_loop.py`
-Expected: 11 passed.
+Expected: 12 passed.
 
 - [ ] **Step 7: Commit**
 
@@ -733,6 +748,47 @@ async def test_an_accounting_failure_does_not_change_the_call(monkeypatch: pytes
         assert _FakeProvider().chat(REQUEST)["usage"] == USAGE
         assert list(_FakeProvider().stream(REQUEST)) == LINES
     await llm_accounting.drain_accounting()
+
+
+async def test_a_midstream_provider_error_reraises_the_same_object_and_still_records(rows) -> None:
+    """A provider that fails after one chunk raises its own exception, and the one row is still written."""
+    failure = ValueError("upstream broke")
+
+    class _FailingStreamProvider(_FakeProvider):
+        """Yields one chunk, then fails."""
+
+        name = "fake-failing-stream"
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield one content chunk and raise."""
+            yield LINES[0]
+            raise failure
+
+    with llm_call_context(user_id=7):
+        stream = _FailingStreamProvider().stream(REQUEST)
+    assert next(stream) == LINES[0]
+    with pytest.raises(ValueError) as raised:
+        next(stream)
+    assert raised.value is failure
+    (row,) = await _settled(rows)
+    assert row["estimate_source"] == "stream_estimate" and row["completion_tokens"] == 1
+
+
+async def test_a_non_iterable_stream_result_is_passed_through_untouched(rows) -> None:
+    """A broken provider that returns None from stream() still returns None, and nothing is recorded."""
+
+    class _BrokenStreamProvider(_FakeProvider):
+        """Returns nothing iterable."""
+
+        name = "fake-broken-stream"
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:  # type: ignore[override]
+            """Return None, as a misbehaving adapter might."""
+            return None  # type: ignore[return-value]
+
+    with llm_call_context(user_id=7):
+        assert _BrokenStreamProvider().stream(REQUEST) is None
+    assert await _settled(rows) == []
 
 
 def test_instrumenting_keeps_type_identity_and_abstractness() -> None:
@@ -1054,6 +1110,8 @@ def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
         started = time.monotonic()
         with accounted_call():
             inner = fn(self, request, *args, **kwargs)
+        if not hasattr(inner, "__iter__"):
+            return inner  # a broken provider's result reaches the caller's own check unchanged
         return _accounted_sync_stream(self, plan, request, inner, started)
 
     return stream
@@ -1076,9 +1134,13 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
                 """Await the provider's result, then wrap the iterator it resolves to."""
                 with accounted_call():
                     resolved = await inner
+                if not hasattr(resolved, "__aiter__"):
+                    return resolved
                 return _accounted_async_stream(self, plan, request, resolved, started)
 
             return _resolve()
+        if not hasattr(inner, "__aiter__"):
+            return inner  # a broken provider's result reaches the caller's own check unchanged
         return _accounted_async_stream(self, plan, request, inner, started)
 
     return astream
@@ -1105,9 +1167,11 @@ def instrument_provider_class(cls: type) -> None:
         setattr(cls, name, wrapped)
 ```
 
-Two notes on behaviour the tests pin:
-- `astream` in a subclass is an `async def` with `yield`, so calling it returns an async generator, not an awaitable. `functools.wraps` on a plain `def astream` keeps that: the wrapper returns an async generator too.
+Three notes on behaviour:
+- `astream` in a subclass is an `async def` with `yield`, so calling it returns an async generator, not an awaitable. The wrapper is a plain `def`, and it returns an async generator too, so callers see the same kind of value.
+  - One function-level difference: `inspect.isasyncgenfunction(Adapter.astream)` is now `False`. No code checks that on a chat adapter.
 - The plan and the start time are fixed when `stream()` or `astream()` is called. The iterator may run later on another thread, where the context is different.
+- A stream whose provider iterator raises midway re-raises the same exception object and still writes its one row, from what was received.
 
 - [ ] **Step 4: Add the hook to `ChatProvider`**
 
@@ -1128,7 +1192,7 @@ The import is inside the method so `base.py` keeps its import-time dependencies.
 - [ ] **Step 5: Run the tests and confirm they pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/LLM_Calls/test_usage_accounting.py`
-Expected: 12 passed.
+Expected: 14 passed.
 
 - [ ] **Step 6: Run the provider and registry suites for regressions**
 
@@ -1166,7 +1230,6 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 """The LLM call state reaches pool threads and queued processors (LLM usage accounting spec §1)."""
 
 import asyncio
-from functools import partial
 from typing import Any
 
 import pytest
@@ -1241,9 +1304,9 @@ async def test_a_queued_stream_factory_runs_with_the_enqueuer_s_call_state() -> 
     assert seen == [(4, True, False)]
 ```
 
-If `RequestQueue`'s future resolves with a wrapper around the processor's return value and not the value itself, assert on the wrapped field. Read `_process_request`'s return for the non-streaming branch, and keep the three-tuple comparison.
-
-For the streaming test, read `_process_request`'s streaming branch first. If the future does not resolve until the channel is drained, read `channel` until its `None` sentinel instead of awaiting the future. The assertion on `seen` stays as written.
+Two facts these tests rely on, confirmed by a dry run:
+- A non-streaming request's future resolves to the processor's own return value (`request_queue.py:611`, `:741`).
+- A streaming request's future resolves when pumping finishes, without the test draining the channel.
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
@@ -1367,7 +1430,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Modify: `tldw_Server_API/app/core/Claims_Extraction/claims_engine.py` (extract and verify calls)
 - Modify: `tldw_Server_API/app/core/AuthNZ/byok_testing.py` (two health calls)
 - Modify: `tldw_Server_API/app/core/Setup/first_chat_verifier.py` (one call)
-- Test: new `tldw_Server_API/tests/Chat/integration/test_chat_completions_marks_self_recorded.py`, new `tldw_Server_API/tests/Setup/test_first_chat_verifier_exempt.py`, and additions to `tests/Chat/unit/test_chat_route_resolver.py`, `tests/Chat/integration/test_chat_endpoint_auto_routing.py`, `tests/Claims/test_claims_engine_modes.py`, `tests/AuthNZ_Unit/test_byok_validation_boundary.py`.
+- Test: new `tldw_Server_API/tests/Chat/integration/test_chat_completions_marks_self_recorded.py`, new `tldw_Server_API/tests/Setup/test_first_chat_verifier_exempt.py`, and additions to `tests/Chat/unit/test_chat_route_resolver.py`, `tests/Chat/integration/test_chat_endpoint_auto_routing.py`, `tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py`, `tests/Claims/test_claims_engine_modes.py`, `tests/AuthNZ_Unit/test_byok_validation_boundary.py`.
 
 **Interfaces:**
 - Consumes: `llm_call_context`, `with_llm_call_context`, `current_llm_call_context` from Task 1; the pool propagation from Task 3.
@@ -1462,19 +1525,34 @@ def test_chat_completions_marks_its_provider_call_as_self_recorded(
     assert seen == [True]
 ```
 
-If the pipeline rejects the canned completion, add the fields `_require_usable_nonstream_provider_result` needs. The assertion `seen == [True]` stays as written.
+The canned completion satisfies `_nonstream_provider_result_is_usable` (`chat_service.py:3155`): a dict with a non-empty `choices` list carrying text. `chat_ep.perform_chat_api_call` is the seam the pipeline calls in both paths (`chat.py:5317`).
 
 Add a streaming case to the same file: the same request with `stream=True`, and a `_dispatch` that appends the flag and returns `iter(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', "data: [DONE]\n\n"])`. Read the response body to the end, then assert `seen == [True]`.
 
-In `tldw_Server_API/tests/Chat/unit/test_chat_route_resolver.py`, add a test that reuses that file's existing harness for driving `resolve_chat_route` or `_select_auto_llm_router_choice` with an injected `perform_chat_api_call_async_fn`. The injected function appends `current_llm_call_context().records_itself` to a list and returns what the harness's existing fake returns. Assert the list is `[True]`.
+In `tldw_Server_API/tests/Chat/unit/test_chat_route_resolver.py`, add a test that calls `_select_auto_llm_router_choice` directly. The file's `router_dependencies` fixture can't be reused: it lists one candidate, and the router call is skipped unless there are at least two. Shape the call like `tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py:128-160`, with:
+- `RouterRequest(model="auto", surface="chat", latest_user_turn=..., scope=...)`;
+- `RoutingPolicy(request_model="auto", server_default_provider="openai", boundary_mode="server_default_provider")`;
+- two candidates: `[{"provider": "openai", "model": "gpt-test"}, {"provider": "openai", "model": "gpt-alt"}]`;
+- a `provider_listing` whose `openai` entry has a `default_model`;
+- `request=SimpleNamespace(state=SimpleNamespace(user_id="user-1", api_key_id="key-1"))` and `current_user=SimpleNamespace(id="user-1", id_int=1)`;
+- `resolve_provider_api_key_fn=lambda *a, **k: ("k", {})`;
+- `resolve_byok_credentials_fn` returning an object with `api_key`, `app_config` and an `async def touch_last_used()`;
+- `log_model_router_usage_fn`, an async no-op;
+- `perform_chat_api_call_async_fn`, an async probe that appends `current_llm_call_context().records_itself` and returns `{"choices": [{"message": {"content": '{"provider":"openai","model":"gpt-test"}'}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}`.
+
+Assert the list is `[True]`. The probe runs inline in the same task, so it sees the mark without any pool.
 
 In `tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py`, add the same probe to one existing test that reaches the router call in `chat.py` (the call near line 1617): wrap the fake that already replaces `perform_chat_api_call_async` so it appends the flag before delegating, and assert every recorded flag is `True`.
 
-In `tldw_Server_API/tests/Claims/test_claims_engine_modes.py`, add two tests using the file's existing way of constructing the engine with a fake analyze callable. The fake appends `current_llm_call_context().records_itself` and returns the canned text the file already uses. One test drives `extract`, one drives `verify`. Assert `[True]` each.
+In `tldw_Server_API/tests/Claims/test_claims_engine_modes.py`, add two tests using the file's existing construction, `ClaimsEngine(_analyze_stub)`. The stub appends `current_llm_call_context().records_itself` and returns the canned text the file already uses. One test drives `extract`, one drives `verify`. Assert `[True]` each. The stub runs on a `SYNC_ADAPTER_CALL_POOL` thread, through `_run_bounded_claims_analyze`, so the probe reads the state Task 3 carries there, not the test's own context.
 
-In `tldw_Server_API/tests/AuthNZ_Unit/test_byok_validation_boundary.py`, add a test using the file's existing replacement of `byok_testing._run_bounded_health_call`. The replacement appends `current_llm_call_context().exempt` and returns what the file's existing fake returns. Assert `[True]`.
+In `tldw_Server_API/tests/AuthNZ_Unit/test_byok_validation_boundary.py`, extend `test_provider_validation_dispatch_binds_authentic_candidate_credentials`, in both `branch` cases. Nothing in that file replaces `_run_bounded_health_call`; it installs a fake adapter and an observed pool (`_install_boundary`), or a fake `chat_api_call` (`_install_legacy_boundary`).
+- In the `adapter` branch, make the fake adapter's `chat` append `current_llm_call_context().exempt` before returning.
+- In the `legacy` branch, make the `call` fake do the same.
 
-For the character-chat router call (`_select_auto_character_llm_router_choice`, `character_chat_sessions.py:1007`), find a test that reaches it: `git grep -n "_select_auto_character_llm_router_choice\|_execute_router_call" tldw_Server_API/tests`. If one exists, add the probe there. If none exists, write a unit test that monkeypatches `character_chat_sessions.perform_chat_api_call_async` with the probe and calls the function with stubs for the arguments its signature requires. A marker with no test is not acceptable; say in the report which route was taken.
+Assert the list is `[True]` after the request. Both run on the observed pool's thread, which inherits `BoundedDaemonPool.start`, so they see the Task 3 state.
+
+For the character-chat router call, extend `tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py`. It already monkeypatches `character_chat_sessions.perform_chat_api_call_async` with `async def provider_call(**kwargs)` and calls `_select_auto_character_llm_router_choice` directly (near lines 102-128). In the `a-to-b` case, make `provider_call` append `current_llm_call_context().records_itself`, and assert every recorded flag is `True`.
 
 - [ ] **Step 2: Run the new tests and confirm they fail**
 
@@ -1654,7 +1732,7 @@ async def test_embeddings_are_excluded_and_null_operations_count(monkeypatch: py
     assert await AuthnzUsageRepo(pool).sum_user_llm_tokens_since(user_id=1, since=since) == 110.0
 ```
 
-If `pool.execute` on SQLite takes its parameters as one tuple, pass them that way; the pattern to copy is in `tests/Usage/test_usage_tracker_sqlite.py`.
+`DatabasePool.execute(query, *args)` takes its parameters as separate arguments (`AuthNZ/database.py:1496`), as written above.
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
@@ -1667,7 +1745,8 @@ In `tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py`, add a module constant 
 
 ```python
 # LLM quota counters leave embeddings out. ``operation`` is nullable, so a bare
-# ``<>`` would also drop rows with no operation.
+# ``<>`` would also drop rows with no operation. This is a constant, never user
+# input, so the queries that interpolate it carry ``nosec B608``.
 _LLM_GENERATION_PREDICATE = "COALESCE(operation, '') <> 'embeddings'"
 ```
 
@@ -1680,16 +1759,18 @@ In `sum_user_llm_tokens_since`, replace the query string:
 with:
 
 ```python
-            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage_log "  # nosec B608 - constant predicate
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage_log "  # nosec B608
             f"WHERE user_id = ? AND ts >= ? AND {_LLM_GENERATION_PREDICATE}",
 ```
+
+Bandit reports B608 on the first line of the concatenated string, so the comment goes there. Keep it to `# nosec B608` alone: trailing words make Bandit warn that they are not test names.
 
 and extend the docstring's first paragraph with: `Embeddings rows are excluded (LLM usage accounting spec §6).`
 
 - [ ] **Step 4: Run the test and confirm it passes**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_token_counter_excludes_embeddings.py tldw_Server_API/tests/Usage/test_quota_resolver.py`
-Expected: all pass. `test_llm_tokens_month_query_passes_naive_utc_on_postgres` still receives two arguments, because the predicate adds no parameter.
+Expected: 13 passed. `test_llm_tokens_month_query_passes_naive_utc_on_postgres` still receives two arguments, because the predicate adds no parameter.
 
 - [ ] **Step 5: Commit**
 
@@ -1805,7 +1886,7 @@ async def test_one_row_is_written_for_the_scope_user(monkeypatch: pytest.MonkeyP
     assert (row["model"], row["prompt_tokens"], row["completion_tokens"]) == ("e2e-model", 30, 12)
 ```
 
-If the pool has no `fetchall`, use the multi-row read the pool does provide (`grep -n "async def fetch" tldw_Server_API/app/core/AuthNZ/database.py`). If `resolved_request_fields_async` rejects an unknown provider name, register the fake under a name it accepts and say so in the report. Do not weaken the assertions.
+Two facts this test relies on, confirmed by a dry run: `DatabasePool.fetchall(query, *args)` exists (`AuthNZ/database.py:1555`), and `resolved_request_fields_async` accepts a provider name that isn't registered anywhere else.
 
 - [ ] **Step 2: Run the test and confirm it passes**
 
@@ -1836,6 +1917,8 @@ Content, each statement checked against the code:
 In `Docs/Operations/Usage_Quotas.md`, in the row or paragraph for `limits.llm_tokens_per_month` (near line 68), keep "enforced on `/chat/completions` only" and add, in the page's own style:
 
 - The monthly count now includes every LLM chat call recorded for the user, not just chat completions: RAG generation, character chat, summarization, evaluations and other calls made during a request. Users reach a token limit sooner than before.
+- That includes calls a request triggers without the user asking for them directly, such as query rewriting and classification.
+- Provider key validation and first-run chat verification are never counted.
 - Embedding tokens no longer count toward it.
 - Calls made by background jobs, workflow runs and WebSocket sessions are recorded in a later change.
 - The count depends on `LLM_USAGE_ENABLED` (default on). With it off, nothing is recorded and the limit never triggers.
