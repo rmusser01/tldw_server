@@ -92,14 +92,21 @@ A new module, `core/Usage/llm_call_context.py`, answers "which user is this LLM 
 With no user, a call is not checked and not recorded.
 
 **Roots that need an explicit set point,** because the content scope doesn't reach them:
-- **Jobs workers on `WorkerSDK`:** both handler call sites (`Jobs/worker_sdk.py:719`, `:955`) run the handler inside `llm_call_context(user_id=as_quota_user_id(owner_user_id))`. The owner is already read from the job row (`:880`). This covers scheduled automations, which run under a `WorkerSDK` worker.
-- **The workflow engine:** it sets the context from the run's owner inside the run coroutine, on the engine's own thread (`Workflows/engine.py:2338-2347`). Setting it at the HTTP or scheduler entry is not enough, because `threading.Thread` doesn't copy context and runs can be dequeued later.
-- **The chat request queue:** `QueuedRequest` captures `contextvars.copy_context()` when the request is enqueued, and the worker runs the handler inside it (`Chat/request_queue.py:371`, `:481-500`, `:672`). Without this, a queued `/chat/completions` (`CHAT_QUEUED_EXECUTION`, off by default) would lose its `prechecked` and `records_itself` flags and be counted twice.
-- **WebSockets:** there is no shared socket auth helper. Each of the five sites sets the context after it authenticates: `audio/audio_streaming.py`, `voice_assistant.py`, `agent_client_protocol.py`, `acp_multiplex.py` and `prompt_studio/prompt_studio_websocket.py`.
+- **Jobs workers on `WorkerSDK`:** both handler call sites (`Jobs/worker_sdk.py:719`, `:955`) run the handler inside `llm_call_context(user_id=as_quota_user_id(owner))`. The owner is the job row's `owner_user_id`, a string that can be empty. This covers scheduled automations, which run under a `WorkerSDK` worker.
+- **The workflow engine:** `start_run` sets the context from `run.user_id` (`Workflows/engine.py:530`, `:596`).
+  - It has to be set there because `_spawn` runs each run on a new thread with its own loop (`:2337-2347`), and `threading.Thread` doesn't copy context.
+  - `start_run` is also awaited directly for child runs (`Workflows/adapters/control/orchestration.py:74`).
+- **The chat request queue:** `QueuedRequest` captures the LLM call state when the request is enqueued, and the worker runs the processor with it (`Chat/request_queue.py:366`, `:672`). The queue's worker tasks otherwise carry the context of whoever started the queue. Without this, a queued `/chat/completions` (`CHAT_QUEUED_EXECUTION`, off by default) would lose its `prechecked` and `records_itself` flags and be counted twice.
+- **WebSockets:** no socket authentication sets the content scope. Each sets the context after it authenticates:
+  - the four audio routes, through their shared helper `_audio_ws_authenticate` (`Audio/streaming_service.py:382`);
+  - `voice_assistant.py`;
+  - `agent_client_protocol.py` (two routes);
+  - `acp_multiplex.py`;
+  - `prompt_studio/prompt_studio_websocket.py` (two routes; its user id is a string).
 
 **Places that lose context today, and their fix:**
-- `Chat/bounded_daemon.py:142` starts raw threads. It starts them with `contextvars.copy_context().run`.
-- `loop.run_in_executor` doesn't copy context. The two sites that lead to LLM calls are converted to `asyncio.to_thread`: `Evaluations/eval_runner.py:1398-1409` (G-Eval) and `Scheduler/base/registry.py:84-92,254-255`.
+- **The bounded daemon pools.** `BoundedDaemonPool.start` (`Chat/bounded_daemon.py:121-150`) starts raw threads. It is the one entry point for the sync adapter pool, the stream pool and the cleanup pool. It carries the LLM call state into the thread: the resolved user and the context fields. It does not copy the whole context, because other context variables, such as the provider-error privacy scope, are not passed to these threads today, and copying everything would change that.
+- **`loop.run_in_executor`** doesn't copy context. The sites that lead to LLM calls carry the LLM call state the same way: `Evaluations/eval_runner.py:1398-1409` (G-Eval) and `Scheduler/base/registry.py:84-92,248-258`.
 - `asyncio.to_thread` and `asyncio.create_task` already copy context. Async FastAPI dependencies run in the request's task, so an endpoint and its streaming response body see what authentication set.
 
 **Exempt calls:** `AuthNZ/byok_testing.py:563,649` and `Setup/first_chat_verifier.py` run inside `llm_call_context(exempt=True)`.
@@ -190,7 +197,7 @@ Two counters back the cost keys, next to the existing token counter. All three e
 
 - `sum_user_llm_tokens_since(user_id, since)`: the existing `AuthnzUsageRepo` method gains the predicate.
 - `sum_user_llm_cost_since(user_id, since)`: new; sums `total_cost_usd`.
-- Each has a SQLite and a Postgres form.
+- One SQL string serves both backends, as the existing counter does. Only the bound timestamp differs.
 - The quota code reads them through `quota_checks` helpers: `llm_tokens_this_month` (existing), `llm_cost_today` and `llm_cost_this_month`.
 - The `(user_id, ts)` index that makes these sums cheap already exists on both backends.
 
@@ -296,9 +303,17 @@ Each test fails before its change. A fake `ChatProvider` subclass reports a fixe
 
 ## Delivery
 
-Three PRs, so recording can be checked before anything new is refused.
+Four PRs, so recording can be checked before anything new is refused.
 
-- **PR 1: who a call is for, and recording.** §1 to §3, §5, and the embeddings predicate in §6. No new refusals. Includes ADR-065, "LLM calls are accounted in the chat provider base class", if the number is free when the PR opens.
+- **PR 1a: the mechanism and recording.** No new refusals. After it, every LLM call made in an HTTP request, or in a worker that already sets the content scope, is recorded. It contains:
+  - the call context;
+  - the single-loop hand-off (§5);
+  - recording in the provider base class (§2, §3);
+  - the state carried through the bounded pools and the chat request queue;
+  - the `records_itself` and `exempt` markings;
+  - the embeddings predicate in §6;
+  - ADR-067, "LLM calls are accounted in the chat provider base class", if the number is free when the PR opens.
+- **PR 1b: the remaining roots in §1.** `WorkerSDK`, the workflow engine, the WebSocket sites and the two executor sites.
 - **PR 2: the check and the keys.** §4, the cost counters and startup warnings in §6, §7 and §9. Closes TASK-13437.
 - **PR 3: the evaluation cost-cap removals.** §8. It has no dependency on the other two beyond the cost quota existing. Closes TASK-13436.
 
