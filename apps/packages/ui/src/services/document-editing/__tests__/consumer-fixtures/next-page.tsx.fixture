@@ -1,0 +1,7 @@
+// Temporary module-loading fixture; real readiness/authentication guards stay active.
+if (typeof window !== "undefined") {
+  void import("@/services/document-editing/__tests__/browser-qualification");
+}
+export default function WorkerQualification() {
+  return <main>E4 local worker qualification</main>;
+}

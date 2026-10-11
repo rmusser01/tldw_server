@@ -41,3 +41,23 @@ line behind and failed the source-preservation gate. Track merge declarations in
 the map-local set, qualify tag values before merge handling, and use retained CST
 property tokens when adjusting leading key whitespace. The 91-case YAML selection
 and 15 amended bundle controls cover these incidents; generic dumping is no remedy.
+
+## E4 worker qualification exposed consumer bundlers and native cleanup (TASK13519)
+
+The2026-10-11 installed WXT0.20.13 probe rewrote shared import.meta.url to
+self.location.href and requested nonexistent extension-root worker.ts. Its native
+?worker import supplied through a trusted host factory restored real local worker
+startup. Next16.1.4 Turbopack emitted a Blob/importScripts bootstrap, rejected by
+worker-src self; the existing webpack consumer passed, leaving default Turbopack
+an explicit integration/packaging gate. Test module hooks must load independently
+of React mount: the real readiness guard correctly refused the unavailable test
+backend. Do not disable that guard to manufacture a worker pass.
+
+An empty test-only infinite loop was removed by the WXT minifier. Observable fixed
+counter loops retained the intended real stall. Chromium145 native terminate
+retired logical authority immediately but left startup-stalled dedicated targets
+briefly alive; raw CDP without worker debugger attachment confirmed eventual
+termination about2s later. Record exact target destruction, responsiveness and
+bounded churn, not a mock terminate count or an immediate-zero-thread claim.
+ADR065 Rulings39–42 and task10 durable evidence preserve each failed and corrected
+control. Actual host service wiring and production build qualification remain I3/I5.

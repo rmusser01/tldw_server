@@ -259,3 +259,65 @@ remain separate, and default 1.2 plus quoted-dot string controls remain qualifie
 This narrows browser admission beyond the unchanged shared v1 fixture profile;
 source/save authority is unchanged. The late self-review correction was made
 after isolated package pinning but before final acceptance or a source commit.
+
+### Bounded worker ownership (E4 / TASK-13519, Ruling39)
+
+Browser checks and formatting use the same app-owned local worker lane with an
+active-editor lease, one executing snapshot and only its latest pending successor.
+Retirement is permanent across authority/editability/conflict transitions; host
+editors invoke that primitive in their integration tasks. Local packaged workers,
+consumer CSP, actual termination and copy/startup costs require E4 qualification.
+No network, storage, editor or save authority is introduced.
+
+The Chatbook counterpart replaces the plan's multiprocessing spawn recipe with
+an isolated fixed package-owned script and bounded JSON frames: actual mounted
+startup failed on Textual stderr; the fd-backed qualification control reimported
+app.py/config and inherited a synthetic credential. Explicit empty environment,
+neutral cwd, closed inherited descriptors and pure package bootstrap separate
+application authority. They do not create an OS sandbox. ADR-194 records this
+launch correction and its installation/lifecycle evidence gate.
+
+### Consumer-owned Worker construction (E4, Ruling40)
+
+The trusted host may supply a `() => Worker` factory to the single document
+worker service. Next uses native static `new Worker(new URL(..., import.meta.url))`;
+WXT uses its native `?worker` import. No user-selected URL, CDN, blob bootstrap or
+bundler-plugin override is admitted. Actual I3 app/service ownership remains a
+separate integration gate.
+
+Installed WXT0.20.13 rewrites import.meta.url to self.location.href before Vite's
+worker detection. The first emitted constructor consequently requested absent
+extension-origin `/worker.ts`, and the positive worker check failed with zero
+worker events. A trusted factory preserves each consumer's supported bundler
+mechanism without weakening its CSP or changing the pure worker protocol. E4
+consumer fixtures establish module/lifecycle loading only; they do not establish
+authenticated Notes integration or change its readiness/authentication guards.
+
+### Next bundler qualification limit (E4, Ruling41)
+
+Next16.1.4's default Turbopack development worker loader creates a Blob URL
+containing an importScripts bootstrap. Actual Chromium qualification with
+`worker-src 'self'` produced two CSP violations and zero workers; results safely
+reported failure. The existing `dev:webpack` consumer is the approved E4
+qualification alternative, without changing production scripts/configuration or
+weakening CSP. Temporary webpack module loading must not be reported as default
+Turbopack or authenticated Notes support. I3 must resolve/qualify each advertised
+host/build path before adoption, and I5 must verify actual production packaging.
+The captured failure remains a release gate, not a waived test.
+
+### Native browser termination semantics (E4, Ruling42)
+
+The browser lane retires listeners, deadline timers, source/key references and
+promise authority and invokes native Worker.terminate before a successor starts.
+This is logical ownership, not a JavaScript thread join or proof of zero physical
+thread overlap. Actual Chromium145.0.7632.6 startup-stall controls retain dedicated
+worker targets briefly after terminate; the raw-CDP timeline records three targets
+at300ms after the final close and none after a further2.5s. Chromium source's
+forcible-termination delay supports the explanation but is not an attestation of
+the installed binary's exact source revision. Real startup/retirement churn,
+responsiveness and eventual target destruction remain required qualification;
+persistent accumulation is not waived. No product sleep, target-control privilege,
+pool or alternate termination service is introduced. Python still reaps and closes
+its child before replacement. This interpretation corrects an immediate-physical-
+cleanup reading of the original cross-platform plan; I3/I5 retain host/platform
+qualification duties.

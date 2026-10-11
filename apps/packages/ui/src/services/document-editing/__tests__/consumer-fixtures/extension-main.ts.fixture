@@ -1,0 +1,7 @@
+import StructuredWorker from "@/services/document-editing/worker?worker";
+import FaultWorker from "@/services/document-editing/__tests__/fault-worker.js?worker";
+import { qualify } from "@/services/document-editing/__tests__/browser-qualification";
+(globalThis as typeof globalThis & { e4Qualify: () => Promise<unknown> }).e4Qualify = () => qualify(
+  () => new StructuredWorker({ name: "document-editing" }),
+  name => new FaultWorker({ name }),
+);
