@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import ts from "typescript"
 import React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import LegacySidepanelChat from "../../../../../tldw-frontend/extension/routes/sidepanel-chat"
@@ -54,6 +55,14 @@ const io = vi.hoisted(() => ({
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
   keyboardNew: null as (() => void) | null,
+  realChatShortcuts: false,
+  stubMirror: false,
+  realSidebar: false,
+  productionTextareaReadiness: false,
+  holdDrawerPresentation: false,
+  drawerCallbacks: [] as { onClose?: (...args: unknown[]) => void; afterOpenChange?: (open: boolean) => void }[],
+  sidebarHold: null as Promise<void> | null,
+  sidebarError: null as Error | null,
   closeTab: null as ((id: string, options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }) => Promise<boolean | void>) | null,
   data: new Map<string, unknown>(),
   read: vi.fn(),
@@ -63,6 +72,21 @@ const io = vi.hoisted(() => ({
   submit: vi.fn(),
   notifyError: vi.fn()
 }))
+// Keep real Drawer/content and expose retained motion callbacks for boundary controls.
+vi.mock("antd", async original => {
+  const actual = await original<typeof import("antd")>()
+  return {
+    ...actual,
+    Drawer: (props: React.ComponentProps<typeof actual.Drawer>) => {
+      io.drawerCallbacks.push(props)
+      return (
+        <actual.ConfigProvider theme={{ token: { motion: false } }}>
+          <actual.Drawer {...props} afterOpenChange={io.holdDrawerPresentation ? undefined : props.afterOpenChange} />
+        </actual.ConfigProvider>
+      )
+    }
+  }
+})
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
     hasPersistentBackend: true,
@@ -126,6 +150,7 @@ vi.mock("@/db/dexie/chat", async original => {
   const actual = await original<typeof import("@/db/dexie/chat")>()
   return { ...actual, PageAssistDatabase: class extends actual.PageAssistDatabase {
     async getHistoryInfo(id: string) { return (await io.local(id))?.historyInfo }
+    async getRecentChatHistories() { return [] }
   } }
 })
 vi.mock("@/db/dexie/history-selection", async original => ({
@@ -160,6 +185,14 @@ vi.mock("@/db/dexie/fork-operations", async original => ({
   findForkCandidate: async () => null,
   loadForkOperations: async () => []
 }))
+// Only the declared native mirror IO is replaced in the overlay handoff controls.
+vi.mock("@/db/dexie/server-chat-mirror", async original => {
+  const actual = await original<typeof import("@/db/dexie/server-chat-mirror")>()
+  return { ...actual,
+    linkServerChatMirror: (...args: Parameters<typeof actual.linkServerChatMirror>) => io.stubMirror ? Promise.resolve(`local-${args[0].chatId}`) : actual.linkServerChatMirror(...args),
+    reconcileServerChatMirror: (...args: Parameters<typeof actual.reconcileServerChatMirror>) => io.stubMirror ? Promise.resolve() : actual.reconcileServerChatMirror(...args)
+  }
+})
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => {} }))
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({
@@ -171,16 +204,19 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", async (original) => {
   const actual =
     await original<typeof import("@/hooks/keyboard/useKeyboardShortcuts")>()
   return {
-    useChatShortcuts: (action: () => void) => {
+    useChatShortcuts: (action: () => void, enabled: boolean) => {
       io.keyboardNew = action
+      if (io.realChatShortcuts) actual.useChatShortcuts(action, enabled)
     },
     useSidebarShortcuts: actual.useSidebarShortcuts,
     useChatModeShortcuts: io.noop,
     useWebSearchShortcuts: io.noop
   }
 })
+vi.mock("@/hooks/useServerChatHistory", () => ({ useServerChatHistory: () => ({ data: [], isSuccess: true, isPending: false, isFetching: false, isError: false, fetchStatus: "idle", refetch: io.noop }) }))
 vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionActions: () => ({ checkOnce: io.noop })
+  useConnectionActions: () => ({ checkOnce: io.noop }),
+  useConnectionState: () => ({ isConnected: true })
 }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: io.noop }))
 vi.mock("@/hooks/useAntdNotification", () => {
@@ -270,6 +306,7 @@ collectOpening(formAst)
 const openingDeclaration = (name: string) => formOpeningNodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node) && node.name.getText(formAst) === name)
 const openingNames = ["documentWebUiHandoffRef", "getHandoffInputRevision", "handoffInputRevision", "handoffSelectionIsCurrent", "captureHandoffGuard", "openChatInWebUiWithDocumentHandoff"]
 const registrations = formOpeningNodes.filter(node => ts.isExpressionStatement(node) && node.getText(formAst).startsWith("React.useLayoutEffect") && node.getText(formAst).includes("onWebUiOpenReady"))
+const composerReadyRegistration = formOpeningNodes.find(node => ts.isExpressionStatement(node) && /React\.use(?:Layout)?Effect/.test(node.getText(formAst)) && node.getText(formAst).includes("onComposerReady"))!
 const openingCleanup = formOpeningNodes.find(node => ts.isExpressionStatement(node) && /React\.use(?:Layout)?Effect\(\(\) => \(\) => documentWebUiHandoffRef/.test(node.getText(formAst)))
 const openingCode = ts.transpileModule(`function useFormOpening(props, composer) {
   const { form, draftReady, isDraftOwnerCurrent } = composer;
@@ -280,13 +317,16 @@ const openingCode = ts.transpileModule(`function useFormOpening(props, composer)
   const currentDocumentSelectionKeyRef = React.useRef(currentDocumentSelectionKey);
   const onOpenChatInWebUi = props.onOpenChatInWebUi;
   const onWebUiOpenReady = props.onWebUiOpenReady;
+  const onComposerReady = props.onComposerReady;
+  const keyboardShortcutsEnabled = props.keyboardShortcutsEnabled ?? true;
   ${openingNames.map(name => `const ${openingDeclaration(name)!.getText(formAst)};`).join("\n")}
   ${openingCleanup?.getText(formAst) ?? ""}
   ${registrations.map(node => node.getText(formAst)).join("\n")}
+  ${composerReadyRegistration.getText(formAst)}
 }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const useFormOpening = new Function("React", "useStoreMessageOption", "useHistorySelectionContext", "notification", "t", "tldwClient", `${openingCode}; return useFormOpening;`)(React, useStoreMessageOption, useHistorySelectionContext, { error: io.noop }, io.t, {})
 
-const ComposerProbe = (props: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement>; onRecoverDraft?: RestoreChatDraft }) => {
+const ComposerProbe = (props: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement>; onRecoverDraft?: RestoreChatDraft; keyboardShortcutsEnabled?: boolean; onComposerReady?: () => void }) => {
   const { draftKey, inputRef, onRecoverDraft } = props
   const address = useStoreMessageOption(state => state.chatDraftAddress)
   React.useLayoutEffect(() => {
@@ -306,7 +346,7 @@ const ComposerProbe = (props: { draftKey: string; inputRef?: React.RefObject<HTM
     textareaRef: inputRef ?? React.createRef<HTMLTextAreaElement>()
   })
   useFormOpening(props, composer)
-  return <>{io.useRecovery && <ChatDraftRecovery listDrafts={composer.listRetainedDrafts} copyDraft={composer.copyRetainedDraft} onRestore={onRecoverDraft} disabled={!composer.draftReady} />}<textarea ref={inputRef} aria-label="Composer draft" disabled={!composer.draftReady}
+  return <>{io.useRecovery && <ChatDraftRecovery listDrafts={composer.listRetainedDrafts} copyDraft={composer.copyRetainedDraft} onRestore={onRecoverDraft} disabled={!composer.draftReady} />}<textarea ref={inputRef} aria-label="Composer draft" disabled={!composer.draftReady && !io.productionTextareaReadiness}
     value={composer.form.values.message}
     onChange={event => composer.setMessageValue(event.target.value)} /></>
 }
@@ -338,7 +378,9 @@ vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
   ConnectionBanner: () => null
 }))
-vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
+vi.mock("@/components/Sidepanel/Chat/Sidebar", async original => {
+ const actual = await original<typeof import("@/components/Sidepanel/Chat/Sidebar")>()
+ return {
   SidepanelChatSidebar: (props: {
     onClose: () => void
     variant: "docked" | "overlay"
@@ -352,6 +394,9 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
     onOpenLocalHistory: (id: string) => void
     onOpenServerChat: (chat: { id: string; title: string }) => void
   }) => {
+    if (io.sidebarHold) throw io.sidebarHold
+    if (io.sidebarError) throw io.sidebarError
+    if (io.realSidebar) return <actual.SidepanelChatSidebar {...props as React.ComponentProps<typeof actual.SidepanelChatSidebar>} />
     io.closeTab = props.onCloseTab
     return (
       <nav data-testid="compact-sidebar" data-variant={props.variant}>
@@ -381,7 +426,7 @@ vi.mock("@/components/Sidepanel/Chat/Sidebar", () => ({
       </nav>
     )
   }
-}))
+}})
 vi.mock("@/components/Common/CommandPaletteHost", () => ({
   CommandPaletteHost: ({
     commandPaletteProps
@@ -653,7 +698,7 @@ describe("current shared Clipper handoff consumer", () => {
       description: "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
     })))
     expect(readPendingWebClipAnalyzeRequest()).toEqual(pending)
-    expect(screen.getByText("alice first")).toBeInTheDocument()
+    expect(await screen.findByText("alice first")).toBeInTheDocument()
     expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
     expect(io.submit).toHaveBeenCalledTimes(1)
     io.submit.mockImplementationOnce(async () => {
@@ -694,6 +739,14 @@ describe.each([
     sessionStorage.clear()
     io.controller = null
     io.keyboardNew = null
+    io.realChatShortcuts = false
+    io.stubMirror = false
+    io.holdDrawerPresentation = false
+    io.drawerCallbacks = []
+    io.realSidebar = false
+    io.productionTextareaReadiness = false
+    io.sidebarHold = null
+    io.sidebarError = null
     io.closeTab = null
     io.submit.mockReset().mockResolvedValue(undefined)
     io.notifyError.mockReset()
@@ -760,6 +813,382 @@ describe.each([
     }
   )
 
+  it.each(["New conversation", "alice two"])("closes an accepted overlay %s and focuses its owned composer", async action => {
+    installSidebarViewport(true)
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const opener = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    opener.focus()
+    fireEvent.click(opener)
+    fireEvent.click(await screen.findByRole("button", { name: action }))
+    await waitFor(() => expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Composer draft" })).toHaveFocus())
+    expect(io.submit).not.toHaveBeenCalled()
+  })
+
+  it("hands an already-ready active tab back to its composer after the native inert boundary clears", async () => {
+    installSidebarViewport(true)
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = screen.getByRole("textbox", { name: "Composer draft" }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer).not.toBeDisabled())
+    const nativeFocus = composer.focus.bind(composer)
+    const blocked = vi.fn()
+    vi.spyOn(composer, "focus").mockImplementation(() => {
+      // jsdom does not enforce native inert; retain the browser's refusal boundary.
+      if (composer.closest("[inert]")) blocked()
+      else nativeFocus()
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const sidebar = await screen.findByTestId("compact-sidebar")
+    within(sidebar).getByRole("button", { name: "alice one" }).focus()
+    fireEvent.click(within(sidebar).getByRole("button", { name: "alice one" }))
+    await waitFor(() => expect(composer).toHaveFocus())
+    expect(blocked).not.toHaveBeenCalled()
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+  })
+
+  it("keeps a refused New overlay and suppresses the background New shortcut", async () => {
+    installSidebarViewport(true)
+    io.realChatShortcuts = true
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const sidebar = await screen.findByTestId("compact-sidebar")
+    const block = (event: Event) => event.preventDefault()
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, block)
+    try { fireEvent.click(within(sidebar).getByRole("button", { name: "New conversation" })) }
+    finally { window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, block) }
+    expect(screen.getByTestId("compact-sidebar")).toBe(sidebar)
+    fireEvent.keyDown(document, { key: "u", ctrlKey: true, shiftKey: true })
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(screen.getByTestId("compact-sidebar")).toBe(sidebar)
+  })
+
+  it.each(["local", "server"])("dismisses a held accepted %s open only after its publication", async source => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    io.captureNative = true
+    io.stubMirror = source === "server"
+    io.localId = "B"
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const data = { historyInfo: { id: "B", title: "B", server_scope_key: ownerKey("alice") }, messages: [{ id: "B-message", role: "user", content: "B TRANSCRIPT" }] }
+    if (source === "local") io.local.mockImplementation(async () => { await held; return data })
+    else io.server.mockImplementation(async () => { await held; return [] })
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const sidebar = await screen.findByTestId("compact-sidebar")
+    fireEvent.click(within(sidebar).getByRole("button", { name: source === "local" ? "Open cached history" : "Open server history" }))
+    await waitFor(() => expect(source === "local" ? io.local : io.server).toHaveBeenCalled())
+    expect(screen.getByTestId("compact-sidebar")).toBe(sidebar)
+    await act(async () => { finish(); await held })
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBe("alice-one"))
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    expect(io.submit).not.toHaveBeenCalled()
+  })
+
+  it("does not let an old accepted load dismiss a reopened overlay or steal its focus", async () => {
+    installSidebarViewport(true)
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    io.localId = "B"
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    io.local.mockImplementation(async () => { await held; return { historyInfo: { id: "B", title: "B", server_scope_key: ownerKey("alice") }, messages: [{ id: "B-message", role: "user", content: "B TRANSCRIPT" }] } })
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
+    await waitFor(() => expect(io.local).toHaveBeenCalledWith("B"))
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const reopened = await screen.findByTestId("compact-sidebar")
+    const control = within(reopened).getByRole("button", { name: "New conversation" })
+    control.focus()
+    await act(async () => { finish(); await held })
+    await screen.findByText("B TRANSCRIPT")
+    expect(screen.getByTestId("compact-sidebar")).toBe(reopened)
+    expect(control).toHaveFocus()
+  })
+
+  it.each(["local", "server"])("retains the overlay when a %s target is refused", async source => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    io.local.mockResolvedValue(null)
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const sidebar = await screen.findByTestId("compact-sidebar")
+    fireEvent.click(within(sidebar).getByRole("button", { name: source === "local" ? "Open cached history" : "Open server history" }))
+    await waitFor(() => expect(useStoreMessageOption.getState().isLoading).toBe(false))
+    expect(screen.getByTestId("compact-sidebar")).toBe(sidebar)
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+  })
+
+  it("waits for an existing local tab's preparation before dismissing its overlay", async () => {
+    installSidebarViewport(true)
+    const saved = tabsState()
+    saved.tabs[1].historyId = "B"
+    saved.snapshotsById["alice-two"].historyId = "B"
+    saved.snapshotsById["alice-two"].chatDraftHandle = { address: { kind: "local", id: "B", profileId: "profile" }, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) }
+    io.data.set(storedKey("alice"), saved)
+    io.localId = "B"
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    io.local.mockImplementation(async () => { await held; return { historyInfo: { id: "B", title: "B", server_scope_key: ownerKey("alice") }, messages: [{ id: "B-message", role: "user", content: "EXISTING B" }] } })
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const sidebar = await screen.findByTestId("compact-sidebar")
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Open cached history" }))
+    await waitFor(() => expect(io.local).toHaveBeenCalledWith("B"))
+    expect(screen.getByTestId("compact-sidebar")).toBe(sidebar)
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    await act(async () => { release(); await held })
+    await screen.findByText("EXISTING B")
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-two")
+    expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(2)
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+  })
+
+  it("does not dismiss a replacement account's overlay after A to B to A retirement", async () => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    io.data.set(storedKey("bob"), tabsState("bob"))
+    io.localId = "B"
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    io.local.mockImplementation(async () => { await held; return { historyInfo: { id: "B", title: "B", server_scope_key: ownerKey("alice") }, messages: [{ id: "B-message", role: "user", content: "RETIRED B" }] } })
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
+    await waitFor(() => expect(io.local).toHaveBeenCalledWith("B"))
+    switchAccount("bob")
+    await screen.findByText("bob first")
+    switchAccount("alice")
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const replacement = await screen.findByTestId("compact-sidebar")
+    await act(async () => { release(); await held })
+    expect(screen.getByTestId("compact-sidebar")).toBe(replacement)
+    expect(screen.queryByText("RETIRED B")).not.toBeInTheDocument()
+    expect(io.submit).not.toHaveBeenCalled()
+  })
+
+  it("focuses Find through the real Sidebar and Drawer once, without replaying it on reopen", async () => {
+    installSidebarViewport(true)
+    io.realSidebar = true
+    io.data.set(storedKey("alice"), tabsState())
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><Route /></QueryClientProvider>)
+    await screen.findByText("alice first")
+    const find = screen.getByRole("button", { name: "Palette find conversations" })
+    find.focus()
+    fireEvent.click(find)
+    const input = await screen.findByPlaceholderText("Search chats...")
+    await waitFor(() => expect(input).toHaveFocus())
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Chats" })).getAllByRole("button", { name: "Close", exact: true })[0])
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    toggle.focus()
+    fireEvent.click(toggle)
+    const dialog = await screen.findByRole("dialog", { name: "Chats" })
+    expect(dialog).toHaveAttribute("aria-modal", "true")
+    expect(screen.getByPlaceholderText("Search chats...")).not.toHaveFocus()
+    view.unmount()
+    client.clear()
+  })
+
+  it("waits for ready before focusing the same enabled textarea the production form exposes", async () => {
+    installSidebarViewport(true)
+    io.useComposer = true
+    io.productionTextareaReadiness = true
+    io.data.set(storedKey("alice"), tabsState())
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    io.read.mockImplementation(async key => { if (String(key).startsWith("registry:draft:tldw:sidepanelChatDraft:new-")) await held; return io.data.get(key) })
+    render(<Route />)
+    await screen.findByText("alice first")
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Composer draft" })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const create = await screen.findByRole("button", { name: "New conversation" })
+    create.focus()
+    fireEvent.click(create)
+    await waitFor(() => expect(io.read.mock.calls.some(([key]) => String(key).startsWith("registry:draft:tldw:sidepanelChatDraft:new-"))).toBe(true))
+    const input = screen.getByRole("textbox", { name: "Composer draft" })
+    expect(input).toBeEnabled()
+    expect(input).not.toHaveFocus()
+    await act(async () => { release(); await held })
+    await waitFor(() => expect(input).toHaveFocus())
+  })
+
+  it("keeps a held Sidebar content boundary dismissible and never resurrects its late content", async () => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    io.sidebarHold = held
+    const opener = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = await screen.findByRole("dialog", { name: "Chats" })
+    expect(screen.getByRole("status")).toHaveTextContent("Loading chats")
+    expect(screen.getByTestId("chat-main")).toHaveAttribute("inert")
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" })
+    expect(screen.queryByRole("dialog", { name: "Chats" })).not.toBeInTheDocument()
+    expect(screen.getByTestId("chat-main")).not.toHaveAttribute("inert")
+    expect(opener).toHaveFocus()
+    await act(async () => { io.sidebarHold = null; release(); await held })
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(io.submit).not.toHaveBeenCalled()
+  })
+
+  it("keeps a rejected Sidebar content boundary dismissible without losing the active chat", async () => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    io.sidebarError = new Error("Declared Sidebar chunk failure")
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+      const dialog = await screen.findByRole("dialog", { name: "Chats" })
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not load chats")
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }))
+      expect(screen.queryByRole("dialog", { name: "Chats" })).not.toBeInTheDocument()
+      expect(screen.getByText("alice first")).toBeVisible()
+      expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    } finally { consoleError.mockRestore(); io.sidebarError = null }
+  })
+
+  it("lets newer loading-drawer focus retire Find before deferred Sidebar content mounts", async () => {
+    installSidebarViewport(true)
+    io.realSidebar = true
+    io.data.set(storedKey("alice"), tabsState())
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><Route /></QueryClientProvider>)
+    await screen.findByText("alice first")
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    io.sidebarHold = held
+    const find = screen.getByRole("button", { name: "Palette find conversations" })
+    find.focus()
+    fireEvent.click(find)
+    const dialog = await screen.findByRole("dialog", { name: "Chats" })
+    const close = within(dialog).getByRole("button", { name: "Close", exact: true })
+    close.focus()
+    await act(async () => { io.sidebarHold = null; release(); await held })
+    await screen.findByRole("textbox", { name: "Search chats" })
+    expect(close).toHaveFocus()
+    view.unmount()
+    client.clear()
+  })
+
+  it("wraps the actual Drawer Tab boundaries without sending focus to the background", async () => {
+    installSidebarViewport(true)
+    io.realSidebar = true
+    io.data.set(storedKey("alice"), tabsState())
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><Route /></QueryClientProvider>)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const drawer = await screen.findByRole("dialog", { name: "Chats" })
+    const first = within(drawer).getAllByRole("button", { name: "Close", exact: true })[0]
+    const last = await within(drawer).findByRole("button", { name: "Pro", exact: true })
+    const outer = drawer.closest<HTMLElement>(".sidepanel-chat-overlay")!
+    outer.focus()
+    const initialBack = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true })
+    fireEvent(outer, initialBack)
+    expect(initialBack.defaultPrevented).toBe(true)
+    expect(last).toHaveFocus()
+    last.focus()
+    const next = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })
+    fireEvent(last, next)
+    expect(next.defaultPrevented).toBe(true)
+    expect(first).toHaveFocus()
+    const previous = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true })
+    fireEvent(first, previous)
+    expect(previous.defaultPrevented).toBe(true)
+    expect(last).toHaveFocus()
+    view.unmount()
+    client.clear()
+  })
+
+  it("lets the actual nested Rename modal own the first Escape while Chats stays open", async () => {
+    installSidebarViewport(true)
+    io.realSidebar = true
+    io.data.set(storedKey("alice"), tabsState())
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><Route /></QueryClientProvider>)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const sidebar = await screen.findByTestId("sidepanel-chat-sidebar")
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: "alice one" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
+    // rc-component reuses "test-id" for both titles in test mode; locate the real nested title.
+    const rename = (await screen.findByText("Rename conversation")).closest('[role="dialog"]')!
+    fireEvent.keyDown(rename, { key: "Escape", code: "Escape" })
+    await waitFor(() => expect(screen.queryByText("Rename conversation")).not.toBeInTheDocument())
+    expect(screen.getByRole("dialog", { name: "Chats" })).toBeInTheDocument()
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(io.submit).not.toHaveBeenCalled()
+    view.unmount()
+    client.clear()
+  })
+
+  it("rejects retained Close and presentation callbacks after a new opening", async () => {
+    installSidebarViewport(true)
+    io.realSidebar = true
+    io.holdDrawerPresentation = true
+    io.data.set(storedKey("alice"), tabsState())
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><Route /></QueryClientProvider>)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    const first = await screen.findByRole("dialog", { name: "Chats" })
+    const old = io.drawerCallbacks.at(-1)!
+    fireEvent.click(within(first).getAllByRole("button", { name: "Close", exact: true })[0])
+    fireEvent.click(screen.getByRole("button", { name: "Palette find conversations" }))
+    const search = await screen.findByRole("textbox", { name: "Search chats" })
+    const current = io.drawerCallbacks.at(-1)!
+    await act(async () => { old.onClose?.(); old.afterOpenChange?.(true) })
+    expect(screen.getByRole("dialog", { name: "Chats" })).toBeInTheDocument()
+    expect(search).not.toHaveFocus()
+    await act(async () => { current.afterOpenChange?.(true) })
+    expect(search).toHaveFocus()
+    await act(async () => { old.afterOpenChange?.(false) })
+    const find = screen.getByRole("button", { name: "Palette find conversations" })
+    find.focus()
+    fireEvent.click(find)
+    expect(search).toHaveFocus()
+    view.unmount()
+    client.clear()
+  })
+
+  it("returns canceled overlay focus to its original initiator", async () => {
+    installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const opener = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    opener.focus()
+    fireEvent.click(opener)
+    const close = await screen.findByRole("button", { name: "Collapse conversation sidebar" })
+    close.focus()
+    fireEvent.click(close)
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
   it("cold narrow Pro starts collapsed and its keyboard opens an overlay", async () => {
     installSidebarViewport(true)
     io.data.set(storedKey("alice"), tabsState())
@@ -772,6 +1201,24 @@ describe.each([
       "overlay"
     )
     fireEvent.keyDown(document, { key: "b", ctrlKey: true })
+    expect(screen.getByTestId("compact-sidebar")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+  })
+
+  it("keeps current docked Collapse usable after an open overlay changes layout, while rejecting its old shell callbacks", async () => {
+    const viewport = installSidebarViewport(true)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
+    await screen.findByRole("dialog", { name: "Chats" })
+    const old = io.drawerCallbacks.at(-1)!
+    viewport.setNarrow(false)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    await act(async () => { old.onClose?.(); old.afterOpenChange?.(true); old.afterOpenChange?.(false) })
+    expect(screen.getByTestId("compact-sidebar")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
     expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
   })
 

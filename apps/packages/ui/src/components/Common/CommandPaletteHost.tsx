@@ -29,8 +29,9 @@ const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 type CommandPaletteHostProps = {
-  commandPaletteProps?: CommandPaletteProps
-  includePromptCommands?: boolean
+  enabled?: boolean;
+  commandPaletteProps?: CommandPaletteProps;
+  includePromptCommands?: boolean;
   loadPalette?: () => Promise<{
     CommandPalette: React.ComponentType<CommandPaletteProps>
   }>
@@ -38,6 +39,7 @@ type CommandPaletteHostProps = {
 }
 
 export const CommandPaletteHost = ({
+  enabled = true,
   commandPaletteProps,
   includePromptCommands = false,
   loadPalette = loadCommandPalette,
@@ -56,19 +58,14 @@ export const CommandPaletteHost = ({
     null
   )
   const [CommandPalette, setCommandPalette] =
-    useState<React.ComponentType<CommandPaletteProps> | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
-  const route = JSON.stringify([
-    location.key,
-    location.pathname,
-    location.search,
-    location.hash
-  ])
-  const previousRoute = useRef(route)
-  const shortcutEnabled = location.pathname !== RESEARCH_WORKSPACE_PATH
-  const [hasMountedPalette, setHasMountedPalette] = useState(false)
-  const [openSignal, setOpenSignal] = useState(0)
-  const [promptQuery, setPromptQuery] = useState("")
+    useState<React.ComponentType<CommandPaletteProps> | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const route = JSON.stringify([location.key, location.pathname, location.search, location.hash]);
+  const previousRoute = useRef(route);
+  const shortcutEnabled = enabled && location.pathname !== RESEARCH_WORKSPACE_PATH;
+  const [hasMountedPalette, setHasMountedPalette] = useState(false);
+  const [openSignal, setOpenSignal] = useState(0);
+  const [promptQuery, setPromptQuery] = useState('');
   useIsomorphicLayoutEffect(() => {
     if (previousRoute.current !== route) {
       requestRef.current?.dispose()
@@ -156,14 +153,15 @@ export const CommandPaletteHost = ({
   }, [openRequest, reloadPage, t])
 
   const openPalette = useCallback(() => {
-    if (requestRef.current?.isOpen() && requestRef.current.isCurrent()) return
-    requestRef.current?.dispose()
-    const request = capturePaletteFocusRequest(selectionRef.current)
-    requestRef.current = request
-    setOpenRequest(request)
-    setHasMountedPalette(true)
-    setOpenSignal((current) => current + 1)
-  }, [])
+    if (!enabled) return;
+    if (requestRef.current?.isOpen() && requestRef.current.isCurrent()) return;
+    requestRef.current?.dispose();
+    const request = capturePaletteFocusRequest(selectionRef.current);
+    requestRef.current = request;
+    setOpenRequest(request);
+    setHasMountedPalette(true);
+    setOpenSignal((current) => current + 1);
+  }, [enabled]);
 
   const mergedCommandPaletteProps = useMemo<CommandPaletteProps>(
     () => ({
@@ -203,6 +201,14 @@ export const CommandPaletteHost = ({
     },
     [openPalette, shortcutEnabled]
   )
+
+  useIsomorphicLayoutEffect(() => {
+    if (!enabled) {
+      requestRef.current?.dispose();
+      setOpenRequest(null);
+      setHasMountedPalette(false);
+    }
+  }, [enabled]);
 
   useIsomorphicLayoutEffect(() => {
     window.addEventListener("tldw:open-command-palette", openPalette)

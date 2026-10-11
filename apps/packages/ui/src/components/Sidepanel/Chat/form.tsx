@@ -209,11 +209,13 @@ export type SidepanelWebUiOpenSource = {
 }
 
 type Props = {
-  dropedFile: File | undefined
-  inputRef?: React.RefObject<HTMLTextAreaElement>
-  draftKey?: string
-  onRecoverDraft?: RestoreChatDraft
-  onFindConversations?: () => void
+  dropedFile: File | undefined;
+  inputRef?: React.RefObject<HTMLTextAreaElement>;
+  draftKey?: string;
+  keyboardShortcutsEnabled?: boolean;
+  onComposerReady?: () => void;
+  onRecoverDraft?: RestoreChatDraft;
+  onFindConversations?: () => void;
   onOpenChatInWebUi?: (
     overrides: SidepanelChatWebUiHandoffOverrides | undefined,
     source: SidepanelWebUiOpenSource
@@ -235,6 +237,8 @@ export const SidepanelForm = ({
   dropedFile,
   inputRef,
   draftKey,
+  keyboardShortcutsEnabled = true,
+  onComposerReady,
   onRecoverDraft,
   onFindConversations,
   onOpenChatInWebUi,
@@ -1946,7 +1950,10 @@ export const SidepanelForm = ({
     }
   }
 
-  useFocusShortcuts(textareaRef, true)
+  useFocusShortcuts(textareaRef, keyboardShortcutsEnabled);
+  React.useEffect(() => {
+    if (draftReady && keyboardShortcutsEnabled) onComposerReady?.();
+  }, [draftReady, keyboardShortcutsEnabled, onComposerReady]);
 
   const ensureEmbeddingModelAvailable = async (): Promise<boolean> => {
     // Fast path: no RAG or web search enabled

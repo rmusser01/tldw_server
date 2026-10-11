@@ -65,24 +65,28 @@ type SidebarGroup = {
 }
 
 type SidepanelChatSidebarProps = {
-  owner?: Pick<SidepanelChatOwner, "ownerKey" | "isCurrent"> & {
-    snapshot: Pick<SidepanelChatOwner["snapshot"], "requestScope">
-  }
-  open: boolean
-  variant: "docked" | "overlay"
-  tabs: SidepanelChatTab[]
-  activeTabId: string | null
-  onSelectTab: (tabId: string) => void
-  onCloseTab: (tabId: string, options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }) => void | boolean | Promise<void | boolean>
-  onNewTab: () => void
-  searchQuery: string
-  onSearchQueryChange: (value: string) => void
-  searchInputRef?: React.RefObject<HTMLInputElement>
-  focusSearchTrigger?: number
-  onOpenLocalHistory?: (historyId: string) => void
-  onOpenServerChat?: (chat: ServerChatHistoryItem) => void
-  onClose?: () => void
-}
+  owner?: Pick<SidepanelChatOwner, 'ownerKey' | 'isCurrent'> & {
+    snapshot: Pick<SidepanelChatOwner['snapshot'], 'requestScope'>;
+  };
+  open: boolean;
+  variant: 'docked' | 'overlay';
+  tabs: SidepanelChatTab[];
+  activeTabId: string | null;
+  onSelectTab: (tabId: string) => boolean | void | Promise<boolean | void>;
+  onCloseTab: (
+    tabId: string,
+    options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }
+  ) => void | boolean | Promise<void | boolean>;
+  onNewTab: () => boolean | void | Promise<boolean | void>;
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement>;
+  focusSearchTrigger?: number;
+  onSearchFocus?: () => void;
+  onOpenLocalHistory?: (historyId: string) => boolean | void | Promise<boolean | void>;
+  onOpenServerChat?: (chat: ServerChatHistoryItem) => boolean | void | Promise<boolean | void>;
+  onClose?: () => void;
+};
 
 /**
  * Status indicator component
@@ -224,6 +228,7 @@ export const SidepanelChatSidebar = ({
   onSearchQueryChange,
   searchInputRef,
   focusSearchTrigger,
+  onSearchFocus,
   onOpenLocalHistory,
   onOpenServerChat,
   onClose
@@ -585,12 +590,8 @@ export const SidepanelChatSidebar = ({
   }, [hasDebouncedSearchQuery, markPanelEngaged])
 
   React.useEffect(() => {
-    if (!focusSearchTrigger) return
-    if (searchInputRef?.current) {
-      searchInputRef.current.focus()
-      searchInputRef.current.select()
-    }
-  }, [focusSearchTrigger, searchInputRef])
+    if (open && focusSearchTrigger) onSearchFocus?.();
+  }, [open, focusSearchTrigger, onSearchFocus]);
 
   React.useEffect(() => {
     const normalized = debouncedSearchQuery.trim()
@@ -1161,18 +1162,18 @@ export const SidepanelChatSidebar = ({
   }
 
   const panelClass = classNames(
-    "relative flex h-full min-h-0 flex-col border-r border-border bg-surface",
-    variant === "overlay"
-      ? `fixed left-0 top-0 z-40 w-72 shadow-card transition-transform ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`
-      : "shadow-none"
-  )
+    'relative flex h-full min-h-0 flex-col border-r border-border bg-surface',
+    variant === 'overlay' ? 'w-full' : 'shadow-none'
+  );
 
   return (
     <aside
       className={panelClass}
       data-testid="sidepanel-chat-sidebar"
+      onKeyDown={(event) => {
+        if (variant === 'overlay' && event.key !== 'Escape' && event.key !== 'Tab')
+          event.stopPropagation();
+      }}
       style={variant === "docked" ? { width: sidebarWidth } : undefined}
     >
       <div
@@ -1181,8 +1182,8 @@ export const SidepanelChatSidebar = ({
           isPro ? "px-4 py-2" : "px-4 py-3"
         )}
       >
-        <div className="text-body font-semibold text-text">
-          {t("common:chatSidebar.title", "Chats")}
+        <div className={variant === 'overlay' ? 'sr-only' : 'text-body font-semibold text-text'}>
+          {t('common:chatSidebar.title', 'Chats')}
         </div>
         <div className="flex items-center gap-1">
           <Tooltip title={t("common:chatSidebar.newChat", "New Chat")}>
@@ -1223,20 +1224,8 @@ export const SidepanelChatSidebar = ({
               <CheckSquare className="size-4" />
             </button>
           </Tooltip>
-          {variant === "overlay" ? (
-            <Tooltip title={t("common:close", "Close")}>
-              <button
-                type="button"
-                aria-label={t("common:close", "Close")}
-                onClick={() => onClose?.()}
-                className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
-                title={t("common:close", "Close")}
-              >
-                <X className="size-4" />
-              </button>
-            </Tooltip>
-          ) : (
-            <Tooltip title={t("common:chatSidebar.collapse", "Collapse sidebar")}>
+          {variant === 'docked' && (
+            <Tooltip title={t('common:chatSidebar.collapse', 'Collapse sidebar')}>
               <button
                 type="button"
                 aria-label={t("common:chatSidebar.collapse", "Collapse sidebar")}
@@ -1258,7 +1247,8 @@ export const SidepanelChatSidebar = ({
             type="text"
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder={t("common:chatSidebar.search", "Search chats...")}
+            placeholder={t('common:chatSidebar.search', 'Search chats...')}
+            aria-label={t('common:chatSidebar.searchLabel', 'Search chats')}
             data-testid="sidepanel-sidebar-search"
             className="w-full bg-transparent text-body text-text outline-none placeholder:text-text-subtle"
             ref={searchInputRef}

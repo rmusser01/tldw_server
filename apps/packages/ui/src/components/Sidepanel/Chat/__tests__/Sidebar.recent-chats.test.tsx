@@ -4,9 +4,10 @@
  * and the server, without a search. Each opens through the panel's own open
  * handlers, which give it its own tab (XS-01).
  */
-import React from "react"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import React from 'react';
+import { Drawer } from 'antd';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SidepanelChatSidebar } from "../Sidebar"
 import type { HistoryInfo } from "@/db/dexie/types"
@@ -24,10 +25,11 @@ const io = vi.hoisted(() => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string | { defaultValue?: string }) =>
-      typeof fallback === "string" ? fallback : fallback?.defaultValue || key
-  })
-}))
-vi.mock("antd", () => ({
+      typeof fallback === 'string' ? fallback : fallback?.defaultValue || key,
+  }),
+}));
+vi.mock('antd', async (original) => ({
+  Drawer: (await original<typeof import('antd')>()).Drawer,
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
   Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   Modal: ({ open, children }: { open?: boolean; children?: React.ReactNode }) =>
@@ -132,9 +134,9 @@ const openTab = (id: string, extra: Partial<SidepanelChatTab>): SidepanelChatTab
 })
 
 const renderSidebar = (props: Partial<React.ComponentProps<typeof SidepanelChatSidebar>> = {}) => {
-  const onOpenServerChat = vi.fn()
-  const onOpenLocalHistory = vi.fn()
-  const view = render(
+  const onOpenServerChat = vi.fn();
+  const onOpenLocalHistory = vi.fn();
+  const panel = (
     <SidepanelChatSidebar
       owner={owner}
       open
@@ -150,9 +152,18 @@ const renderSidebar = (props: Partial<React.ComponentProps<typeof SidepanelChatS
       onOpenLocalHistory={onOpenLocalHistory}
       {...props}
     />
-  )
-  return { ...view, onOpenServerChat, onOpenLocalHistory }
-}
+  );
+  const view = render(
+    props.variant === 'overlay' ? (
+      <Drawer open title="Chats" onClose={props.onClose}>
+        {panel}
+      </Drawer>
+    ) : (
+      panel
+    )
+  );
+  return { ...view, onOpenServerChat, onOpenLocalHistory };
+};
 
 const recentSection = () => screen.getByRole("region", { name: "Recent chats" })
 const recentTitles = () =>
@@ -411,4 +422,43 @@ it('qualifies the profile and global namespace before the bounded recent read', 
   renderSidebar();
   await screen.findByRole('button', { name: /^Eligible global mirror\s*Server copy$/ });
   expect(recentTitles().join(' ')).not.toContain('Workspace');
+});
+
+// The installed Drawer stays real; only unrelated Sidebar IO and tooltips are declared doubles.
+describe('Compact modal framing', () => {
+  it('owns modal semantics and Escape without shrinking the docked panel contract', async () => {
+    const onClose = vi.fn();
+    const view = renderSidebar({ variant: 'overlay', onClose });
+    const dialog = await screen.findByRole('dialog', { name: 'Chats' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(screen.getByTestId('sidepanel-chat-sidebar')).not.toHaveClass('fixed');
+    fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    view.unmount();
+    renderSidebar({ variant: 'docked' });
+    expect(screen.queryByRole('dialog', { name: 'Chats' })).not.toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize sidebar' })).toBeInTheDocument();
+  });
+
+  it('contains background shortcuts while New, selection and recent controls remain usable', async () => {
+    const background = vi.fn();
+    document.addEventListener('keydown', background);
+    const onNewTab = vi.fn();
+    const { onOpenServerChat } = renderSidebar({ variant: 'overlay', onNewTab });
+    try {
+      const sidebar = screen.getByTestId('sidepanel-chat-sidebar');
+      const create = within(sidebar).getByRole('button', { name: 'New Chat' });
+      fireEvent.keyDown(create, { key: 'u', ctrlKey: true, shiftKey: true });
+      expect(background).not.toHaveBeenCalled();
+      fireEvent.click(create);
+      expect(onNewTab).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(sidebar).getByRole('button', { name: 'Select chats' }));
+      expect(screen.getByRole('dialog', { name: 'Chats' })).toBeInTheDocument();
+      fireEvent.click(within(sidebar).getByRole('button', { name: 'Exit selection' }));
+      fireEvent.click(await screen.findByRole('button', { name: /Server newest/ }));
+      expect(onOpenServerChat).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', background);
+    }
+  });
 });
