@@ -496,6 +496,50 @@ describe('H1 native owner scope', () => {
   })
 })
 
+it.each([
+  ["composed", TldwApiClient],
+  ["domain-on-base", TldwApiClientBase]
+] as const)(
+  "%s opts in to native completion capture without replacing original scope",
+  async (_name, Client) => {
+    mocks.bgRequest.mockResolvedValue({})
+    const client = new Client()
+    const capture =
+      _name === "composed"
+        ? (client as TldwApiClient).captureHistorySelection.bind(client)
+        : chatRagMethods.captureHistorySelection.bind(client)
+    const signal = new AbortController().signal
+    const request = {
+      view: {
+        view_session_id: "view-one",
+        conversation_id: "chat/one",
+        interpretation: { kind: "parent_graph_v1" as const },
+        cursor: { kind: "empty" as const },
+        selection_revision: 1
+      },
+      purpose: "send" as const
+    }
+    await capture("chat/one", request, {
+      requestScope,
+      signal,
+      scope: { type: "workspace", workspaceId: "7" },
+      includeNativeCompletion: true
+    })
+    expect(mocks.bgRequest.mock.lastCall?.[0]).toMatchObject({
+      ...expectedScopeFields,
+      abortSignal: signal,
+      body: request,
+      path: "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=workspace&workspace_id=7&include_native_completion=true"
+    })
+    await capture("chat/one", request, {
+      requestScope
+    })
+    expect(mocks.bgRequest.mock.lastCall?.[0].path).toBe(
+      "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=global"
+    )
+  }
+)
+
 it.each([['composed', TldwApiClient], ['base', TldwApiClientBase]] as const)(
   '%s streaming accepts frozen selected-history payload without mutating its request',
   async (_name, Client) => {

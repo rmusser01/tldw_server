@@ -155,6 +155,14 @@ const content = revision
   .strict()
 const capturedSchema = z
   .object({
+    native_completion_v1: z
+      .object({
+        policy: z.literal("selected_history_v1"),
+        supported: z.boolean(),
+        storage_context_digest: str
+      })
+      .strict()
+      .optional(),
     status: z.literal("captured"),
     snapshot,
     rows: z.array(node),
@@ -317,7 +325,10 @@ export const captureHistorySnapshot = async (
     response = await tldwClient.captureHistorySelection(
       owner.conversation_id,
       request,
-      nativeOptions(owner, signal)
+      {
+        ...nativeOptions(owner, signal),
+        ...(purpose === "send" ? { includeNativeCompletion: true } : {})
+      }
     )
   } catch (error) {
     assertOwnerLease(owner, { signal })
@@ -362,6 +373,13 @@ export const captureHistorySnapshot = async (
       canonicalHistoryJson(resolved.rows) !== canonicalHistoryJson(result.rows)
     )
       fail("selected_content_mismatch")
+    if (
+      result.native_completion_v1 &&
+      (purpose !== "send" ||
+        result.native_completion_v1.storage_context_digest !==
+          result.storage_context_digest)
+    )
+      fail("native_completion_capability_mismatch")
     bindSelectedHistoryContent(result.rows, result.selected_content)
   }
   const previous = nativeCapabilities.get(owner)

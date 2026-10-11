@@ -54,6 +54,192 @@ def test_capture_bootstrap_and_generic_admission_before_assistant(history_api):
     assert db.get_message_by_id("api-reply")["parent_message_id"] == "api-input"
 
 
+@pytest.mark.parametrize("sync_enrolled", [False, True])
+def test_opted_in_native_completion_capability_matches_original_owner(history_api, monkeypatch, sync_enrolled):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    client, db, cid, headers = history_api
+    monkeypatch.setattr(
+        character_messages, "_active_message_sync_service", lambda *_: object() if sync_enrolled else None
+    )
+    legacy = capture(client, cid, headers)
+    response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection?include_native_completion=true",
+        headers=headers,
+        json={"purpose": "send", "view": legacy.json()["view"]},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["native_completion_v1"] == {
+        "policy": "selected_history_v1",
+        "supported": not sync_enrolled,
+        "storage_context_digest": body["storage_context_digest"],
+    }
+    assert {k: v for k, v in body.items() if k != "native_completion_v1"} == legacy.json()
+    assert db.count_messages_for_conversation(cid) == 0
+
+
+@pytest.mark.parametrize(
+    "purpose,query",
+    [("send", ""), ("send", "?include_native_completion=false"), ("fork", "?include_native_completion=true")],
+)
+def test_unrequested_or_fork_capture_retains_legacy_json(history_api, purpose, query):
+    client, db, cid, headers = history_api
+    db.add_message(
+        {
+            "id": "nullable-root",
+            "conversation_id": cid,
+            "sender": "user",
+            "content": "Legacy nullable parent",
+            "parent_message_id": None,
+        }
+    )
+    view = capture(client, cid, headers).json()["view"]
+    response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection{query}",
+        headers=headers,
+        json={"purpose": purpose, "view": view},
+    )
+    assert response.status_code == 200, response.text
+    assert "native_completion_v1" not in response.json()
+    assert response.json()["snapshot"]["native_fork_context"] is not None
+    assert response.json()["snapshot"]["nodes"][0]["parent_id"] is None
+    assert db.count_messages_for_conversation(cid) == 1
+
+
+@pytest.mark.parametrize("scope_type", ["global", "workspace"])
+def test_native_completion_capability_uses_original_chat_scope(history_api, monkeypatch, scope_type):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    client, db, cid, headers = history_api
+    query = "?include_native_completion=true"
+    if scope_type == "workspace":
+        db.upsert_workspace("completion-workspace", "Completion workspace")
+        created = client.post(
+            "/api/v1/chats/",
+            headers=headers,
+            json={"title": "Completion scope", "scope_type": "workspace", "workspace_id": "completion-workspace"},
+        )
+        assert created.status_code == 201, created.text
+        cid = created.json()["id"]
+        query += "&scope_type=workspace&workspace_id=completion-workspace"
+    observed = []
+
+    def active_sync(_user, scope):
+        observed.append({"scope_type": scope.scope_type, "workspace_id": scope.workspace_id})
+        return object() if scope.scope_type == "global" else None
+
+    monkeypatch.setattr(character_messages, "_active_message_sync_service", active_sync)
+    response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection{query}",
+        headers=headers,
+        json={
+            "purpose": "send",
+            "view": {
+                "view_session_id": "scope-view",
+                "conversation_id": cid,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "cursor": {"kind": "empty"},
+                "selection_revision": 0,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["native_completion_v1"]["supported"] is (scope_type == "workspace")
+    assert observed == [
+        {"scope_type": scope_type, "workspace_id": "completion-workspace" if scope_type == "workspace" else None}
+    ]
+    assert db.count_messages_for_conversation(cid) == 0
+
+
+def test_capability_does_not_authorize_completion_after_sync_enrollment(history_api, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    client, db, cid, headers = history_api
+    monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: None)
+    view = capture(client, cid, headers).json()["view"]
+    captured = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection?include_native_completion=true",
+        headers=headers,
+        json={"purpose": "send", "view": view},
+    )
+    assert captured.status_code == 200, captured.text
+    body = captured.json()
+    assert body["native_completion_v1"]["supported"] is True
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "enrollment-race")["selection"]
+    monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
+    response = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json={
+            "api_provider": "openai",
+            "model": "gpt-4o-mini",
+            "conversation_id": cid,
+            "save_to_db": True,
+            "messages": [{"role": "user", "content": "enrollment race"}],
+            "tldw_history_selection_v1": selection,
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {"code": "sync_owner_unsupported", "status": "unsupported_history_capability"}
+    assert db.count_messages_for_conversation(cid) == 0
+    assert db.get_conversation_settings(cid) is None
+
+
+@pytest.mark.parametrize("kind", ["foreign-owner", "foreign-workspace", "expected-user"])
+def test_opted_in_capability_keeps_authenticated_capture_boundaries(history_api, kind):
+    client, db, cid, headers = history_api
+    view = capture(client, cid, headers).json()["view"]
+    query = "?include_native_completion=true"
+    request_headers = dict(headers)
+    expected = 409
+    if kind == "foreign-owner":
+        view["owner_key"] = "server:foreign/account:1"
+    elif kind == "foreign-workspace":
+        query += "&scope_type=workspace&workspace_id=foreign"
+        expected = 404
+    else:
+        request_headers["X-TLDW-Expected-User-ID"] = "other"
+        expected = 412
+    response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection{query}",
+        headers=request_headers,
+        json={"purpose": "send", "view": view},
+    )
+    assert response.status_code == expected, response.text
+    assert "native_completion_v1" not in response.json()
+    assert db.count_messages_for_conversation(cid) == 0
+
+
+@pytest.mark.parametrize("kind", ["policy", "boolean", "integer", "context", "extra", "fork"])
+def test_native_completion_capability_schema_is_strict_and_capture_bound(history_api, kind):
+    from pydantic import ValidationError
+
+    from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import CapturedHistoryV1
+
+    client, _db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    capability = {
+        "policy": "selected_history_v1",
+        "supported": True,
+        "storage_context_digest": body["storage_context_digest"],
+    }
+    if kind == "policy":
+        capability["policy"] = "future_v2"
+    elif kind == "boolean":
+        capability["supported"] = "true"
+    elif kind == "integer":
+        capability["supported"] = 1
+    elif kind == "context":
+        capability["storage_context_digest"] = "foreign"
+    elif kind == "extra":
+        capability["owner_override"] = "foreign"
+    else:
+        body["purpose"] = "fork"
+    with pytest.raises(ValidationError):
+        CapturedHistoryV1.model_validate({**body, "native_completion_v1": capability})
+
+
 def test_capture_foreign_namespace_and_workspace_have_no_mutations(history_api):
     client, db, cid, headers = history_api
     response = capture(client, cid, headers, owner_key="server:foreign/account:1")

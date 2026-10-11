@@ -1437,13 +1437,23 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chatId: string,
     request: HistoryCaptureRequestV1,
-    options: { scope?: ChatScope; signal?: AbortSignal; requestScope: ServicePromptRequestScope }
+    options: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope: ServicePromptRequestScope
+      includeNativeCompletion?: boolean
+    }
   ): Promise<unknown> {
     const scoped = requestScopeFields(options.requestScope)
     return bgRequest({
       path: appendPathQuery(
         `/api/v1/chat/conversations/${encodeURIComponent(chatId)}/history/selection`,
-        buildQuery(toChatScopeParams(options.scope))
+        buildQuery({
+          ...toChatScopeParams(options.scope),
+          ...(options.includeNativeCompletion === true
+            ? { include_native_completion: true }
+            : {})
+        })
       ),
       method: "POST",
       body: request,

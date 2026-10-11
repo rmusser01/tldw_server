@@ -138,6 +138,93 @@ it.each(["capture", "confirm", "admit", "settle"] as const)(
     expect(read).not.toHaveBeenCalled()
   }
 )
+describe("native completion capture capability", () => {
+  it.each([true, false, undefined])(
+    "preserves original owner capability %s without writes",
+    async (supported) => {
+      const native = owner()
+      const response = capture()
+      calls.capture.mockResolvedValue(
+        supported === undefined
+          ? response
+          : {
+              ...response,
+              native_completion_v1: {
+                policy: "selected_history_v1",
+                supported,
+                storage_context_digest: "storage"
+              }
+            }
+      )
+      const result = await service.captureHistorySnapshot(native, view, "send")
+      if (result.status !== "captured") throw Error(result.status)
+      expect(result.native_completion_v1?.supported).toBe(supported)
+      expect(calls.capture).toHaveBeenCalledWith(
+        "chat",
+        { view, purpose: "send" },
+        expect.objectContaining({
+          includeNativeCompletion: true,
+          requestScope: native.request_scope
+        })
+      )
+      expect(calls.append).not.toHaveBeenCalled()
+    }
+  )
+  it.each([
+    "wrong-policy",
+    "coerced",
+    "foreign-context",
+    "extra",
+    "null",
+    "foreign-owner",
+    "foreign-view"
+  ])("rejects %s capability before writes", async (kind) => {
+    const capability: Record<string, unknown> = {
+      policy: "selected_history_v1",
+      supported: true,
+      storage_context_digest: "storage"
+    }
+    const response = {
+      ...capture(),
+      native_completion_v1: capability as unknown
+    }
+    if (kind === "wrong-policy") capability.policy = "future_v2"
+    if (kind === "coerced") capability.supported = "true"
+    if (kind === "foreign-context") capability.storage_context_digest = "other"
+    if (kind === "extra") capability.owner_override = "foreign"
+    if (kind === "null") response.native_completion_v1 = null
+    if (kind === "foreign-owner") response.snapshot.owner_key = "foreign"
+    if (kind === "foreign-view")
+      response.view = { ...view, selection_revision: 2 }
+    calls.capture.mockResolvedValue(response)
+    await expect(
+      service.captureHistorySnapshot(owner(), view, "send")
+    ).rejects.toThrow()
+    expect(calls.append).not.toHaveBeenCalled()
+  })
+  it("does not request completion eligibility for a fork capture", async () => {
+    calls.capture.mockResolvedValue({ ...capture(), purpose: "fork" })
+    await service.captureHistorySnapshot(owner(), view, "fork")
+    expect(
+      calls.capture.mock.calls[0][2].includeNativeCompletion
+    ).toBeUndefined()
+  })
+  it("rejects an unsolicited completion capability on a fork", async () => {
+    calls.capture.mockResolvedValue({
+      ...capture(),
+      purpose: "fork",
+      native_completion_v1: {
+        policy: "selected_history_v1",
+        supported: true,
+        storage_context_digest: "storage"
+      }
+    })
+    await expect(
+      service.captureHistorySnapshot(owner(), view, "fork")
+    ).rejects.toThrow()
+  })
+})
+
 describe("history owner service", () => {
   it("returns capture before composition and freezes the exact explicit payload", async () => {
     const native = owner()

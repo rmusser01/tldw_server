@@ -8359,6 +8359,10 @@ async def capture_conversation_history(
     conversation_id: str,
     scope_type: Literal["global", "workspace"] | None = None,
     workspace_id: str | None = None,
+    include_native_completion: bool = Query(False, description=(
+        "Opt in to selected_history_v1 persistence ownership eligibility on a captured send. "
+        "Omitted or false preserves the legacy response; completion admission rechecks ownership."
+    )),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
@@ -8394,9 +8398,18 @@ async def capture_conversation_history(
             content = db.get_conversation_history_selected_content(conversation_id,
                 [row["id"] for row in result["rows"]], snapshot=snap, owner_client_id=str(current_user.id),
                 owner_key=owner, conn=conn)
+            capability = {}
+            if include_native_completion and body.purpose == "send":
+                from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+
+                capability = {"native_completion_v1": {
+                    "policy": "selected_history_v1",
+                    "supported": _active_message_sync_service(current_user, scope) is None,
+                    "storage_context_digest": snap.storage_context_digest,
+                }}
             return {"status": "captured", "snapshot": wire, "view": view, "purpose": body.purpose,
                     "rows": result["rows"], "selected_content": content,
-                    "storage_context_digest": snap.storage_context_digest}
+                    "storage_context_digest": snap.storage_context_digest, **capability}
     except HistorySelectionError as exc:
         raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
 

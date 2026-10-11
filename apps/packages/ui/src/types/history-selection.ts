@@ -96,7 +96,14 @@ export type HistoryResolutionV1 =
   | { readonly status: "ready"; readonly selection: HistorySelectionV1; readonly rows: readonly HistoryNodeV1[] }
   | HistoryResolutionFailureV1
 
+export type NativeCompletionCapabilityV1 = {
+  readonly policy: "selected_history_v1"
+  readonly supported: boolean
+  readonly storage_context_digest: string
+}
+
 export type HistorySelectionCaptureV1 = {
+  readonly native_completion_v1?: NativeCompletionCapabilityV1
   readonly status: "captured"
   readonly snapshot: HistorySelectionSnapshotV1
   readonly rows: readonly HistoryNodeV1[]

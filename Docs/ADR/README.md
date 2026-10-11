@@ -95,5 +95,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-064](064-usage-quotas-per-user-limits.md) | Accepted | Usage quotas are per-user UserProfiles `limits.*` values, off by default (`USAGE_QUOTAS_ENABLED`), resolved from the user's own value, then the most generous team value, then the most generous org value; none is set by default. |
 | [ADR-065](065-independent-notes-knowledge-provenance.md) | Accepted | Preserve Knowledge provenance as an owner-scoped independent Notes/Sync capability, separate from editable Markdown. |
 | [ADR-066](066-explicit-web-capture-and-refresh-snapshots.md) | Accepted | Require explicit accepted public-web capture and fresh refresh snapshots through existing WebClipper and canonical Media versions, retaining prior evidence. |
+| [ADR-067](067-native-completion-capture-capability.md) | Proposed | Discover selected native completion persistence ownership through an opt-in on the original scoped H1 capture, retaining primary admission gates and legacy response compatibility. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

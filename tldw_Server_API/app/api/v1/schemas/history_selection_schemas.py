@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 
 def _wire_array(value: object) -> object:
@@ -257,6 +266,14 @@ class HistoryCaptureRequestV1(HistoryWireModel):
     purpose: Literal["send", "fork"]
 
 
+class NativeCompletionCapabilityV1(HistoryWireModel):
+    """Capture-bound persistence ownership eligibility; admission checks remain mandatory."""
+
+    policy: Literal["selected_history_v1"]
+    supported: StrictBool
+    storage_context_digest: str = Field(min_length=1)
+
+
 class CapturedHistoryV1(HistoryWireModel):
     status: Literal["captured"]
     snapshot: HistorySelectionSnapshotV1
@@ -266,12 +283,28 @@ class CapturedHistoryV1(HistoryWireModel):
     purpose: Literal["send", "fork"]
     storage_context_digest: str
 
+    native_completion_v1: NativeCompletionCapabilityV1 | None = None
+
     _freeze_rows = field_validator("rows", "selected_content", mode="before")(_wire_array)
+
+    @model_serializer(mode="wrap")
+    def omit_unrequested_native_completion(self, handler):
+        """Keep legacy strict captures byte-compatible in their JSON members."""
+        result = handler(self)
+        if self.native_completion_v1 is None:
+            result.pop("native_completion_v1", None)
+        return result
 
     @model_validator(mode="after")
     def validate_content_binding(self) -> CapturedHistoryV1:
         """A strict capture cannot pair content with another manifest revision."""
 
+        if self.native_completion_v1 and (
+            self.purpose != "send"
+            or self.native_completion_v1.storage_context_digest != self.storage_context_digest
+            or self.storage_context_digest != self.snapshot.storage_context_digest
+        ):
+            raise ValueError("native_completion_capability_mismatch")
         members = {row.id: row.revision for row in self.snapshot.nodes}
         if len(members) != len(self.snapshot.nodes):
             raise ValueError("duplicate_message_id")
