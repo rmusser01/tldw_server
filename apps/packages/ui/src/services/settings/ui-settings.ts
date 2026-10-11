@@ -5,7 +5,7 @@ import {
   coerceString,
   defineSetting
 } from "@/services/settings/registry"
-import { DEFAULT_SPLASH_CARD_NAMES } from "@/data/splash-cards"
+import { DEFAULT_SPLASH_CARD_NAMES } from "@/data/splash-card-names"
 import {
   normalizeMediaChatHandoffPayload,
   type MediaChatHandoffPayload
