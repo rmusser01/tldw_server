@@ -1,0 +1,109 @@
+[
+  {
+    "id": "late_chunk:2:1",
+    "content": "This domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes.",
+    "metadata": {
+      "title": "downloaded_323911489848964201",
+      "media_type": "document",
+      "url": "https://example.com/",
+      "created_at": "2026-09-30T23:08:27.793Z",
+      "transcription_model": "Imported",
+      "last_modified": "2026-09-30T23:35:33.096Z",
+      "source": "media_db",
+      "media_id": "2",
+      "chunk_index": 1,
+      "total_chunks": 3,
+      "retrieval_mode": "late_chunk",
+      "start_char": 46,
+      "end_char": 202,
+      "chunk_type": "text",
+      "paragraph_kind": "paragraph",
+      "ancestry_titles": [],
+      "highlighted": "**This** **doma****in** is **f****or** use **in** **documentati****on** **examples** **w**it****hout need**in**g **permissi****on**. **This** is not a service, avoid rely**in**g **on** **it** **f****or** **test**i**n**g **and** **m**on****i******t****or****in**g purposes.",
+      "match_count": 29,
+      "snippets": [
+        "...rvice, avoid relying on it for testing and monitoring purposes."
+      ],
+      "chunk_id": "late_chunk:2:1"
+    }
+  },
+  {
+    "id": "2",
+    "content": "Example Domain\n\nThis domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes.\n\n[Learn more](https://iana.org/help/example-domains)",
+    "metadata": {
+      "title": "downloaded_323911489848964201",
+      "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+      "chunk_type": "text",
+      "media_id": "2",
+      "chunk_index": 0,
+      "author": "Unknown",
+      "embedding_provider": "huggingface",
+      "chunk_start": 0,
+      "chunk_end": 225,
+      "highlighted": "Example **Doma****in**\n\n**This** **doma****in** is **f****or** use **in** **documentati****on** **examples** **w**it****hout need**in**g **permissi****on**. **This** is not a service, avoid rely**in**g **on** **it** **f****or** **test**i**n**g **and** **m**on****i******t****or****in**g purposes.\n\n[Learn m**or**e](https://iana.**or**g/help/example-**doma****in**s)",
+      "match_count": 35,
+      "snippets": [
+        "....\n\n[Learn more](https://iana.org/help/example-domains)",
+        "...rvice, avoid relying on it for testing and monitoring purposes.\n\n[Learn more](https://iana.org/help/ex..."
+      ],
+      "source": "media_db",
+      "chunk_id": "2"
+    }
+  },
+  {
+    "id": "late_chunk:2:2",
+    "content": "[Learn more](https://iana.org/help/example-domains)",
+    "metadata": {
+      "title": "downloaded_323911489848964201",
+      "media_type": "document",
+      "url": "https://example.com/",
+      "created_at": "2026-09-30T23:08:27.793Z",
+      "transcription_model": "Imported",
+      "last_modified": "2026-09-30T23:35:33.096Z",
+      "source": "media_db",
+      "media_id": "2",
+      "chunk_index": 2,
+      "total_chunks": 3,
+      "retrieval_mode": "late_chunk",
+      "start_char": 204,
+      "end_char": 255,
+      "chunk_type": "text",
+      "paragraph_kind": "paragraph",
+      "ancestry_titles": [],
+      "highlighted": "[Learn m**or**e](https://iana.**or**g/help/example-**doma****in**s)",
+      "match_count": 4,
+      "snippets": [
+        "[Learn more](https://iana.org/help/example-domains)"
+      ],
+      "chunk_id": "late_chunk:2:2"
+    }
+  },
+  {
+    "id": "late_chunk:2:0",
+    "content": "downloaded_323911489848964201\nExample Domain",
+    "metadata": {
+      "title": "downloaded_323911489848964201",
+      "media_type": "document",
+      "url": "https://example.com/",
+      "created_at": "2026-09-30T23:08:27.793Z",
+      "transcription_model": "Imported",
+      "last_modified": "2026-09-30T23:35:33.096Z",
+      "source": "media_db",
+      "media_id": "2",
+      "chunk_index": 0,
+      "total_chunks": 3,
+      "retrieval_mode": "late_chunk",
+      "start_char": 0,
+      "end_char": 44,
+      "chunk_type": "text",
+      "paragraph_kind": "paragraph",
+      "ancestry_titles": [],
+      "highlighted": "downloaded_323911489848964201\nExample **Doma****in**",
+      "match_count": 2,
+      "snippets": [
+        "downloaded_323911489848964201\nExample Domain"
+      ],
+      "chunk_id": "late_chunk:2:0"
+    }
+  }
+]

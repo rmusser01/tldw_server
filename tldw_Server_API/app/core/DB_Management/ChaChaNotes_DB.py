@@ -794,8 +794,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 78  # Knowledge provenance and durable receipts after upstream Chat migrations
-    _POSTGRES_SCHEMA_VERSION = 82
+    _CURRENT_SCHEMA_VERSION = 79  # Reconcile released Chat and Knowledge provenance catalogs
+    _POSTGRES_SCHEMA_VERSION = 83
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7627,6 +7627,22 @@ ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
 UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
 """
 
+    _CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        typeof(create_request_fingerprint) = 'text'
+        AND length(create_request_fingerprint) = 64
+        AND length(CAST(create_request_fingerprint AS BLOB)) = 64
+        AND create_request_fingerprint NOT GLOB '*[^0-9a-f]*'
+    ));
+"""
+    _CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        length(create_request_fingerprint) = 64 AND create_request_fingerprint !~ '[^0-9a-f]'
+    ));
+"""
+
     # #3182: until the Sync v2 conversation materializer stopped doing it, a chat whose
     # payload named no assistant was stored as persona 'sync-v2'. That persona never
     # existed, so persona admission answered 404 for the chat. The repair makes such a
@@ -8812,6 +8828,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (75, "_migrate_from_v75_to_v76"),
             (76, "_migrate_from_v76_to_v77"),
             (77, "_migrate_from_v77_to_v78"),
+            (78, "_migrate_from_v78_to_v79"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17994,6 +18011,132 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _ensure_message_order_and_create_fingerprint_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Reconcile the two V75 catalogs without reconstructing old rows."""
+        columns = {column["name"] for column in self.backend.get_table_info("conversations", connection=conn)}
+        if "create_request_fingerprint" not in columns:
+            conn.execute(self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE)
+        # The statement splitter does not parse SQLite trigger BEGIN/END blocks.
+        statements = (
+            """
+            CREATE TABLE message_insertion_order (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TRIGGER messages_record_insertion_order AFTER INSERT ON messages
+            BEGIN
+                INSERT INTO message_insertion_order(message_id) VALUES (NEW.id);
+            END
+            """,
+            """
+            CREATE TRIGGER message_insertion_order_immutable BEFORE UPDATE ON message_insertion_order
+            BEGIN
+                SELECT RAISE(ABORT, 'Message insertion order is immutable.');
+            END
+            """,
+        )
+        if not self.backend.table_exists("message_insertion_order", connection=conn):
+            for statement in statements:
+                conn.execute(statement)
+
+    def _ensure_message_order_and_create_fingerprint_postgres(self, conn: Any) -> None:
+        """Reconcile V79 catalogs while retaining serialized writers and forced RLS."""
+        columns = {column["name"] for column in self.backend.get_table_info("conversations", connection=conn)}
+        if "create_request_fingerprint" not in columns:
+            self.backend.execute(self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES, connection=conn)
+        sql = """
+            CREATE TABLE message_insertion_order (
+                sequence BIGSERIAL PRIMARY KEY,
+                message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE
+            );
+            ALTER TABLE message_insertion_order ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE message_insertion_order FORCE ROW LEVEL SECURITY;
+            CREATE POLICY message_insertion_order_tenant_isolation ON message_insertion_order
+                USING (EXISTS (
+                    SELECT 1 FROM messages AS message
+                    WHERE message.id = message_insertion_order.message_id
+                        AND message.client_id = current_setting('app.current_user_id', true)
+                ))
+                WITH CHECK (EXISTS (
+                    SELECT 1 FROM messages AS message
+                    WHERE message.id = message_insertion_order.message_id
+                        AND message.client_id = current_setting('app.current_user_id', true)
+                ));
+            CREATE FUNCTION messages_lock_insertion_order() RETURNS TRIGGER AS $$
+            BEGIN
+                PERFORM id FROM conversations WHERE id = NEW.conversation_id FOR UPDATE;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER messages_lock_insertion_order BEFORE INSERT ON messages
+                FOR EACH ROW EXECUTE FUNCTION messages_lock_insertion_order();
+            CREATE FUNCTION messages_record_insertion_order() RETURNS TRIGGER AS $$
+            BEGIN
+                INSERT INTO message_insertion_order(message_id) VALUES (NEW.id);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER messages_record_insertion_order AFTER INSERT ON messages
+                FOR EACH ROW EXECUTE FUNCTION messages_record_insertion_order();
+            CREATE FUNCTION message_insertion_order_immutable() RETURNS TRIGGER AS $$
+            BEGIN
+                RAISE EXCEPTION 'Message insertion order is immutable.';
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER message_insertion_order_immutable BEFORE UPDATE ON message_insertion_order
+                FOR EACH ROW EXECUTE FUNCTION message_insertion_order_immutable();
+        """
+        if not self.backend.table_exists("message_insertion_order", connection=conn):
+            for statement in split_sql_statements(sql):
+                self.backend.execute(statement, connection=conn)
+
+    def _migrate_from_v78_to_v79(self, conn: sqlite3.Connection) -> None:
+        """Union released Chat and provenance catalogs without reconstructing history."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
+            workspace_chat_startup_schema_statements,
+        )
+
+        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+            for statement in workspace_chat_startup_schema_statements(postgres=False):
+                conn.execute(statement)
+        self._ensure_message_order_and_create_fingerprint_sqlite(conn)
+        conn.execute(notes_provenance_schema_sql(postgres=False))
+        conn.execute(
+            "UPDATE db_schema_version SET version = 79 WHERE schema_name = ? AND version = 78", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 79:
+            raise SchemaError("Chat/provenance catalog SQLite migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v82_to_v83_postgres(self, conn: Any) -> None:
+        """Union both released catalogs with forced provenance owner RLS atomically."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
+            build_notes_provenance_rls_sql,
+            build_workspace_chat_startup_rls_sql,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
+            workspace_chat_startup_schema_statements,
+        )
+
+        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+            for statement in (
+                *workspace_chat_startup_schema_statements(postgres=True),
+                *build_workspace_chat_startup_rls_sql(),
+            ):
+                self.backend.execute(statement, connection=conn)
+        self._ensure_message_order_and_create_fingerprint_postgres(conn)
+        for statement in (notes_provenance_schema_sql(postgres=True), *build_notes_provenance_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 82",
+            (83, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 83:
+            raise SchemaError("Chat/provenance catalog PostgreSQL migration failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v77_to_v78(self, conn: sqlite3.Connection) -> None:
         """Install owner-scoped local provenance receipts in the Notes transaction."""
         from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
@@ -18059,20 +18202,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("Workspace startup migration V73->V74 failed version verification.")
 
     def _migrate_from_v74_to_v75(self, conn: sqlite3.Connection) -> None:
-        """Add client-id create fingerprints without inferring them for existing chats."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V74_TO_V75):
-            conn.execute(statement)
+        """Install ordering and fingerprints without inferring historical values."""
+        # The prior native V74 installed ordering instead of startup receipts.
+        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+            self._migrate_from_v73_to_v74(conn)
+        self._ensure_message_order_and_create_fingerprint_sqlite(conn)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 75 WHERE schema_name = ? AND version = 74",
+            (self._SCHEMA_NAME,),
+        )
         if self._get_db_version(conn) != 75:
-            raise SchemaError("Conversation create fingerprint migration V74->V75 failed version verification.")  # noqa: TRY003
+            raise SchemaError("Message insertion-order migration V74->V75 failed version verification.")  # noqa: TRY003
 
     def _migrate_from_v78_to_v79_postgres(self, conn: Any) -> None:
-        """Add PostgreSQL client-id create fingerprints in the caller's upgrade transaction."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V78_TO_V79_POSTGRES):
-            self.backend.execute(statement, connection=conn)
+        """Install ordering and fingerprints in the caller's upgrade transaction."""
+        # The prior native V78 installed ordering instead of startup receipts.
+        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+            self._migrate_from_v77_to_v78_postgres(conn)
+        self._ensure_message_order_and_create_fingerprint_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
+            (79, self._SCHEMA_NAME, 78),
+            connection=conn,
+        )
         if self._get_schema_version_postgres(conn) != 79:
-            raise SchemaError(  # noqa: TRY003
-                "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
-            )
+            raise SchemaError("Message insertion-order PostgreSQL migration V78->V79 failed version verification.")  # noqa: TRY003
 
     def _migrate_from_v75_to_v76(self, conn: sqlite3.Connection) -> None:
         """Clear the retired Sync placeholder persona from this owner's chats."""
@@ -21353,6 +21507,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 78 and current_db_version == 77:
                         self._migrate_from_v77_to_v78(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 79 and current_db_version == 78:
+                        self._migrate_from_v78_to_v79(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21835,6 +21992,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 78 and current_db_version == 77:
                     self._migrate_from_v77_to_v78(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 79 and current_db_version == 78:
+                    self._migrate_from_v78_to_v79(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25696,7 +25856,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25733,6 +25893,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 82 and current_version < 82:
                     self._migrate_from_v81_to_v82_postgres(conn)
                     current_version = 82
+                if target_version >= 83 and current_version < 83:
+                    self._migrate_from_v82_to_v83_postgres(conn)
+                    current_version = 83
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26198,6 +26361,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v81_to_v82_postgres(conn)
                 self._runtime_schema_version = 82
                 current_version = 82
+
+            if target_version >= 83 and current_version < 83:
+                self._migrate_from_v82_to_v83_postgres(conn)
+                self._runtime_schema_version = 83
+                current_version = 83
 
             if current_version < target_version:
                 logger.warning(
@@ -46028,6 +46196,7 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
+    "insert_or_validate_user_turn",
     "lock_message_for_edit",
     "lock_message_metadata_for_edit",
     "get_conversation_history_snapshot",
@@ -46037,6 +46206,7 @@ for _message_store_method in (
     "append_selected_history_input",
     "append_selected_history_inputs",
     "settle_history_admission",
+    "read_history_recovery_messages",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",

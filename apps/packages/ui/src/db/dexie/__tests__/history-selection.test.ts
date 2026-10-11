@@ -1177,7 +1177,7 @@ it("pending turn updates preserve confirmation and reject changed immutable inte
 it("keeps how a retained reply ended and drops unknown outcomes (CS-04)", async () => {
   const owner = await history.getLocalHistoryOwner("chat")
   const origin = view(owner)
-  const pending: any = {
+  const pending = {
     operation_id: "operation",
     owner_key: owner.owner_key,
     conversation_id: "chat",
@@ -1187,11 +1187,11 @@ it("keeps how a retained reply ended and drops unknown outcomes (CS-04)", async 
     input_text: "question",
     input_images: [],
     result_text: "partial",
-    state: "generated_unsaved",
+    state: "generated_unsaved" as const,
     origin_view: origin,
     selection_digest: "selected",
     request_context_digest: "prepared",
-    outcome: "stopped",
+    outcome: "stopped" as const,
     interruption_reason: "Stopped",
     settled_message_id: "result",
     model_name: "local-model",
@@ -1213,7 +1213,7 @@ it("keeps how a retained reply ended and drops unknown outcomes (CS-04)", async 
     ...pending,
     operation_id: "other",
     outcome: "resumed-elsewhere"
-  })
+  } as unknown as Parameters<typeof history.saveHistoryTurnRecovery>[2])
   const other = (await history.loadHistoryTurnRecoveries(bookmark, owner)).find(
     (entry) => entry.turn.operation_id === "other"
   )
@@ -1307,4 +1307,230 @@ it("native recovery begins without canonical IDs and binds monotonically to owne
       input_id: "forged"
     })
   ).rejects.toThrow()
+})
+
+describe("selected durable recovery observations", () => {
+  const logicalId = "f61d4e19-3600-4715-96fd-1f7b45cf8d77"
+  const resultId = "3be5bac5-b2d5-4d42-9a53-3a2db0f1c6d5"
+  const requestDigest = "a".repeat(64)
+  const intent = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const capture = await history.captureLocalHistorySnapshot(owner, origin, "send")
+    const resolved = resolveHistorySelection(capture.snapshot, origin, "send", requestDigest)
+    if (resolved.status !== "ready") throw new Error(resolved.status)
+    const pending: any = {
+      operation_id: "selected-durable", persistence: "server", origin_view: origin,
+      owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+      logical_user_message_id: logicalId, finalized_selection: resolved.selection,
+      selection_digest: resolved.selection.selection_digest, request_context_digest: requestDigest,
+      created_at: 1, input_text: "original question", input_images: [], result_text: "", state: "dispatching"
+    }
+    const admission = {
+      version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+      input_message_id: logicalId, input_message_revision: "1", selection_digest: pending.selection_digest
+    }
+    const result = {
+      version: 1, result_message_id: resultId, result_message_revision: "1", admission,
+      request_context_digest: requestDigest,
+      sources: [{name: "Document", type: "pdf", mode: "rag", url: "local provenance", pageContent: "evidence", metadata: {page: 0}}]
+    }
+    return {owner, origin, pending, admission, result}
+  }
+  const stored = async (owner: any) => {
+    const turn = (await history.loadHistoryTurnRecoveries(bookmark, owner))[0]?.turn
+    return turn?.persistence === "server" ? turn : undefined
+  }
+
+  it("retains detached logical UUID and strict original selection before server admission", async () => {
+    const {owner, origin, pending} = await intent()
+    const original = structuredClone(pending.finalized_selection)
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    pending.finalized_selection.fences.history = "caller changed"
+    expect(await stored(owner)).toMatchObject({logical_user_message_id: logicalId, finalized_selection: original})
+    expect(await stored(owner)).not.toHaveProperty("input_id")
+    expect(await stored(owner)).not.toHaveProperty("assistant_id")
+    expect((await history.captureLocalHistorySnapshot(owner, origin, "send")).snapshot.nodes).toEqual([])
+  })
+
+  it.each(["plain", "array", "prototype", "boxed_string"])(
+    "rejects nonstring request digests before coercion or recovery storage: %s", async kind => {
+      const {owner, origin, pending} = await intent()
+      let coercions = 0
+      const toString = () => { coercions++; return requestDigest }
+      const credentials = {api_key: "prohibited-runtime-data", request_config: {token: "not allowed"}}
+      const digest = kind === "array" ? [requestDigest]
+        : kind === "prototype" ? Object.assign(Object.create({toString}), credentials)
+        : kind === "boxed_string" ? new String(requestDigest)
+        : Object.defineProperty({...credentials}, "toString", {value: toString})
+      await expect(history.saveHistoryTurnRecovery(bookmark, origin, {
+        ...pending, request_context_digest: digest
+      })).rejects.toMatchObject({code: "invalid_history_operation"})
+      expect(coercions).toBe(0)
+      expect(memory.historySelections.rows.size).toBe(0)
+      expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([])
+    }
+  )
+
+  it.each(["uuid", "missing_selection", "missing_uuid", "null_selection", "selection_extra", "nested_extra", "digest", "fork"])(
+    "rejects malformed selected durable intent: %s", async change => {
+      const {owner, origin, pending} = await intent()
+      if (change === "uuid") pending.logical_user_message_id = "not-uuid"
+      if (change === "missing_selection") delete pending.finalized_selection
+      if (change === "missing_uuid") delete pending.logical_user_message_id
+      if (change === "null_selection") pending.finalized_selection = null
+      if (change === "selection_extra") pending.finalized_selection.request_config = {token: "not allowed"}
+      if (change === "nested_extra") pending.finalized_selection.fences.request_config = "not allowed"
+      if (change === "digest") pending.finalized_selection.selection_digest = "b".repeat(64)
+      if (change === "fork") pending.finalized_selection.purpose = "fork"
+      await expect(history.saveHistoryTurnRecovery(bookmark, origin, pending)).rejects.toThrow()
+      expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([])
+    }
+  )
+
+  it.each(["logical_user_message_id", "finalized_selection", "request_context_digest"])(
+    "rejects replacing immutable operation intent: %s", async field => {
+      const {owner, origin, pending} = await intent()
+      await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+      const changed = structuredClone(pending)
+      if (field === "logical_user_message_id") changed[field] = resultId
+      if (field === "request_context_digest") changed[field] = "b".repeat(64)
+      if (field === "finalized_selection") changed[field].fences.settings = "other"
+      await expect(history.saveHistoryTurnRecovery(bookmark, origin, changed)).rejects.toThrow()
+      expect(await stored(owner)).toMatchObject({logical_user_message_id: logicalId, finalized_selection: pending.finalized_selection})
+    }
+  )
+
+  it("never accepts logical identity as a server input receipt", async () => {
+    const {origin, pending} = await intent()
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, {...pending, input_id: logicalId})).rejects.toThrow()
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, {...pending, assistant_id: resultId})).rejects.toThrow()
+  })
+
+  it("requires admitted server input to equal the immutable logical UUID", async () => {
+    const {origin, pending, admission} = await intent()
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending, input_id: resultId, admission: {...admission, input_message_id: resultId}
+    })).rejects.toThrow()
+  })
+
+  it.each(["null_result", "null_input", "bad_assistant", "image_object", "image", "text_object", "result_object", "origin_extra", "view_extra", "created_at", "state", "admission_version", "admission_revision"])(
+    "rejects malformed credential-free observation fields: %s", async change => {
+      const {owner, origin, pending, admission} = await intent()
+      const update = {...pending, input_id: logicalId, admission: {...admission}}
+      if (change === "null_result") update.observed_result = null
+      if (change === "null_input") update.input_id = null
+      if (change === "bad_assistant") update.assistant_id = "not-uuid"
+      if (change === "image_object") update.input_images = [{request_config: {token: "not allowed"}}]
+      if (change === "image") update.input_images = ["data:image/png;base64,YQ=="]
+      if (change === "text_object") update.input_text = {systems: ["not allowed"]}
+      if (change === "result_object") update.result_text = {request_config: {token: "not allowed"}}
+      if (change === "origin_extra") update.origin_view = {...origin, follow_lease: {generation: 1}}
+      if (change === "view_extra") (origin as any).request_config = {token: "not allowed"}
+      if (change === "created_at") update.created_at = "now"
+      if (change === "state") update.state = "not-a-state"
+      if (change === "admission_version") update.admission.version = 2
+      if (change === "admission_revision") update.admission.input_message_revision = "2"
+      await expect(history.saveHistoryTurnRecovery(bookmark, origin, update)).rejects.toThrow()
+      expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([])
+    }
+  )
+
+  it("does not downgrade an admitted operation when a weaker predispatch callback arrives", async () => {
+    const {owner, origin, pending, admission} = await intent()
+    await history.saveHistoryTurnRecovery(bookmark, origin, {...pending, input_id: logicalId, admission, state: "accepted_unsent"})
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    expect((await stored(owner))?.state).toBe("accepted_unsent")
+  })
+
+  it("preserves legacy validation before ignoring a weaker result callback", async () => {
+    const {owner, origin, pending} = await intent()
+    const legacy = {...pending, input_id: "legacy-input", assistant_id: "legacy-result", result_text: "answer"}
+    delete legacy.logical_user_message_id
+    delete legacy.finalized_selection
+    legacy.admission = {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+      input_message_id: "legacy-input", input_message_revision: "r", selection_digest: legacy.selection_digest}
+    await history.saveHistoryTurnRecovery(bookmark, origin, legacy)
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, {...legacy, admission: undefined, result_text: ""})).rejects.toThrow()
+    expect((await stored(owner))?.result_text).toBe("answer")
+  })
+
+  it("retains original finalized selection for a newly prepared accepted-reference operation", async () => {
+    const {owner, origin, pending, admission} = await intent()
+    const fresh = {...pending, operation_id: "new-observation", request_context_digest: "b".repeat(64), input_id: logicalId, admission}
+    await history.saveHistoryTurnRecovery(bookmark, origin, fresh)
+    expect(await stored(owner)).toMatchObject({finalized_selection: pending.finalized_selection, request_context_digest: "b".repeat(64)})
+  })
+
+  it("merges admitted and result observations while preserving stronger earlier receipt fields", async () => {
+    const {owner, origin, pending, admission, result} = await intent()
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    await history.saveHistoryTurnRecovery(bookmark, origin, {...pending, input_id: logicalId, admission, state: "accepted_unsent"})
+    await history.saveHistoryTurnRecovery(bookmark, origin, {...pending, observed_result: result, result_text: "answer", state: "unknown"})
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    expect(await stored(owner)).toMatchObject({input_id: logicalId, admission, observed_result: result, result_text: "answer"})
+  })
+
+  it.each(["owner", "conversation", "input", "digest", "result_revision", "known_id", "receipt_extra", "source_extra"])(
+    "rejects an observed result with wrong protected binding: %s", async change => {
+      const {owner, origin, pending, admission, result} = await intent()
+      const accepted = {...pending, input_id: logicalId, admission, assistant_id: resultId}
+      await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+      const changed = structuredClone(result) as any
+      if (change === "owner") changed.admission.owner_key = "other"
+      if (change === "conversation") changed.admission.conversation_id = "other"
+      if (change === "input") changed.admission.input_message_id = resultId
+      if (change === "digest") changed.request_context_digest = "b".repeat(64)
+      if (change === "result_revision") changed.result_message_revision = "2"
+      if (change === "known_id") changed.result_message_id = logicalId
+      if (change === "receipt_extra") changed.request_config = {token: "not allowed"}
+      if (change === "source_extra") changed.sources[0].metadata.request_config = {token: "not allowed"}
+      await expect(history.saveHistoryTurnRecovery(bookmark, origin, {...accepted, observed_result: changed})).rejects.toThrow()
+      expect(await stored(owner)).not.toHaveProperty("observed_result")
+    }
+  )
+
+  it("never substitutes a second observed result for a known canonical result in the same operation", async () => {
+    const {owner, origin, pending, admission, result} = await intent()
+    const accepted = {...pending, input_id: logicalId, admission, observed_result: result}
+    await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...accepted, observed_result: {...result, result_message_id: "43b5ead6-f95c-4aa6-9cf2-6a0f7d613894"}
+    })).rejects.toThrow()
+    expect((await stored(owner))?.observed_result).toEqual(result)
+  })
+
+  it("does not replace the sources of an already observed canonical result", async () => {
+    const {owner, origin, pending, admission, result} = await intent()
+    const accepted = {...pending, input_id: logicalId, admission, observed_result: result}
+    await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...accepted, observed_result: {...result, sources: [{...result.sources[0], pageContent: "substituted evidence"}]}
+    })).rejects.toThrow()
+    expect((await stored(owner))?.observed_result).toEqual(result)
+  })
+
+  it("drops runtime transport secrets and leases without dropping validated result sources", async () => {
+    const {owner, origin, pending, admission, result} = await intent()
+    await history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending, input_id: logicalId, admission, observed_result: result,
+      api_key: "not allowed", systems: ["detached evidence system"], request_config: {token: "not allowed"},
+      follow_lease: {generation: 1}, result_v1: {version: 1, sources: []}
+    } as any)
+    const saved = await stored(owner)
+    expect(saved?.observed_result?.sources).toEqual(result.sources)
+    for (const key of ["api_key", "systems", "request_config", "follow_lease", "result_v1"])
+      expect(saved).not.toHaveProperty(key)
+  })
+
+  it("isolates result observation completion from unknown sibling operations", async () => {
+    const {owner, origin, pending, admission, result} = await intent()
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    await history.saveHistoryTurnRecovery(bookmark, origin, {...pending, operation_id: "unknown-sibling", state: "unknown"})
+    const accepted = {...pending, input_id: logicalId, admission, observed_result: result}
+    await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+    await history.dismissHistoryTurnRecovery(bookmark, owner, pending.operation_id, "completed")
+    await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+    expect((await history.loadHistoryTurnRecoveries(bookmark, owner)).map(entry => entry.turn.operation_id)).toEqual(["unknown-sibling"])
+  })
 })

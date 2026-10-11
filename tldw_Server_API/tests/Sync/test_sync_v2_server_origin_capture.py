@@ -8,7 +8,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chat_sessions_endpoint
 from tldw_Server_API.app.api.v1.endpoints import character_messages as messages_endpoint
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
@@ -136,6 +137,7 @@ def _notes_app(
 
     app.dependency_overrides[notes_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[notes_endpoint.get_request_user] = _user_override
+    app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(kind="user", is_admin=True)
     app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     monkeypatch.setattr(
         notes_endpoint,
@@ -166,6 +168,7 @@ def _chat_messages_app(
     app.dependency_overrides[messages_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[chat_sessions_endpoint.get_request_user] = _user_override
     app.dependency_overrides[messages_endpoint.get_request_user] = _user_override
+    app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(kind="user", is_admin=True)
     monkeypatch.setattr(
         chat_sessions_endpoint,
         "get_active_server_origin_sync_service_for_user",

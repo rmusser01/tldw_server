@@ -74,6 +74,18 @@
       "settingsContent": "Configure voice chat settings including the voice model, auto-send timing, and trigger phrases."
     }
   },
+  "chatWorkspace": {
+    "basics": {
+      "label": "Chat Workspace Basics",
+      "description": "Prepare workspace chat, stage sources, and check send status",
+      "scopeTitle": "Workspace and Assistant",
+      "scopeContent": "Use the active workspace from Research Workspace and choose a model in Chat before returning here. Inspector reports the workspace, model, and persona, including inherited defaults. On narrow screens, switch between Chat, Sources, and Inspector.",
+      "sourcesTitle": "Review Staged Sources",
+      "sourcesContent": "Browse opens a bounded read-only preview without staging or sending. Stage adds a ready source to the next send; review it in Chat first. Ready media is sent as retrieval context. Insert summary instead adds a text list of source names and clears staging, not the source contents.",
+      "statusTitle": "Send Status and Recovery",
+      "statusContent": "The status strip and Inspector show readiness, streaming, and errors. Offline or failed sends keep the current draft and staged context for retry while this page stays open. Stop cancels generation. Switching workspaces or leaving this page can discard unsent work."
+    }
+  },
   "researchWorkspace": {
     "basics": {
       "label": "Research Workspace Basics",
@@ -82,7 +94,7 @@
       "headerContent": "Use the header to rename, switch, import, and manage workspaces while tracking system status.",
       "sourcesTitle": "Sources Pane",
       "sourcesContent": "Add and select sources here. Your selected source set controls what the chat and studio use.",
-      "chatTitle": "Chat Workspace",
+      "chatTitle": "Source Chat",
       "chatContent": "Ask questions against your selected sources and review grounded answers before generating outputs.",
       "studioTitle": "Studio Outputs",
       "studioContent": "Turn source context into summaries, reports, quizzes, flashcards, and other artifacts.",

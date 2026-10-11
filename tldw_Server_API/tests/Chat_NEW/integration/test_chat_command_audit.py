@@ -36,7 +36,7 @@ def test_chat_command_audit_logged_system_mode(monkeypatch, test_client, auth_he
 
     # Override dependencies
     from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
+    monkeypatch.setitem(test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
 
     # Avoid provider network calls
     from tldw_Server_API.app.core.Chat import chat_service
@@ -72,7 +72,7 @@ def test_chat_command_audit_logged_preface_mode(monkeypatch, credentialed_test_c
         return DummyAudit()
 
     from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    credentialed_test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
+    monkeypatch.setitem(credentialed_test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
 
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
     captured_msg = {"messages": None}
@@ -134,7 +134,7 @@ def test_chat_command_rbac_enforcement(monkeypatch, test_client, auth_headers):
     async def override_audit():
         return DummyAudit()
     from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
+    monkeypatch.setitem(test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
 
     from tldw_Server_API.app.core.Chat import chat_service
     monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda **kwargs: {"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
@@ -199,7 +199,7 @@ def test_chat_command_weather_default_location_system_mode(monkeypatch, credenti
     async def override_audit():
         return DummyAudit()
     from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    credentialed_test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
+    monkeypatch.setitem(credentialed_test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/weather"}], "stream": False}
     response = credentialed_test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)

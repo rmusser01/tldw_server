@@ -4,6 +4,7 @@ import io
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import numpy as np
 import pytest
@@ -35,6 +36,7 @@ def ledger(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     monkeypatch.setattr(audio_quota, "ledger_used_today", _today)
     monkeypatch.setattr(audio_quota, "ledger_used_this_month", _month)
+    monkeypatch.setattr(audio_quota, "_get_daily_ledger", AsyncMock(return_value=None))
     return used
 
 
@@ -55,6 +57,16 @@ async def test_daily_and_monthly_minutes_come_from_the_ledger(ledger: dict) -> N
     ledger["today"], ledger["month"] = 600.0, 5400.0
     assert await audio_quota.get_daily_minutes_used(7) == 10.0
     assert await audio_quota.get_monthly_minutes_used(7) == 90.0
+
+
+@pytest.mark.parametrize("reader", ["get_daily_minutes_used", "get_monthly_minutes_used"])
+async def test_mocked_reporting_does_not_initialize_real_ledger(ledger: dict, monkeypatch, reader: str) -> None:
+    constructor = Mock(side_effect=RuntimeError("real database initialization is not allowed in this unit test"))
+    monkeypatch.setattr(audio_quota, "_daily_ledger", None)
+    monkeypatch.setattr(audio_quota, "ResourceDailyLedger", constructor)
+
+    assert await getattr(audio_quota, reader)(7) == 0.0
+    constructor.assert_not_called()
 
 
 async def test_monthly_minutes_exhausted_only_with_a_limit(ledger: dict, monkeypatch: pytest.MonkeyPatch) -> None:

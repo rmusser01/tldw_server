@@ -24,6 +24,34 @@ const sources: WorkspaceSource[] = [
 ]
 
 describe("WorkspaceRail", () => {
+  it("announces initial loading and source refresh errors even with cached rows", () => {
+    const props = {
+      workspaceName: "Workspace",
+      sources: [],
+      browsedSourceId: null,
+      stagedSourceIds: [],
+      onBrowseSource: vi.fn(),
+      onStageSources: vi.fn()
+    }
+    const { rerender } = render(<WorkspaceRail {...props} sourcesLoading />)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading workspace sources"
+    )
+    rerender(
+      <WorkspaceRail
+        {...props}
+        sources={sources}
+        sourcesError="Could not refresh sources"
+      />
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not refresh sources"
+    )
+    expect(
+      screen.getByRole("button", { name: "Stage Operator Notes for chat" })
+    ).toBeEnabled()
+  })
+
   it("selecting a source for browsing does not stage it", () => {
     const onBrowseSource = vi.fn()
     const onStageSources = vi.fn()
@@ -404,7 +432,7 @@ describe("WorkspaceRail", () => {
     ).toBeInTheDocument()
   })
 
-  it("wraps long source titles inside action buttons", () => {
+  it("keeps actions concise while exposing full source names to assistive technology", () => {
     const longTitle = "x".repeat(160)
 
     render(
@@ -425,9 +453,7 @@ describe("WorkspaceRail", () => {
       name: `Stage ${longTitle} for chat`
     })
 
-    expect(browseButton).toHaveClass("min-w-0")
-    expect(browseButton).toHaveClass("break-words")
-    expect(stageButton).toHaveClass("min-w-0")
-    expect(stageButton).toHaveClass("break-words")
+    expect(browseButton).toHaveTextContent(/^Browse$/)
+    expect(stageButton).toHaveTextContent(/^Stage$/)
   })
 })

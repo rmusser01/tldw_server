@@ -12,6 +12,7 @@ const deleteChatMock = vi.fn()
 const addChatMessageMock = vi.fn()
 const searchCharactersMock = vi.fn()
 const listCharactersMock = vi.fn()
+const fetchWithAuthMock = vi.fn()
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [undefined],
@@ -30,11 +31,7 @@ vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn().mockResolvedValue(undefined),
-    fetchWithAuth: vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => [],
-      text: async () => "",
-    }),
+    fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args),
     ragSearch: (...args: unknown[]) => ragSearchMock(...args),
     createChat: (...args: unknown[]) => createChatMock(...args),
     deleteChat: (...args: unknown[]) => deleteChatMock(...args),
@@ -58,6 +55,7 @@ describe("KnowledgeQAProvider search cancellation", () => {
     vi.clearAllMocks()
     localStorage.clear()
     latestContext = null
+    fetchWithAuthMock.mockResolvedValue({ ok: false, json: async () => [], text: async () => "" })
     trackMetricMock.mockResolvedValue(undefined)
     createChatMock.mockResolvedValue({ id: "thread-default", version: 1 })
     deleteChatMock.mockResolvedValue(undefined)
@@ -77,6 +75,98 @@ describe("KnowledgeQAProvider search cancellation", () => {
         })
       })
     })
+  })
+
+  it("does not activate cancelled A after its delayed tagging settles behind completed B", async () => {
+    let finishTagA!: () => void
+    const tagA = new Promise<void>(resolve => { finishTagA = resolve })
+    fetchWithAuthMock.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path.endsWith("/thread-a") && options?.method === "PATCH") await tagA
+      return { ok: true, json: async () => ({ keywords: [] }), text: async () => "" }
+    })
+    createChatMock.mockResolvedValueOnce({ id: "thread-a", version: 1 })
+      .mockResolvedValueOnce({ id: "thread-b", version: 1 })
+    ragSearchMock.mockResolvedValue({
+      results: [{ id: "note-b", content: "B evidence", metadata: { source_type: "notes", note_id: "note-b" } }],
+      answer: "B answer [1].",
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    act(() => {
+      latestContext!.setQuery("A question")
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-b"])
+      latestContext!.updateSetting("enable_web_fallback", false)
+    })
+    let requestA!: Promise<void>
+    let requestB: Promise<void> | undefined
+    act(() => { requestA = latestContext!.search() })
+    try {
+      await waitFor(() => expect(fetchWithAuthMock).toHaveBeenCalledWith(
+        "/api/v1/chat/conversations/thread-a", expect.objectContaining({ method: "PATCH" })
+      ))
+      act(() => { latestContext!.cancelSearch(); latestContext!.setQuery("B question") })
+      await act(async () => { requestB = latestContext!.search(); await requestB })
+      expect(latestContext!.currentThreadId).toBe("thread-b")
+      expect(latestContext!.messages.map(message => message.content)).toEqual(["B question", "B answer [1]."])
+      expect(latestContext!.queryStage).toBe("complete")
+      const retained = {
+        currentThreadId: latestContext!.currentThreadId,
+        messages: latestContext!.messages,
+        results: latestContext!.results,
+        answer: latestContext!.answer,
+        resultQuery: latestContext!.resultQuery,
+        lastSearchScope: latestContext!.lastSearchScope,
+        citations: latestContext!.citations,
+      }
+      await act(async () => { finishTagA(); await requestA })
+      expect(latestContext).toMatchObject(retained)
+      expect(deleteChatMock).toHaveBeenCalledWith("thread-a", expect.objectContaining({
+        requestScope: expect.objectContaining({ userId: "test-owner" }),
+        signal: expect.any(AbortSignal),
+      }))
+      expect(ragSearchMock).toHaveBeenCalledTimes(1)
+      expect(latestContext!.queryStage).toBe("complete")
+    } finally {
+      finishTagA()
+      await act(async () => { await requestA; await requestB })
+    }
+  })
+
+  it("settles cancellation synchronously without an old completion clearing a newer request", async () => {
+    let finishOld!: (value: Record<string, unknown>) => void
+    let finishNew!: (value: Record<string, unknown>) => void
+    ragSearchMock.mockImplementation((query: string) => new Promise(resolve => {
+      if (query === "Old question") finishOld = resolve
+      else finishNew = resolve
+    }))
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-cancel-owner") })
+    act(() => { latestContext!.setQuery("Old question") })
+    let oldRequest!: Promise<void>
+    let newRequest: Promise<void> | undefined
+    act(() => { oldRequest = latestContext!.search() })
+    try {
+      await waitFor(() => expect(ragSearchMock).toHaveBeenCalledTimes(1))
+      act(() => { latestContext!.cancelSearch() })
+      expect(latestContext!.isSearching).toBe(false)
+      expect(latestContext!.queryStage).toBe("cancelled")
+      act(() => { latestContext!.setQuery("New question") })
+      act(() => { newRequest = latestContext!.search() })
+      await waitFor(() => expect(ragSearchMock).toHaveBeenCalledTimes(2))
+      await act(async () => { finishOld({ results: [], answer: "Late old answer" }); await oldRequest })
+      expect(latestContext!.isSearching).toBe(true)
+      expect(latestContext!.queryStage).toBe("ranking")
+      expect(latestContext!.answer).toBeNull()
+      act(() => { latestContext!.cancelSearch() })
+      expect((ragSearchMock.mock.calls[1][1] as { signal: AbortSignal }).signal.aborted).toBe(true)
+      await act(async () => { finishNew({ results: [], answer: "Late new answer" }); await newRequest })
+      expect(latestContext!.isSearching).toBe(false)
+      expect(latestContext!.queryStage).toBe("cancelled")
+      expect(latestContext!.answer).toBeNull()
+    } finally {
+      act(() => { latestContext!.cancelSearch(); finishOld({ results: [] }); finishNew?.({ results: [] }) })
+      await act(async () => { await oldRequest; await newRequest })
+    }
   })
 
   it("passes AbortSignal to ragSearch and supports cancelSearch", async () => {

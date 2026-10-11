@@ -157,6 +157,8 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
 
   captureToCurrentNote: ({ title, content, mode = "append", provenance }) =>
     set((state) => {
+      // Unbound drafts also seed captured-owner Knowledge imports; selected canonical notes are view-only.
+      if (state.currentNote.serverWorkspaceId || (state.serverWorkspace && state.currentNote.id != null)) return state
       const trimmedContent = content.trim()
       if (!trimmedContent) return state
 

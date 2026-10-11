@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from threading import get_ident
 from types import SimpleNamespace
 
 import httpx
@@ -17,6 +18,95 @@ def _empty_lifecycle_session() -> SimpleNamespace:
         publish_stopped_names=lambda _phase: None,
         publish_inventory=lambda: None,
     )
+
+
+@pytest.fixture
+def isolated_openapi_lifespan(monkeypatch: pytest.MonkeyPatch):
+    from unittest.mock import AsyncMock
+
+    from fastapi import FastAPI
+
+    from tldw_Server_API.app import main as main_module
+    from tldw_Server_API.app.services import (
+        lifespan_shutdown_sequence,
+        lifespan_startup_sequence,
+    )
+
+    handles = SimpleNamespace(db_pool=None, session_manager=None, heavy_startup_handles=None)
+    monkeypatch.setattr(
+        lifespan_startup_sequence,
+        "run_lifespan_startup_sequence",
+        AsyncMock(return_value=handles),
+    )
+    shutdown = AsyncMock()
+    monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", shutdown)
+    monkeypatch.setattr(main_module, "_run_startup_config_validation", lambda: None)
+    return main_module.lifespan, FastAPI(), shutdown
+
+
+@pytest.mark.asyncio
+async def test_lifespan_warms_openapi_off_loop_before_serving_and_reuses_cache(
+    isolated_openapi_lifespan, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifespan, app, shutdown = isolated_openapi_lifespan
+    event_loop_thread = get_ident()
+    build_threads: list[int] = []
+    original_openapi = app.openapi
+
+    def tracked_openapi():
+        if app.openapi_schema is None:
+            build_threads.append(get_ident())
+        return original_openapi()
+
+    monkeypatch.setattr(app, "openapi", tracked_openapi)
+    for _ in range(2):
+        async with lifespan(app):
+            cached = app.openapi_schema
+            assert cached is not None
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.get("/openapi.json")
+            assert response.status_code == 200
+            assert response.json() == cached
+            assert app.openapi_schema is cached
+
+    assert len(build_threads) == 1
+    assert build_threads[0] != event_loop_thread
+    assert shutdown.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_lifespan_openapi_failure_propagates_and_cleans_up(
+    isolated_openapi_lifespan, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifespan, app, shutdown = isolated_openapi_lifespan
+
+    def broken_openapi():
+        raise RuntimeError("finite schema generation failure")
+
+    monkeypatch.setattr(app, "openapi", broken_openapi)
+    with pytest.raises(RuntimeError, match="finite schema generation failure"):
+        async with lifespan(app):
+            pytest.fail("An app with a failed schema must not finish startup")
+
+    shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_does_not_generate_disabled_openapi(
+    isolated_openapi_lifespan, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifespan, app, shutdown = isolated_openapi_lifespan
+    app.openapi_url = None
+
+    def forbidden_openapi():
+        pytest.fail("Disabled OpenAPI must not generate a schema")
+
+    monkeypatch.setattr(app, "openapi", forbidden_openapi)
+    async with lifespan(app):
+        assert app.openapi_schema is None
+
+    shutdown.assert_awaited_once()
 
 
 @pytest.mark.integration

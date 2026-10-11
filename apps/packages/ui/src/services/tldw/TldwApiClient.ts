@@ -1037,9 +1037,13 @@ export interface ResearchRunResponse {
   chat_id?: string | null
 }
 
+export interface ChatTurnIdentity {
+  user_message_id: string
+}
+
 export interface ChatCompletionRequest {
   tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
-  messages: ChatMessage[]
+  messages: readonly ChatMessage[]
   model: string
   routing?: {
     strategy?: "llm_router" | "rules_router"
@@ -1061,6 +1065,10 @@ export interface ChatCompletionRequest {
   tools?: Record<string, unknown>[]
   save_to_db?: boolean
   conversation_id?: string
+  tldw_turn?: ChatTurnIdentity & {
+    result_v1?: import("@/types/history-durable-turn").HistoryDurableResultV1
+    history_v1?: import("@/types/history-durable-turn").HistoryDurableEnvelopeV1
+  }
   history_message_limit?: number
   history_message_order?: string
   slash_command_injection_mode?: string
@@ -1706,35 +1714,39 @@ type TldwProvidersStatus = {
 // module-level TTL cache + in-flight dedup (mirroring the apiSend pattern)
 // collapses the resulting burst into one request per TTL window.
 const PROVIDERS_STATUS_CACHE_TTL_MS = 60_000
-let providersStatusCache: { at: number; value: TldwProvidersStatus } | null = null
-let providersStatusInFlight: Promise<TldwProvidersStatus> | null = null
+let providersStatusCache: { at: number; revision: number; value: TldwProvidersStatus } | null = null
+let providersStatusInFlight: { revision: number; request: Promise<TldwProvidersStatus> } | null = null
 
 const getProvidersStatusCached = async (): Promise<TldwProvidersStatus> => {
   const now = Date.now()
+  const revision = domainCacheAccountRevision
   if (
     providersStatusCache &&
+    providersStatusCache.revision === revision &&
     now - providersStatusCache.at < PROVIDERS_STATUS_CACHE_TTL_MS
   ) {
     return providersStatusCache.value
   }
-  if (providersStatusInFlight) {
-    return providersStatusInFlight
+  if (providersStatusInFlight?.revision === revision) {
+    return providersStatusInFlight.request
   }
-  const request = (async () => {
-    try {
-      const value = (await bgRequest<any>({
-        path: '/api/v1/config/providers',
-        method: 'GET'
-      })) as TldwProvidersStatus
-      providersStatusCache = { at: Date.now(), value }
-      return value
-    } finally {
-      if (providersStatusInFlight === request) {
-        providersStatusInFlight = null
-      }
+  const request = bgRequest<TldwProvidersStatus>({
+    path: '/api/v1/config/providers',
+    method: 'GET',
+    // This domain owns singleflight; generic GET sharing does not distinguish single-user credentials.
+    abortSignal: new AbortController().signal
+  }).then(value => {
+    if (revision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
     }
-  })()
-  providersStatusInFlight = request
+    providersStatusCache = { at: Date.now(), revision, value }
+    return value
+  }).finally(() => {
+    if (providersStatusInFlight?.request === request) {
+      providersStatusInFlight = null
+    }
+  })
+  providersStatusInFlight = { revision, request }
   return request
 }
 
@@ -2967,7 +2979,12 @@ export class TldwApiClientBase {
     }>
     any_configured: boolean
   }> {
-    return await getProvidersStatusCached()
+    const revision = domainCacheAccountRevision
+    const value = await getProvidersStatusCached()
+    if (revision !== domainCacheAccountRevision) {
+      throw createServicePromptScopeChangedError()
+    }
+    return value
   }
 
   async getModelsMetadata(options?: {
@@ -3520,8 +3537,9 @@ export class TldwApiClientBase {
     options?: ChatCompletionRequestOptions
   ): Promise<Response> {
     // Non-stream request via background
+    const path = `/api/v1/chat/completions${options?.scope ? this.buildQuery(toChatScopeParams(options.scope)) : ""}` as const
     captureChatRequestDebugSnapshot({
-      endpoint: "/api/v1/chat/completions",
+      endpoint: path,
       method: "POST",
       mode: "non-stream",
       body: request,
@@ -3529,7 +3547,7 @@ export class TldwApiClientBase {
     })
     const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<Response>({
-      path: '/api/v1/chat/completions',
+      path,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
       body: request,
@@ -5903,8 +5921,6 @@ export class TldwApiClientBase {
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET",
       headers: scopeFields.headers,

@@ -43,6 +43,7 @@ describe("Research Workspace migration manifest planning", () => {
     const values: Record<string, string> = {
       "tldw-workspace": JSON.stringify({ activeWorkspaceId: "ws-1" }),
       "tldw-workspace:workspace:ws-1:snapshot": JSON.stringify({
+        workspaceId: "ws-1",
         sources: [{ id: "source-1", title: "Captured PDF" }]
       }),
       "tldw-workspace:workspace:ws-1:chat": JSON.stringify({
@@ -154,13 +155,14 @@ describe("Research Workspace migration manifest planning", () => {
       client_delete_eligible: false,
       chunks: []
     }))
-    const deleteLocalStorageValue = vi.fn()
+    const compareAndDeleteLocalStorageValue = vi.fn(() => true)
 
-    const result = await runResearchWorkspaceMigration({
+    const input = {
       targetWorkspaceId: "ws-1",
       targetWorkspaceName: "Workspace One",
       discoveredLocalStorageKeys: ["tldw-workspace"],
-      readLocalStorageValue: async () => "{}",
+      readLocalStorageValue: async () => JSON.stringify({ workspaceId: "ws-1" }),
+      readLocalStorageValueSync: () => null,
       api: {
         createWorkspaceMigration,
         putWorkspaceMigrationChunk,
@@ -168,29 +170,31 @@ describe("Research Workspace migration manifest planning", () => {
         getWorkspaceMigration,
         ackWorkspaceMigrationClientDelete: vi.fn()
       },
-      deleteLocalStorageValue,
+      compareAndDeleteLocalStorageValue,
       writeLocalStorageValue: vi.fn()
-    })
+    }
+    const result = await runResearchWorkspaceMigration(input)
 
     expect(result.status).toBe("finalized_not_delete_eligible")
     expect(createWorkspaceMigration).toHaveBeenCalledOnce()
     expect(putWorkspaceMigrationChunk).toHaveBeenCalledOnce()
     expect(finalizeWorkspaceMigration).toHaveBeenCalledOnce()
     expect(getWorkspaceMigration).toHaveBeenCalledOnce()
-    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(compareAndDeleteLocalStorageValue).not.toHaveBeenCalled()
   })
 
-  it("deletes covered local content, writes a tombstone, and acknowledges only when server and local gates allow it", async () => {
+  it("retains writable copies without markers or acknowledgement even when both receipt gates allow deletion", async () => {
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
-    const deleteLocalStorageValue = vi.fn()
+    const compareAndDeleteLocalStorageValue = vi.fn(() => true)
     const writeLocalStorageValue = vi.fn()
 
-    const result = await runResearchWorkspaceMigration({
+    const input = {
       targetWorkspaceId: "ws-1",
       targetWorkspaceName: "Workspace One",
       legacyWorkspaceId: "legacy-ws",
       discoveredLocalStorageKeys: ["tldw-workspace"],
-      readLocalStorageValue: async () => "{}",
+      readLocalStorageValue: async () => JSON.stringify({ workspaceId: "ws-1" }),
+      readLocalStorageValueSync: () => null,
       api: {
         createWorkspaceMigration: vi.fn(async (body) => ({
           ...body,
@@ -229,90 +233,84 @@ describe("Research Workspace migration manifest planning", () => {
         })),
         ackWorkspaceMigrationClientDelete
       },
-      deleteLocalStorageValue,
+      compareAndDeleteLocalStorageValue,
       writeLocalStorageValue,
       now: () => "2026-05-26T00:00:00Z"
-    })
-
-    expect(result.status).toBe("deleted")
-    expect(deleteLocalStorageValue).toHaveBeenCalledWith("tldw-workspace")
-    expect(writeLocalStorageValue).toHaveBeenCalledWith(
-      "tldw:research-workspace:migration:tombstone:legacy-ws",
-      JSON.stringify({
-        legacyWorkspaceId: "legacy-ws",
-        serverWorkspaceId: "ws-1",
-        migrationId: result.migrationId,
-        deletedAt: "2026-05-26T00:00:00Z",
-        contentRetained: false
-      })
-    )
-    expect(ackWorkspaceMigrationClientDelete).toHaveBeenCalledWith(
-      result.migrationId,
-      { acknowledged_manifest_hash: result.manifestHash }
-    )
-  })
-
-  it("preflights tombstone writing before deleting remotely covered content", async () => {
-    const deleteLocalStorageValue = vi.fn()
-    const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
-
-    const result = await runResearchWorkspaceMigration({
-      targetWorkspaceId: "ws-1",
-      targetWorkspaceName: "Workspace One",
-      discoveredLocalStorageKeys: ["tldw-workspace"],
-      readLocalStorageValue: async () => "{}",
-      api: {
-        createWorkspaceMigration: vi.fn(async (body) => ({
-          ...body,
-          status: "created",
-          declared_chunk_count: body.declared_chunks.length,
-          accepted_chunk_count: 0,
-          missing_chunk_ids: [],
-          client_delete_eligible: false,
-          created_at: "2026-05-26T00:00:00Z",
-          updated_at: "2026-05-26T00:00:00Z",
-          finalized_at: null,
-          recovery_manifest: {},
-          chunks: []
-        })),
-        putWorkspaceMigrationChunk: vi.fn(async () => ({
-          id: "chunk-1",
-          migration_id: "mig-1",
-          sha256: "b".repeat(64),
-          byte_count: 2,
-          chunk_kind: "workspace_bundle",
-          metadata: {},
-          status: "accepted",
-          accepted_at: "2026-05-26T00:00:00Z"
-        })),
-        finalizeWorkspaceMigration: vi.fn(async () => ({
-          id: "mig-1",
-          status: "finalized",
-          client_delete_eligible: true,
-          chunks: []
-        })),
-        getWorkspaceMigration: vi.fn(async () => ({
-          id: "mig-1",
-          status: "finalized",
-          client_delete_eligible: true,
-          chunks: []
-        })),
-        ackWorkspaceMigrationClientDelete
-      },
-      deleteLocalStorageValue
-    })
+    }
+    const result = await runResearchWorkspaceMigration(input)
 
     expect(result.status).toBe("blocked")
-    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(result.deletedSurfaceIds).toEqual([])
+    expect(result.serverMigration?.client_delete_eligible).toBe(true)
+    expect(result.message).toMatch(/automatic.*cleanup.*disabled/i)
+    expect(compareAndDeleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(writeLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 
-  it("preflights every local deletion dependency before deleting any chunk", async () => {
-    const deleteLocalStorageValue = vi.fn()
+  it("does not require a tombstone writer to retain remotely covered writable copies", async () => {
+    const compareAndDeleteLocalStorageValue = vi.fn(() => true)
+    const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
+
+    const input = {
+      targetWorkspaceId: "ws-1",
+      targetWorkspaceName: "Workspace One",
+      discoveredLocalStorageKeys: ["tldw-workspace"],
+      readLocalStorageValue: async () => JSON.stringify({ workspaceId: "ws-1" }),
+      readLocalStorageValueSync: () => null,
+      api: {
+        createWorkspaceMigration: vi.fn(async (body) => ({
+          ...body,
+          status: "created",
+          declared_chunk_count: body.declared_chunks.length,
+          accepted_chunk_count: 0,
+          missing_chunk_ids: [],
+          client_delete_eligible: false,
+          created_at: "2026-05-26T00:00:00Z",
+          updated_at: "2026-05-26T00:00:00Z",
+          finalized_at: null,
+          recovery_manifest: {},
+          chunks: []
+        })),
+        putWorkspaceMigrationChunk: vi.fn(async () => ({
+          id: "chunk-1",
+          migration_id: "mig-1",
+          sha256: "b".repeat(64),
+          byte_count: 2,
+          chunk_kind: "workspace_bundle",
+          metadata: {},
+          status: "accepted",
+          accepted_at: "2026-05-26T00:00:00Z"
+        })),
+        finalizeWorkspaceMigration: vi.fn(async () => ({
+          id: "mig-1",
+          status: "finalized",
+          client_delete_eligible: true,
+          chunks: []
+        })),
+        getWorkspaceMigration: vi.fn(async () => ({
+          id: "mig-1",
+          status: "finalized",
+          client_delete_eligible: true,
+          chunks: []
+        })),
+        ackWorkspaceMigrationClientDelete
+      },
+      compareAndDeleteLocalStorageValue
+    }
+    const result = await runResearchWorkspaceMigration(input)
+
+    expect(result.status).toBe("blocked")
+    expect(compareAndDeleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
+  })
+
+  it("retains shared IndexedDB stores without invoking any cleanup dependencies", async () => {
+    const compareAndDeleteLocalStorageValue = vi.fn(() => true)
     const writeLocalStorageValue = vi.fn()
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
 
-    const result = await runResearchWorkspaceMigration({
+    const input = {
       targetWorkspaceId: "ws-1",
       targetWorkspaceName: "Workspace One",
       discoveredLocalStorageKeys: ["tldw-workspace"],
@@ -322,7 +320,8 @@ describe("Research Workspace migration manifest planning", () => {
           storeName: "workspace-artifact-payloads"
         }
       ],
-      readLocalStorageValue: async () => "{}",
+      readLocalStorageValue: async () => JSON.stringify({ workspaceId: "ws-1" }),
+      readLocalStorageValueSync: () => null,
       readIndexedDbStorePayload: async () => "{\"artifact\":\"payload\"}",
       api: {
         createWorkspaceMigration: vi.fn(async (body) => ({
@@ -362,24 +361,26 @@ describe("Research Workspace migration manifest planning", () => {
         })),
         ackWorkspaceMigrationClientDelete
       },
-      deleteLocalStorageValue,
+      compareAndDeleteLocalStorageValue,
       writeLocalStorageValue
-    })
+    }
+    const result = await runResearchWorkspaceMigration(input)
 
     expect(result.status).toBe("blocked")
-    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(compareAndDeleteLocalStorageValue).not.toHaveBeenCalled()
     expect(writeLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 
   it("returns a failed state and retains local content when the migration API fails", async () => {
-    const deleteLocalStorageValue = vi.fn()
+    const compareAndDeleteLocalStorageValue = vi.fn(() => true)
 
-    const result = await runResearchWorkspaceMigration({
+    const input = {
       targetWorkspaceId: "ws-1",
       targetWorkspaceName: "Workspace One",
       discoveredLocalStorageKeys: ["tldw-workspace"],
-      readLocalStorageValue: async () => "{}",
+      readLocalStorageValue: async () => JSON.stringify({ workspaceId: "ws-1" }),
+      readLocalStorageValueSync: () => null,
       api: {
         createWorkspaceMigration: vi.fn(async () => {
           throw new Error("conflict")
@@ -389,27 +390,29 @@ describe("Research Workspace migration manifest planning", () => {
         getWorkspaceMigration: vi.fn(),
         ackWorkspaceMigrationClientDelete: vi.fn()
       },
-      deleteLocalStorageValue,
+      compareAndDeleteLocalStorageValue,
       writeLocalStorageValue: vi.fn()
-    })
+    }
+    const result = await runResearchWorkspaceMigration(input)
 
     expect(result.status).toBe("failed")
     expect(result.migrationId).toMatch(/^research-workspace-ws-1-/)
     expect(result.manifestHash).toHaveLength(64)
     expect(result.localDeletionEligibility?.eligible).toBe(true)
-    expect(result.message).toBe("Research Workspace migration failed before local deletion.")
-    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(result.deletedSurfaceIds).toEqual([])
+    expect(compareAndDeleteLocalStorageValue).not.toHaveBeenCalled()
   })
 
-  it("fails safely when tombstone preflight write throws before local deletion", async () => {
-    const deleteLocalStorageValue = vi.fn()
+  it("never invokes the former destructive writer even when it would throw a quota error", async () => {
+    const compareAndDeleteLocalStorageValue = vi.fn(() => true)
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
 
-    const result = await runResearchWorkspaceMigration({
+    const input = {
       targetWorkspaceId: "ws-1",
       targetWorkspaceName: "Workspace One",
       discoveredLocalStorageKeys: ["tldw-workspace"],
-      readLocalStorageValue: async () => "{}",
+      readLocalStorageValue: async () => JSON.stringify({ workspaceId: "ws-1" }),
+      readLocalStorageValueSync: () => null,
       api: {
         createWorkspaceMigration: vi.fn(async (body) => ({
           ...body,
@@ -448,22 +451,23 @@ describe("Research Workspace migration manifest planning", () => {
         })),
         ackWorkspaceMigrationClientDelete
       },
-      deleteLocalStorageValue,
+      compareAndDeleteLocalStorageValue,
       writeLocalStorageValue: vi.fn(async () => {
         throw new Error("local-storage-quota")
       })
-    })
+    }
+    const result = await runResearchWorkspaceMigration(input)
 
-    expect(result.status).toBe("failed")
-    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(result.status).toBe("blocked")
+    expect(compareAndDeleteLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 
-  it("does not persist the final tombstone when indexeddb deletion cannot be preflight-cleaned", async () => {
+  it("rejects shared IndexedDB payloads without tombstones or whole-store deletion", async () => {
     const writeLocalStorageValue = vi.fn()
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
 
-    const result = await runResearchWorkspaceMigration({
+    const input = {
       targetWorkspaceId: "ws-1",
       targetWorkspaceName: "Workspace One",
       discoveredLocalStorageKeys: [],
@@ -517,7 +521,8 @@ describe("Research Workspace migration manifest planning", () => {
       deleteIndexedDbStorePayload: vi.fn(async () => {
         throw new Error("indexeddb-delete-failed")
       })
-    })
+    }
+    const result = await runResearchWorkspaceMigration(input)
 
     expect(result.status).toBe("blocked")
     expect(writeLocalStorageValue).not.toHaveBeenCalled()

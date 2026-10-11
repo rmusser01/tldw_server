@@ -23,7 +23,13 @@ export const stripMediaMetadata = (content: string): string => {
       if (!remaining.startsWith("[/METADATA]")) return content
       try {
         JSON.parse(json.slice(0, i + 1))
-        return remaining.slice("[/METADATA]".length).trim()
+        const body = remaining.slice("[/METADATA]".length)
+        // Only the exact historical writer layout owns this eight-space prefix.
+        if (
+          text.startsWith("[METADATA]\n        {") &&
+          json.slice(i + 1).startsWith("\n        [/METADATA]\n\n        ")
+        ) return body.slice("\n\n        ".length)
+        return body.replace(/^(?:\r?\n){1,2}|^ (?![ \t])/, "")
       } catch {
         return content
       }

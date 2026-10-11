@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
 import type { MessageMetadataExtra } from "@/store/option"
+import {
+  getServerCapabilities,
+  type ServerCapabilities
+} from "@/services/tldw/server-capabilities"
+import type { SaveMessageData } from "@/types/chat-modes"
 
 const {
   addChatMessageMock,
@@ -234,6 +239,9 @@ const createHookOptions = () => ({
 describe("useChatActions dynamic UI action integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getServerCapabilities).mockResolvedValue({
+      hasChatSaveToDb: false
+    } as ServerCapabilities)
     storageValues.clear()
     storeOptionState.value = { selectedModel: "deepseek-chat" }
     normalChatModeMock.mockImplementation(
@@ -265,6 +273,68 @@ describe("useChatActions dynamic UI action integration", () => {
       }
     )
   })
+
+  it.each([
+    { acknowledged: true, capabilityError: false, mirrorCount: 0 },
+    { acknowledged: true, capabilityError: true, mirrorCount: 0 },
+    { acknowledged: false, capabilityError: false, mirrorCount: 2 },
+    { acknowledged: false, capabilityError: true, mirrorCount: 2 }
+  ])(
+    "preserves local history and selects mirroring from acknowledgement $acknowledged with capability error $capabilityError",
+    async ({ acknowledged, capabilityError, mirrorCount }) => {
+      if (capabilityError) {
+        vi.mocked(getServerCapabilities).mockRejectedValueOnce(new Error("offline"))
+      }
+      normalChatModeMock.mockImplementationOnce(async (
+        message: string,
+        image: string,
+        isRegenerate: boolean,
+        _messages: unknown[],
+        _history: unknown[],
+        _signal: AbortSignal,
+        params: {
+          selectedModel: string
+          setHistoryId: SaveMessageData["setHistoryId"]
+          saveMessageOnSuccess: (data: SaveMessageData) => Promise<unknown>
+        }
+      ) => {
+        await params.saveMessageOnSuccess({
+          historyId: "history-1",
+          setHistoryId: params.setHistoryId,
+          isRegenerate,
+          selectedModel: params.selectedModel,
+          message,
+          image,
+          fullText: "Saved answer",
+          source: [],
+          assistantMessageId: "assistant-response-1",
+          modelId: params.selectedModel,
+          reasoning_time_taken: 0,
+          saveToDb: true,
+          conversationId: "chat-1",
+          serverMessagesAlreadyPersisted: acknowledged
+        })
+      })
+      const { result } = renderHook(() => useChatActions(
+        createHookOptions() as unknown as Parameters<typeof useChatActions>[0]
+      ))
+
+      await act(async () => {
+        await result.current.onSubmit({ message: "Hello", image: "" })
+      })
+
+      expect(saveMessageOnSuccessMock).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Hello", fullText: "Saved answer" })
+      )
+      expect(addChatMessageMock).toHaveBeenCalledTimes(mirrorCount)
+      if (mirrorCount > 0) {
+        expect(addChatMessageMock).toHaveBeenCalledWith(
+          "chat-1",
+          expect.objectContaining({ role: "assistant", content: "Saved answer" })
+        )
+      }
+    }
+  )
 
   it("persists dynamic UI action provenance through the normal submit path", async () => {
     const metadata: MessageMetadataExtra = {

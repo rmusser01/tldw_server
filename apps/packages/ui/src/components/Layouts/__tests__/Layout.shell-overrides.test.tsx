@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { WorkspaceChatRouteSearchContext } from "@/hooks/chat/useWorkspaceChatCheckpoint"
 import OptionLayout, { useOptionLayoutShellOverrides } from "../Layout"
 
 const storeMessageOptionMock = vi.hoisted(() =>
@@ -404,6 +405,27 @@ it("places the chat controller above both shell consumers and route content", ()
   expect(view.getByTestId("selection-probe")).toHaveTextContent("present")
 })
 
+it.each(["/chat-workspace", "/research-workspace"])("places one fresh controller above %s", (path) => {
+  delete (globalThis as any).__tldwOptionShell
+  const seen: any[] = []
+  function Probe() {
+    const selection = useHistorySelectionContext()
+    const navigate = useNavigate()
+    seen.push(selection?.getReference ?? null)
+    return <><button onClick={() => navigate("/chat")}>Playground</button><button onClick={() => navigate(path)}>Workspace</button></>
+  }
+  const view = render(<MemoryRouter initialEntries={[path]}><OptionLayout><Probe /></OptionLayout></MemoryRouter>)
+  expect(view.getByTestId("header")).toHaveAttribute("data-history-controller", "present")
+  const first = seen.at(-1)
+  expect(first).toBeTypeOf("function")
+  fireEvent.click(view.getByText("Playground"))
+  expect(seen.at(-1)).not.toBe(first)
+  const playground = seen.at(-1)
+  fireEvent.click(view.getByText("Workspace"))
+  expect(seen.at(-1)).toBeTypeOf("function")
+  expect(seen.at(-1)).not.toBe(playground)
+})
+
 it("reuses the shell controller and gives chat route reentry a fresh lifetime", () => {
   delete (globalThis as any).__tldwOptionShell
   const seen: any[] = []
@@ -425,4 +447,26 @@ it("reuses the shell controller and gives chat route reentry a fresh lifetime", 
   fireEvent.click(view.getByText("Return"))
   expect(seen.at(-1)).toBeTypeOf("function")
   expect(seen.at(-1)).not.toBe(first)
+})
+
+it.each(["/chat-workspace", "/research-workspace"])("publishes reactive workspace route search on %s without replacing H1", path => {
+  delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell
+  const seen: unknown[] = []
+  function Probe() {
+    const search = React.useContext(WorkspaceChatRouteSearchContext)
+    const selection = useHistorySelectionContext()
+    const navigate = useNavigate()
+    seen.push(selection?.getReference)
+    return <><output aria-label="Workspace route search">{search}</output>
+      <button onClick={() => navigate(`${path}?chatId=chat-C`)}>Next query</button></>
+  }
+  const view = render(<MemoryRouter initialEntries={[`${path}?chatId=chat-B`]}><OptionLayout><Probe /></OptionLayout></MemoryRouter>)
+  expect(screen.getByLabelText("Workspace route search")).toHaveTextContent("?chatId=chat-B")
+  const first = seen.at(-1)
+  expect(first).toBeTypeOf("function")
+  fireEvent.click(screen.getByRole("button", { name: "Next query" }))
+  expect(screen.getByLabelText("Workspace route search")).toHaveTextContent("?chatId=chat-C")
+  expect(seen.at(-1)).toBe(first)
+  view.unmount()
+  delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell
 })

@@ -44,6 +44,7 @@ import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { useWorkspaceChatCheckpoint } from "@/hooks/chat/useWorkspaceChatCheckpoint"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useModelSelector } from "@/hooks/playground"
@@ -56,13 +57,15 @@ import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import type { WorkspaceSource, WorkspaceSourceType } from "@/types/workspace"
 import type { ChatScope } from "@/types/chat-scope"
+import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import {
   applyVariantToMessage,
   normalizeMessageVariants
 } from "@/utils/message-variants"
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
-import { Link, useNavigate } from "react-router-dom"
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { buildChatLorebookDebugPath } from "@/routes/route-paths"
@@ -1199,7 +1202,9 @@ const SimpleChatInput: React.FC<{
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
-  onDraftChange?: (value: string) => void
+  onDraftChange?: (value: string, origin?: "edit" | "submit") => void
+  getSubmitLease?: () => () => boolean
+  draft?: string
   slashCommands?: Array<{ name: string; description: string }>
 }> = ({
   onSubmit,
@@ -1216,19 +1221,23 @@ const SimpleChatInput: React.FC<{
   seededValue,
   onSeedConsumed,
   onDraftChange,
+  getSubmitLease,
+  draft,
   slashCommands = []
 }) => {
   const { t } = useTranslation(["playground", "common"])
-  const [value, setValue] = React.useState("")
+  const [localValue, setValue] = React.useState("")
+  const value = draft ?? localValue
   const [showSlashMenu, setShowSlashMenu] = React.useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0)
   const inputRef = React.useRef<InputRef>(null)
   const valueRef = React.useRef("")
+  valueRef.current = value
   const updateValue = React.useCallback(
-    (nextValue: string) => {
+    (nextValue: string, origin: "edit" | "submit" = "edit") => {
       valueRef.current = nextValue
       setValue(nextValue)
-      onDraftChange?.(nextValue)
+      onDraftChange?.(nextValue, origin)
     },
     [onDraftChange]
   )
@@ -1282,16 +1291,17 @@ const SimpleChatInput: React.FC<{
     ) {
       return
     }
-    updateValue("")
+    const isCurrent = getSubmitLease?.() ?? (() => true)
+    updateValue("", "submit")
     setShowSlashMenu(false)
     try {
       const result = await onSubmit(trimmed)
-      if (!shouldClearSubmittedDraft(result) && valueRef.current === "") {
-        updateValue(submittedValue)
+      if (isCurrent() && !shouldClearSubmittedDraft(result) && valueRef.current === "") {
+        updateValue(submittedValue, "submit")
       }
     } catch (error) {
-      if (valueRef.current === "") {
-        updateValue(submittedValue)
+      if (isCurrent() && valueRef.current === "") {
+        updateValue(submittedValue, "submit")
       }
       throw error
     }
@@ -1532,6 +1542,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
   const isMobile = useMobile()
   const navigate = useNavigate()
+  const location = useLocation()
   const [messageApi, messageContextHolder] = message.useMessage()
 
   // Workspace store
@@ -1543,7 +1554,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const focusSourceById = useWorkspaceStore((s) => s.focusSourceById)
   const focusSourceByMediaId = useWorkspaceStore((s) => s.focusSourceByMediaId)
   const captureToCurrentNote = useWorkspaceStore((s) => s.captureToCurrentNote)
+  const notesCaptureReadOnly = useWorkspaceStore((s) =>
+    Boolean(s.serverWorkspace || s.currentNote?.serverWorkspaceId)
+  )
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const storeHydrated = useWorkspaceStore((s) => s.storeHydrated)
   const workspaceChatReferenceId = useWorkspaceStore(
     (s) => s.workspaceChatReferenceId
   )
@@ -1572,6 +1587,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
 
   // Message option hook
+  const chat = useMessageOption({ scope: chatScope, hydrateServerChat: Boolean(workspaceId) })
   const {
     messages,
     setMessages,
@@ -1591,7 +1607,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setHistoryId,
     serverChatId,
     setServerChatId
-  } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
+  } = chat
 
   // RAG state from store
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)
@@ -1604,12 +1620,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const ragAdvancedOptions = useStoreMessageOption((s) => s.ragAdvancedOptions)
   const setRagAdvancedOptions = useStoreMessageOption(
     (s) => s.setRagAdvancedOptions
-  )
-  const saveWorkspaceChatSession = useWorkspaceStore(
-    (s) => s.saveWorkspaceChatSession
-  )
-  const getWorkspaceChatSession = useWorkspaceStore(
-    (s) => s.getWorkspaceChatSession
   )
   const checkConnectionOnce = useConnectionStore((s) => s.checkOnce)
   const connectionState = useConnectionStore((s) => s.state)
@@ -1631,7 +1641,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     React.useState<ChatResponseLength>("standard")
   const [dropZoneActive, setDropZoneActive] = React.useState(false)
   const [seededPrompt, setSeededPrompt] = React.useState<string | null>(null)
-  const [composerDraft, setComposerDraft] = React.useState("")
+  const [composerDraft, setComposerDraftState] = React.useState("")
+  const pendingReprepareUUID = React.useRef<string | null>(null)
   const [highlightedChatMessageId, setHighlightedChatMessageId] = React.useState<
     string | null
   >(null)
@@ -1666,7 +1677,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     React.useState<ChatComposerModel[]>([])
   const slashCommandsFetchedRef = React.useRef(false)
   const modelsFetchedRef = React.useRef(false)
-  const workspaceSessionRef = React.useRef<string | null>(null)
   const chatMessageItemRefs = React.useRef<Record<string, HTMLDivElement | null>>(
     {}
   )
@@ -1695,6 +1705,29 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       ),
     [workspaceChatReferenceId, workspaceId]
   )
+  const checkpoint = useWorkspaceChatCheckpoint({
+    workspaceId, workspaceReady: Boolean(storeHydrated && workspaceId),
+    draft: composerDraft, setDraft: setComposerDraftState, chat,
+    legacySessionKey: workspaceSessionId,
+    replaceRouteSearch: search => navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, flushSync: true })
+  })
+  const { controller: checkpointController, setDraft: setCheckpointDraft } = checkpoint
+  const recoveryReference = checkpoint.controller?.getReference()
+  const reprepareRecovery = React.useCallback((turn: HistoryTurnRecovery) => {
+    const current = checkpointController?.getCurrent()
+    const reference = checkpointController?.getReference()
+    if (turn.persistence !== "server" || !turn.logical_user_message_id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(turn.logical_user_message_id) ||
+      current?.status !== "ready" || current.owner?.kind !== "native" || !current.owner.validate_lease() ||
+      reference?.owner_key !== turn.owner_key || reference.conversation_id !== turn.conversation_id ||
+      turn.conversation_id !== serverChatId || chat.temporaryChat) return
+    pendingReprepareUUID.current = turn.logical_user_message_id
+    setCheckpointDraft(turn.input_text)
+  }, [checkpointController, setCheckpointDraft, serverChatId, chat.temporaryChat])
+  const setComposerDraft = React.useCallback((value: string, origin: "edit" | "submit" = "edit") => {
+    if (origin === "edit") pendingReprepareUUID.current = null
+    setCheckpointDraft(value)
+  }, [setCheckpointDraft])
 
   // Smart scroll for chat messages
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
@@ -1910,6 +1943,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     preferredChatMode ?? (hasQueryableSelectedSources ? "rag" : "normal")
   const effectiveChatMode: ChatModePreference =
     hasQueryableSelectedSources && requestedChatMode === "rag" ? "rag" : "normal"
+  const preparedSourceScope = JSON.stringify(
+    queryableSelectedSources.map(({ id, mediaId, title }) => [id, mediaId, title])
+  )
+
+  React.useEffect(() => {
+    pendingReprepareUUID.current = null
+  }, [
+    workspaceId, checkpoint.referenceId, recoveryReference?.owner_key,
+    recoveryReference?.conversation_id, serverChatId, chat.temporaryChat,
+    selectedModel, effectiveChatMode, preparedSourceScope, responseStyle,
+    responseLength, includeFullSourceContents, ragTopK, ragAdvancedOptions
+  ])
 
   React.useEffect(() => {
     if (hasQueryableSelectedSources || !includeFullSourceContents) return
@@ -2142,72 +2187,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setRagMediaIds
   ])
 
-  React.useEffect(() => {
-    if (!workspaceSessionId) return
-    if (workspaceSessionRef.current !== workspaceSessionId) return
-
-    saveWorkspaceChatSession(workspaceSessionId, {
-      messages,
-      history,
-      historyId,
-      serverChatId
-    })
-  }, [
-    workspaceSessionId,
-    messages,
-    history,
-    historyId,
-    serverChatId,
-    saveWorkspaceChatSession
-  ])
-
-  React.useEffect(() => {
-    if (!workspaceSessionId) return
-
-    const previousWorkspaceSessionId = workspaceSessionRef.current
-    if (previousWorkspaceSessionId === workspaceSessionId) return
-
-    if (previousWorkspaceSessionId) {
-      saveWorkspaceChatSession(previousWorkspaceSessionId, {
-        messages,
-        history,
-        historyId,
-        serverChatId
-      })
-    }
-
-    const nextSession = getWorkspaceChatSession(workspaceSessionId)
-    if (nextSession) {
-      setMessages(nextSession.messages)
-      setHistory(nextSession.history)
-      setHistoryId(nextSession.historyId, { preserveServerChatId: true })
-      setServerChatId(nextSession.serverChatId)
-    } else {
-      setMessages([])
-      setHistory([])
-      setHistoryId(null, { preserveServerChatId: true })
-      setServerChatId(null)
-    }
-
-    setStreaming(false)
-    setIsProcessing(false)
-    setSubmitError(null)
-    workspaceSessionRef.current = workspaceSessionId
-  }, [
-    workspaceSessionId,
-    getWorkspaceChatSession,
-    history,
-    historyId,
-    messages,
-    saveWorkspaceChatSession,
-    serverChatId,
-    setHistory,
-    setHistoryId,
-    setIsProcessing,
-    setMessages,
-    setServerChatId,
-    setStreaming
-  ])
+  React.useEffect(() => { setSubmitError(null) }, [workspaceSessionId])
 
   React.useEffect(() => {
     const targetMessageId = chatFocusTarget?.messageId
@@ -2252,6 +2232,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       controller?: AbortController
     ) => Promise<boolean>
   ): Promise<boolean> => {
+    const viewIsCurrent = checkpoint.controller?.fence() ?? (() => true)
     const captures = queryableSelectedSources.filter((source) => source.webCapture)
     if (!captures.length) return action()
     const controller = new AbortController()
@@ -2327,6 +2308,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         await assertWebCaptureHeadCurrent(source, workspaceId!, options)
         assertCurrent()
       }
+      if (!viewIsCurrent()) return false
       return await action(options, assertCurrent, controller)
     } catch (reason) {
       if (reason instanceof WebCaptureNotCurrentError) {
@@ -2539,6 +2521,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSubmit = async (message: string): Promise<boolean> => {
     if (preparingSourceContext) return false
+    const durableCheckpoint = checkpoint.active && !chat.temporaryChat
+    if (durableCheckpoint && (!storeHydrated || !workspaceId || !workspaceChatReferenceId || checkpoint.restoring)) return false
+    const isCurrent = checkpoint.fence()
+    const viewIsCurrent = checkpoint.controller?.fence() ?? (() => true)
+    const reprepareUUID = pendingReprepareUUID.current
+    const reference = checkpointController?.getReference()
+    const recovery = reprepareUUID ? checkpointController?.recoveries.find(({ turn }) =>
+      turn.persistence === "server" && turn.logical_user_message_id === reprepareUUID &&
+      turn.owner_key === reference?.owner_key && turn.conversation_id === serverChatId)?.turn : undefined
     if (
       typeof selectedModel !== "string" ||
       selectedModel.trim().length === 0
@@ -2567,6 +2558,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         // Keep the existing snapshot; connection errors are handled by submit.
       }
     }
+    if (!isCurrent() || !viewIsCurrent()) return false
 
     if (statusGuardrailsEnabled && actionChatCapability?.mode === "block") {
       const capabilityMessage = getCapabilityCopy(actionChatCapability, "Chat")
@@ -2616,13 +2608,24 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     return withCurrentCaptureHeads(
       async (options, assertCurrent = () => {}, controller) => {
         try {
+          const tldwTurn = durableCheckpoint
+            ? { user_message_id: reprepareUUID ?? crypto.randomUUID() }
+            : undefined
           const responsePresetInstruction = buildResponsePresetInstruction()
-          const preparedMessage = await buildFullSourceContextPrompt(
-            message,
-            responsePresetInstruction,
-            options,
-            assertCurrent
-          )
+          // Recovery input already contains its response preset and source context.
+          const preparedMessage = recovery?.input_text === message
+            ? message
+            : await buildFullSourceContextPrompt(
+                message,
+                responsePresetInstruction,
+                options,
+                assertCurrent
+              )
+          if (!isCurrent() || !viewIsCurrent()) return false
+          if (tldwTurn && reprepareUUID && recovery?.input_text !== preparedMessage) {
+            tldwTurn.user_message_id = crypto.randomUUID()
+            if (pendingReprepareUUID.current === reprepareUUID) pendingReprepareUUID.current = null
+          }
           if (options) {
             for (const source of queryableSelectedSources.filter(
               (item) => item.webCapture
@@ -2632,11 +2635,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             }
           }
           assertCurrent()
+          if (!isCurrent() || !viewIsCurrent()) return false
           const submitResult = await onSubmit({
             message: preparedMessage,
             image: "",
+            ...(tldwTurn ? { requestOverrides: { tldwTurn } } : {}),
             ...(controller ? { controller, assertCurrent } : {})
           })
+          if (!isCurrent()) return false
           if (
             submitResult &&
             typeof submitResult === "object" &&
@@ -2645,6 +2651,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           ) {
             return false
           }
+          pendingReprepareUUID.current = null
           const activeScope = temporarySourceScopeRef.current
           if (activeScope) {
             const selectedIds = selectedSourceIdsRef.current
@@ -2657,6 +2664,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           }
           return true
         } catch (reason) {
+          if (!isCurrent()) return false
           if (options) throw reason
           setSubmitError(
             t(
@@ -2768,6 +2776,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleClearChat = () => {
     if (!hasMessages) return
+    const isCurrent = checkpoint.fence()
+    const currentSelection = checkpointController?.fence()
+    const nativeClear = checkpointController?.getCurrent().owner?.kind === "native" && !chat.temporaryChat
 
     Modal.confirm({
       title: t("playground:chat.clearTitle", "Clear chat?"),
@@ -2778,6 +2789,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       okText: t("common:clear", "Clear"),
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
+        if ((nativeClear && !isCurrent()) || currentSelection?.() === false) return
+        const restoreNative = nativeClear ? checkpoint.clearChat() : null
+        if (nativeClear && !restoreNative) return
         const previousMessages = [...messages]
         const previousHistory = [...history]
         const previousHistoryId = historyId
@@ -2785,6 +2799,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         const undoHandle = scheduleWorkspaceUndoAction({
           apply: () => {
+            if (restoreNative) { setSubmitError(null); return }
             setMessages([])
             setHistory([])
             setHistoryId(null, { preserveServerChatId: true })
@@ -2792,14 +2807,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
-            saveWorkspaceChatSession(workspaceSessionId, {
-              messages: [],
-              history: [],
-              historyId: null,
-              serverChatId: null
-            })
           },
           undo: () => {
+            if (restoreNative) {
+              void restoreNative().then(restored => {
+                if (restored === true) messageApi.success(t("playground:chat.restored", "Chat restored"))
+                else if (restored === "failed") messageApi.error(t("playground:chat.restoreFailed", "Chat could not be restored."))
+              })
+              return
+            }
             setMessages(previousMessages)
             setHistory(previousHistory)
             setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2807,12 +2823,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
-            saveWorkspaceChatSession(workspaceSessionId, {
-              messages: previousMessages,
-              history: previousHistory,
-              historyId: previousHistoryId,
-              serverChatId: previousServerChatId
-            })
           }
         })
 
@@ -2831,7 +2841,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               size="small"
               type="link"
               onClick={() => {
-                if (undoWorkspaceAction(undoHandle.id)) {
+                if (undoWorkspaceAction(undoHandle.id) && !restoreNative) {
                   messageApi.success(
                     t("playground:chat.restored", "Chat restored")
                   )
@@ -2866,24 +2876,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       const previousServerChatId = serverChatId
       if (!previousMessages[messageIndex]) return
 
-      const nextMessages = previousMessages.filter(
-        (_message, index) => index !== messageIndex
-      )
-      const nextHistory = previousHistory.filter(
-        (_entry, index) => index !== messageIndex
-      )
-
       await deleteMessage(messageIndex)
 
       const undoHandle = scheduleWorkspaceUndoAction({
-        apply: () => {
-          saveWorkspaceChatSession(workspaceSessionId, {
-            messages: nextMessages,
-            history: nextHistory,
-            historyId: previousHistoryId,
-            serverChatId: previousServerChatId
-          })
-        },
+        apply: () => {},
         undo: () => {
           setMessages(previousMessages)
           setHistory(previousHistory)
@@ -2892,12 +2888,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           setStreaming(false)
           setIsProcessing(false)
           setSubmitError(null)
-          saveWorkspaceChatSession(workspaceSessionId, {
-            messages: previousMessages,
-            history: previousHistory,
-            historyId: previousHistoryId,
-            serverChatId: previousServerChatId
-          })
         }
       })
 
@@ -2948,7 +2938,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       historyId,
       messageApi,
       messages,
-      saveWorkspaceChatSession,
       serverChatId,
       setHistory,
       setHistoryId,
@@ -2956,8 +2945,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       setMessages,
       setServerChatId,
       setStreaming,
-      t,
-      workspaceSessionId
+      t
     ]
   )
 
@@ -3142,6 +3130,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       name?: string
       sources?: unknown[]
     }) => {
+      const destination = useWorkspaceStore.getState()
+      if (destination.serverWorkspace || destination.currentNote.serverWorkspaceId) {
+        messageApi.warning(t("playground:studio.serverNotesReadOnly", "Server notes are view-only"))
+        return
+      }
       const snippet = String(msg.message || "").trim()
       if (!snippet) return
       const citedMediaIds = new Set(
@@ -3168,7 +3161,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         mode: "append"
       })
     },
-    [captureToCurrentNote, sources, t]
+    [captureToCurrentNote, messageApi, sources, t]
   )
 
   // Share conversation handler (UX-044)
@@ -3356,7 +3349,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     isConnectionUnavailable || isChatCapabilityBlocked
   const isModelSelectionMissing =
     typeof selectedModel !== "string" || selectedModel.trim().length === 0
-  const isSendBlocked = !isChatUnavailable && isModelSelectionMissing
+  const isSendBlocked = !isChatUnavailable && (isModelSelectionMissing || checkpoint.restoring)
   const sendBlockedMessage = isModelSelectionMissing
     ? t(
         "playground:chat.selectModelBeforeSending",
@@ -3567,6 +3560,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           className="custom-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-4"
         >
           <div className={`mx-auto w-full ${contentMaxWidthClass} pb-6`}>
+            {checkpoint.controller ? <HistorySelectionReview selection={checkpoint.controller} onReprepareRecovery={reprepareRecovery} /> : null}
             {hasMessages ? (
               <div className="space-y-4 py-4">
                 {messages.map((msg, idx) => {
@@ -3593,6 +3587,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     >
                       <PlaygroundMessage
                         isBot={msg.isBot}
+                        role={msg.role}
                         message={msg.message}
                         name={msg.name}
                         images={msg.images}
@@ -3637,7 +3632,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         onSourceClick={
                           provenanceEnabled ? handleCitationSourceClick : undefined
                         }
-                        onSaveToWorkspaceNotes={() =>
+                        onSaveToWorkspaceNotes={notesCaptureReadOnly ? undefined : () =>
                           handleSaveMessageToNotes({
                             isBot: msg.isBot,
                             message: msg.message,
@@ -4055,7 +4050,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             }
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
+            draft={composerDraft}
             onDraftChange={setComposerDraft}
+            getSubmitLease={checkpoint.fence}
             slashCommands={slashCommands}
             placeholder={
               hasQueryableSelectedSources

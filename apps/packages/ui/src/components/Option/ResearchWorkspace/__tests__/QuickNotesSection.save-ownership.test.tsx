@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QuickNotesSection } from "../StudioPane/QuickNotesSection"
 import { useWorkspaceStore } from "@/store/workspace"
 import type { WorkspaceNote } from "@/types/workspace"
+import { readKnowledgeNoteProvenance, type KnowledgeNoteSource } from "@/utils/knowledge-note-provenance"
 
 const mocks = vi.hoisted(() => ({
   serverUrl: "https://research-a.example",
@@ -50,6 +51,7 @@ vi.mock("antd", async () => ({
         success: mocks.success,
         error: mocks.error,
         open: mocks.open,
+        destroy: vi.fn(),
         warning: vi.fn()
       },
       null
@@ -620,3 +622,179 @@ it("retains explicit capture history when the acknowledgment does not confirm it
   ).toEqual(replacement)
   expect(mocks.success).not.toHaveBeenCalled()
 })
+
+const sourceHistory = (id: string): KnowledgeNoteSource => ({
+  originalId: id, excerpt: `Excerpt ${id}`, mediaId: 71,
+  title: id, type: "website", sourceType: "web_capture",
+  url: "https://article.example/story", snapshotMediaId: 71, originalVersion: 9
+})
+const originalHistory = {
+  origin: "knowledge_qa" as const, question: "Original question",
+  trust_state: "uncited_degraded_answer", trust_reason_codes: ["missing_citations"],
+  sources: [sourceHistory("A"), sourceHistory("removed")]
+}
+const pendingHistory = { ...originalHistory, sources: [...originalHistory.sources, sourceHistory("C")] }
+const remoteHistory = {
+  ...originalHistory, question: "Remote question", trust_reason_codes: ["remote_review"],
+  sources: [sourceHistory("A"), sourceHistory("B")]
+}
+const reconciledHistory = { ...remoteHistory, sources: [...remoteHistory.sources, sourceHistory("C")] }
+const prepareCaptureConflict = async () => {
+  useWorkspaceStore.setState({ currentNote: {
+    ...draft(), content: "Unsaved captured message", version: 40,
+    knowledge_provenance_state: "active", knowledge_provenance_version: 2,
+    knowledge_provenance: originalHistory, pendingKnowledgeProvenance: pendingHistory
+  } })
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "GET") return {
+      ...draft(), title: "Remote title", content: "Remote body", version: 41,
+      knowledge_provenance_state: "active", knowledge_provenance_version: 3,
+      knowledge_provenance: remoteHistory
+    }
+    if (writes().length === 1) throw { status: 409, message: "version conflict" }
+    return { ...request.body, id: noteId, version: 42,
+      knowledge_provenance_state: "active", knowledge_provenance_version: 4,
+      knowledge_provenance: request.body.knowledge_provenance || remoteHistory }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.open).toHaveBeenCalled())
+  await waitFor(() => expect(screen.getByRole("button", { name: "Update" })).not.toBeDisabled())
+}
+const reloadCaptureConflict = () => {
+  render(mocks.open.mock.calls.at(-1)![0].content)
+  fireEvent.click(screen.getByRole("button", { name: "Reload latest" }))
+}
+it("capture conflict retry reconciles whole canonical history without resurrecting removed references", async () => {
+  await prepareCaptureConflict()
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  const retry = writes()[1][0]
+  expect(retry.body.knowledge_provenance).toEqual(reconciledHistory)
+  expect(retry.body.expected_provenance_version).toBe(3)
+  expect(retry.headers["expected-version"]).toBe("41")
+  expect(retry.headers["Idempotency-Key"]).not.toBe(writes()[0][0].headers["Idempotency-Key"])
+  expect(readKnowledgeNoteProvenance(retry.body.content)).toEqual(reconciledHistory)
+})
+it("reload latest retains unsaved capture provenance through the next explicit save", async () => {
+  await prepareCaptureConflict()
+  reloadCaptureConflict()
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  const current = useWorkspaceStore.getState().currentNote
+  expect(current.content).toContain("Remote body")
+  expect(current.content).toContain("Unsaved captured message")
+  expect(current.pendingKnowledgeProvenance).toEqual(reconciledHistory)
+  expect(current.isDirty).toBe(true)
+  const reload = mocks.request.mock.calls.filter(([request]) => request.method === "GET" && request.path === `/api/v1/notes/${noteId}`).at(-1)![0]
+  expect(reload.servicePromptConfig).toMatchObject({ serverUrl: "https://research-a.example", expectedUserId: "alice" })
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(writes()).toHaveLength(2))
+  expect(writes()[1][0].body.knowledge_provenance).toEqual(reconciledHistory)
+  await waitFor(() => expect(useWorkspaceStore.getState().currentNote.pendingKnowledgeProvenance).toBeUndefined())
+})
+it.each(["workspace", "workspace-return", "note", "note-return", "clear", "account", "server", "edit"])(
+  "reload latest cannot replace a retired %s capture draft",
+  async (change) => {
+    await prepareCaptureConflict()
+    const gate = deferred()
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return []
+      await gate.promise
+      return { ...draft(), content: "Late remote body", version: 42,
+        knowledge_provenance_state: "active", knowledge_provenance_version: 3,
+        knowledge_provenance: remoteHistory }
+    })
+    const callsBefore = mocks.request.mock.calls.length
+    reloadCaptureConflict()
+    await waitFor(() => expect(mocks.request.mock.calls.length).toBeGreaterThan(callsBefore))
+    await act(async () => {
+      if (change === "edit")
+        useWorkspaceStore.getState().updateNoteContent("Newer local capture draft")
+      else changeContext(change)
+    })
+    const replacement = useWorkspaceStore.getState().currentNote
+    await act(async () => { gate.resolve(); await gate.promise })
+    expect(useWorkspaceStore.getState().currentNote).toBe(replacement)
+    expect(mocks.success).not.toHaveBeenCalled()
+  }
+)
+
+it.each([
+  ["GET", "body"], ["PUT", "body"],
+  ["GET", "capture-D"], ["PUT", "capture-D"]
+] as const)(
+  "rebased save acknowledgment retains remote history through a %s %s edit and second save",
+  async (boundary, change) => {
+    const localHistory = { ...originalHistory, sources: [sourceHistory("A")] }
+    const localPending = { ...localHistory, sources: [...localHistory.sources, sourceHistory("C")] }
+    const freshHistory = { ...remoteHistory, sources: [sourceHistory("B")] }
+    const acceptedHistory = { ...freshHistory, sources: [...freshHistory.sources, sourceHistory("C")] }
+    const nextHistory = change === "body" ? acceptedHistory
+      : { ...acceptedHistory, sources: [...acceptedHistory.sources, sourceHistory("D")] }
+    const getGate = deferred()
+    const putGate = deferred()
+    if (boundary === "PUT") getGate.resolve()
+    useWorkspaceStore.setState({ currentNote: {
+      ...draft(), version: undefined,
+      knowledge_provenance_state: "active", knowledge_provenance_version: 2,
+      knowledge_provenance: localHistory, pendingKnowledgeProvenance: localPending
+    } })
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return []
+      if (request.method === "GET") {
+        await getGate.promise
+        return { ...draft(), version: 41, knowledge_provenance_state: "active",
+          knowledge_provenance_version: 3, knowledge_provenance: freshHistory }
+      }
+      const first = writes().length === 1
+      if (first) await putGate.promise
+      return { ...request.body, id: noteId, version: first ? 42 : 43,
+        knowledge_provenance_state: "active", knowledge_provenance_version: first ? 4 : 5,
+        knowledge_provenance: request.body.knowledge_provenance || acceptedHistory }
+    })
+    render(<QuickNotesSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.request.mock.calls.some(([request]) =>
+      request.method === boundary && request.path === `/api/v1/notes/${noteId}`
+    )).toBe(true))
+    await act(async () => {
+      const state = useWorkspaceStore.getState()
+      if (change === "body") state.updateNoteContent("Later human body")
+      else state.captureToCurrentNote({
+        content: "New capture D", title: "New capture D",
+        provenance: { ...localPending, sources: [...localPending.sources, sourceHistory("D")] }
+      })
+    })
+    const newerBody = useWorkspaceStore.getState().currentNote.content
+    await act(async () => { getGate.resolve(); await getGate.promise })
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    const firstBody = structuredClone(writes()[0][0].body)
+    expect(firstBody.knowledge_provenance).toEqual(acceptedHistory)
+    expect(firstBody.expected_provenance_version).toBe(3)
+    expect(writes()[0][0].headers["expected-version"]).toBe("41")
+    await act(async () => { putGate.resolve(); await putGate.promise })
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledTimes(1))
+    const afterAck = structuredClone(useWorkspaceStore.getState().currentNote)
+    expect(afterAck.content).toBe(newerBody)
+    expect(afterAck.knowledge_provenance).toEqual(acceptedHistory)
+    expect(afterAck.knowledge_provenance_version).toBe(4)
+    expect(afterAck.version).toBe(42)
+    expect(afterAck.isDirty).toBe(true)
+    expect(writes()[0][0].body).toEqual(firstBody)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update" })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledTimes(2))
+    const second = writes()[1][0]
+    if (change === "body") expect(second.body.knowledge_provenance).toBeUndefined()
+    else expect(second.body.knowledge_provenance).toEqual(nextHistory)
+    expect(readKnowledgeNoteProvenance(second.body.content)).toEqual(nextHistory)
+    expect(second.headers["expected-version"]).toBe("42")
+    expect(second.headers["Idempotency-Key"]).not.toBe(writes()[0][0].headers["Idempotency-Key"])
+    expect(afterAck.pendingKnowledgeProvenance).toEqual(change === "body" ? undefined : nextHistory)
+    expect(useWorkspaceStore.getState().currentNote.knowledge_provenance).toEqual(nextHistory)
+    expect(useWorkspaceStore.getState().currentNote.pendingKnowledgeProvenance).toBeUndefined()
+    expect(useWorkspaceStore.getState().currentNote.knowledge_provenance?.sources?.map(source => source.originalId))
+      .toEqual(change === "body" ? ["B", "C"] : ["B", "C", "D"])
+  }
+)

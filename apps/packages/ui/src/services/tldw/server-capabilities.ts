@@ -11,6 +11,7 @@ import {
 } from "@/services/tldw/runtime-auth-override"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import { createSafeStorage } from "@/utils/safe-storage"
+import { requestScopeFields, type ServicePromptRequestScope } from "./domains/service-prompts"
 
 export type ServerCapabilities = {
   hasChat: boolean
@@ -39,6 +40,7 @@ export type ServerCapabilities = {
   hasChatbooks: boolean
   hasChatQueue: boolean
   hasChatSaveToDb: boolean
+  hasChatTurnIdentity?: boolean
   hasWebClipper: boolean
   hasStt: boolean
   hasTts: boolean
@@ -91,6 +93,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasChatbooks: false,
   hasChatQueue: false,
   hasChatSaveToDb: false,
+  hasChatTurnIdentity: false,
   hasWebClipper: false,
   hasStt: false,
   hasTts: false,
@@ -532,6 +535,14 @@ const computeCapabilities = (
   const paths = normalizePaths(spec.paths || {})
   const has = (p: string) => Boolean(paths[p])
   const hasChatSaveToDb = detectChatSaveToDb(spec)
+  const chatRequestContent =
+    spec?.paths?.["/api/v1/chat/completions"]?.post?.requestBody?.content
+  const hasChatTurnIdentity = schemaHasProperty(
+    chatRequestContent?.["application/json"]?.schema ??
+      chatRequestContent?.["application/json;charset=utf-8"]?.schema,
+    "tldw_turn",
+    spec
+  )
   const hasSlidesRoutes =
     has("/api/v1/slides/generate/from-media") ||
     has("/api/v1/slides/presentations") ||
@@ -607,6 +618,7 @@ const computeCapabilities = (
     hasChatbooks: has("/api/v1/chatbooks/export") || has("/api/v1/chatbooks/health"),
     hasChatQueue: has("/api/v1/chat/queue/status") || has("/api/v1/chat/queue/activity"),
     hasChatSaveToDb,
+    hasChatTurnIdentity,
     hasWebClipper: has("/api/v1/web-clipper/save"),
     hasStt,
     hasTts,
@@ -876,6 +888,223 @@ const fetchCapabilitiesFromServer = async (
   }
 
   return capabilities
+}
+
+export const getChatTurnIdentitySupport = async (
+  requestScope: ServicePromptRequestScope,
+  signal?: AbortSignal
+): Promise<boolean> => {
+  // Retry safety must use the same pinned target as the completion, not UI cache state.
+  const spec = await bgRequest({
+    path: "/openapi.json",
+    method: "GET",
+    abortSignal: signal,
+    ...requestScopeFields(requestScope)
+  })
+  return computeCapabilities(spec, "authoritative").hasChatTurnIdentity === true
+}
+
+const selectedDurableMarker = {
+  version: 1, history: "h1_single_input_v1", result: "rag_source_v1", request_digest: "history_context_wire_v1",
+  recovery_read: "protected_live_v1", inference_guarantee: "multiple_results_possible"
+}
+const sourceBounds = {
+  sources: 20, excerpt_scalars: 1000, excerpt_utf8_bytes: 4000, aggregate_excerpt_scalars: 16000,
+  name_utf8_bytes: 1000, metadata_text_utf8_bytes: 1000, chunk_id_utf8_bytes: 512, compact_label_utf8_bytes: 128,
+  url_utf8_bytes: 2048, result_canonical_utf8_bytes: 65536, distinct_excerpts: true,
+  media_id_utf8_bytes: 512, paired_character_ranges: true, chunk_index_within_total: true
+}
+type SchemaObject = Record<string, unknown>
+const schemaObject = (value: unknown): SchemaObject =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as SchemaObject : {}
+const exactFields = (value: unknown, expected: SchemaObject): boolean => {
+  const object = schemaObject(value)
+  return Object.keys(object).length === Object.keys(expected).length &&
+    Object.entries(expected).every(([key, item]) => object[key] === item)
+}
+
+/** A marker is insufficient: follow operation references to the strict bounded wire DTOs. */
+const selectedDurableContract = (spec: unknown): boolean => {
+  const resolve = (value: unknown) => schemaObject(resolveSchemaRef(value, spec))
+  const variants = (value: unknown, allowNull = false, depth = 0): SchemaObject[] => {
+    if (depth > 8) return []
+    const node = resolve(value)
+    const union = node.oneOf ?? node.anyOf
+    if (!Array.isArray(union)) return [node]
+    return union.flatMap(item => variants(item, allowNull, depth + 1)).filter(item => !allowNull || item.type !== "null")
+  }
+  const single = (value: unknown) => {
+    const nodes = variants(value, true)
+    return nodes.length === 1 ? nodes[0] : {}
+  }
+  const props = (value: unknown) => schemaObject(resolve(value).properties)
+  const strict = (value: unknown, keys: string[], required = keys): SchemaObject | null => {
+    const node = resolve(value)
+    const properties = props(node)
+    const mandatory = node.required ?? []
+    if (node.type !== "object" || node.additionalProperties !== false ||
+        Object.keys(properties).length !== keys.length || !keys.every(key => key in properties) ||
+        !Array.isArray(mandatory) || mandatory.length !== required.length || !required.every(key => mandatory.includes(key))) return null
+    return properties
+  }
+  const literal = (value: unknown, constant: string | number) => {
+    const node = resolve(value)
+    return node.type === (typeof constant === "number" ? "integer" : "string") &&
+      (node.const === constant || (Array.isArray(node.enum) && node.enum.length === 1 && node.enum[0] === constant))
+  }
+  const string = (value: unknown) => resolve(value).type === "string"
+  const hex = (value: unknown) => {
+    const node = resolve(value)
+    return string(node) && node.pattern === "^[0-9a-f]{64}$" && node.minLength === 64 && node.maxLength === 64
+  }
+  const safeInt = (value: unknown) => {
+    const node = resolve(value)
+    return node.type === "integer" && node.minimum === 0 && node.maximum === Number.MAX_SAFE_INTEGER
+  }
+  const nonnegative = (value: unknown) => resolve(value).type === "integer" && resolve(value).minimum === 0
+  const referenceKeys = ["version", "owner_key", "conversation_id", "input_message_id", "input_message_revision", "selection_digest"]
+  const reference = (value: unknown, full = false) => {
+    const fields = strict(value, full ? [...referenceKeys, "messages", "originating_selection_revision"] : referenceKeys)
+    return !!fields && literal(fields.version, 1) && referenceKeys.slice(1).every(key => string(fields[key])) &&
+      (!full || (manifest(fields.messages) && nonnegative(fields.originating_selection_revision)))
+  }
+  const manifest = (value: unknown) => {
+    const array = resolve(value)
+    const fields = strict(array.items, ["id", "revision"])
+    return array.type === "array" && !!fields && string(fields.id) && string(fields.revision)
+  }
+  const selection = (value: unknown) => {
+    const fields = strict(value, ["version", "owner_key", "conversation_id", "interpretation", "cursor", "selection_revision",
+      "purpose", "messages", "fences", "storage_context_digest", "request_context_digest", "selection_digest"])
+    if (!fields || !literal(fields.version, 1) || !["owner_key", "conversation_id", "storage_context_digest", "request_context_digest", "selection_digest"].every(key => string(fields[key])) ||
+        !manifest(fields.messages) || !nonnegative(fields.selection_revision) || !Array.isArray(resolve(fields.purpose).enum) ||
+        !(resolve(fields.purpose).enum as unknown[]).includes("send")) return false
+    const fences = strict(fields.fences, ["conversation", "history", "settings"])
+    if (!fences || !Object.values(fences).every(string)) return false
+    const interpretations = variants(fields.interpretation)
+    const cursors = variants(fields.cursor)
+    return interpretations.length === 2 && ["parent_graph_v1", "legacy_linear_v1"].every(kind => interpretations.some(node => literal(props(node).kind, kind))) && interpretations.every(node => {
+      const kind = props(node).kind
+      return literal(kind, "parent_graph_v1") ? !!strict(node, ["kind"]) :
+        literal(kind, "legacy_linear_v1") && !!strict(node, ["kind", "projection_id"]) && string(props(node).projection_id)
+    }) && cursors.length === 3 && ["empty", "before_message", "after_message"].every(kind => cursors.some(node => literal(props(node).kind, kind))) && cursors.every(node => literal(props(node).kind, "empty") ? !!strict(node, ["kind"]) :
+      (literal(props(node).kind, "before_message") || literal(props(node).kind, "after_message")) &&
+      !!strict(node, ["kind", "message_id"]) && string(props(node).message_id))
+  }
+  const source = (value: unknown) => {
+    const fields = strict(value, ["name", "type", "mode", "url", "pageContent", "metadata"])
+    if (!fields || !["name", "type", "url", "pageContent"].every(key => string(fields[key])) ||
+        !literal(fields.mode, "rag") || resolve(fields.pageContent).maxLength !== 1000) return false
+    const metadata = strict(fields.metadata, ["source", "title", "chunk_id", "retrieval_strategy", "source_type", "selection_reason", "score", "page", "loc",
+      "media_id", "author", "chunk_index", "total_chunks", "start_char", "end_char", "chunk_start", "chunk_end"], [])
+    if (!metadata || !["source", "title", "chunk_id", "retrieval_strategy", "source_type", "selection_reason", "media_id", "author"].every(key => string(metadata[key])) ||
+        !["page", "chunk_index", "start_char", "end_char", "chunk_start", "chunk_end"].every(key => safeInt(metadata[key])) ||
+        resolve(metadata.total_chunks).type !== "integer" || resolve(metadata.total_chunks).minimum !== 1 ||
+        resolve(metadata.total_chunks).maximum !== Number.MAX_SAFE_INTEGER) return false
+    const score = variants(metadata.score)
+    if (!score.length || score.some(node => node.type !== "integer" && node.type !== "number")) return false
+    const loc = strict(metadata.loc, ["lines"])
+    const lines = loc && strict(loc.lines, ["from", "to"])
+    return !!lines && safeInt(lines.from) && safeInt(lines.to)
+  }
+  const payload = (value: unknown, receipt = false) => {
+    const fields = strict(value, receipt ? ["version", "sources", "result_message_id", "result_message_revision", "admission", "request_context_digest"] : ["version", "sources"])
+    if (!fields || !literal(fields.version, 1)) return false
+    const sources = resolve(fields.sources)
+    if (sources.type !== "array" || sources.maxItems !== 20 || (sources.minItems !== undefined && sources.minItems !== 0) || !source(sources.items)) return false
+    return receipt ? string(fields.result_message_id) && resolve(fields.result_message_id).format === "uuid" &&
+      literal(fields.result_message_revision, "1") && reference(fields.admission) && hex(fields.request_context_digest)
+      : exactFields(resolve(value)["x-tldw-source-bounds"], sourceBounds)
+  }
+  const scope = (value: unknown) => {
+    const nodes = variants(value)
+    return nodes.length === 2 && ["global", "workspace"].every(kind => nodes.some(node => literal(props(node).scope_type, kind))) && nodes.every(node => {
+      const fields = strict(node, ["scope_type", "workspace_id"])
+      return !!fields && (literal(fields.scope_type, "global") ? resolve(fields.workspace_id).type === "null" :
+        literal(fields.scope_type, "workspace") && string(fields.workspace_id) && resolve(fields.workspace_id).minLength === 1)
+    })
+  }
+  const recovery = (value: unknown) => {
+    const nodes = variants(value, true)
+    const statuses = nodes.map(node => resolve(props(node).status).const)
+    if (nodes.length !== 3 || new Set(statuses).size !== 3) return false
+    return nodes.every(node => {
+      const fields = props(node)
+      if (literal(fields.status, "input_verified")) return !!strict(node, ["version", "status", "scope", "admission"]) && literal(fields.version, 1) && scope(fields.scope) && reference(fields.admission, true)
+      if (literal(fields.status, "result_verified")) return !!strict(node, ["version", "status", "scope", "result"]) && literal(fields.version, 1) && scope(fields.scope) && payload(fields.result, true)
+      const codes = resolve(fields.code).enum
+      return literal(fields.status, "unverified") && !!strict(node, ["version", "status", "code"]) && literal(fields.version, 1) &&
+        Array.isArray(codes) && codes.length === 3 && ["no_protected_binding", "live_state_mismatch", "unsupported_projection"].every(code => codes.includes(code))
+    })
+  }
+  const requiredFields = (value: unknown, keys: string[]) => {
+    const node = resolve(value)
+    const required = node.required
+    return node.type === "object" && Array.isArray(required) && keys.every(key => required.includes(key)) ? props(node) : null
+  }
+  const messageList = (value: unknown) => {
+    const fields = requiredFields(value, ["messages", "total", "limit", "offset", "pagination"])
+    if (!fields || !["total", "limit", "offset"].every(key => resolve(fields[key]).type === "integer")) return false
+    const messages = resolve(fields.messages)
+    if (messages.type !== "array" || !recovery(props(resolve(messages.items)).tldw_history_recovery_v1) ||
+        single(fields.has_more).type !== "boolean" || !nonnegative(single(fields.next_offset))) return false
+    const pagination = requiredFields(fields.pagination, ["limit", "offset", "has_more"])
+    return !!pagination && literal(pagination.mode, "offset") && resolve(pagination.limit).type === "integer" &&
+      resolve(pagination.limit).minimum === 1 && nonnegative(pagination.offset) &&
+      nonnegative(single(pagination.total)) && resolve(pagination.has_more).type === "boolean" &&
+      nonnegative(single(pagination.next_offset))
+  }
+  const paths = schemaObject(schemaObject(spec).paths)
+  const post = schemaObject(schemaObject(paths["/api/v1/chat/completions"]).post)
+  if (!exactFields(post["x-tldw-selected-durable-turn"], selectedDurableMarker)) return false
+  const jsonSchema = (value: unknown) => schemaObject(schemaObject(schemaObject(value).content)["application/json"]).schema
+  const turn = single(props(single(jsonSchema(post.requestBody))).tldw_turn)
+  const turnFields = strict(turn, ["user_message_id", "history_v1", "result_v1"], ["user_message_id"])
+  if (!turnFields || !string(turnFields.user_message_id) || resolve(turnFields.user_message_id).format !== "uuid" || !payload(single(turnFields.result_v1))) return false
+  const histories = variants(turnFields.history_v1, true).flatMap(node => variants(node))
+  if (histories.length !== 2 || !histories.some(node => literal(props(node).kind, "selection")) || !histories.some(node => literal(props(node).kind, "admission")) ||
+      !histories.every(node => {
+        const fields = props(node)
+        return literal(fields.kind, "selection") ? !!strict(node, ["version", "kind", "selection"]) && literal(fields.version, 1) && selection(fields.selection) :
+          literal(fields.kind, "admission") && !!strict(node, ["version", "kind", "admission", "request_context_digest"]) && literal(fields.version, 1) && reference(fields.admission) && hex(fields.request_context_digest)
+      })) return false
+  const readMarker = { version: 1, projection: "protected_live_v1" }
+  for (const [path, list] of [["/api/v1/messages/{message_id}", false], ["/api/v1/chats/{chat_id}/messages", true]] as const) {
+    const route = schemaObject(paths[path])
+    const operation = schemaObject(route.get)
+    if (!exactFields(operation["x-tldw-history-recovery-read"], readMarker)) return false
+    const parameters = [...(Array.isArray(route.parameters) ? route.parameters : []), ...(Array.isArray(operation.parameters) ? operation.parameters : [])].map(resolve)
+    const query = (name: string) => {
+      const matches = parameters.filter(param => param.in === "query" && param.name === name)
+      return matches.length === 1 ? resolve(matches[0].schema) : {}
+    }
+    const optIn = query("include_history_recovery_v1")
+    const scopeQuery = single(query("scope_type"))
+    const scopes = scopeQuery.enum
+    if (optIn.type !== "boolean" || optIn.default !== false || scopeQuery.type !== "string" || !Array.isArray(scopes) || scopes.length !== 2 || !scopes.includes("global") || !scopes.includes("workspace") ||
+        !string(single(query("workspace_id"))) ||
+        (list && !["format_for_completions", "include_character_context", "include_deleted", "render_placeholders"].every(name => query(name).type === "boolean"))) return false
+    const response = schemaObject(schemaObject(operation.responses)["200"])
+    if (!list) {
+      if (!recovery(props(single(jsonSchema(response))).tldw_history_recovery_v1)) return false
+    } else {
+      const limit = query("limit")
+      const offset = query("offset")
+      if (limit.type !== "integer" || limit.default !== 50 || limit.minimum !== 1 || limit.maximum !== 200 ||
+          offset.type !== "integer" || offset.default !== 0 || offset.minimum !== 0 || offset.maximum !== undefined ||
+          !messageList(jsonSchema(response))) return false
+    }
+  }
+  return true
+}
+
+export const getSelectedDurableTurnSupport = async (
+  requestScope: ServicePromptRequestScope, signal?: AbortSignal
+): Promise<boolean> => {
+  signal?.throwIfAborted()
+  const spec = await bgRequest({ path: "/openapi.json", method: "GET", abortSignal: signal, ...requestScopeFields(requestScope) })
+  signal?.throwIfAborted()
+  return selectedDurableContract(spec)
 }
 
 export const getServerCapabilities = async (

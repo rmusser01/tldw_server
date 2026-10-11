@@ -4,7 +4,9 @@ import type {
   WorkspaceSourceCreateRequest,
   WorkspaceUpsertRequest
 } from "@/services/tldw/domains/workspace-api"
-import type { WorkspaceSource } from "@/types/workspace"
+import type { StudyMaterialsPolicy, WorkspaceSource } from "@/types/workspace"
+import type { ServerWorkspaceCache } from "@/store/workspace-api"
+export { buildResearchWorkspaceServerSourceSignature } from "@/store/workspace-api"
 
 export interface ResearchWorkspaceServerClient {
   upsertWorkspace: (
@@ -34,6 +36,7 @@ export interface ResearchWorkspaceServerReconcileInput {
   client: ResearchWorkspaceServerClient
   workspaceId: string
   workspaceName?: string | null
+  studyMaterialsPolicy?: StudyMaterialsPolicy | null
   sources: WorkspaceSource[]
   selectedSourceIds?: string[]
   onWorkspaceReady?: () => void
@@ -99,26 +102,25 @@ const buildSourceCreateRequest = (
   }
 }
 
-export const buildResearchWorkspaceServerSourceSignature = (
-  sources: WorkspaceSource[]
-): string =>
-  sources
-    .map((source, index) =>
-      [
-        index,
-        source.id,
-        Number.isFinite(source.mediaId) ? source.mediaId : "invalid-media",
-        source.title,
-        source.type,
-        source.url || ""
-      ].join(":")
-    )
-    .join("|")
+export const matchesHydratedWorkspaceBaseline = (input: {
+  workspaceId: string
+  workspaceName: string
+  studyMaterialsPolicy: StudyMaterialsPolicy | null
+  sourceSignature: string
+  selectedSourceSignature: string
+  baseline?: ServerWorkspaceCache | null
+}): boolean => Boolean(input.baseline &&
+  input.baseline.metadata.id === input.workspaceId &&
+  (input.baseline.metadata.name || "Untitled Workspace") === input.workspaceName &&
+  input.baseline.metadata.study_materials_policy === input.studyMaterialsPolicy &&
+  input.baseline.sourceSignature === input.sourceSignature &&
+  input.baseline.selectedSourceSignature === input.selectedSourceSignature)
 
 export const reconcileResearchWorkspaceServerState = async ({
   client,
   workspaceId,
   workspaceName,
+  studyMaterialsPolicy,
   sources,
   selectedSourceIds,
   onWorkspaceReady
@@ -134,7 +136,7 @@ export const reconcileResearchWorkspaceServerState = async ({
   try {
     await client.upsertWorkspace(workspaceId, {
       name: normalizeWorkspaceName(workspaceName),
-      study_materials_policy: "workspace"
+      study_materials_policy: studyMaterialsPolicy ?? "workspace"
     })
     result.workspaceReady = true
     onWorkspaceReady?.()

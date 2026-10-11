@@ -1,4 +1,9 @@
 import type { StagedWorkspaceSource } from "./types"
+import { useSetting } from "@/hooks/useSetting"
+import { useDarkModeStore } from "@/hooks/useDarkmode"
+import { CUSTOM_THEMES_SETTING, THEME_PRESET_SETTING } from "@/services/settings/ui-settings"
+import { getDefaultTheme, getThemeById } from "@/themes/presets"
+import { meetsTextContrast } from "@/themes/contrast"
 
 export type ContextStagingCardProps = {
   sources: StagedWorkspaceSource[]
@@ -11,10 +16,10 @@ export type ContextStagingCardProps = {
 }
 
 const actionButtonClass =
-  "inline-flex min-h-[28px] items-center justify-center rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 xl:min-h-8"
 
 const primaryButtonClass =
-  "inline-flex min-h-[28px] items-center justify-center rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+  "inline-flex min-h-11 items-center justify-center rounded-md bg-primaryStrong px-2.5 py-1 text-xs font-medium transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 xl:min-h-8"
 
 export const ContextStagingCard = ({
   sources,
@@ -25,6 +30,14 @@ export const ContextStagingCard = ({
   onSend,
   onRemoveSource
 }: ContextStagingCardProps) => {
+  const [themeId] = useSetting(THEME_PRESET_SETTING)
+  const [customThemes] = useSetting(CUSTOM_THEMES_SETTING)
+  const mode = useDarkModeStore(state => state.mode)
+  const theme = getThemeById(themeId, customThemes) ?? getDefaultTheme()
+  const primaryStrong = theme.palette[mode === "dark" ? "dark" : "light"].primaryStrong
+  const primaryForeground = meetsTextContrast("255 255 255", primaryStrong)
+    ? "#ffffff"
+    : "#000000"
   const hasSources = sources.length > 0
   const sendDisabled = isSending || !canSend || !hasSources
 
@@ -75,7 +88,9 @@ export const ContextStagingCard = ({
                   </div>
                 </div>
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
-                  <span className="min-w-0 break-words">{source.scopeLabel}</span>
+                  <span className="min-w-0 break-words">
+                    {source.scopeLabel}
+                  </span>
                   <span aria-hidden="true">/</span>
                   <span>{source.type}</span>
                 </div>
@@ -113,6 +128,7 @@ export const ContextStagingCard = ({
           <button
             type="button"
             className={primaryButtonClass}
+            style={{ color: primaryForeground }}
             onClick={onSend}
             disabled={sendDisabled}
             aria-label="Send with staged context"

@@ -211,6 +211,27 @@ describe("TldwApiClient captured request scope", () => {
     expect(outbound.body).not.toHaveProperty("requestScope")
   })
 
+  it.each([
+    { name: "runtime mixin", Client: TldwApiClient },
+    { name: "base client", Client: TldwApiClientBase }
+  ])("binds conversation lookup in $name to the captured account and cancellation", async ({ Client }) => {
+    mocks.bgRequest.mockResolvedValueOnce({ id: "chat-1" })
+    const controller = new AbortController()
+    const client = new Client()
+    await client.getChat("chat-1", {
+      scope: { type: "workspace", workspaceId: "workspace-1" },
+      requestScope,
+      signal: controller.signal
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/chats/chat-1?scope_type=workspace&workspace_id=workspace-1",
+      method: "GET",
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: expectedScopeFields.servicePromptConfig,
+      abortSignal: controller.signal
+    })
+  })
+
   it("binds non-streaming chat without serializing the scope", async () => {
     mocks.bgRequest.mockResolvedValueOnce({ choices: [] })
     const client = new TldwApiClient()

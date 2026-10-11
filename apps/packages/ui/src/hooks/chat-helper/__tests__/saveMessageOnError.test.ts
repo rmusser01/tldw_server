@@ -96,6 +96,48 @@ describe("saveMessageOnError", () => {
       id: "local-assistant", serverMessageId: "server-assistant", role: "assistant"
     }))
   })
+  describe.each([false, true])("role metadata (scoped=%s)", (scoped) => {
+    it.each([
+      { historyId: "history-1", abort: false },
+      { historyId: null, abort: false },
+      { historyId: "history-1", abort: true },
+      { historyId: null, abort: true }
+    ])("keeps assistant interruption status off the user (history=$historyId, abort=$abort)", async ({ historyId, abort }) => {
+      const generationInfo = {
+        tldw_user_message_id: "durable-user-1",
+        request_label: "original request",
+        interrupted: true,
+        interruptionReason: "Connection dropped",
+        interruptedAt: 123,
+        partialResponseSaved: true,
+        streamTransportInterrupted: true,
+        streamTransportInterruptionReason: "Port closed"
+      }
+      await saveMessageOnError({
+        e: Object.assign(new Error("Connection dropped"), { name: abort ? "AbortError" : "Error" }),
+        history: [], setHistory: vi.fn(), image: "",
+        userMessage: "Question", botMessage: "Partial answer",
+        historyId, selectedModel: "model-1", setHistoryId: vi.fn(),
+        isRegenerating: false, userMessageId: "user-1", assistantMessageId: "assistant-1",
+        generationInfo,
+        ...(scoped ? {
+          scopeSignal: new AbortController().signal,
+          scopeInvalidatedSignal: new AbortController().signal
+        } : {})
+      })
+      expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+        role: "user",
+        generationInfo: {
+          tldw_user_message_id: "durable-user-1",
+          request_label: "original request"
+        }
+      }))
+      expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+        role: "assistant", generationInfo
+      }))
+      expect(generationInfo.interrupted).toBe(true)
+    })
+  })
 
   it("falls back to store setter when setHistory is not callable", async () => {
     const history: ChatHistory = [

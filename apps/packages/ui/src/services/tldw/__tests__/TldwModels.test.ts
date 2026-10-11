@@ -452,6 +452,49 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    { dev: true, cached: false },
+    { dev: false, cached: false },
+    { dev: true, cached: true },
+    { dev: false, cached: true }
+  ])(
+    "warns for handled metadata failures without reporting an unhandled error (dev=$dev, cached=$cached)",
+    async ({ dev, cached }) => {
+      vi.stubEnv("DEV", dev)
+      const fetchError = new TypeError("Failed to fetch")
+      const cachedModels = cached
+        ? [{ id: "local-model", name: "Local Model", provider: "llama", type: "chat" }]
+        : []
+      if (cached) {
+        mocks.storageGet.mockResolvedValue({
+          version: 4,
+          timestamp: Date.now() - 600_000,
+          scope: "http://127.0.0.1:8000|single-user|key|none",
+          models: cachedModels
+        })
+      }
+      mocks.getModels.mockRejectedValueOnce(fetchError)
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+      try {
+        const { TldwModelsService } = await importService()
+        const service = new TldwModelsService()
+
+        await expect(service.getModels(true)).resolves.toEqual(cachedModels)
+        expect(consoleError).not.toHaveBeenCalled()
+        expect(consoleWarn).toHaveBeenCalledWith(
+          "Failed to fetch models from tldw:",
+          fetchError
+        )
+      } finally {
+        consoleError.mockRestore()
+        consoleWarn.mockRestore()
+        vi.unstubAllEnvs()
+      }
+    }
+  )
+
   it("does not retry or log model metadata requests aborted by page lifecycle", async () => {
     const abortError = Object.assign(
       new Error("signal is aborted without reason"),
@@ -463,6 +506,7 @@ describe("TldwModelsService caching", () => {
     )
     mocks.getModels.mockRejectedValue(abortError)
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
     try {
       const { TldwModelsService } = await importService()
@@ -471,8 +515,10 @@ describe("TldwModelsService caching", () => {
       await expect(service.getModels(true)).resolves.toEqual([])
       expect(mocks.getModels).toHaveBeenCalledTimes(1)
       expect(consoleError).not.toHaveBeenCalled()
+      expect(consoleWarn).not.toHaveBeenCalled()
     } finally {
       consoleError.mockRestore()
+      consoleWarn.mockRestore()
     }
   })
 

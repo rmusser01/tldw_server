@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/Common/Button"
 import { Alert, Badge } from "@/components/ui/primitives"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
-import { buildResearchWorkspaceReturnPath } from "@/routes/route-paths"
+import { buildResearchWorkspacePath, buildResearchWorkspaceReturnPath } from "@/routes/route-paths"
 import type {
   WorkspaceApiResponse,
   WorkspaceProfile
@@ -403,7 +403,7 @@ export const WorkspacesManagerPage = () => {
                   onSelect={(item) => setSelectedItemId(item.id)}
                   onOpen={(item) =>
                     navigate(
-                      buildResearchWorkspaceReturnPath({
+                      item.profile === "research" ? buildResearchWorkspacePath(item.id) : buildResearchWorkspaceReturnPath({
                         sourceWorkspaceId: item.id
                       })
                     )

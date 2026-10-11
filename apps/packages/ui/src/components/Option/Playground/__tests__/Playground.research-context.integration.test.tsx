@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { Playground } from "../Playground"
 
@@ -87,14 +87,22 @@ const mobileViewportState = vi.hoisted(() => ({
 }))
 
 const historySelectionState = vi.hoisted(() => ({
+  current: null as {
+    view: { owner_key: string; conversation_id: string }
+    owner: { kind: "native"; conversation_id: string; validate_lease: () => boolean }
+  } | null,
   status: "idle",
   forkCandidate: null,
   forkSettings: null,
-  settingsMode: () => "ordinary" as const,
-  getCurrent: () => ({ status: "idle", owner: null, capture: null }),
+  settingsMode: () => historySelectionState.current?.owner.validate_lease() === false ? "pending" as const : "ordinary" as const,
+  getCurrent: () => ({ status: "idle", owner: historySelectionState.current?.owner ?? null,
+    view: historySelectionState.current?.view ?? null, capture: null }),
   getStoredReference: () => null,
   canAutomaticallyLoad: () => false,
-  fence: () => () => true
+  fence: () => {
+    const current = historySelectionState.current
+    return () => current === historySelectionState.current
+  }
 }))
 
 const storeOptionState = vi.hoisted(() => ({
@@ -154,6 +162,12 @@ const buildPersistedAttachment = (runId: string, query: string) => ({
   ...buildAttachedContext(runId, query),
   updatedAt: "2026-03-08T20:05:00Z"
 })
+
+const held = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -447,7 +461,9 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
   return {
     ...actual,
     HistorySelectionProvider: ({ children }: { children: React.ReactNode }) => children,
-    useHistorySelectionContext: () => historySelectionState
+    useHistorySelectionContext: () => ({ ...historySelectionState,
+      view: historySelectionState.current?.view ?? null,
+      owner: historySelectionState.current?.owner ?? null })
   }
 })
 
@@ -580,6 +596,16 @@ vi.mock("react-router-dom", async () => {
 describe("Playground research context integration", { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    historySelectionState.current = null
+    researchClientMocks.initialize.mockReset().mockResolvedValue(undefined)
+    researchClientMocks.getResearchBundle.mockReset().mockResolvedValue({
+      question: "Prepared follow-up question",
+      outline: { sections: [{ title: "Overview" }] },
+      claims: [{ text: "Claim one" }], unresolved_questions: ["Open question"],
+      verification_summary: { unsupported_claim_count: 0 },
+      source_trust: [{ source_id: "src_1", trust_tier: "high" }]
+    })
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => { throw new Error("Unexpected network request in finite parent research test") })
     window.history.replaceState({}, "", "/chat")
     mobileViewportState.value = false
     artifactsState.value.isOpen = false
@@ -609,6 +635,74 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     messageOptionState.value.toolChoice = "none"
     chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue(null)
     chatSettingsState.applyChatSettingsPatch.mockResolvedValue(null)
+  })
+
+  afterEach(() => {
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it.each([
+    ["chat", "initialize"], ["chat", "bundle"],
+    ["owner", "initialize"], ["owner", "bundle"],
+    ["revocation", "initialize"], ["revocation", "bundle"]
+  ] as const)("fences attachment and composer setters after %s while follow-up %s is held", async (boundary, phase) => {
+    let valid = true
+    historySelectionState.current = {
+      view: { owner_key: "owner-a", conversation_id: "chat-1" },
+      owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => valid }
+    }
+    const view = render(<Playground />)
+    const form = screen.getByTestId("playground-form")
+    const pending = held<unknown>()
+    const method = phase === "initialize" ? researchClientMocks.initialize : researchClientMocks.getResearchBundle
+    method.mockClear().mockImplementationOnce(() => pending.promise)
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(method).toHaveBeenCalledTimes(1))
+    if (boundary === "chat") {
+      messageOptionState.value.serverChatId = "chat-2"
+      messageOptionState.value.historyId = "history-2"
+      historySelectionState.current = {
+        view: { owner_key: "owner-a", conversation_id: "chat-2" },
+        owner: { kind: "native", conversation_id: "chat-2", validate_lease: () => true }
+      }
+    } else if (boundary === "owner") {
+      historySelectionState.current = {
+        view: { owner_key: "owner-b", conversation_id: "chat-1" },
+        owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => true }
+      }
+    } else valid = false
+    view.rerender(<Playground />)
+    expect(screen.getByTestId("playground-form")).toBe(form)
+    await act(async () => {
+      pending.resolve(phase === "bundle" ? { question: "Owner A result", outline: { sections: [] } } : undefined)
+      await pending.promise
+    })
+    expect.soft(form).toHaveAttribute("data-attached-run-id", "")
+    expect.soft(form).toHaveAttribute("data-baseline-run-id", "")
+    expect.soft(form).toHaveAttribute("data-history-run-ids", "")
+    expect.soft(storeOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect.soft(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+    if (phase === "initialize") expect.soft(researchClientMocks.getResearchBundle).not.toHaveBeenCalled()
+  })
+
+  it.each(["initialize", "bundle"] as const)("keeps same-owner follow-up attachment and composer setters while %s is held", async phase => {
+    historySelectionState.current = {
+      view: { owner_key: "owner-a", conversation_id: "chat-1" },
+      owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => true }
+    }
+    render(<Playground />)
+    const pending = held<unknown>()
+    const method = phase === "initialize" ? researchClientMocks.initialize : researchClientMocks.getResearchBundle
+    method.mockClear().mockImplementationOnce(() => pending.promise)
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(method).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      pending.resolve(phase === "bundle" ? { question: "Same-owner result", outline: { sections: [] } } : undefined)
+      await pending.promise
+    })
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "run_follow_up")
+    expect(storeOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith("Follow up on this research: Battery recycling supply chain")
   })
 
   it("prepares follow-up research by attaching the selected run and seeding the deterministic draft", async () => {

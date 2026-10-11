@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import builtins
+import os
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Callable
@@ -256,6 +258,24 @@ MINIMAL_TAIL_ROUTER_DEFINITION_DATA = (
         "/authnz-debug/status",
     ),
 )
+
+
+@pytest.fixture
+def enabled_media_audio_routes(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep resolution contracts independent of other suites' route disables."""
+    from tldw_Server_API.app.core.config import _route_toggle_policy
+
+    enabled_routes = os.environ.get("ROUTES_ENABLE", "")
+    try:
+        with monkeypatch.context() as route_env:
+            route_env.setenv(
+                "ROUTES_ENABLE",
+                ",".join((enabled_routes, "media", "audio", "audio-websocket")),
+            )
+            _route_toggle_policy.cache_clear()
+            yield
+    finally:
+        _route_toggle_policy.cache_clear()
 
 
 def _main_source_text() -> str:
@@ -6077,6 +6097,7 @@ def test_iter_minimal_optional_router_specs_defers_media_attr_lookup(
     assert access_count == {f"{module_name}.router": 1}
 
 
+@pytest.mark.usefixtures("enabled_media_audio_routes")
 def test_iter_minimal_optional_router_specs_skips_media_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -6121,6 +6142,7 @@ def test_iter_minimal_optional_router_specs_skips_media_missing_import_failures(
     assert "missing during import" in skip_message
 
 
+@pytest.mark.usefixtures("enabled_media_audio_routes")
 def test_iter_minimal_optional_router_specs_skips_media_missing_attribute_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -6148,6 +6170,7 @@ def test_iter_minimal_optional_router_specs_skips_media_missing_attribute_failur
     assert f"{module_name}.router" in skip_message
 
 
+@pytest.mark.usefixtures("enabled_media_audio_routes")
 @pytest.mark.parametrize(
     ("exception_type", "message"),
     (
@@ -10722,6 +10745,7 @@ def test_iter_minimal_optional_router_specs_defers_audio_router_attr_lookup(
     }
 
 
+@pytest.mark.usefixtures("enabled_media_audio_routes")
 def test_iter_minimal_optional_router_specs_skips_audio_router_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -10779,6 +10803,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_router_missing_import_fa
     )
 
 
+@pytest.mark.usefixtures("enabled_media_audio_routes")
 def test_iter_minimal_optional_router_specs_skips_audio_router_missing_attribute_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -10818,6 +10843,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_router_missing_attribute
     )
 
 
+@pytest.mark.usefixtures("enabled_media_audio_routes")
 @pytest.mark.parametrize(
     ("exception_type", "message"),
     (

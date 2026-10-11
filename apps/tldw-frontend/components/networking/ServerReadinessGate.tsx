@@ -587,46 +587,32 @@ export const ServerReadinessGate: React.FC<{
     }
   }, [bypass, degradedChecks, gate, healthUrl, lastReadinessState])
 
-  if (bypass || gate === "ready") {
-    return <>{children}</>
-  }
-
   if (nonBlocking) {
-    // Established session: the auth round trip already proved reachability, so
-    // health problems surface as banners around live content rather than a
-    // blocking spinner/recovery panel.
-    if (gate === "degraded") {
-      return (
-        <div
-          data-testid="server-readiness-degraded-shell"
-          className="server-readiness-degraded-shell"
-        >
+    const showDegraded = !bypass && gate === "degraded"
+    const showReconnect = !bypass && (gate === "waiting" || gate === "timeout")
+    const showBanner = showDegraded || showReconnect
+    // Keep the live child subtree at the same position even without a banner.
+    return (
+      <div
+        data-testid={showDegraded ? "server-readiness-degraded-shell" : showReconnect ? "server-readiness-nonblocking-shell" : undefined}
+        className={showBanner ? "server-readiness-degraded-shell" : "contents"}
+      >
+        {showDegraded ? (
           <ServerHealthWarningBanner degradedChecks={degradedChecks} />
-          <div className="server-readiness-degraded-content">
-            {children}
-          </div>
-        </div>
-      )
-    }
-
-    if (gate === "waiting" || gate === "timeout") {
-      return (
-        <div
-          data-testid="server-readiness-nonblocking-shell"
-          className="server-readiness-degraded-shell"
-        >
+        ) : showReconnect ? (
           <ServerReconnectBanner
             exhausted={gate === "timeout"}
             onRetry={retryNow}
           />
-          <div className="server-readiness-degraded-content">
-            {children}
-          </div>
+        ) : null}
+        <div className={showBanner ? "server-readiness-degraded-content" : "contents"}>
+          {children}
         </div>
-      )
-    }
+      </div>
+    )
+  }
 
-    // Initial check still in flight: render children with no banner.
+  if (bypass || gate === "ready") {
     return <>{children}</>
   }
 

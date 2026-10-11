@@ -210,6 +210,28 @@ describe("normalChatMode overlay prompt ordering", () => {
     )
   })
 
+  it.each([true, false])("keeps prior history out of server-owned request context only: %s", async serverOwned => {
+    const history = [
+      { role: "user", content: "Prior question" },
+      { role: "assistant", content: "Prior answer" }
+    ]
+    const prompt = await normalChatMode("Follow-up", "", false, [], history,
+      new AbortController().signal, {
+        selectedModel: "tldw:gemma", useOCR: false, selectedSystemPrompt: "",
+        currentChatModelSettings: {}, historyId: null, setHistoryId: vi.fn(),
+        historyForModel: history, historyTurn: { serverOwned } as never,
+        setMessages: vi.fn(), saveMessageOnSuccess: vi.fn(), saveMessageOnError: vi.fn(),
+        setHistory: vi.fn(), setIsProcessing: vi.fn(), setStreaming: vi.fn(),
+        setAbortController: vi.fn()
+      }) as unknown as { chatHistory: SystemMessage[] }
+    expect(prompt.chatHistory).toHaveLength(serverOwned ? 1 : 3)
+    expect(prompt.chatHistory[0].content).toBe("Base system prompt")
+    expect(history).toEqual([
+      { role: "user", content: "Prior question" },
+      { role: "assistant", content: "Prior answer" }
+    ])
+  })
+
   it("does not classify a no-web-search manual stop as scope invalidation", async () => {
     const controller = new AbortController()
     mocks.runChatPipeline.mockImplementationOnce(async (...args: unknown[]) => {

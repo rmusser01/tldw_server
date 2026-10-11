@@ -4,9 +4,9 @@ import { toPrefillSource } from "@/utils/research-workspace-prefill"
  * ExportDialog - Export conversations as markdown/PDF with citations
  */
 
-import { getMeasuredRelevance } from "./sourceListUtils"
+import { getMeasuredRelevance, getOriginalResultIndex } from "./sourceListUtils"
 
-import React, { useState, useCallback, useEffect, useRef } from "react"
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { retainKnowledgeNoteProvenance, validateKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -108,6 +108,16 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     searchDetails,
   } = useKnowledgeQA()
   const query = resultQuery === undefined ? editableQuery : resultQuery ?? ""
+  const exportSettings = useMemo(() => lastSearchScope ? {
+    ...settings,
+    sources: lastSearchScope.sources,
+    include_media_ids: lastSearchScope.includeMediaIds,
+    include_note_ids: lastSearchScope.includeNoteIds,
+    collection_id: lastSearchScope.collectionId,
+    keyword_filter: lastSearchScope.keywordFilter,
+    enable_web_fallback: lastSearchScope.webFallback,
+  } : settings, [lastSearchScope, settings])
+  const exportPreset = lastSearchScope?.preset ?? preset
   const message = useAntdMessage()
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
@@ -218,8 +228,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           options,
           {
             citations,
-            settings,
-            preset,
+            settings: exportSettings,
+            preset: exportPreset,
             searchDetails,
             trustState: answerTrustState,
             evidenceOrigin: answerEvidenceOrigin,
@@ -239,8 +249,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           options,
           {
             citations,
-            settings,
-            preset,
+            settings: exportSettings,
+            preset: exportPreset,
             searchDetails,
             trustState: answerTrustState,
             evidenceOrigin: answerEvidenceOrigin,
@@ -334,8 +344,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     results,
     messages,
     citations,
-    settings,
-    preset,
+    exportSettings,
+    exportPreset,
     searchDetails,
     answerTrustState,
     answerEvidenceOrigin,
@@ -392,8 +402,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         { ...options, format: "markdown" },
         {
           citations,
-          settings,
-          preset,
+          settings: exportSettings,
+          preset: exportPreset,
           searchDetails,
           trustState: answerTrustState,
           evidenceOrigin: answerEvidenceOrigin,
@@ -496,7 +506,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     options,
     citations,
     settings,
-    preset,
+    exportSettings,
+    exportPreset,
     searchDetails,
     answerTrustState,
     answerEvidenceOrigin,
@@ -1119,7 +1130,7 @@ function collectCitationIndexes(
 
   citations?.forEach((citation) => pushIndex(citation.index))
 
-  if (indexes.length === 0 && answer) {
+  if (citations === undefined && answer) {
     for (const match of answer.matchAll(/\[(\d+)\]/g)) {
       pushIndex(Number(match[1]))
     }
@@ -1256,16 +1267,29 @@ function generateMarkdown(
     lines.push("## Citations")
     lines.push("")
     citationIndexes.forEach((citationIndex) => {
-      const sourceIndex = citationIndex - 1
+      const citation = context?.citations?.find(candidate => candidate.index === citationIndex)
+      let sourceIndexes = results.flatMap((result, index) =>
+        getOriginalResultIndex(result, index) + 1 === citationIndex &&
+        (!citation?.documentId || result.id === citation.documentId)
+          ? [index] : []
+      )
+      if (sourceIndexes.length === 0 && citation?.documentId) {
+        sourceIndexes = results.flatMap((result, index) =>
+          result.id === citation.documentId && getOriginalResultIndex(result, -1) === -1
+            ? [index] : []
+        )
+      }
+      const sourceIndex = sourceIndexes.length === 1 ? sourceIndexes[0] : -1
       const result = results[sourceIndex]
-      const title = getSourceTitle(result, sourceIndex)
 
       if (!result) {
         lines.push(`- [${citationIndex}] Source unavailable in exported results.`)
         return
       }
 
-      lines.push(`- [${citationIndex}] ${title} maps to Source ${sourceIndex + 1}.`)
+      const originalIndex = getOriginalResultIndex(result, sourceIndex)
+      const title = getSourceTitle(result, originalIndex)
+      lines.push(`- [${citationIndex}] ${title} maps to Source ${originalIndex + 1}.`)
       if (result.metadata?.page_number) {
         lines.push(`  Page: ${result.metadata.page_number}`)
       }
@@ -1281,12 +1305,13 @@ function generateMarkdown(
     lines.push("## Sources")
     lines.push("")
     results.forEach((result, index) => {
-      const title = getSourceTitle(result, index)
+      const originalIndex = getOriginalResultIndex(result, index)
+      const title = getSourceTitle(result, originalIndex)
       const url = result.metadata?.url
       const score = getMeasuredRelevance(result)
       const content = result.content || result.text || ""
 
-      lines.push(`### [${index + 1}] ${title}`)
+      lines.push(`### [${originalIndex + 1}] ${title}`)
       lines.push("")
       if (url) {
         lines.push(`URL: ${url}`)
@@ -1328,7 +1353,7 @@ function generateMarkdown(
     )
     lines.push("")
     results.forEach((result, index) => {
-      const citation = formatCitation(result, index + 1, options.citationStyle)
+      const citation = formatCitation(result, getOriginalResultIndex(result, index) + 1, options.citationStyle)
       lines.push(citation)
       lines.push("")
     })

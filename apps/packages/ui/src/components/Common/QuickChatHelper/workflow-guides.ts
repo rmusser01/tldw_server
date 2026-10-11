@@ -34,6 +34,16 @@ const canonicalizeQuickChatRoute = (route: string): string =>
 
 export const QUICK_CHAT_WORKFLOW_GUIDES: QuickChatWorkflowGuide[] = [
   {
+    id: "workspace-chat-context",
+    title: "Chat with staged workspace sources",
+    question: "How do I use staged sources in Chat Workspace?",
+    answer:
+      "Choose the active workspace in Research Workspace and a model in Chat, then open Chat Workspace. Browse does not send context; Stage adds ready sources to the next send. Review staged context in Chat and check Inspector for model, persona inheritance, and send status. Insert summary adds only a source-name list. Failed or offline sends keep unsent work while the page remains open, not across navigation or reloads.",
+    route: "/chat-workspace",
+    routeLabel: "Chat Workspace",
+    tags: ["workspace", "chat", "staged sources", "context", "persona", "offline"]
+  },
+  {
     id: "ingest-summarize-media",
     title: "Ingest + summarize a source",
     question: "How do I ingest a URL or file and then summarize it quickly?",

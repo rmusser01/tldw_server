@@ -94,11 +94,27 @@ const rootsResponse = {
 }
 
 describe("workspace API domain contract", () => {
+  it.each([
+    ["getWorkspace", ""], ["getWorkspaceSources", "/sources"],
+    ["getWorkspaceArtifacts", "/artifacts"], ["getWorkspaceNotes", "/notes"]
+  ] as const)("pins activation %s to captured account and cancellation signal (unit double)", async (method, suffix) => {
+    const controller = new AbortController()
+    const requestScope = { config: { serverUrl: "https://owner.test", authMode: "multi-user" as const, orgId: "org-a" }, userId: 42 }
+    mocks.bgRequest.mockResolvedValue(method === "getWorkspace" ? workspaceResponse : [])
+    await workspaceApiMethods[method]("workspace with spaces", { signal: controller.signal, requestScope })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: `/api/v1/workspaces/workspace%20with%20spaces${suffix}`, method: "GET",
+      abortSignal: controller.signal,
+      servicePromptConfig: { ...requestScope.config, expectedUserId: 42 },
+      headers: { "X-TLDW-Expected-User-ID": "42" }
+    }))
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it("lists workspaces for destination pickers", async () => {
+  it("lists workspaces without a cross-origin collection redirect", async () => {
     mocks.bgRequest.mockResolvedValue({
       items: [
         {

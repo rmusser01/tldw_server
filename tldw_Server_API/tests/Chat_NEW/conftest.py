@@ -454,6 +454,12 @@ def credentialed_test_client_factory():
 
 
 @pytest.fixture
+def test_openai_server_credential_factory():
+    """Reinstall the scoped credential after an isolated AuthNZ pool reset."""
+    return _test_openai_server_credential
+
+
+@pytest.fixture
 def credentialed_test_client(test_env_vars):
     """Provide a client with an explicit test-only OpenAI server credential."""
     from tldw_Server_API.app.main import app

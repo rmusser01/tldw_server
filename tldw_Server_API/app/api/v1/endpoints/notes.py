@@ -239,6 +239,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
     validate_notes_provenance_payload,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    NOTES_WIKILINK_REWRITE_SOURCE,
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
@@ -1120,6 +1121,37 @@ def _capture_notes_organization_plan(
                 ),
                 None,
             )
+            if child is None:
+                parent = next(
+                    (
+                        item
+                        for item in result.envelopes
+                        if item.domain == "notes.note" and item.object_id == response.get("id")
+                    ),
+                    None,
+                )
+                if parent is not None:
+                    # Omission retains the child or its absence at this group's ACK boundary.
+                    child = coordinator.service.store.get_envelope_for_entity_at_or_before(
+                        parent.dataset_id,
+                        "notes.provenance",
+                        entity_id=parent.object_id,
+                        server_sequence=max(int(item.server_cursor or 0) for item in result.envelopes),
+                    )
+                    if (
+                        parent.apply_status != "applied"
+                        or parent.object_revision != response.get("version")
+                        or str(coordinator.note_db.owner_user_id) != coordinator.user_id
+                        or (
+                            child is not None
+                            and (child.apply_status != "applied" or child.parent_id != parent.object_id)
+                        )
+                    ):
+                        raise SyncStoreError("notes_provenance_projection_incomplete")
+                    if child is None:
+                        provenance_response(
+                            response, None, supported=getattr(coordinator.note_db, "note_provenance_store", None) is not None
+                        )
             if child is not None:
                 provenance_response(
                     response,
@@ -2818,12 +2850,14 @@ async def create_note_folder(
 @router.get(
     "/search",
     response_model=NotesListResponse,
+    dependencies=[Depends(require_expected_user)],
     summary="Search notes for the current user",
     tags=["notes"]
 )
 @router.get(
     "/search/",
     response_model=NotesListResponse,
+    dependencies=[Depends(require_expected_user)],
     summary="Search notes for the current user",
     tags=["notes"]
 )
@@ -2926,6 +2960,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
 @router.post(
     "/wikilinks/resolve",
     response_model=WikilinkResolveResponse,
+    dependencies=[Depends(require_expected_user)],
     summary="Resolve [[Title]] and [[id:UUID]] wikilinks for the current user",
     tags=["notes"],
 )
@@ -3001,10 +3036,9 @@ def _wikilink_rename_saver(db: CharactersRAGDB, current_user: User) -> SaveNoteC
     """Write one rewritten note the way ``PUT /notes/{id}`` writes a content edit.
 
     Without Sync the write is one version-checked transaction. With Sync v2
-    active it is captured as a server-origin mutation, like ``PUT``: the
-    caller has just compared the note's version, but the capture itself is not
-    conditional on it, and a capture that fails after it was accepted may
-    still be applied later.
+    active the owner-bound product-version guard survives capture and replay.
+    A capture that fails after acceptance remains a recorded Sync mutation;
+    it is not reported as a pre-accept version skip.
     """
 
     sync_service = _active_notes_sync_service(current_user)
@@ -3021,7 +3055,8 @@ def _wikilink_rename_saver(db: CharactersRAGDB, current_user: User) -> SaveNoteC
                 operation="upsert",
                 object_id=note_id,
                 payload=payload,
-                source="server_api",
+                source=NOTES_WIKILINK_REWRITE_SOURCE,
+                expected_product_version=int(note["version"]),
             )
             return
         db.update_note(
@@ -3653,6 +3688,7 @@ async def import_notes(
                             idempotency_key=request_key,
                             request_fingerprint=request_fingerprint,
                             result_domain="notes.note",
+                            require_organization=keywords is not None,
                         )
                         if replay is not None:
                             replayed_note = _capture_notes_organization_plan(

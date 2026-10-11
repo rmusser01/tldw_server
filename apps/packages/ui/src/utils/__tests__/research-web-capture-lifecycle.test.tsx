@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { webcrypto } from "node:crypto"
 import { useResearchWebCapture } from "../use-research-web-capture"
 import {
@@ -121,6 +121,9 @@ const deferred = <T,>() => {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.stubGlobal("navigator", Object.create(window.navigator, {
+    locks: { value: { request: vi.fn((_key: string, work: () => Promise<unknown>) => work()) } }
+  }))
   Object.defineProperty(globalThis, "crypto", {
     value: webcrypto,
     configurable: true
@@ -168,6 +171,7 @@ beforeEach(() => {
     }
   }))
 })
+afterEach(() => vi.unstubAllGlobals())
 it("mount and preview cancel never acquire or save", async () => {
   const { result } = renderHook(() => useResearchWebCapture("workspace"))
   await act(async () => {})

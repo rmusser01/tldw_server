@@ -703,7 +703,9 @@ describe("useChatActions character stream throttling integration", () => {
       avatar_url: ""
     }
     options.selectedAssistant = {
-      kind: "character", id: "101", name: "Stream Character",
+      kind: "character",
+      id: "101",
+      name: "Stream Character",
       metadata: { selectionMode: "tracked" }
     }
     options.selectedModel = "openrouter/openai/gpt-4.1-mini"
@@ -766,7 +768,9 @@ describe("useChatActions character stream throttling integration", () => {
       avatar_url: ""
     }
     options.selectedAssistant = {
-      kind: "character", id: "101", name: "Stream Character",
+      kind: "character",
+      id: "101",
+      name: "Stream Character",
       metadata: { selectionMode: "tracked" }
     }
 
@@ -836,7 +840,9 @@ describe("useChatActions character stream throttling integration", () => {
       avatar_url: ""
     }
     options.selectedAssistant = {
-      kind: "character", id: "101", name: "Stream Character",
+      kind: "character",
+      id: "101",
+      name: "Stream Character",
       metadata: { selectionMode: "tracked" }
     }
 

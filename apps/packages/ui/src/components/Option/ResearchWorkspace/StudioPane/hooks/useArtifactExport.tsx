@@ -4,6 +4,7 @@ import type { MessageInstance } from "antd/es/message/interface"
 import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ArtifactType, GeneratedArtifact } from "@/types/workspace"
+import { useWorkspaceStore } from "@/store/workspace"
 import {
   WORKSPACE_UNDO_WINDOW_MS,
   scheduleWorkspaceUndoAction,
@@ -258,6 +259,11 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
       artifact: GeneratedArtifact,
       mode: "append" | "replace" = "append"
     ) => {
+      const destination = useWorkspaceStore.getState?.()
+      if (destination?.serverWorkspace || destination?.currentNote?.serverWorkspaceId) {
+        messageApi.warning(t("playground:studio.serverNotesReadOnly", "Server notes are view-only"))
+        return
+      }
       const content = (artifact.content || "").trim()
       if (!content) {
         messageApi.warning(

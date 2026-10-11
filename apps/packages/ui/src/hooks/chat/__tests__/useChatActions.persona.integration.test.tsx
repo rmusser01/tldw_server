@@ -9,6 +9,8 @@ const {
   createChatMock,
   getChatMock,
   addChatMessageMock,
+  getServerCapabilitiesMock,
+  pageAssistModelMock,
   normalChatModeMock,
   ragModeMock,
   streamCharacterChatCompletionMock,
@@ -23,6 +25,8 @@ const {
   createChatMock: vi.fn(),
   getChatMock: vi.fn(),
   addChatMessageMock: vi.fn(),
+  getServerCapabilitiesMock: vi.fn(),
+  pageAssistModelMock: vi.fn(),
   normalChatModeMock: vi.fn(),
   ragModeMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
@@ -137,8 +141,10 @@ vi.mock("@/store/option", () => ({
 }))
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
-  getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
+  getServerCapabilities: getServerCapabilitiesMock
 }))
+
+vi.mock("@/models", () => ({ pageAssistModel: pageAssistModelMock }))
 
 vi.mock("@/services/chat-settings", () => ({
   syncChatSettingsForServerChat: syncChatSettingsForServerChatMock
@@ -309,6 +315,7 @@ const deferred = <T,>() => {
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    getServerCapabilitiesMock.mockResolvedValue({ hasChatSaveToDb: false })
     syncChatSettingsForServerChatMock.mockResolvedValue(null)
     getConfigMock.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -407,7 +414,8 @@ describe("useChatActions persona integration", () => {
           avatarUrl: undefined
         },
         historyId: "history-persona",
-        serverChatId: "persona-chat-1"
+        serverChatId: "persona-chat-1",
+        conversationId: "persona-chat-1"
       })
     )
   })
@@ -706,7 +714,11 @@ describe("useChatActions persona integration", () => {
       })
     })
 
-    expect(getChatMock).toHaveBeenCalledWith("stale-global-chat", { scope })
+    expect(getChatMock).toHaveBeenCalledWith("stale-global-chat", {
+      scope,
+      requestScope: servicePromptSnapshot.requestScope,
+      signal: servicePromptSnapshot.scopeSignal
+    })
     expect(options.setServerChatId).toHaveBeenCalledWith(null)
     expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
     expect(createChatMock).toHaveBeenCalledWith(
@@ -718,6 +730,505 @@ describe("useChatActions persona integration", () => {
     expect(options.setServerChatId).toHaveBeenLastCalledWith(
       "workspace-fresh-chat"
     )
+  })
+
+  it.each([false, true].flatMap(durable => ["reject", "resolve"].map(settlement => ({ durable, settlement }))))(
+    "preserves the binding after Stop during workspace conversation preflight (durable $durable, $settlement)",
+    async ({ durable, settlement }) => {
+    const controller = new AbortController()
+    loadServicePromptSnapshotMock.mockResolvedValueOnce({
+      ...servicePromptSnapshot,
+      scopeSignal: controller.signal
+    })
+    const lookup = deferred<Record<string, unknown>>()
+    if (settlement === "resolve") {
+      getChatMock.mockReturnValueOnce(lookup.promise)
+    } else {
+      getChatMock.mockImplementationOnce((_id, requestOptions) => new Promise((_resolve, reject) => {
+        requestOptions.signal.addEventListener("abort", () => {
+          reject(new DOMException("Request cancelled", "AbortError"))
+        }, { once: true })
+      }))
+    }
+    const options = {
+      ...createHookOptions(),
+      scope: { type: "workspace", workspaceId: "workspace-plain" } as const,
+      serverChatId: "bound-original-chat",
+      selectedAssistant: null
+    }
+    const { result, unmount } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    let submission!: ReturnType<typeof result.current.onSubmit>
+    act(() => {
+      submission = result.current.onSubmit({
+        message: "Keep this conversation",
+        image: "",
+        controller,
+        ...(durable ? { requestOverrides: { tldwTurn: {
+          user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739"
+        } } } : {})
+      })
+    })
+    await vi.waitFor(() => expect(getChatMock).toHaveBeenCalledTimes(1))
+    const historyLinksBeforeStop = options.ensureServerChatHistoryId.mock.calls.length
+    controller.abort()
+    lookup.resolve({ id: "bound-original-chat", scope_type: "workspace", workspace_id: "workspace-plain" })
+    await act(async () => {
+      expect(await submission).toMatchObject({ status: "skipped", reason: "Request cancelled" })
+    })
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(historyLinksBeforeStop)
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  describe.each(["normal", "rag"] as const)("%s durable workspace binding", (mode) => {
+    const scope = { type: "workspace", workspaceId: "workspace-plain" } as const
+    const tldwTurn = {
+      user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739"
+    }
+    const modeOverrides =
+      mode === "rag" ? { fileRetrievalEnabled: true, ragMediaIds: [101] } : {}
+    const generationMock = mode === "rag" ? ragModeMock : normalChatModeMock
+
+    it.each([
+      { isRegenerate: false, status: 503 },
+      { isRegenerate: true, status: 503 },
+      { isRegenerate: false, status: 404 },
+      { isRegenerate: true, status: 404 }
+    ])("propagates $status without replacing a bound turn (regenerate=$isRegenerate)", async ({ isRegenerate, status }) => {
+      const error = new Error(`Conversation lookup failed (${status})`)
+      getChatMock.mockRejectedValueOnce(error)
+      const options = {
+        ...createHookOptions(),
+        scope,
+        selectedAssistant: null,
+        serverChatId: "different-current-chat"
+      }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      await act(async () => {
+        expect(await result.current.onSubmit({
+          message: "Retry the saved turn",
+          image: "",
+          isRegenerate,
+          serverChatIdOverride: "bound-original-chat",
+          requestOverrides: { ...modeOverrides, tldwTurn }
+        })).toEqual({ status: "failed", errorMessage: error.message })
+      })
+
+      expect(getChatMock).toHaveBeenCalledWith("bound-original-chat", {
+        scope,
+        requestScope: servicePromptSnapshot.requestScope,
+        signal: servicePromptSnapshot.scopeSignal
+      })
+      expect(createChatMock).not.toHaveBeenCalled()
+      expect(normalChatModeMock).not.toHaveBeenCalled()
+      expect(ragModeMock).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      { label: "another workspace", metadata: { scope_type: "workspace", workspace_id: "other-workspace" } },
+      { label: "global scope", metadata: { scope_type: "global" } },
+      { label: "missing scope", metadata: {} }
+    ])("rejects $label without replacing the bound conversation", async ({ metadata }) => {
+      getChatMock.mockResolvedValueOnce({ id: "bound-original-chat", ...metadata })
+      const options = {
+        ...createHookOptions(),
+        scope,
+        selectedAssistant: null,
+        serverChatId: "bound-original-chat"
+      }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      await act(async () => {
+        expect(await result.current.onSubmit({
+          message: "Retry the saved turn",
+          image: "",
+          isRegenerate: true,
+          serverChatIdOverride: "bound-original-chat",
+          requestOverrides: { ...modeOverrides, tldwTurn }
+        })).toEqual({
+          status: "failed",
+          errorMessage: "The bound conversation is unavailable in this workspace."
+        })
+      })
+
+      expect(createChatMock).not.toHaveBeenCalled()
+      expect(normalChatModeMock).not.toHaveBeenCalled()
+      expect(ragModeMock).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+    })
+
+    it.each([false, true])("keeps the explicit conversation and turn identity (regenerate=%s)", async (isRegenerate) => {
+      getChatMock.mockResolvedValueOnce({
+        id: "bound-original-chat",
+        scope_type: "workspace",
+        workspace_id: scope.workspaceId
+      })
+      const options = {
+        ...createHookOptions(),
+        scope,
+        selectedAssistant: null,
+        serverChatId: "different-current-chat"
+      }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      await act(async () => {
+        expect(await result.current.onSubmit({
+          message: "Retry the saved turn",
+          image: "",
+          isRegenerate,
+          serverChatIdOverride: "bound-original-chat",
+          requestOverrides: { ...modeOverrides, tldwTurn }
+        })).toEqual({ status: "submitted" })
+      })
+
+      expect(getChatMock).toHaveBeenCalledWith("bound-original-chat", {
+        scope,
+        requestScope: servicePromptSnapshot.requestScope,
+        signal: servicePromptSnapshot.scopeSignal
+      })
+      expect(createChatMock).not.toHaveBeenCalled()
+      expect(generationMock).toHaveBeenCalledWith(
+        "Retry the saved turn", "", isRegenerate, [], [], expect.any(AbortSignal),
+        expect.objectContaining({
+          serverChatId: "bound-original-chat",
+          conversationId: "bound-original-chat",
+          tldwTurn
+        })
+      )
+    })
+
+    it("creates a conversation for an unbound durable first send", async () => {
+      const options = { ...createHookOptions(), scope, selectedAssistant: null }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      await act(async () => {
+        expect(await result.current.onSubmit({
+          message: "Start a new turn",
+          image: "",
+          requestOverrides: { ...modeOverrides, tldwTurn }
+        })).toEqual({ status: "submitted" })
+      })
+
+      expect(getChatMock).not.toHaveBeenCalled()
+      expect(createChatMock).toHaveBeenCalledTimes(1)
+      expect(generationMock.mock.calls[0][6]).toEqual(expect.objectContaining({
+        conversationId: "persona-chat-1",
+        tldwTurn
+      }))
+    })
+
+    it("preserves replacement bootstrap for a legacy override without durable identity", async () => {
+      getChatMock.mockRejectedValueOnce(new Error("Conversation lookup failed (503)"))
+      const options = { ...createHookOptions(), scope, selectedAssistant: null }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      await act(async () => {
+        expect(await result.current.onSubmit({
+          message: "Legacy send",
+          image: "",
+          serverChatIdOverride: "stale-legacy-chat",
+          requestOverrides: modeOverrides
+        })).toEqual({ status: "submitted" })
+      })
+
+      expect(options.setServerChatId).toHaveBeenCalledWith(null)
+      expect(createChatMock).toHaveBeenCalledTimes(1)
+      expect(generationMock.mock.calls[0][6]).toEqual(expect.objectContaining({
+        conversationId: "persona-chat-1"
+      }))
+    })
+  })
+
+  describe.each([
+    { name: "existing normal chat", persona: false, chatId: "bound-original-chat" },
+    { name: "new normal chat", persona: false, chatId: null },
+    { name: "new persona chat", persona: true, chatId: null }
+  ])("durable scope for $name", ({ persona, chatId }) => {
+    const scope = { type: "workspace", workspaceId: "workspace-plain" } as const
+    const tldwTurn = {
+      user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739"
+    }
+    const bindingMock = chatId ? getChatMock : createChatMock
+
+    it("captures scope before history or server binding and forwards the same snapshot", async () => {
+      const base = createHookOptions()
+      const options = {
+        ...base,
+        scope,
+        serverChatId: chatId,
+        selectedAssistant: persona ? base.selectedAssistant : null
+      }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      await act(async () => {
+        expect(await result.current.onSubmit({
+          message: "Keep the captured scope",
+          image: "",
+          isRegenerate: Boolean(chatId),
+          serverChatIdOverride: chatId,
+          requestOverrides: { tldwTurn }
+        })).toEqual({ status: "submitted" })
+      })
+
+      expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith([], {
+        signal: expect.any(AbortSignal)
+      })
+      expect(loadServicePromptSnapshotMock.mock.invocationCallOrder[0]).toBeLessThan(
+        options.ensureServerChatHistoryId.mock.invocationCallOrder[0]
+      )
+      expect(loadServicePromptSnapshotMock.mock.invocationCallOrder[0]).toBeLessThan(
+        bindingMock.mock.invocationCallOrder[0]
+      )
+      expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith(
+        expect.any(String),
+        persona || chatId ? undefined : "Persona chat",
+        servicePromptSnapshot.scopeInvalidatedSignal,
+        servicePromptSnapshot
+      )
+      expect(normalChatModeMock.mock.calls[0][6].servicePromptSnapshot).toBe(
+        servicePromptSnapshot
+      )
+      expect(releaseServicePromptSnapshotMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not dispatch generation after scope changes during server binding", async () => {
+      const scopeController = new AbortController()
+      const scopedSnapshot = {
+        ...servicePromptSnapshot,
+        scopeSignal: scopeController.signal,
+        scopeInvalidatedSignal: scopeController.signal
+      }
+      loadServicePromptSnapshotMock.mockResolvedValue(scopedSnapshot)
+      const binding = deferred<Record<string, unknown>>()
+      bindingMock.mockImplementationOnce(() => binding.promise)
+      const base = createHookOptions()
+      const options = {
+        ...base,
+        scope,
+        serverChatId: chatId,
+        selectedAssistant: persona ? base.selectedAssistant : null
+      }
+      const { result } = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+
+      let submission!: ReturnType<typeof result.current.onSubmit>
+      act(() => {
+        submission = result.current.onSubmit({
+          message: "Do not cross scopes",
+          image: "",
+          isRegenerate: Boolean(chatId),
+          serverChatIdOverride: chatId,
+          requestOverrides: { tldwTurn }
+        })
+      })
+      await vi.waitFor(() => expect(bindingMock).toHaveBeenCalledTimes(1))
+      scopeController.abort()
+      binding.resolve({
+        id: chatId ?? "newly-created-chat",
+        scope_type: "workspace",
+        workspace_id: scope.workspaceId,
+        assistant_kind: persona ? "persona" : null,
+        assistant_id: persona ? "garden-helper" : null
+      })
+
+      await act(async () => {
+        expect(await submission).toMatchObject({ status: "failed" })
+      })
+
+      expect(normalChatModeMock).not.toHaveBeenCalled()
+      expect(ragModeMock).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+      expect(releaseServicePromptSnapshotMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("does not look up a bound conversation after scope invalidation during history loading", async () => {
+    const invalidated = new AbortController()
+    loadServicePromptSnapshotMock.mockResolvedValue({
+      ...servicePromptSnapshot,
+      scopeInvalidatedSignal: invalidated.signal
+    })
+    const options = {
+      ...createHookOptions(),
+      scope: { type: "workspace", workspaceId: "workspace-plain" } as const,
+      serverChatId: "bound-original-chat",
+      selectedAssistant: null
+    }
+    options.ensureServerChatHistoryId.mockImplementationOnce(async () => {
+      invalidated.abort()
+      return "history-persona"
+    })
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+
+    await act(async () => {
+      expect(await result.current.onSubmit({
+        message: "Keep the original target",
+        image: "",
+        serverChatIdOverride: "bound-original-chat",
+        requestOverrides: {
+          tldwTurn: { user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739" }
+        }
+      })).toMatchObject({ status: "failed" })
+    })
+    expect(getChatMock).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+  })
+
+  it("does not replace a current conversation when the request guard rejects its captured scope", async () => {
+    getChatMock.mockRejectedValueOnce(Object.assign(new Error("Captured account changed"), {
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    }))
+    const options = {
+      ...createHookOptions(),
+      scope: { type: "workspace", workspaceId: "workspace-plain" } as const,
+      serverChatId: "bound-original-chat",
+      selectedAssistant: null
+    }
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    await act(async () => {
+      expect(await result.current.onSubmit({
+        message: "Stay in the original conversation", image: "",
+        requestOverrides: {
+          tldwTurn: { user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739" }
+        }
+      })).toMatchObject({ status: "failed" })
+    })
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { capsUnavailable: false, receipt: undefined },
+    { capsUnavailable: true, receipt: undefined },
+    { capsUnavailable: false, receipt: false },
+    { capsUnavailable: true, receipt: false }
+  ])("keeps one durable user without receipts (capsUnavailable=$capsUnavailable, receipt=$receipt)", async ({ capsUnavailable, receipt }) => {
+    const { runChatPipeline } = await import("@/hooks/chat-modes/chatModePipeline")
+    const rows: Array<{ role: string; content: string }> = []
+    const tldwTurn = { user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739" }
+    const scope = { type: "workspace", workspaceId: "workspace-plain" } as const
+    if (capsUnavailable) {
+      getServerCapabilitiesMock.mockRejectedValueOnce(new Error("Capability cache unavailable"))
+    }
+    pageAssistModelMock.mockResolvedValue({
+      conversationId: "bound-original-chat",
+      saveToDb: true,
+      serverMessagesAlreadyPersisted: receipt,
+      stream: async function* () {
+        rows.push({ role: "user", content: "Durable question" })
+        yield "Fallback assistant answer"
+      }
+    })
+    addChatMessageMock.mockImplementation(async (_chatId, payload) => {
+      rows.push(payload)
+      return { id: `mirror-${rows.length}` }
+    })
+    normalChatModeMock.mockImplementationOnce(async (message, image, regenerate, messages, history, signal, params) =>
+      runChatPipeline({
+        id: "normal",
+        setupMessages: () => ({ targetMessageId: "assistant-1" }),
+        preparePrompt: async () => ({
+          chatHistory: [],
+          humanMessage: { role: "user", content: message },
+          sources: []
+        })
+      }, message, image, regenerate, messages, history, signal, params)
+    )
+    const options = {
+      ...createHookOptions(), scope, selectedAssistant: null,
+      serverChatId: "bound-original-chat"
+    }
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    await act(async () => {
+      expect(await result.current.onSubmit({
+        message: "Durable question", image: "", requestOverrides: { tldwTurn }
+      })).toEqual({ status: "submitted" })
+    })
+
+    expect(rows.filter((row) => row.role === "user")).toEqual([
+      { role: "user", content: "Durable question" }
+    ])
+    expect(rows.filter((row) => row.role === "assistant")).toHaveLength(1)
+    expect(baseSaveMessageOnSuccessMock).toHaveBeenCalledWith(expect.objectContaining({
+      serverOwnsUserMessage: true,
+      serverMessagesAlreadyPersisted: false
+    }))
+  })
+
+  it.each([
+    { rag: false, chatId: null },
+    { rag: true, chatId: null },
+    { rag: false, chatId: "bound-original-chat" },
+    { rag: true, chatId: "bound-original-chat" }
+  ])("checks the failed turn's expected scope before any binding or generation (%j)", async ({ rag, chatId }) => {
+    const expectedScope = servicePromptSnapshot.requestScope
+    const scopeError = Object.assign(new Error("Request scope changed"), {
+      code: "service_prompt_scope_changed"
+    })
+    loadServicePromptSnapshotMock.mockRejectedValueOnce(scopeError)
+    const options = {
+      ...createHookOptions(),
+      scope: { type: "workspace", workspaceId: "workspace-plain" },
+      selectedAssistant: null,
+      serverChatId: chatId
+    }
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+
+    await act(async () => {
+      expect(await result.current.onSubmit({
+        message: "Original question", image: "", isRegenerate: Boolean(chatId),
+        serverChatIdOverride: chatId,
+        requestOverrides: {
+          tldwTurn: { user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739" },
+          requestScope: expectedScope,
+          ...(rag ? { ragMediaIds: [7], fileRetrievalEnabled: true } : {})
+        }
+      })).toEqual({ status: "failed", errorMessage: "Request scope changed" })
+    })
+
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(
+      rag ? ["chat.rag.answer", "chat.rag.question_rewrite"] : [],
+      { signal: expect.any(AbortSignal), requestScope: expectedScope }
+    )
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+    expect(getChatMock).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(ragModeMock).not.toHaveBeenCalled()
+    expect(options.setStreaming).toHaveBeenLastCalledWith(false)
   })
 
   it("creates a workspace-scoped server chat for staged RAG sends", async () => {
@@ -1009,7 +1520,12 @@ describe("useChatActions persona integration", () => {
     await act(async () => {
       await result.current.onSubmit({
         message: "Stay persona",
-        image: ""
+        image: "",
+        requestOverrides: {
+          tldwTurn: {
+            user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739"
+          }
+        }
       })
     })
 
@@ -1031,7 +1547,11 @@ describe("useChatActions persona integration", () => {
           name: "Garden Helper",
           avatarUrl: undefined
         },
-        serverChatId: "persona-chat-existing"
+        serverChatId: "persona-chat-existing",
+        conversationId: "persona-chat-existing",
+        tldwTurn: {
+          user_message_id: "5bbd7b2f-a92b-427c-8062-b039d47de739"
+        }
       })
     )
   })

@@ -527,8 +527,8 @@ def _finish(
     # no version churn for repeated identical outcomes).
     health = {
         "succeeded": "ready",
-        "timed_out": "degraded",
-        "failed": "degraded",
+        "timed_out": "needs_attention",
+        "failed": "needs_attention",
         "skipped": definition.health,
     }.get(status, definition.health)
     if health != definition.health:

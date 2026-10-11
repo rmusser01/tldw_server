@@ -3027,6 +3027,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const keepMyVersion = React.useCallback(async (): Promise<boolean> => {
     const noteId = selectedIdRef.current
     if (noteId == null || !saveNoteRef.current) return false
+    // Conflict permission belongs to this owner, selection and draft, not a later save ref.
+    const requestEpoch = authorityEpochRef.current
+    const noteEpoch = noteSelectionEpochRef.current
+    const editRevision = editRevisionRef.current.revision
+    const dirtyRevision = dirtyRevisionRef.current
+    const isCurrent = () => authorityEpochRef.current === requestEpoch &&
+      authorityScopeRef.current === authorityScope && noteSelectionEpochRef.current === noteEpoch &&
+      selectedIdRef.current === noteId && editRevisionRef.current.revision === editRevision &&
+      dirtyRevisionRef.current === dirtyRevision
     clearAutosaveTimeout()
     let serverVersion: number | null = null
     try {
@@ -3036,6 +3045,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     } catch {
       serverVersion = null
     }
+    if (!isCurrent()) return false
     if (serverVersion == null) {
       message.error(
         t('option:notesSearch.keepMineLoadFailed', {
@@ -3045,7 +3055,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       return false
     }
     return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine', expectedVersion: serverVersion })
-  }, [clearAutosaveTimeout, message, t])
+  }, [authorityScope, clearAutosaveTimeout, message, t])
 
   /** Load the server copy; the local text goes to the clipboard first. */
   const takeTheirVersion = React.useCallback(async (): Promise<boolean> => {
@@ -3053,6 +3063,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (noteId == null) return false
     clearAutosaveTimeout()
     const local = editRevisionRef.current
+    const requestEpoch = authorityEpochRef.current
+    const noteEpoch = noteSelectionEpochRef.current
+    const dirtyRevision = dirtyRevisionRef.current
+    const isCurrent = () => authorityEpochRef.current === requestEpoch &&
+      authorityScopeRef.current === authorityScope && noteSelectionEpochRef.current === noteEpoch &&
+      selectedIdRef.current === noteId && editRevisionRef.current.revision === local.revision &&
+      dirtyRevisionRef.current === dirtyRevision
     // Must run before any other await (see writeClipboardText).
     const copied = await writeClipboardText(
       buildSingleNoteCopyText(
@@ -3060,6 +3077,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         'markdown'
       )
     )
+    if (!isCurrent()) return false
     if (!copied) {
       const ok = await confirmDanger({
         title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
@@ -3069,7 +3087,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
         cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
       })
-      if (!ok) return false
+      if (!ok || !isCurrent()) return false
     }
     dropOfflineDraftNow(offlineDraftKeyFor(noteId))
     const loaded = await loadDetail(noteId)
@@ -3085,7 +3103,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       })
     }
     return loaded
-  }, [clearAutosaveTimeout, confirmDanger, dropOfflineDraftNow, loadDetail, message, refetch, t])
+  }, [authorityScope, clearAutosaveTimeout, confirmDanger, dropOfflineDraftNow, loadDetail, message, refetch, t])
 
   /** "Reload" for a newer server copy when there is nothing local to lose. */
   const loadLatestVersion = React.useCallback(async (): Promise<boolean> => {

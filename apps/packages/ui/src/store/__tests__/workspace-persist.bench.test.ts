@@ -23,7 +23,7 @@
 //   - Seeds the real store once with the 10x50 fixture via `setState` and waits
 //     for the persistence write to land (split index present in localStorage).
 //   - Installs passthrough spies on `JSON.stringify` and
-//     `Storage.prototype.setItem` (jsdom's Storage is a WebIDL proxy: spying on
+//     the active storage prototype (jsdom's Storage is a WebIDL proxy: spying on
 //     the `localStorage` INSTANCE stores the spy as a named data entry instead
 //     of intercepting — the prototype spy intercepts every real write).
 //   - Runs one trivial `set()` (`notes` flip-flop) and drains persistence;
@@ -189,10 +189,8 @@ describe("workspace persist bench (one trivial set, 10x50 fixture)", () => {
     localStorage.clear()
 
     const stringifySpy = vi.spyOn(JSON, "stringify")
-    // See the file header: under jsdom the instance-level
-    // `vi.spyOn(localStorage, "setItem")` pattern does NOT intercept (the spy
-    // becomes a named storage entry), so the write counter spies the prototype.
-    const setItemSpy = vi.spyOn(Storage.prototype, "setItem")
+    // Observe the actual storage implementation, including the runner fallback.
+    const setItemSpy = vi.spyOn(Object.getPrototypeOf(localStorage), "setItem")
 
     try {
       // Seed (outside the measurement window).

@@ -424,7 +424,7 @@ describe("WorkspacesManagerPage", () => {
 
     await user.click(within(row).getByRole("button", { name: "Open Climate Evidence" }))
     expect(routerMocks.navigate).toHaveBeenCalledWith(
-      "/research-workspace?source_workspace_id=ws-research"
+      "/research-workspace?workspace=ws-research"
     )
 
     await user.click(within(row).getByRole("button", { name: "Archive Climate Evidence" }))

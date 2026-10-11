@@ -8,13 +8,18 @@ import pytest
 from fastapi import FastAPI
 
 from tldw_Server_API.app.api.v1.endpoints import character_messages
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
-@pytest.fixture
-def listing_state(tmp_path):
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def listing_state(request, tmp_path):
     """Create one owned neutral conversation using the real database interface."""
-    db = CharactersRAGDB(str(tmp_path / "messages.db"), client_id="41")
+    backend = None
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    db = CharactersRAGDB(str(tmp_path / "messages.db"), client_id="41", backend=backend)
     chat_id = db.add_conversation({"client_id": "41", "title": "Literal templates"})
     content = "Explain {{user}} and <CHAR>; keep {{char}} literally."
     message_id = db.add_message(
@@ -28,6 +33,8 @@ def listing_state(tmp_path):
         yield db, chat_id, message_id, content
     finally:
         db.close_all_connections()
+        if backend is not None:
+            backend.get_pool().close_all()
 
 
 @pytest.mark.unit
@@ -115,8 +122,82 @@ async def test_raw_option_does_not_change_completion_format(listing_state):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_recovery_opt_in_returns_unverified_without_public_metadata_authority(listing_state):
+    """Legacy rows remain readable but cannot manufacture protected receipts."""
+    db, chat_id, message_id, content = listing_state
+    db.set_message_metadata_extra(message_id, {"history_result_v1": {"version": 1, "sources": []}})
+    app = FastAPI()
+    app.include_router(character_messages.router, prefix="/api/v1")
+    app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        params = {"include_history_recovery_v1": "true", "scope_type": "global"}
+        single = await client.get(f"/api/v1/messages/{message_id}", params=params)
+        page = await client.get(f"/api/v1/chats/{chat_id}/messages", params={**params, "render_placeholders": "false"})
+        assert single.status_code == page.status_code == 200
+        for body in (single.json(), page.json()["messages"][0]):
+            assert body["content"] == content
+            assert body["tldw_history_recovery_v1"] == {
+                "version": 1, "status": "unverified", "code": "no_protected_binding",
+            }
+            assert body.get("metadata_extra") is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_recovery_api_get_and_list_use_normal_operation_checkout(listing_state):
+    """GET's preliminary message/image reads must leave isolation configurable."""
+    db, chat_id, message_id, content = listing_state
+    db.close_connection()
+    app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
+    app.include_router(character_messages.router, prefix="/api/v1")
+    principal = SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_request_user] = lambda: principal
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        params = {"include_history_recovery_v1": "true", "scope_type": "global"}
+        single_path = f"/api/v1/messages/{message_id}"
+        page_path = f"/api/v1/chats/{chat_id}/messages"
+        single = await client.get(single_path, params=params)
+        page = await client.get(page_path, params={**params, "render_placeholders": "false"})
+        assert single.status_code == page.status_code == 200
+        assert single.json()["content"] == page.json()["messages"][0]["content"] == content
+        assert single.json()["tldw_history_recovery_v1"]["status"] == "unverified"
+        assert page.json()["total"] == 1
+        assert (
+            await client.get(single_path, params={**params, "scope_type": "workspace", "workspace_id": "other"})
+        ).status_code == 404
+        principal.id = 42
+        assert (await client.get(single_path, params=params)).status_code == 403
+        assert (await client.get(page_path, params={**params, "render_placeholders": "false"})).status_code == 403
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incompatible", [
+    {"render_placeholders": "true"}, {"include_deleted": "true"},
+    {"format_for_completions": "true"}, {"include_character_context": "true"},
+])
+async def test_recovery_listing_rejects_transformed_or_deleted_views(listing_state, incompatible):
+    db, chat_id, _, _ = listing_state
+    app = FastAPI()
+    app.include_router(character_messages.router, prefix="/api/v1")
+    app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
+            "include_history_recovery_v1": "true", "render_placeholders": "false", **incompatible,
+        })
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", [False, True])
 async def test_image_listing_runs_off_event_loop_with_operation_context(
     listing_state: tuple[CharactersRAGDB, str, str, str], monkeypatch: pytest.MonkeyPatch,
+    recovery: bool,
 ) -> None:
     """Attachment decoding must not block the loop or lose request-owned DB cleanup."""
     import threading
@@ -127,15 +208,16 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
     )
 
     db, chat_id, _, _ = listing_state
-    original = character_messages.read_messages_with_images
+    helper_name = "expand_message_images" if recovery else "read_messages_with_images"
+    original = getattr(character_messages, helper_name)
     observed = []
 
-    def read(*args: Any, **kwargs: Any) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    def read(*args: Any, **kwargs: Any) -> Any:
         """Capture the execution owner while performing the real complete read."""
         observed.append((threading.get_ident(), current_connection_state(db)))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(character_messages, "read_messages_with_images", read)
+    monkeypatch.setattr(character_messages, helper_name, read)
     app = FastAPI()
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
@@ -144,10 +226,97 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
     with chacha_operation() as operation:
         expected_state = operation.state_for(db)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={"include_images": True})
+            response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
+                "include_images": True, "include_history_recovery_v1": recovery,
+                "render_placeholders": not recovery, "scope_type": "global",
+            })
     assert response.status_code == 200
     assert observed[0][0] != loop_thread
     assert observed[0][1] is expected_state
+    if recovery:
+        assert response.json()["messages"][0]["tldw_history_recovery_v1"]["status"] == "unverified"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", [False, True])
+@pytest.mark.parametrize("corruption,ordinary_status", [("empty", 409), ("gap", 503)])
+async def test_stored_attachment_read_failure_is_bounded(listing_state, recovery, corruption, ordinary_status):
+    """An incomplete stored page must fail without exposing any message or receipt."""
+    import io
+
+    from PIL import Image
+
+    db, chat_id, message_id, _ = listing_state
+    output = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(output, format="PNG")
+    db.append_message_image(message_id, b"" if corruption == "empty" else output.getvalue(), "image/png")
+    if corruption == "gap":
+        with db.transaction() as conn:
+            conn.execute("UPDATE message_images SET position = 2 WHERE message_id = ?", (message_id,))
+    stored = db.get_message_images(message_id)
+    assert stored[0]["image_data"] == (b"" if corruption == "empty" else output.getvalue())
+    assert stored[0]["position"] == (2 if corruption == "gap" else 0)
+    db.close_connection()
+    app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
+    app.include_router(character_messages.router, prefix="/api/v1")
+    app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+    ) as client:
+        response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
+            "include_images": True, "include_history_recovery_v1": recovery,
+            "render_placeholders": False, "scope_type": "global",
+        })
+    assert response.status_code == (503 if recovery else ordinary_status)
+    assert response.json() == {"detail": (
+        "Saved chat attachments could not be read completely. Retry loading the conversation."
+        if recovery or corruption == "gap" else "A saved chat attachment is incomplete or invalid."
+    )}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_images", [False, True])
+@pytest.mark.parametrize("failure,image_status", [("read", 503), ("budget", 413), ("missing", 404)])
+async def test_protected_image_read_failure_translation_is_scoped(
+    listing_state, monkeypatch, include_images, failure, image_status,
+):
+    """Only image reads translate DB failures; unavailable protected rows remain 404."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+    from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
+
+    db, chat_id, _, _ = listing_state
+    error = {
+        "read": CharactersRAGDBError("private read failure"),
+        "budget": InputError("private budget failure"),
+        "missing": NotFoundError("private unavailable row"),
+    }[failure]
+
+    def fail_read(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(db, "read_history_recovery_messages", fail_read)
+    app = FastAPI()
+    app.include_router(character_messages.router, prefix="/api/v1")
+    principal = SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_request_user] = lambda: principal
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+    ) as client:
+        path = f"/api/v1/chats/{chat_id}/messages"
+        params = {"include_images": include_images, "include_history_recovery_v1": True,
+                  "render_placeholders": False, "scope_type": "global"}
+        response = await client.get(path, params=params)
+        assert response.status_code == (image_status if include_images or failure == "missing" else 500)
+        assert "private" not in response.text
+        wrong_scope = await client.get(path, params={**params, "scope_type": "workspace", "workspace_id": "other"})
+        assert wrong_scope.status_code == 404
+        principal.id = 42
+        assert (await client.get(path, params=params)).status_code == 403
 
 
 @pytest.mark.unit

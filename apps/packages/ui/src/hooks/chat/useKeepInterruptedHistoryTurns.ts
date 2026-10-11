@@ -101,10 +101,10 @@ export function useKeepInterruptedHistoryTurns({
     if (!retainedReplies.length) return
     const last = messages[messages.length - 1]
     for (const entry of retainedReplies) {
+      if (isHistoryTurnLive(entry.turn.operation_id)) continue
       const inputId = inputIdOf(entry)
       const index = messages.findIndex((message) => message.id === inputId)
       if (index < 0) continue
-      const next = messages[index + 1]
       if (index === messages.length - 1 && last && !last.isBot) {
         // The question is the last message: show the kept partial reply.
         setMessages((previous) =>
@@ -113,9 +113,6 @@ export function useKeepInterruptedHistoryTurns({
             ? previous
             : [...previous, retainedReplyMessage(entry.turn)]
         )
-      } else if (next && next.id !== entry.turn.assistant_id) {
-        // The user continued after it: the cut-off reply is no longer needed.
-        void selectionRef.current?.dismissRecovery(entry)
       }
     }
   }, [messages, retainedReplies, setMessages])
@@ -124,8 +121,7 @@ export function useKeepInterruptedHistoryTurns({
     (entry: HistoryTurnRecoveryEntry) =>
       isHistoryTurnLive(entry.turn.operation_id) ||
       (Boolean(entry.turn.outcome) &&
-        (!isRetainedPartialReply(entry.turn, ownerKind) ||
-          messages.some((message) => message.id === entry.turn.assistant_id))),
-    [messages, ownerKind]
+        messages.some((message) => message.id === entry.turn.assistant_id)),
+    [messages]
   )
 }

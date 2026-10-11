@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 async def audio_postgres(isolated_test_environment, monkeypatch):
     """Use the standard isolated database and a stable UTC quota day."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-    from tldw_Server_API.app.core.Usage import audio_quota
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_checks, quota_resolver
 
     client, _db_name = isolated_test_environment
     pool = await get_db_pool()
@@ -28,7 +28,15 @@ async def audio_postgres(isolated_test_environment, monkeypatch):
         SimpleNamespace(now=lambda _tz: datetime(2026, 9, 10, 12, tzinfo=timezone.utc)),
     )
     monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
-    return client, pool
+    monkeypatch.setattr(audio_quota, "_daily_ledger", None)
+    quota_checks.reset_ledger_cache()
+    # Per-test databases reuse user IDs, but the resolver cache is process-local.
+    quota_resolver.invalidate_all()
+    try:
+        yield client, pool
+    finally:
+        quota_resolver.invalidate_all()
+        quota_checks.reset_ledger_cache()
 
 
 @pytest_asyncio.fixture
@@ -37,96 +45,127 @@ async def audio_profile_user(audio_postgres, minutes_used, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
     from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import LedgerEntry, ResourceDailyLedger
-    from tldw_Server_API.app.core.Usage import quota_checks
+    from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
 
+    client, fixture_pool = audio_postgres
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
-    client, pool = audio_postgres
-    connection = await asyncpg.connect(pool.settings.DATABASE_URL)
-    try:
-        user_id = await connection.fetchval(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, is_active, is_verified)
-            VALUES ($1, 'audio-profile', 'audio-profile@example.test', $2, TRUE, TRUE)
-            RETURNING id
-            """,
-            uuid.uuid4(),
-            PasswordService().hash_password("AudioProfile@Test2026!"),
-        )
-    finally:
-        await connection.close()
-    # Reported minutes come from the resource ledger (real UTC day), not audio_usage_daily.
-    quota_checks.reset_ledger_cache()
-    ledger = ResourceDailyLedger(db_pool=pool)
-    await ledger.initialize()
-    now = datetime.now(timezone.utc)
-    seed = [(now - timedelta(days=1), 9.0, "yesterday")]
-    if minutes_used is not None:
-        seed.append((now, minutes_used, "today"))
-    for occurred_at, minutes, tag in seed:
-        await ledger.add(
-            LedgerEntry(
-                entity_scope="user",
-                entity_value=str(user_id),
-                category="minutes",
-                units=int(minutes * 60),
-                op_id=f"audio-profile-test:{user_id}:{tag}",
-                occurred_at=occurred_at,
-            )
-        )
 
-    login = client.post(
-        "/api/v1/auth/login",
-        data={
-            "username": "audio-profile",
-            "password": "AudioProfile@Test2026!",  # nosec B105
-        },
-    )
-    assert login.status_code == 200
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    # Login runs on the app loop and can replace the fixture loop's pool.
+    async def seed_profile_user():
+        """Keep pooled profile setup on the same loop as the actual portal."""
+        pool = await get_db_pool()
+        assert pool.settings.DATABASE_URL == fixture_pool.settings.DATABASE_URL
+        connection = await asyncpg.connect(pool.settings.DATABASE_URL)
+        try:
+            user_id = await connection.fetchval(
+                """
+                INSERT INTO users (uuid, username, email, password_hash, is_active, is_verified)
+                VALUES ($1, 'audio-profile', 'audio-profile@example.test', $2, TRUE, TRUE)
+                RETURNING id
+                """,
+                uuid.uuid4(),
+                PasswordService().hash_password("AudioProfile@Test2026!"),
+            )
+        finally:
+            await connection.close()
+        # Reported minutes come from the resource ledger's real UTC day.
+        quota_checks.reset_ledger_cache()
+        ledger = ResourceDailyLedger(db_pool=pool)
+        await ledger.initialize()
+        now = datetime.now(timezone.utc)
+        seed = [(now - timedelta(days=1), 9.0, "yesterday")]
+        if minutes_used is not None:
+            seed.append((now, minutes_used, "today"))
+        for occurred_at, minutes, tag in seed:
+            await ledger.add(
+                LedgerEntry(
+                    entity_scope="user",
+                    entity_value=str(user_id),
+                    category="minutes",
+                    units=int(minutes * 60),
+                    op_id=f"audio-profile-test:{user_id}:{tag}",
+                    occurred_at=occurred_at,
+                )
+            )
+        quota_resolver.invalidate_user(user_id)
+        return pool, user_id
+
+    pool, user_id = client.portal.call(seed_profile_user)
     try:
-        yield client, await get_db_pool(), user_id, headers
+        login = client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "audio-profile",
+                "password": "AudioProfile@Test2026!",  # nosec B105
+            },
+        )
+        assert login.status_code == 200
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        assert client.portal.call(get_db_pool) is pool
+        yield client, pool, user_id, headers
     finally:
+        quota_resolver.invalidate_user(user_id)
         quota_checks.reset_ledger_cache()
 
 
 @pytest_asyncio.fixture
-async def configured_audio_profile_user(audio_profile_user):
-    """Persist a user limit and invalidate only that user's primed unlimited cache."""
+async def configured_audio_profile_user(audio_profile_user, daily_limit):
+    """Optionally persist a limit and invalidate this user's primed unlimited cache."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.Usage import quota_resolver
     from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
-    _client, pool, user_id, _headers = audio_profile_user
-    repo = UserProfileOverridesRepo(pool)
-    await repo.ensure_tables()
-    assert await quota_resolver.user_quota(user_id, "limits.audio_daily_minutes") is None
-    try:
-        await repo.upsert_override(
-            user_id=user_id, key="limits.audio_daily_minutes", value=30, updated_by=user_id,
-        )
-        overrides = await repo.list_overrides_for_user(user_id)
-        assert [(row["key"], row["value"]) for row in overrides] == [("limits.audio_daily_minutes", 30)]
+    client, pool, user_id, _headers = audio_profile_user
+
+    async def configure_limit():
+        """Prime and reread limits on the profile request's owning loop."""
+        assert await get_db_pool() is pool
+        repo = UserProfileOverridesRepo(pool)
+        await repo.ensure_tables()
         assert await quota_resolver.user_quota(user_id, "limits.audio_daily_minutes") is None
-        quota_resolver.invalidate_user(user_id)
-        assert await quota_resolver.user_quota(user_id, "limits.audio_daily_minutes") == 30
-        yield audio_profile_user
-    finally:
-        try:
-            cleanup_pool = await get_db_pool()
-            assert cleanup_pool.settings.DATABASE_URL == pool.settings.DATABASE_URL
-            await UserProfileOverridesRepo(cleanup_pool).delete_override(
-                user_id=user_id, key="limits.audio_daily_minutes"
+        if daily_limit is not None:
+            await repo.upsert_override(
+                user_id=user_id, key="limits.audio_daily_minutes", value=daily_limit, updated_by=user_id,
             )
+            overrides = await repo.list_overrides_for_user(user_id)
+            assert [(row["key"], row["value"]) for row in overrides] == [("limits.audio_daily_minutes", daily_limit)]
+            assert await quota_resolver.user_quota(user_id, "limits.audio_daily_minutes") is None
+        else:
+            assert await repo.list_overrides_for_user(user_id) == []
+        quota_resolver.invalidate_user(user_id)
+        assert await quota_resolver.user_quota(user_id, "limits.audio_daily_minutes") == daily_limit
+
+    async def cleanup_limit():
+        """Delete only an override this fixture was configured to create."""
+        try:
+            if daily_limit is not None:
+                cleanup_pool = await get_db_pool()
+                assert cleanup_pool.settings.DATABASE_URL == pool.settings.DATABASE_URL
+                await UserProfileOverridesRepo(cleanup_pool).delete_override(
+                    user_id=user_id, key="limits.audio_daily_minutes"
+                )
         finally:
             quota_resolver.invalidate_user(user_id)
+
+    try:
+        client.portal.call(configure_limit)
+        yield audio_profile_user
+    finally:
+        client.portal.call(cleanup_limit)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_used", [None, 2.5], ids=["no-usage", "existing-usage"])
-async def test_postgres_full_profile_reports_current_day_audio_usage(configured_audio_profile_user, minutes_used) -> None:
-    """An enabled persisted limit yields numeric remaining minutes without a DATE encoding error."""
+@pytest.mark.parametrize(
+    ("quotas_enabled", "daily_limit"),
+    [(False, None), (True, None), (True, 30.0)],
+    ids=["quotas-off", "no-override", "configured-limit"],
+)
+async def test_postgres_full_profile_reports_current_day_audio_usage(
+    configured_audio_profile_user, minutes_used, quotas_enabled, daily_limit, monkeypatch,
+) -> None:
+    """Report DATE-backed usage with unlimited or explicitly configured quotas."""
     client, _pool, _user_id, headers = configured_audio_profile_user
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1" if quotas_enabled else "0")
     response = client.get(
         "/api/v1/users/me/profile",
         headers=headers,
@@ -135,11 +174,13 @@ async def test_postgres_full_profile_reports_current_day_audio_usage(configured_
     assert response.status_code == 200
     audio = response.json()["quotas"]["audio"]
     assert audio["daily_minutes_used"] == (0.0 if minutes_used is None else 2.5)
-    assert audio["daily_minutes_remaining"] == (30.0 if minutes_used is None else 27.5)
+    expected_remaining = None if daily_limit is None else daily_limit - (minutes_used or 0.0)
+    assert audio["daily_minutes_remaining"] == expected_remaining
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_used", [None, 2.5], ids=["no-usage", "existing-usage"])
+@pytest.mark.parametrize("daily_limit", [30.0], ids=["configured-limit"])
 async def test_postgres_audio_profile_disabled_quota_preserves_usage(
     configured_audio_profile_user, minutes_used, monkeypatch,
 ) -> None:
@@ -163,8 +204,13 @@ async def test_postgres_audio_profile_without_limit_preserves_usage(audio_profil
     from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
     client, pool, user_id, headers = audio_profile_user
-    assert await UserProfileOverridesRepo(pool).list_overrides_for_user(user_id) == []
-    quota_resolver.invalidate_user(user_id)
+
+    async def verify_unlimited():
+        """Read the real profile overrides without replacing the portal's pool."""
+        assert await UserProfileOverridesRepo(pool).list_overrides_for_user(user_id) == []
+        quota_resolver.invalidate_user(user_id)
+
+    client.portal.call(verify_unlimited)
 
     response = client.get("/api/v1/users/me/profile", headers=headers)
 
@@ -228,3 +274,25 @@ async def test_postgres_legacy_audio_backfill_preserves_current_day_usage_once(a
             "op_id": "audio-minutes-legacy:7:2026-09-10",
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reader", ["daily", "monthly", "monthly-admission"])
+async def test_postgres_audio_reads_backfill_legacy_usage_before_new_writes(
+    audio_postgres, monkeypatch, reader: str
+) -> None:
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    _client, pool = audio_postgres
+    monkeypatch.setattr(audio_quota, "datetime", datetime)
+    today = datetime.now(timezone.utc).date()
+    await pool.execute(
+        "INSERT INTO audio_usage_daily (user_id, day, minutes_used) VALUES ($1, $2, $3)",
+        7, today, 2.5,
+    )
+    for _ in range(2):
+        if reader == "monthly-admission":
+            assert await audio_quota._monthly_minutes_exhausted(7, 3.0, 1.0) is True
+        else:
+            read = audio_quota.get_daily_minutes_used if reader == "daily" else audio_quota.get_monthly_minutes_used
+            assert await read(7) == 2.5

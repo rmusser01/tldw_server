@@ -79,6 +79,28 @@ async def handle_vn_asset_job(job: dict[str, Any], *, job_manager: JobManager | 
         _close_worker_database(note_db)
 
 
+async def handle_vn_asset_failed_job(
+    job: dict[str, Any], error: Exception, *, job_manager: JobManager | None = None,
+) -> None:
+    """Reconcile a variant only after the SDK verified its terminal Jobs failure."""
+    if job.get("job_type") != VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
+        return
+    owner_user_id = _job_owner_user_id(job)
+    if _payload_user_id(job.get("payload") or {}) != owner_user_id:
+        raise ValueError("vn_asset_job_owner_mismatch")
+    note_db = await get_chacha_db_for_user_id(
+        owner_user_id, client_id=f"vn-asset-worker-{owner_user_id}",
+    )
+    try:
+        worker = VNAssetGenerationWorker(
+            repo=VNAssetPacksRepository.initialized(note_db),
+            jobs_manager=job_manager or JobManager(),
+        )
+        await worker.handle_failed_job(job, error)
+    finally:
+        _close_worker_database(note_db)
+
+
 def _job_owner_user_id(job: dict[str, Any]) -> int:
     try:
         owner_user_id = int(str(job.get("owner_user_id") or "").strip())
@@ -179,6 +201,7 @@ async def _run_vn_asset_jobs_worker(
         lease_seconds=int(os.getenv("VN_ASSET_JOBS_LEASE_SECONDS", os.getenv("JOBS_LEASE_SECONDS", "120")) or "120"),
         renew_threshold_seconds=int(os.getenv("VN_ASSET_JOBS_RENEW_THRESHOLD_SECONDS", "10") or "10"),
         renew_jitter_seconds=int(os.getenv("VN_ASSET_JOBS_RENEW_JITTER_SECONDS", "0") or "0"),
+        bind_completion_token=True,
     )
     jm = JobManager()
     sdk = WorkerSDK(jm, cfg)
@@ -196,6 +219,7 @@ async def _run_vn_asset_jobs_worker(
         await sdk.run(
             handler=lambda job_row: handle_vn_asset_job(job_row, job_manager=jm),
             cancel_check=lambda job_row: _should_cancel(job_row, job_manager=jm),
+            on_failed=lambda job_row, error: handle_vn_asset_failed_job(job_row, error, job_manager=jm),
         )
     finally:
         if stop_task is not None:

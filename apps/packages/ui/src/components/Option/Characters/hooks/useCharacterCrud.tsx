@@ -206,7 +206,14 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       return createdCharacter
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["tldw:listCharacters"] })
+      // Let pre-create reads settle so neither query nor transport coalescing
+      // can reuse their stale response for the post-create refresh.
+      const pendingReads = qc.getQueryCache().findAll({
+        queryKey: ["tldw:listCharacters"], fetchStatus: "fetching"
+      }).map(query => query.promise?.catch(() => undefined))
+      void Promise.all(pendingReads).then(() =>
+        qc.invalidateQueries({ queryKey: ["tldw:listCharacters"] })
+      )
       qc.invalidateQueries({ queryKey: ["tldw:characterPreviewWorldBooks"] })
       setOpen(false)
       createForm.resetFields()

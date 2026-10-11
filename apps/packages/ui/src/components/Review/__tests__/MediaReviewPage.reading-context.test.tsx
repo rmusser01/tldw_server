@@ -861,7 +861,9 @@ describe('MediaReviewPage active reading context', () => {
     await screen.findByText("Content 3")
     const footer = screen.getByTestId("media-review-status-bar")
     expect(footer).toHaveTextContent("Previewing 3 of 40")
-    for (let id = 1; id <= 40; id++) selectItemByCheckbox(`Item ${id}`)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add visible to selection (40)" })
+    )
     fireEvent.click(screen.getByRole("button", { name: "Review selected (40)" }))
     await waitFor(() =>
       expect(
@@ -870,7 +872,11 @@ describe('MediaReviewPage active reading context', () => {
     )
     expect(footer).toHaveTextContent("Reading item 1 of 40")
     expect(footer).not.toHaveTextContent("Previewing")
-    fireEvent.click(screen.getByRole("button", { name: "Next reading window" }))
+    fireEvent.click(
+      within(screen.getByTestId("media-review-reading-window")).getByRole(
+        "button", { name: "Next reading window" }
+      )
+    )
     await waitFor(() =>
       expect(
         screen.getByTestId("media-review-reading-context")
@@ -878,7 +884,11 @@ describe('MediaReviewPage active reading context', () => {
     )
     expect(footer).toHaveTextContent("40 selected")
     expect(footer).toHaveTextContent("Reading item 31 of 40")
-    fireEvent.click(screen.getByRole("button", { name: "Return to preview" }))
+    fireEvent.click(
+      within(screen.getByTestId("media-review-reading-context")).getByRole(
+        "button", { name: "Return to preview" }
+      )
+    )
     expect(screen.getByTestId("media-review-reading-context")).toHaveTextContent(
       "Result preview: Item 3"
     )

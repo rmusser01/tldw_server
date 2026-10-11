@@ -888,7 +888,7 @@ def _caller_allowed_for_loguru_config() -> bool:
 
 # Ensure any subsequent logger.add calls wrap raw streams with SafeStreamWrapper
 _ROOT_LOGGER = logger
-_original_logger_add = _ROOT_LOGGER.add
+_original_logger_add = _unwrap_logger_add(_ROOT_LOGGER.add)
 _original_unwrapped_logger_add = _unwrap_logger_add(_original_logger_add)
 
 
@@ -948,7 +948,7 @@ _install_stderr_redirect()
 if not hasattr(_ROOT_LOGGER, "_tldw_original_remove"):
     _ROOT_LOGGER._tldw_original_remove = _unwrap_loguru_wrapper(_ROOT_LOGGER.remove)  # type: ignore[attr-defined]
 _original_logger_remove = getattr(_ROOT_LOGGER, "_tldw_original_remove", None)
-_root_configure = getattr(_ROOT_LOGGER, "configure", None)
+_root_configure = _unwrap_loguru_wrapper(getattr(_ROOT_LOGGER, "configure", None))
 if callable(_root_configure) and not hasattr(_ROOT_LOGGER, "_tldw_original_configure"):
     _ROOT_LOGGER._tldw_original_configure = _unwrap_loguru_wrapper(_root_configure)  # type: ignore[attr-defined]
 _original_logger_configure = getattr(_ROOT_LOGGER, "_tldw_original_configure", None)
@@ -1298,6 +1298,9 @@ async def lifespan(app: FastAPI):
     _run_startup_config_validation()
 
     try:
+        # Cold schema generation must finish before requests share the event loop.
+        if app.openapi_url:
+            await asyncio.to_thread(app.openapi)
         yield
     finally:
         # Forced ASGI shutdown cancels this suspended lifespan. Owned workers
@@ -2201,7 +2204,7 @@ def _ensure_openapi_operation_tags_declared(openapi_schema: dict[str, Any]) -> N
 
 
 # Add global security schemes, servers, and branding to the generated OpenAPI schema
-def custom_openapi():
+def custom_openapi(app: FastAPI = app):
     # All schema normalization below is covered by FastAPI's OpenAPI schema cache.
     if app.openapi_schema:
         return app.openapi_schema

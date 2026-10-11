@@ -4483,16 +4483,33 @@ export default defineBackground({
           );
           return;
         }
+        const frameId = info.frameId ?? 0;
+        const message = {
+          type: "tldw:popup:open",
+          payload: {
+            selectionText: selection,
+            pageUrl: info.pageUrl || tab?.url || "",
+            pageTitle: tab?.title || "",
+            frameId,
+          },
+        };
         try {
-          await browser.tabs.sendMessage(tabId, {
-            type: "tldw:popup:open",
-            payload: {
-              selectionText: selection,
-              pageUrl: info.pageUrl || tab?.url || "",
-              pageTitle: tab?.title || "",
-              frameId: info.frameId,
-            },
-          });
+          try {
+            await browser.tabs.sendMessage(tabId, message, { frameId });
+          } catch (error) {
+            if (
+              !/Receiving end does not exist/i.test(
+                String((error as Error)?.message || error),
+              )
+            ) {
+              throw error;
+            }
+            await browser.scripting.executeScript({
+              target: { tabId, frameIds: [frameId] },
+              files: ["content-scripts/copilot-popup.js"],
+            });
+            await browser.tabs.sendMessage(tabId, message, { frameId });
+          }
         } catch (error) {
           logBackgroundError("contextual popup sendMessage", error);
           notify(

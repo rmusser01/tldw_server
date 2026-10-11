@@ -263,7 +263,7 @@ export class NotesPage extends BasePage {
     // The submenu's accessible name includes its expand icon ("Export right").
     const exportMenuItem = this.page.getByRole("menuitem", { name: /^export\b/i })
     await expect(exportMenuItem).toBeVisible({ timeout: 10_000 })
-    await exportMenuItem.hover()
+    await exportMenuItem.click()
 
     await expect(this.printExportMenuItem).toBeVisible({ timeout: 10_000 })
     await this.printExportMenuItem.click()

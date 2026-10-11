@@ -851,7 +851,8 @@ it("mounted sidepanel native character uses owner selection and ACK without lega
   ).toEqual(["u-old", "a1"])
   expect(h1.controller.followResult).toHaveBeenCalledWith(
     expect.objectContaining({ view_session_id: "origin" }),
-    "native-result"
+    "native-result",
+    expect.any(Function)
   )
   expect(h1.append).not.toHaveBeenCalled()
 })
@@ -1145,7 +1146,8 @@ it("a disconnect after the native owner ACK preserves the completed outcome", as
   )
   expect(h1.controller.followResult).toHaveBeenCalledWith(
     expect.anything(),
-    "owner-result"
+    "owner-result",
+    expect.any(Function)
   )
   expect(h1.append).not.toHaveBeenCalled()
 })

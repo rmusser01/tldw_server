@@ -138,6 +138,7 @@ export const useQuickChat = () => {
           chatHistory,
           options
         )) {
+          if (typeof chunk !== "string") continue
           chunks.push(chunk)
           updateLastMessage(chunks.join(""))
         }

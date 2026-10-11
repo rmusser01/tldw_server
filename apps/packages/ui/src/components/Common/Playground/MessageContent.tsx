@@ -17,6 +17,11 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
+const MarkdownHeadingScope = React.lazy(() =>
+  import("../../Common/Markdown").then(module => ({
+    default: module.MarkdownHeadingScope
+  }))
+)
 
 const MARKDOWN_BASE_CLASSES =
   "prose break-words text-message dark:prose-invert prose-p:leading-relaxed prose-pre:p-0 dark:prose-dark max-w-none"
@@ -36,10 +41,10 @@ const ErrorBubble: React.FC<{
     <div
       role="alert"
       aria-live="assertive"
-      className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+      className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-text">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
-        <p className="mt-1 text-xs text-danger">
+        <p className="mt-1 text-xs text-text">
           {payload.hint}
         </p>
       )}
@@ -48,12 +53,12 @@ const ErrorBubble: React.FC<{
           type="button"
           onClick={() => setShowDetails((prev) => !prev)}
           title={showDetails ? toggleLabels.hide : toggleLabels.show}
-          className="mt-2 text-xs font-medium text-danger underline hover:text-danger">
+          className="mt-2 min-h-11 text-xs font-medium text-text underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus xl:min-h-8">
           {showDetails ? toggleLabels.hide : toggleLabels.show}
         </button>
       )}
       {showDetails && payload.detail && (
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-danger">
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-text">
           {payload.detail}
         </pre>
       )}
@@ -68,7 +73,7 @@ const ErrorBubble: React.FC<{
               key={action.id}
               type="button"
               onClick={action.onClick}
-              className="rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
+              className="min-h-11 rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-text transition hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus xl:min-h-8"
             >
               {action.label}
             </button>
@@ -96,6 +101,7 @@ export interface MessageContentProps {
   assistantTextClass: string
   chatTextClass: string
   searchQuery?: string
+  headingOffset?: number
 
   // Error recovery
   errorRecoveryActions: Array<{ id: string; label: string; onClick: () => void }>
@@ -144,6 +150,7 @@ export const MessageContent = React.memo(function MessageContent(
     assistantTextClass,
     chatTextClass,
     searchQuery,
+    headingOffset,
     errorRecoveryActions,
     openReasoning,
     reasoningTimeTaken,
@@ -221,6 +228,7 @@ export const MessageContent = React.memo(function MessageContent(
                   message={message}
                   className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                   searchQuery={searchQuery}
+                  headingOffset={headingOffset}
                   codeBlockVariant="compact"
                   enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                 />
@@ -229,7 +237,7 @@ export const MessageContent = React.memo(function MessageContent(
               <>
                 {parseReasoning(message).map((e, i) => {
                   if (e.type === "reasoning") {
-                    return (
+                    const reasoning = (
                       <ReasoningBlock
                         key={`reasoning-${i}`}
                         content={e.content}
@@ -244,6 +252,13 @@ export const MessageContent = React.memo(function MessageContent(
                         enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                       />
                     )
+                    return headingOffset ? (
+                      <React.Suspense key={`reasoning-${i}`} fallback={<p>{t("reasoning.loading")}</p>}>
+                        <MarkdownHeadingScope value={headingOffset}>
+                          {reasoning}
+                        </MarkdownHeadingScope>
+                      </React.Suspense>
+                    ) : reasoning
                   }
 
                   return (
@@ -259,6 +274,7 @@ export const MessageContent = React.memo(function MessageContent(
                         message={e.content}
                         className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                         searchQuery={searchQuery}
+                        headingOffset={headingOffset}
                         codeBlockVariant="github"
                         enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                       />

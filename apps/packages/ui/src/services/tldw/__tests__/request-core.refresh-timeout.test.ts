@@ -223,22 +223,16 @@ describe("tldwRequest timeout bounds", () => {
     vi.useFakeTimers()
     const fetchFn = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const signal = init?.signal
-      return {
-        ok: true,
-        status: 200,
-        headers: new Headers({ "content-type": "application/json" }),
-        // Body read never resolves on its own — only the request timeout can
-        // unblock it by aborting the shared controller.
-        json: () =>
-          new Promise((_resolve, reject) => {
+      return new Response(
+        new ReadableStream({
+          start(controller) {
             signal?.addEventListener("abort", () => {
-              const abortError = new Error("aborted")
-              abortError.name = "AbortError"
-              reject(abortError)
+              controller.error(signal.reason)
             })
-          }),
-        text: () => Promise.resolve("")
-      } as unknown as Response
+          }
+        }),
+        { headers: { "content-type": "application/json" } }
+      )
     }) as unknown as typeof fetch
 
     const runtime = {
@@ -259,7 +253,12 @@ describe("tldwRequest timeout bounds", () => {
     // and resolve rather than hang.
     await vi.advanceTimersByTimeAsync(120001)
     const resp = await pending
-    expect(resp.status).toBe(200)
-    expect(resp.data).toBeNull()
+    expect(resp).toMatchObject({
+      ok: false,
+      status: 0,
+      error: "Request timed out.",
+      code: "REQUEST_TIMEOUT"
+    })
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

@@ -8,7 +8,7 @@
  * needs no live LLM (TASK-13520, WebUI perf batch W0 Stage 1).
  */
 
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect, type BrowserContext, type Page } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import path from "path"
 import http from "node:http"
@@ -622,7 +622,7 @@ const installCannedStreamBench = (page: Page, expectedFullText: string) =>
       lastChunkAt: 0,
       prevAssistantLength: 0
     }
-    bench.prevAssistantLength = assistantTextOf(store.getState().messages).length
+    bench.prevAssistantLength = assistantTextOf(store.getState().messages).replace(/\u258b$/, "").length
 
     const mutationObserver = new MutationObserver((records) => {
       if (!bench.completed) bench.domMutations += records.length
@@ -657,13 +657,14 @@ const installCannedStreamBench = (page: Page, expectedFullText: string) =>
       }
 
       const text = assistantTextOf(next?.messages || [])
-      if (text.length > bench.prevAssistantLength) {
+      const contentLength = text.replace(/\u258b$/, "").length
+      if (contentLength > bench.prevAssistantLength) {
         const now = performance.now()
         if (!bench.started) {
           bench.started = true
           bench.firstChunkAt = now
         }
-        bench.prevAssistantLength = text.length
+        bench.prevAssistantLength = contentLength
         bench.chunksApplied += 1
         bench.lastChunkAt = now
         performance.mark(MARK_CHUNK)
@@ -742,24 +743,26 @@ test.describe("Canned 100-chunk stream (no live LLM)", () => {
     const reportStartTime = performance.now()
     const canned = await startCannedStreamServer()
 
-    const { context, page, extensionId, openSidepanel } = await launchWithExtensionOrSkip(
-      test,
-      CANNED_EXT_PATH,
-      {
-        seedConfig: {
-          __tldw_first_run_complete: true,
-          __tldw_allow_offline: true,
-          tldwConfig: {
-            serverUrl: canned.baseUrl,
-            authMode: "single-user",
-            apiKey: "test-key"
-          }
-        }
-      }
-    )
-
+    let context: BrowserContext | undefined
     let sidepanel: Page | undefined
     try {
+      const launched = await launchWithExtensionOrSkip(
+        test,
+        CANNED_EXT_PATH,
+        {
+          seedConfig: {
+            __tldw_first_run_complete: true,
+            __tldw_allow_offline: true,
+            tldwConfig: {
+              serverUrl: canned.baseUrl,
+              authMode: "single-user",
+              apiKey: "test-key"
+            }
+          }
+        }
+      )
+      context = launched.context
+      const { page, extensionId, openSidepanel } = launched
       const origin = `${new URL(canned.baseUrl).origin}/*`
       const granted = await grantHostPermission(context, extensionId, origin)
       expect(
@@ -893,8 +896,11 @@ test.describe("Canned 100-chunk stream (no live LLM)", () => {
       } catch {
         // Page may already be closed.
       }
-      await context.close()
-      await stopCannedStreamServer(canned.server)
+      try {
+        await context?.close()
+      } finally {
+        await stopCannedStreamServer(canned.server)
+      }
     }
   })
 })

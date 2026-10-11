@@ -170,8 +170,7 @@ export const createIngestJobsTracker = <TMeta>() => {
 type PollTrackedIngestJobsOptions<TMeta, TResult> = {
   tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
   /**
-   * Per-job status fetch (legacy N+1 path). Required unless `fetchJobs` is
-   * provided; ignored when `fetchJobs` is present.
+   * Per-job status fetch; also reconciles ids absent from a successful batch.
    */
   fetchJob?: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
   /**
@@ -179,8 +178,7 @@ type PollTrackedIngestJobsOptions<TMeta, TResult> = {
    * returned response is expected to carry the reconciled status of every
    * requested job under `data.jobs` (an array of job status objects with an
    * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
-   * A job missing from `data.jobs` is treated like the per-job 404 path
-   * (stays pending until the poll timeout).
+   * Missing jobs use `fetchJob` when available, otherwise remain pending.
    */
   fetchJobs?: (
     batchId: string,
@@ -325,10 +323,10 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
 
     let observedTerminal = false
     for (const [jobId, item] of Array.from(unresolved.entries())) {
+      // Idempotent replay can return a job still owned by an earlier batch.
       const response =
         responsesByJob.get(jobId) ??
-        // Job missing from the batch listing: treat like the per-job 404
-        // path (kept pending; mapRequestError sees a 404-shaped response).
+        (!responsesByJob.has(jobId) ? await options.fetchJob?.(jobId) : undefined) ??
         ({
           ok: false,
           status: 404,

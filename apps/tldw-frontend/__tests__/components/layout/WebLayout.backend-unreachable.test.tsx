@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -31,7 +31,10 @@ describe("BackendUnavailableModalGate", () => {
     ).toBeInTheDocument()
   })
 
-  it("can render backend-unreachable detail as a non-blocking inline alert", () => {
+  it("preserves backend-unreachable detail and recovery actions in a non-blocking inline alert", () => {
+    const onClose = vi.fn()
+    const onOpenHealth = vi.fn()
+    const onRetry = vi.fn()
     render(
       <BackendUnavailableModalGate
         backendUnavailableDetail={{
@@ -43,9 +46,9 @@ describe("BackendUnavailableModalGate", () => {
         }}
         fatalBackendRecoveryActive={false}
         isChecking={false}
-        onClose={vi.fn()}
-        onOpenHealth={vi.fn()}
-        onRetry={vi.fn()}
+        onClose={onClose}
+        onOpenHealth={onOpenHealth}
+        onRetry={onRetry}
         presentation="inline"
         t={(key: string, fallback?: string) => fallback ?? key}
       />
@@ -57,9 +60,19 @@ describe("BackendUnavailableModalGate", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(
+      screen.getByText("Failed to fetch (GET /api/v1/llm/models/metadata)")
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
+    expect(onOpenHealth).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("suppresses the modal while a fatal backend recovery takeover is active", () => {
+  it.each(["modal", "inline"] as const)("suppresses %s presentation while a fatal backend recovery takeover is active", (presentation) => {
     render(
       <BackendUnavailableModalGate
         backendUnavailableDetail={{
@@ -74,6 +87,7 @@ describe("BackendUnavailableModalGate", () => {
         onClose={vi.fn()}
         onOpenHealth={vi.fn()}
         onRetry={vi.fn()}
+        presentation={presentation}
         t={(key: string, fallback?: string) => fallback ?? key}
       />
     )
@@ -83,7 +97,7 @@ describe("BackendUnavailableModalGate", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("consumes stale modal detail when fatal recovery takes over", () => {
+  it.each(["modal", "inline"] as const)("consumes stale %s detail when fatal recovery takes over", (presentation) => {
     const onConsumeHiddenDetail = vi.fn()
 
     render(
@@ -101,6 +115,7 @@ describe("BackendUnavailableModalGate", () => {
         onOpenHealth={vi.fn()}
         onRetry={vi.fn()}
         onConsumeHiddenDetail={onConsumeHiddenDetail}
+        presentation={presentation}
         t={(key: string, fallback?: string) => fallback ?? key}
       />
     )

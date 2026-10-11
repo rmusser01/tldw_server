@@ -580,12 +580,21 @@ const renderSettings = (client = createClient()) => ({
 
 const DelayedRouteLink = () => {
   const navigate = useNavigate()
+  const timers = React.useRef(new Set<number>())
+  React.useEffect(() => {
+    const owned = timers.current
+    return () => owned.forEach((timer) => window.clearTimeout(timer))
+  }, [])
   return (
     <a
       href="/settings/chat"
       onClick={(event) => {
         event.preventDefault()
-        window.setTimeout(() => navigate("/settings/chat"), 0)
+        const timer = window.setTimeout(() => {
+          timers.current.delete(timer)
+          navigate("/settings/chat")
+        }, 0)
+        timers.current.add(timer)
       }}
     >
       Delayed settings test route
@@ -609,13 +618,53 @@ const ProgrammaticSettingsNavigation = ({ destination }: {
   )
 }
 
-const openPrompt = async (name: string) => {
-  fireEvent.click(await screen.findByRole("button", { name }))
+let fixtureSignal: AbortSignal
+const pendingHistory = new Set<Promise<void>>()
+
+const traverseHistory = (
+  direction: "back" | "forward", events = 1, signal = fixtureSignal
+) => {
+  const operation = (async () => {
+    signal.throwIfAborted()
+    let received = 0
+    const arrivals = Array.from({ length: events }, () => deferred<void>())
+    void Promise.allSettled(arrivals.map((arrival) => arrival.promise))
+    const onPopstate = () => {
+      arrivals[received++]?.resolve(undefined)
+    }
+    const onAbort = () => arrivals.forEach((arrival) => arrival.reject(signal.reason))
+    window.addEventListener("popstate", onPopstate)
+    signal.addEventListener("abort", onAbort, { once: true })
+    try {
+      act(() => window.history[direction]())
+      for (const arrival of arrivals) {
+        await act(async () => { await arrival.promise })
+      }
+      signal.throwIfAborted()
+    } finally {
+      window.removeEventListener("popstate", onPopstate)
+      signal.removeEventListener("abort", onAbort)
+    }
+  })()
+  const settled = operation.then(() => undefined, () => undefined)
+  pendingHistory.add(settled)
+  void settled.then(() => pendingHistory.delete(settled))
+  return operation
+}
+
+const openPrompt = async (name: string, signal = fixtureSignal) => {
+  signal.throwIfAborted()
+  const label = await screen.findByText(name, { selector: "button > span" })
+  signal.throwIfAborted()
+  const button = label.closest("button")!
+  fireEvent.click(within(button.parentElement!).getByRole("button", { name }))
   await screen.findByRole("heading", { name })
+  signal.throwIfAborted()
 }
 
 describe("ServicePromptsSettings", () => {
-  beforeEach(() => {
+  beforeEach(({ signal }) => {
+    fixtureSignal = signal
     vi.resetAllMocks()
     window.history.replaceState({}, "", "/settings/prompt")
     mocks.initialize.mockResolvedValue(undefined)
@@ -654,8 +703,117 @@ describe("ServicePromptsSettings", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true)
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.allSettled(pendingHistory)
     vi.restoreAllMocks()
+  })
+
+  it("waits for a history traversal before resolving its fixture operation", async () => {
+    vi.useFakeTimers()
+    const events: string[] = []
+    const onPopstate = () => events.push(window.location.pathname)
+    window.addEventListener("popstate", onPopstate)
+    try {
+      window.history.replaceState({}, "", "/settings/prompt")
+      window.history.pushState({}, "", "/settings/chat")
+      const moving = traverseHistory("back").then(() => events.push("complete"))
+      await vi.runAllTimersAsync()
+      await moving
+      expect(events).toEqual(["/settings/prompt", "complete"])
+    } finally {
+      window.removeEventListener("popstate", onPopstate)
+      vi.useRealTimers()
+    }
+  })
+
+  it("waits for both destination and reversal before resolving its fixture operation", async () => {
+    vi.useFakeTimers()
+    const events: string[] = []
+    const onPopstate = () => {
+      events.push(window.location.pathname)
+      if (events.length === 1) window.history.forward()
+    }
+    window.addEventListener("popstate", onPopstate)
+    try {
+      window.history.replaceState({}, "", "/settings/prompt")
+      window.history.pushState({}, "", "/settings/chat")
+      const moving = traverseHistory("back", 2).then(() => events.push("complete"))
+      await vi.runAllTimersAsync()
+      await moving
+      expect(events).toEqual(["/settings/prompt", "/settings/chat", "complete"])
+    } finally {
+      window.removeEventListener("popstate", onPopstate)
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels delayed fixture navigation when its link unmounts", () => {
+    vi.useFakeTimers()
+    try {
+      const view = render(<BrowserRouter><DelayedRouteLink /></BrowserRouter>)
+      fireEvent.click(screen.getByRole("link", { name: "Delayed settings test route" }))
+      view.unmount()
+      window.history.replaceState({}, "", "/settings/prompt?next-fixture=1")
+      act(() => vi.runOnlyPendingTimers())
+      expect(window.location.pathname + window.location.search)
+        .toBe("/settings/prompt?next-fixture=1")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("settles and removes its history listener when the fixture operation aborts", async () => {
+    const controller = new AbortController()
+    const added = vi.spyOn(window, "addEventListener")
+    const removed = vi.spyOn(window, "removeEventListener")
+    vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    let result: string | undefined
+    const moving = traverseHistory("back", 2, controller.signal).then(
+      () => { result = "resolved" },
+      error => { result = error.message }
+    )
+    controller.abort(new Error("Expired history fixture"))
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(result).toBe("Expired history fixture")
+      const listener = added.mock.calls.find(([name]) => name === "popstate")![1]
+      expect(removed).toHaveBeenCalledWith("popstate", listener)
+      expect(pendingHistory.size).toBe(0)
+    } finally {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+      await moving
+    }
+  })
+
+  it("does not click a prompt after its fixture operation expires", async () => {
+    const clicked = vi.fn()
+    render(<button onClick={clicked}><span>RAG answer</span></button>)
+    const controller = new AbortController()
+    const opening = openPrompt("RAG answer", controller.signal)
+    controller.abort(new Error("Expired prompt fixture"))
+    await expect(opening).rejects.toThrow("Expired prompt fixture")
+    expect(clicked).not.toHaveBeenCalled()
+  })
+
+  it("drains the entire aborted history operation before fixture cleanup", async () => {
+    const controller = new AbortController()
+    const removed = vi.spyOn(window, "removeEventListener")
+    vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    const moving = traverseHistory("back", 2, controller.signal)
+      .catch(() => undefined)
+    controller.abort(new Error("Expired history fixture"))
+    try {
+      await Promise.allSettled(pendingHistory)
+      expect(removed.mock.calls.some(([name]) => name === "popstate")).toBe(true)
+      expect(pendingHistory.size).toBe(0)
+    } finally {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+      await moving
+    }
   })
 
   it("shows loading, a retryable disconnected error, and no migration probe on failure", async () => {
@@ -1038,10 +1196,7 @@ describe("ServicePromptsSettings", () => {
     expect(destinationToken).toEqual(expect.any(String))
     const historyLength = window.history.length
 
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back")
     await screen.findByRole("heading", { name: "RAG answer" })
     expect(window.history.state).toMatchObject({
       hostMarker: "hash-b",
@@ -1055,10 +1210,7 @@ describe("ServicePromptsSettings", () => {
     vi.mocked(window.confirm).mockReturnValue(false)
 
     const confirmationsBeforeBack = vi.mocked(window.confirm).mock.calls.length
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back", 2)
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledTimes(confirmationsBeforeBack + 1)
     })
@@ -1070,10 +1222,7 @@ describe("ServicePromptsSettings", () => {
       .toHaveValue(authoredValue)
 
     const confirmationsBeforeForward = vi.mocked(window.confirm).mock.calls.length
-    await act(async () => {
-      window.history.forward()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("forward", 2)
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledTimes(confirmationsBeforeForward + 1)
     })
@@ -1160,10 +1309,7 @@ describe("ServicePromptsSettings", () => {
       )
       const historyLength = window.history.length
 
-      await act(async () => {
-        window.history.back()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("back")
       await screen.findByRole("heading", { name: "RAG answer" })
       expect(window.history.state).toMatchObject({
         hostMarker: "programmatic-source",
@@ -1180,10 +1326,7 @@ describe("ServicePromptsSettings", () => {
       editor.focus()
       vi.mocked(window.confirm).mockReturnValue(false)
 
-      await act(async () => {
-        window.history.forward()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("forward", 2)
       await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
       const restored = await screen.findByRole("textbox", { name: "Template" })
       expect(restored).toHaveValue(authoredValue)
@@ -2493,10 +2636,7 @@ describe("ServicePromptsSettings", () => {
     editor.focus()
     vi.mocked(window.confirm).mockReturnValue(false)
 
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back", 2)
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalled()
       expect(window.location.pathname).toBe("/settings/prompt")
@@ -2541,10 +2681,7 @@ describe("ServicePromptsSettings", () => {
     editor.focus()
     vi.mocked(window.confirm).mockReturnValue(false)
 
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back", 2)
     await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
     expect(window.history.length).toBe(historyLength)
     const restored = await screen.findByRole("textbox", { name: "Template" })
@@ -2564,10 +2701,7 @@ describe("ServicePromptsSettings", () => {
     await openPrompt("RAG follow-up rewrite")
     const historyLength = window.history.length
 
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back")
     await screen.findByRole("heading", { name: "RAG answer" })
     expect(window.history.state).toMatchObject({
       __N: true,
@@ -2584,10 +2718,7 @@ describe("ServicePromptsSettings", () => {
     editor.focus()
     vi.mocked(window.confirm).mockReturnValue(false)
 
-    await act(async () => {
-      window.history.forward()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("forward", 2)
     await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
     expect(window.history.length).toBe(historyLength)
     const restored = await screen.findByRole("textbox", { name: "Template" })
@@ -2634,10 +2765,7 @@ describe("ServicePromptsSettings", () => {
     expect(destinationToken).toEqual(expect.any(String))
     const historyLength = window.history.length
 
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back")
     await screen.findByRole("heading", { name: "RAG answer" })
     expect(window.history.state).toMatchObject({
       hostMarker: "preserved",
@@ -2651,10 +2779,7 @@ describe("ServicePromptsSettings", () => {
     editor.focus()
     vi.mocked(window.confirm).mockReturnValue(false)
 
-    await act(async () => {
-      window.history.forward()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("forward", 2)
     await screen.findByRole("heading", { name: "RAG answer" })
     await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
     const restored = screen.getByRole("textbox", { name: "Template" })
@@ -2716,10 +2841,7 @@ describe("ServicePromptsSettings", () => {
       const destinationToken = destinationState.servicePromptHistoryEntryToken
       const historyLength = window.history.length
 
-      await act(async () => {
-        window.history.back()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("back")
       await screen.findByRole("heading", { name: "RAG answer" })
       expect(window.history.state).toMatchObject({
         __N: true,
@@ -2734,10 +2856,7 @@ describe("ServicePromptsSettings", () => {
       editor.focus()
       vi.mocked(window.confirm).mockReturnValue(false)
 
-      await act(async () => {
-        window.history.back()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("back", 2)
       await screen.findByRole("heading", { name: "RAG answer" })
       await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
       expect(screen.getByRole("textbox", { name: "Template" }))
@@ -2746,10 +2865,7 @@ describe("ServicePromptsSettings", () => {
         hostMarker: "outside-a"
       }))
 
-      await act(async () => {
-        window.history.forward()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("forward", 2)
       await screen.findByRole("heading", { name: "RAG answer" })
       await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
       expect(window.history.length).toBe(historyLength)
@@ -2809,10 +2925,7 @@ describe("ServicePromptsSettings", () => {
         name: "Chat settings test route"
       }))
       await screen.findByText("Outside workflow prompt route")
-      await act(async () => {
-        window.history.back()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("back")
       await screen.findByRole("heading", { name: "RAG answer" })
 
       const realSetTimeout = globalThis.setTimeout
@@ -2837,10 +2950,7 @@ describe("ServicePromptsSettings", () => {
       })
       vi.mocked(window.confirm).mockReturnValue(false)
 
-      await act(async () => {
-        window.history.forward()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("forward", 2)
       await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(3))
       expect(window.location.href).toBe(dirtyUrl)
       expect(capsuleTimerCount).toBe(1)
@@ -2909,10 +3019,7 @@ describe("ServicePromptsSettings", () => {
         name: "Chat settings test route"
       }))
       await screen.findByText("Outside workflow prompt route")
-      await act(async () => {
-        window.history.back()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("back")
       await screen.findByRole("heading", { name: "RAG answer" })
 
       const dirtyUrl = window.location.href
@@ -2922,10 +3029,7 @@ describe("ServicePromptsSettings", () => {
       })
       vi.mocked(window.confirm).mockReturnValue(false)
 
-      await act(async () => {
-        window.history.forward()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+      await traverseHistory("forward", 2)
       expect(await screen.findByText(
         "Unable to resolve the connected server and account."
       )).toBeInTheDocument()
@@ -2936,10 +3040,17 @@ describe("ServicePromptsSettings", () => {
       expect(hiddenUnload.defaultPrevented).toBe(true)
 
       if (acceptsLeave) {
+        const confirmations = vi.mocked(window.confirm).mock.calls.length
         vi.mocked(window.confirm).mockReturnValue(true)
-        window.dispatchEvent(new PopStateEvent("popstate", {
-          state: window.history.state
-        }))
+        act(() => {
+          window.dispatchEvent(new PopStateEvent("popstate", {
+            state: window.history.state
+          }))
+        })
+        expect(window.confirm).toHaveBeenCalledTimes(confirmations + 1)
+        const acceptedUnload = new Event("beforeunload", { cancelable: true })
+        window.dispatchEvent(acceptedUnload)
+        expect(acceptedUnload.defaultPrevented).toBe(false)
       }
       fireEvent.click(screen.getByRole("button", { name: "Retry" }))
       const restored = await screen.findByRole("textbox", { name: "Template" })
@@ -2989,10 +3100,7 @@ describe("ServicePromptsSettings", () => {
     expect(window.history.state).not.toHaveProperty("idx")
     const historyLength = window.history.length
 
-    await act(async () => {
-      window.history.back()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("back")
     await screen.findByRole("heading", { name: "RAG answer" })
     expect(window.history.state).toMatchObject({
       __N: true,
@@ -3025,10 +3133,7 @@ describe("ServicePromptsSettings", () => {
     }
     vi.mocked(window.confirm).mockReturnValue(false)
 
-    await act(async () => {
-      window.history.forward()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await traverseHistory("forward", 2)
     await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
     expect(window.history.length).toBe(historyLength)
     const restored = await screen.findByRole("textbox", { name: "Template" })

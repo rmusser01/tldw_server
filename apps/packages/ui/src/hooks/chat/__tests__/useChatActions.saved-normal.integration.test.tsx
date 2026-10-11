@@ -1173,7 +1173,10 @@ describe("saved normal Chat pipeline with autosave", () => {
     view.unmount()
   })
 
-  it("preserves the selected provider in source-grounded generation options", async () => {
+  it.each([
+    "preserves the selected provider for chat after retrieval without generating an extra answer",
+    "preserves the selected provider in source-grounded generation options"
+  ])("%s", async () => {
     mocks.realProviderResolution = true
     const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
     mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
@@ -1197,6 +1200,17 @@ describe("saved normal Chat pipeline with autosave", () => {
     const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true, ragEnableGeneration: true })
     act(() => useStoreMessageOption.setState({ selectedModel: "custom-openai-api:shared-model" }))
     await act(async () => { await view.result.current.actions.onSubmit({ message: "Use this source", image: "" }) })
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({ enable_generation: false }))
+    const retrievalOptions = mocks.ragSearch.mock.calls[0][1]
+    expect(retrievalOptions).not.toHaveProperty("generation_model")
+    expect(retrievalOptions).not.toHaveProperty("generation_provider")
+    expect(retrievalOptions).not.toHaveProperty("generation_prompt")
+    expect(mocks.pageAssistModel).toHaveBeenCalledTimes(1)
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith(expect.objectContaining({
+      apiProvider: "custom-openai-api", model: "custom-openai-api:shared-model"
+    }))
+    expect(mocks.ragSearch.mock.invocationCallOrder[0]).toBeLessThan(mocks.pageAssistModel.mock.invocationCallOrder[0])
     // Retrieval supplies evidence; the selected provider generates the one streamed answer.
     expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({
       enable_generation: false, include_media_ids: [42], sources: ["media_db"]

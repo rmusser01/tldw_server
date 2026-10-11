@@ -2,6 +2,7 @@ import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { HistoryCursorV1 } from "@/types/history-selection"
+import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -38,11 +39,13 @@ export function HistorySelectionReview({
   selection,
   onExpand,
   onBind,
+  onReprepareRecovery,
   hideRecovery
 }: {
   selection: HistorySelectionController
   onExpand?: () => void
   onBind?: () => void
+  onReprepareRecovery?: (turn: HistoryTurnRecovery) => void
   /** Leave out retained turns the transcript already shows or still handles (CS-04). */
   hideRecovery?: (
     entry: NonNullable<HistorySelectionController["recoveries"]>[number]
@@ -265,6 +268,20 @@ export function HistorySelectionReview({
             <Button onClick={() => void selection.dismissRecovery(entry)}>
               {text("dismissRecovery", "Dismiss recovery")}
             </Button>
+            {entry.turn.persistence === "server" && entry.turn.logical_user_message_id && (
+              <Button onClick={() => void selection.inspectRecovery(entry)} disabled={!selection.settingsQualified}>
+                {text("verifyRecovery", "Verify saved outcome")}
+              </Button>
+            )}
+            {onReprepareRecovery && entry.turn.persistence === "server" && entry.turn.admission &&
+              entry.turn.finalized_selection && entry.turn.logical_user_message_id && !entry.turn.observed_result && (
+                <>
+                  <p>{text("reprepareWarning", "A new send can produce another answer. The earlier outcome remains unresolved.")}</p>
+                  <Button onClick={() => onReprepareRecovery(entry.turn)} disabled={!selection.settingsQualified}>
+                    {text("reprepareRecovery", "Reprepare input")}
+                  </Button>
+                </>
+              )}
           </div>
         ))}
       {selection.status === "loading" && (

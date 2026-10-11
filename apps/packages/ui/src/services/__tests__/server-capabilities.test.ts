@@ -123,6 +123,155 @@ describe("server capabilities docs-info merge", () => {
     vi.useRealTimers()
   })
 
+  it("checks durable-turn support against the captured target, not cached global capabilities", async () => {
+    const supportedSpec = { paths: { "/api/v1/chat/completions": { post: {
+      requestBody: { content: { "application/json": { schema: { properties: { tldw_turn: {} } } } } }
+    } } } }
+    mocks.getOpenAPISpec.mockResolvedValue(supportedSpec)
+    mocks.bgRequest.mockResolvedValue({})
+    const capabilitiesModule = await importCapabilitiesModule()
+    expect((await capabilitiesModule.getServerCapabilities()).hasChatTurnIdentity).toBe(true)
+    const scope = { config: { serverUrl: "https://old-server.test", authMode: "multi-user" as const }, userId: 42 }
+    mocks.bgRequest.mockResolvedValue({ paths: {} })
+    expect(await capabilitiesModule.getChatTurnIdentitySupport(scope)).toBe(false)
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith(expect.objectContaining({
+      path: "/openapi.json", method: "GET",
+      servicePromptConfig: { ...scope.config, expectedUserId: 42 }
+    }))
+    mocks.bgRequest.mockResolvedValue(supportedSpec)
+    expect(await capabilitiesModule.getChatTurnIdentitySupport(scope)).toBe(true)
+  })
+
+  it("propagates a scoped capability lookup failure without trusting the cache", async () => {
+    const scope = { config: { serverUrl: "https://old-server.test", authMode: "multi-user" as const }, userId: 42 }
+    const error = new Error("Request scope changed")
+    mocks.bgRequest.mockRejectedValue(error)
+    const capabilitiesModule = await importCapabilitiesModule()
+    await expect(capabilitiesModule.getChatTurnIdentitySupport(scope)).rejects.toBe(error)
+  })
+
+  it.each([
+    ["inline", { type: "object", properties: { tldw_turn: { type: "object" } } }],
+    ["ref", { $ref: "#/components/schemas/ChatCompletionRequest" }],
+    ["allOf", { allOf: [
+      { type: "object", properties: { save_to_db: { type: "boolean" } } },
+      { $ref: "#/components/schemas/ChatCompletionRequest" }
+    ] }]
+  ])("detects chat turn identity from a %s request schema", async (_, schema) => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      paths: {
+        "/api/v1/chat/completions": {
+          post: { requestBody: { content: { "application/json": { schema } } } }
+        }
+      },
+      components: {
+        schemas: {
+          ChatCompletionRequest: {
+            type: "object",
+            properties: { tldw_turn: { $ref: "#/components/schemas/ChatTurnIdentity" } }
+          },
+          ChatTurnIdentity: {
+            type: "object",
+            properties: { user_message_id: { type: "string", format: "uuid" } }
+          }
+        }
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasChatTurnIdentity).toBe(true)
+    expect((await getServerCapabilities()).hasChatTurnIdentity).toBe(true)
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1)
+  })
+
+  it("detects chat turn identity for the UTF-8 JSON request content type", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      paths: {
+        "/api/v1/chat/completions": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json;charset=utf-8": {
+                  schema: { properties: { tldw_turn: { type: "object" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasChatTurnIdentity).toBe(true)
+  })
+
+  it.each([
+    ["absent field", { properties: { save_to_db: { type: "boolean" } } }],
+    ["missing schema", undefined],
+    ["unresolved ref", { $ref: "#/components/schemas/MissingRequest" }],
+    ["nested field only", {
+      properties: { messages: { items: { properties: { tldw_turn: { type: "object" } } } } }
+    }]
+  ])("keeps chat turn identity unsupported with %s", async (_, schema) => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      paths: {
+        "/api/v1/chat/completions": {
+          post: { requestBody: { content: { "application/json": { schema } } } }
+        }
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({ capabilities: { hasChatTurnIdentity: true } })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasChatTurnIdentity).toBe(false)
+  })
+
+  it("defaults chat turn identity to false when the spec is invalid", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue("invalid spec")
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasChatTurnIdentity).toBe(false)
+  })
+
+  it("defaults a pre-flag persisted cache to unsupported without refetching", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV5", {
+      key: "server:17azy7u:auth:single-user:org:none:user:single-user:key:none",
+      fetchedAt: Date.now(),
+      capabilities: { hasChat: true, hasChatSaveToDb: true }
+    })
+
+    const { getServerCapabilities, getServerCapabilitiesCacheDiagnostics } =
+      await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasChatTurnIdentity).toBe(false)
+    expect(capabilities.hasChatSaveToDb).toBe(true)
+    expect((await getServerCapabilities()).hasChatTurnIdentity).toBe(false)
+    expect(mocks.getOpenAPISpec).not.toHaveBeenCalled()
+    expect(getServerCapabilitiesCacheDiagnostics()).toMatchObject({
+      persistedHits: 1,
+      inMemoryHits: 1
+    })
+  })
+
+  it.each([false, undefined])(
+    "does not advertise chat turn identity from a cached %s flag",
+    async (hasChatTurnIdentity) => {
+      cacheState.values.set("__tldwServerCapabilitiesCacheV5", {
+        key: "server:17azy7u:auth:single-user:org:none:user:single-user:key:none",
+        fetchedAt: Date.now(),
+        capabilities: { hasChat: true, hasChatTurnIdentity }
+      })
+
+      const { getServerCapabilities } = await importCapabilitiesModule()
+      expect((await getServerCapabilities()).hasChatTurnIdentity).not.toBe(true)
+      expect(mocks.getOpenAPISpec).not.toHaveBeenCalled()
+    }
+  )
+
   it("requires both persona route support and docs-info persona feature flag", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "test-version" },
@@ -595,6 +744,7 @@ describe("server capabilities docs-info merge", () => {
     const capabilities = await getServerCapabilities()
 
     expect(capabilities.hasWebClipper).toBe(false)
+    expect(capabilities.hasChatTurnIdentity).toBe(false)
     expect(capabilities.specSource).toBe("fallback")
   })
 

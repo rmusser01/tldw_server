@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.exceptions import LegacyDisplayReconciliationError
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
 from tldw_Server_API.app.core.Image_Generation.config import get_image_generation_config, resolve_image_generation_model
+from tldw_Server_API.app.core.Image_Generation.exceptions import ImageGenerationError
 from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
 from tldw_Server_API.app.core.Storage.generated_file_helpers import save_and_register_vn_asset_image
 from tldw_Server_API.app.core.VN_Assets.concurrency import get_default_backend_generation_gate
@@ -35,8 +36,10 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
     build_legacy_activity_reader,
     create_generate_variant_job,
+    generate_variant_idempotency_key,
     legacy_delivery_fingerprint,
     vn_asset_batch_group,
+    vn_asset_generation_jobs_queue,
 )
 from tldw_Server_API.app.core.VN_Assets.portability.exporter import VNPackExporter
 from tldw_Server_API.app.core.VN_Assets.portability.importer import VNPackImporter
@@ -255,10 +258,16 @@ class VNAssetGenerationWorker:
             recipe_version == 0 and _retryable_fanout_failure(batch)
         ):
             if recipe_version == 1 and batch["status"] == "cancelled":
-                await self._cleanup_cancelled_variant_storage(
-                    batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
-                    user_id=user_id, pack_id=pack_id,
+                # Clean sibling reservations before cancelling their only delivery path.
+                recipes = await self.repo.run_worker_replay_operation(
+                    partial(self.repo.list_batch_recipes, batch_id)
                 )
+                for recipe_row in recipes:
+                    await self._cleanup_cancelled_variant_storage(
+                        batch_id=batch_id, slot_id=int(recipe_row["slot_id"]),
+                        variant_index=int(recipe_row["variant_index"]),
+                        user_id=user_id, pack_id=pack_id,
+                    )
             self._cancel_terminal_batch_jobs(
                 user_id=user_id,
                 pack_id=pack_id,
@@ -380,11 +389,21 @@ class VNAssetGenerationWorker:
             if not legacy_setup_complete:
                 raise
             legacy_status = SLOT_STATUS_FAILED
+            if recipe_version == 1 and job is not None:
+                await self.repo.run_worker_replay_operation(
+                    partial(self._require_current_job_lease, job, user_id=user_id)
+                )
             definitive_replay_failure = isinstance(exc, VNAssetGenerationError) and not exc.retryable
-            if (recipe_version == 1 or definitive_replay_failure or not _job_has_retry_remaining(job)) and (
-                not reconciling or definitive_replay_failure
+            definitive_generation_failure = (
+                recipe_version == 1 and isinstance(exc, (ValueError, OSError))
+                and not isinstance(exc, VNAssetGenerationError)
+            )
+            # Exhausted Jobs reconciliation fails the recipe without deleting stored bytes.
+            if (definitive_generation_failure or definitive_replay_failure or not _job_has_retry_remaining(job)) and (
+                not reconciling or definitive_replay_failure or job is not None
             ) and not (
                 isinstance(exc, VNAssetGenerationError) and exc.retryable
+                and (job is None or "max_retries" not in job)
             ):
                 await self.repo.run_worker_replay_operation(partial(
                     self._record_generation_failure,
@@ -428,6 +447,86 @@ class VNAssetGenerationWorker:
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                     attempt_token=attempt_token,
                 ))
+
+    async def handle_failed_job(self, job: Mapping[str, Any], error: Exception) -> None:
+        """Reconcile the exact V1 claim after Jobs durably terminates its delivery."""
+        if job.get("job_type") != VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
+            return
+        payload = job.get("payload") or {}
+        user_id = _payload_int(payload, "user_id")
+        pack_id = _payload_int(payload, "pack_id")
+        batch_id = _payload_int(payload, "batch_id")
+        slot_id = _payload_int(payload, "slot_id")
+        variant_index = _payload_int(payload, "variant_index")
+        lease_id = str(job.get("lease_id") or "")
+        job_id = _positive_int(_job_id(job))
+        expected_scope = {
+            "owner_user_id": str(user_id),
+            "domain": VN_ASSETS_DOMAIN,
+            "queue": vn_asset_generation_jobs_queue(),
+            "job_type": VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
+            "batch_group": vn_asset_batch_group(user_id=user_id, pack_id=pack_id, batch_id=batch_id),
+            "idempotency_key": generate_variant_idempotency_key(
+                user_id=user_id, pack_id=pack_id, batch_id=batch_id,
+                slot_id=slot_id, variant_index=variant_index,
+            ),
+        }
+        if (
+            not lease_id or job_id is None or not job.get("uuid")
+            or any(job.get(key) != value for key, value in expected_scope.items())
+        ):
+            return
+
+        def reconcile() -> None:
+            outcome = self.repo.get_variant_outcome(batch_id, slot_id, variant_index)
+            if (
+                not outcome or outcome["outcome_status"] != "planned"
+                or outcome.get("claim_lease_id") != lease_id or not outcome.get("claim_token")
+            ):
+                return
+            attempt_token = str(outcome["claim_token"])
+
+            def is_current_terminal_claim() -> bool:
+                current = self.jobs_manager.get_job_or_archived_by_uuid(
+                    str(job["uuid"]), domain=VN_ASSETS_DOMAIN, owner_user_id=str(user_id),
+                )
+                if (
+                    not current or current.get("uuid") != job["uuid"]
+                    or current.get("status") not in {"failed", "quarantined"}
+                    or current.get("completion_token") != lease_id
+                    or (not current.get("archived") and current.get("id") != job_id)
+                    or current.get("payload") != payload
+                    or any(current.get(key) != value for key, value in expected_scope.items())
+                ):
+                    return False
+                batch = self.repo.get_batch(batch_id)
+                pack = self.repo.get_pack(pack_id)
+                claimed = self.repo.get_variant_outcome(batch_id, slot_id, variant_index)
+                item = self.repo.get_item(int(claimed["item_id"])) if claimed and claimed.get("item_id") else None
+                return bool(
+                    batch and int(batch["recipe_version"] or 0) == 1
+                    and int(batch["pack_id"]) == pack_id and int(batch["requested_by_user_id"]) == user_id
+                    and pack and int(pack["owner_user_id"]) == user_id
+                    and claimed and claimed["outcome_status"] == "planned"
+                    and claimed.get("claim_token") == attempt_token and claimed.get("claim_lease_id") == lease_id
+                    and item and int(item["pack_id"]) == pack_id and int(item["slot_id"]) == slot_id
+                    and _positive_int(item.get("generation_job_id")) == job_id
+                )
+
+            if not is_current_terminal_claim():
+                return
+
+            def validate_authority() -> None:
+                if not is_current_terminal_claim():
+                    raise VNAssetGenerationError("vn_asset_job_lease_lost", retryable=True, job_id=job_id)
+
+            # Jobs cleared the live lease; its completion token and the V1 claim bind this failure.
+            self.repo.fail_variant(
+                batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                error=str(error), attempt_token=attempt_token, validate_authority=validate_authority,
+            )
+
+        await self.repo.run_worker_replay_operation(reconcile)
 
     def _require_current_job_lease(self, job: Mapping[str, Any], *, user_id: int) -> None:
         """Validate job's live lease for user_id, returning None on admission.
@@ -1046,7 +1145,11 @@ class VNAssetGenerationWorker:
                 await self.repo.run_worker_replay_operation(
                     partial(self._require_current_job_lease, job, user_id=user_id)
                 )
-            image = await asyncio.to_thread(generation_result.generate, request)
+            try:
+                image = await asyncio.to_thread(generation_result.generate, request)
+            except OSError as exc:
+                # Adapter I/O failures use the retry contract, unlike repository failures.
+                raise ImageGenerationError("image adapter generation failed") from exc
 
         if attempt_token is not None:
             if job is not None:

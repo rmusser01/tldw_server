@@ -327,6 +327,17 @@ const setupWatchlistJourneyRoutes = async (page: Page) => {
   })
 }
 
+const openWatchlistCommandPalette = async (page: Page) => {
+  await page.getByTestId("watchlists-help-icon").click()
+  await expect(page.getByTestId("watchlists-help-panel")).toBeVisible()
+  await page.getByTestId("watchlists-open-command-palette").click()
+  const commandPalette = page.getByTestId("watchlists-command-palette").getByRole("dialog")
+  await expect(commandPalette).toBeVisible()
+  // Retained palette scroll and its opening transform can move the click target.
+  await expect(commandPalette).not.toHaveClass(/ant-zoom-(enter|appear)/)
+  return commandPalette
+}
+
 test.describe("Watchlist -> Ingest -> Notify journey", () => {
   test("runs a monitor, surfaces the new article, and shows the inbox notification", async ({
     authedPage: page,
@@ -342,11 +353,10 @@ test.describe("Watchlist -> Ingest -> Notify journey", () => {
 
       await expect(page.getByTestId("watchlists-health-bar")).toBeVisible()
       // Repeated guidance and commands now live in the Help disclosure.
-      await page.getByTestId("watchlists-help-icon").click()
-      await expect(page.getByTestId("watchlists-help-panel")).toBeVisible()
-      await page.getByTestId("watchlists-open-command-palette").click()
+      const commandPalette = await openWatchlistCommandPalette(page)
       await expect(page.getByTestId("watchlists-command-palette-input")).toBeVisible()
       await page.getByTestId("watchlists-command-nav-monitors").click()
+      await expect(commandPalette).toBeHidden()
 
       await expect(page.getByLabel(/Monitors table/i)).toBeVisible()
       await expect(page.getByText("Morning Brief")).toBeVisible()
@@ -365,9 +375,9 @@ test.describe("Watchlist -> Ingest -> Notify journey", () => {
     })
 
     await test.step("Verify the completed run appears in Activity", async () => {
-      await page.getByTestId("watchlists-help-icon").click()
-      await page.getByTestId("watchlists-open-command-palette").click()
+      const commandPalette = await openWatchlistCommandPalette(page)
       await page.getByTestId("watchlists-command-nav-activity").click()
+      await expect(commandPalette).toBeHidden()
 
       const activitySection = page.getByTestId("watchlists-secondary-activity")
       await expect(page.getByLabel(/Activity runs table/i)).toBeVisible()

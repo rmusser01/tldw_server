@@ -221,6 +221,73 @@ describe("manual single-user credential policy", () => {
     ).resolves.toEqual(deviceConfig)
   })
 
+  it("restores only saved same-origin cookie timeout preferences", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const cookieSession: TldwConfig = {
+      authMode: "single-user", authSource: "cookie-session", serverUrl: "https://api.example.test"
+    }
+    const timeouts = {
+      requestTimeoutMs: 60_000, streamIdleTimeoutMs: 30_000,
+      chatRequestTimeoutMs: 240_000, chatStartupTimeoutMs: 240_000,
+      chatStreamIdleTimeoutMs: 30_000, ragRequestTimeoutMs: "240000",
+      mediaRequestTimeoutMs: 90_000, uploadRequestTimeoutMs: 90_000
+    }
+    await persistent.set("tldwConfig", {
+      ...cookieSession, ...timeouts, apiKey: "stale-key", accessToken: "stale-token",
+      refreshToken: "stale-refresh", apiBearer: "stale-bearer", orgId: 999,
+      credentialSource: "manual", apiKeyPersistence: "device", unsafeOption: true
+    })
+    await expect(resolveEffectiveTldwConfig(
+      { persistent, session }, { cookieSession, expectedCookieOrigin: cookieSession.serverUrl }
+    )).resolves.toEqual({ ...cookieSession, ...timeouts, ragRequestTimeoutMs: 240_000 })
+  })
+
+  it.each([
+    { value: "90000", expected: 90_000 },
+    { value: 2_147_483_648, expected: 2_147_483_000 },
+    { value: "2147483648", expected: 2_147_483_000 }
+  ])("normalizes saved cookie timer $value to $expected ms", async ({ value, expected }) => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const cookieSession: TldwConfig = {
+      authMode: "single-user", authSource: "cookie-session", serverUrl: "https://api.example.test"
+    }
+    await persistent.set("tldwConfig", {
+      ...cookieSession, requestTimeoutMs: value, uploadRequestTimeoutMs: value
+    })
+    await expect(resolveEffectiveTldwConfig(
+      { persistent, session }, { cookieSession, expectedCookieOrigin: cookieSession.serverUrl }
+    )).resolves.toEqual({ ...cookieSession, requestTimeoutMs: expected, uploadRequestTimeoutMs: expected })
+  })
+
+  it.each(["foreign-cookie", "manual"])("does not inherit timeout preferences from %s authority", async (authority) => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const cookieSession: TldwConfig = {
+      authMode: "single-user", authSource: "cookie-session", serverUrl: "https://api.example.test"
+    }
+    await persistent.set("tldwConfig", {
+      ...cookieSession, requestTimeoutMs: 60_000,
+      ...(authority === "manual" ? { authSource: "manual" } : { serverUrl: "https://other.test" })
+    })
+    await expect(resolveEffectiveTldwConfig(
+      { persistent, session }, { cookieSession, expectedCookieOrigin: cookieSession.serverUrl }
+    )).resolves.toEqual(cookieSession)
+  })
+
+  it.each([0, -1, Infinity, NaN, "invalid", null, true])("does not restore invalid cookie timeout %s", async (requestTimeoutMs) => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const cookieSession: TldwConfig = {
+      authMode: "single-user", authSource: "cookie-session", serverUrl: "https://api.example.test"
+    }
+    await persistent.set("tldwConfig", { ...cookieSession, requestTimeoutMs })
+    await expect(resolveEffectiveTldwConfig(
+      { persistent, session }, { cookieSession, expectedCookieOrigin: cookieSession.serverUrl }
+    )).resolves.toEqual(cookieSession)
+  })
+
   it("fails closed when credential storage is unreadable", async () => {
     const unreadable: CredentialStorage = {
       get: async () => {

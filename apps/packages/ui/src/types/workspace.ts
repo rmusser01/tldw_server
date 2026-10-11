@@ -636,6 +636,8 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface WorkspaceNote extends KnowledgeNoteHead {
+  serverWorkspaceId?: string
+  serverScopeKey?: string
   pendingKnowledgeProvenance?: KnowledgeNoteProvenance
   id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string

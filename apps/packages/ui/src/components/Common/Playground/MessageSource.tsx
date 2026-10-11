@@ -1,4 +1,5 @@
 import { KnowledgeIcon } from "@/components/Option/Knowledge/KnowledgeIcon"
+import { parseHttpOrigin } from "@/utils/absolute-url-guard"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import { useTranslation } from "react-i18next"
 import React from "react"
@@ -79,7 +80,11 @@ export const MessageSource: React.FC<Props> = ({
     source?.snippet ||
     ""
   const url = source?.url
-  const safeUrl = safeExternalUrl(url)
+  const candidateUrl = safeExternalUrl(url)
+  const safeUrl =
+    candidateUrl && /^https?:\/\//i.test(candidateUrl) && parseHttpOrigin(candidateUrl)
+      ? candidateUrl
+      : null
   const page = source?.metadata?.page
   const lineFrom = source?.metadata?.loc?.lines?.from
   const lineTo = source?.metadata?.loc?.lines?.to

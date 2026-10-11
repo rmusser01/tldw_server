@@ -328,6 +328,32 @@ beforeEach(() => {
 })
 
 describe("Service Prompt mode wrapper ownership", () => {
+  it("rejects mixed history admission before loading or creating local history", async () => {
+    const controller = { getCurrent: vi.fn(() => {
+      throw new Error("selection_read_before_validation")
+    }) }
+    await expect(normalChatMode("Question", "", false, [], [], new AbortController().signal, {
+      ...normalParams(false),
+      tldwTurn: { user_message_id: "12409645-7bce-4cba-b03b-bc4b0b27cc68" },
+      historySelection: { controller, originIsCurrent: () => true } as any
+    })).rejects.toThrow("unsupported_history_durable_turn")
+    expect(controller.getCurrent).not.toHaveBeenCalled()
+    expect(mocks.loadServicePromptSnapshot).not.toHaveBeenCalled()
+    expect(mocks.runChatPipeline).not.toHaveBeenCalled()
+  })
+
+  it("retains the captured scope when a direct RAG retry loads its snapshot", async () => {
+    mocks.loadServicePromptSnapshot.mockRejectedValueOnce(new Error("Request scope changed"))
+    const signal = new AbortController().signal
+    await expect(ragMode("Question", "", true, [], [], signal, {
+      ...ragParams(), ...{ requestScope }
+    })).rejects.toThrow("Request scope changed")
+    expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledWith(
+      ["chat.rag.answer", "chat.rag.question_rewrite"], { signal, requestScope }
+    )
+    expect(mocks.runChatPipeline).not.toHaveBeenCalled()
+  })
+
   it("uses and releases a freshly loaded snapshot lease for the whole pipeline", async () => {
     const scopeController = new AbortController()
     const release = vi.fn()
@@ -493,6 +519,32 @@ describe("Service Prompt mode wrapper ownership", () => {
       })
     )
     expect(mocks.addFileToSession).not.toHaveBeenCalled()
+  })
+
+  it("binds durable normal turns to a captured server scope without web search", async () => {
+    const resolved = snapshot([])
+    mocks.loadServicePromptSnapshot.mockResolvedValue(resolved)
+    const signal = new AbortController().signal
+    await normalChatMode("Question", "", false, [], [], signal, {
+      ...normalParams(false), conversationId: "workspace-chat",
+      tldwTurn: { user_message_id: "12803947-a1f4-4c49-b6eb-bf4218765f6a" }
+    })
+    expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledWith([], { signal })
+    expect(mocks.runChatPipeline.mock.calls[0][6]).toBe(resolved.scopeSignal)
+    expect(mocks.runChatPipeline.mock.calls[0][7].servicePromptSnapshot.requestScope).toBe(requestScope)
+    expect(resolved.release).toHaveBeenCalledOnce()
+  })
+
+  it("checks the original failed-turn scope for a direct durable normal retry", async () => {
+    mocks.loadServicePromptSnapshot.mockRejectedValueOnce(new Error("Request scope changed"))
+    const signal = new AbortController().signal
+    await expect(normalChatMode("Question", "", true, [], [], signal, {
+      ...normalParams(false), conversationId: "workspace-chat",
+      tldwTurn: { user_message_id: "12803947-a1f4-4c49-b6eb-bf4218765f6a" },
+      ...{ requestScope }
+    })).rejects.toThrow("Request scope changed")
+    expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledWith([], { signal, requestScope })
+    expect(mocks.runChatPipeline).not.toHaveBeenCalled()
   })
 
   it("loads the web-search snapshot only when Normal Chat enables web search", async () => {
@@ -1219,11 +1271,12 @@ describe("Service Prompt mode definitions", () => {
     ).rejects.toThrow("chat.rag.answer")
   })
 
-  it("preserves selected-source retrieval failure as a grounded handled response", async () => {
+  it("preserves an unavailable retrieval as a local selected-source diagnostic", async () => {
     useDefinitionPipeline(true)
-    mocks.ragSearch.mockRejectedValue(new Error("retrieval unavailable"))
+    const error = new Error("retrieval unavailable")
+    mocks.ragSearch.mockRejectedValue(error)
 
-    const handled = (await ragMode(
+    await expect(ragMode(
       "selected question",
       "",
       false,
@@ -1236,11 +1289,11 @@ describe("Service Prompt mode definitions", () => {
         ),
         ragMediaIds: [42]
       }
-    )) as unknown as { handled: boolean; fullText: string }
-
-    expect(handled).toMatchObject({
+    )).resolves.toMatchObject({
       handled: true,
-      fullText: expect.stringContaining("couldn't retrieve evidence")
+      saveToDb: false,
+      skipHistoryAppend: true,
+      generationInfo: { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
     })
   })
 

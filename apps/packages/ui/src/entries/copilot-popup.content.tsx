@@ -1,10 +1,10 @@
 import { browser } from "wxt/browser"
 import { TldwChatService } from "@/services/tldw/TldwChat"
 import {
-  detectSelectionTarget,
+  captureSelectionContext,
   isSelectionTargetValid,
   replaceSelectionTarget,
-  SelectionTarget
+  type SelectionContext
 } from "@/utils/selection-replace"
 
 const POPUP_HOST_ID = "tldw-copilot-popup-host"
@@ -30,12 +30,6 @@ type PopupPayload = {
   pageUrl?: string
   pageTitle?: string
   frameId?: number
-}
-
-type PopupContext = {
-  selectionText: string
-  anchorRange: Range | null
-  target: SelectionTarget | null
 }
 
 const chatService = new TldwChatService()
@@ -72,31 +66,8 @@ const getMessage = (
 const buildPrompt = (selection: string) =>
   `Respond helpfully to the selected text:\n\n${selection}`
 
-const getSelectionContext = (payload?: PopupPayload): PopupContext | null => {
-  const selection = window.getSelection()
-  const selectionText = String(
-    (selection?.toString() || payload?.selectionText || "").trim()
-  )
-
-  if (!selectionText) {
-    return null
-  }
-
-  let anchorRange: Range | null = null
-  if (selection && selection.rangeCount > 0) {
-    anchorRange = selection.getRangeAt(0).cloneRange()
-  }
-
-  const target = detectSelectionTarget(selection)
-  return {
-    selectionText,
-    anchorRange,
-    target
-  }
-}
-
 const createPopup = (
-  context: PopupContext,
+  context: SelectionContext,
   actions: {
     onClose: () => void
     onStop: () => void
@@ -523,14 +494,20 @@ const resolveSelectedModel = async (): Promise<string> => {
   return ""
 }
 
-const handlePopupOpen = async (payload?: PopupPayload) => {
+const handlePopupOpen = async (
+  payload?: PopupPayload,
+  capturedContext?: SelectionContext | null
+) => {
   if (activePopup) {
     activePopup.close()
     activePopup = null
   }
 
   let responseText = ""
-  const context = getSelectionContext(payload)
+  const context =
+    capturedContext === undefined
+      ? captureSelectionContext(payload?.selectionText)
+      : capturedContext
   if (!context) {
     const fallback = createPopup(
       {
@@ -655,14 +632,12 @@ export const registerCopilotPopupHandler = (): void => {
     handlePopupOpen
 }
 
-export const getCopilotPopupHandler = ():
-  | ((payload?: PopupPayload) => Promise<void>)
-  | undefined => {
+export const getCopilotPopupHandler = (): typeof handlePopupOpen | undefined => {
   const handle = (globalThis as Record<string, unknown>)[
     COPILOT_POPUP_HANDLE_KEY
   ]
   return typeof handle === "function"
-    ? (handle as (payload?: PopupPayload) => Promise<void>)
+    ? (handle as typeof handlePopupOpen)
     : undefined
 }
 
