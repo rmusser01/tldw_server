@@ -287,3 +287,13 @@ it.each(["acknowledged", "bound", "settled"] as const)(
     expect(create).toHaveBeenCalledOnce()
   }
 )
+
+
+it("keeps bound original input when a different operation tries to settle it", async () => {
+  const created = await createChatWithRecovery({ ...args(), create: async id => ({ id }) })
+  expect(await markChatCreationBound(handle(), created.id)).toBe(true)
+  expect(await markChatCreationSettled(handle(), created.id, "foreign-operation")).toBe(false)
+  const attempt = await readChatCreationRecovery(handle())
+  expect(attempt).toMatchObject({ state: "bound", inputText: "ORIGINAL INPUT" })
+  expect(await markChatCreationSettled(handle(), created.id, attempt!.operationId)).toBe(true)
+})

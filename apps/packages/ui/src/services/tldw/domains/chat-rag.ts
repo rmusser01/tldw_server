@@ -1,3 +1,13 @@
+import {
+  parseRoleplayResumeAppendRequest,
+  parseRoleplayResumeAppendReceipt,
+  parseRoleplayResumeCompletionRequest,
+  parseRoleplayResumeCompletionReceipt,
+  readRoleplayResumeMetadata,
+  requireRoleplayResumeDetail,
+  type RoleplayResumeUserAppendRequest,
+  type RoleplayResumeUserAppendReceipt
+} from "../roleplay-resume"
 import type { HistoryCaptureRequestV1, LegacyHistoryProjectionConfirmV1 } from "@/types/history-selection"
 import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
@@ -346,6 +356,7 @@ export const chatRagMethods = {
           ? input.workspaceId
           : null
     return {
+      ...readRoleplayResumeMetadata(input),
       id: String(input?.id ?? ""),
       title: String(input?.title || ""),
       created_at,
@@ -790,26 +801,81 @@ export const chatRagMethods = {
     return this.normalizeChatSummary(res)
   },
 
+  async appendRoleplayResumeInput(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload: RoleplayResumeUserAppendRequest,
+    options: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<RoleplayResumeUserAppendReceipt> {
+    const cid = String(chat_id)
+    if (!options?.requestScope)
+      throw new Error("roleplay_resume_original_scope_required")
+    options.signal?.throwIfAborted()
+    const input = parseRoleplayResumeAppendRequest(payload)
+    const fields = requestScopeFields(options.requestScope)
+    return trackServerChatWrite(cid, async () =>
+      parseRoleplayResumeAppendReceipt(
+        cid,
+        input,
+        await bgRequest<unknown>({
+          ...fields,
+          path: `/api/v1/chats/${encodeURIComponent(cid)}/roleplay/messages`,
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...fields.headers },
+          body: input,
+          abortSignal: options.signal,
+          onDispatch: options.onDispatch
+        })
+      )
+    )
+  },
+
   async completeCharacterChatTurn(
     this: TldwApiClientCore,
     chat_id: string | number,
-    payload: Record<string, any>
-  ): Promise<any> {
+    payload: Record<string, unknown>,
+    options?: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<Record<string, unknown>> {
     const cid = String(chat_id)
-    return await trackServerChatWrite(cid, () =>
-      bgRequest<any>({
-        path: `/api/v1/chats/${cid}/complete-v2`,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
-      })
+    const protectedResume = Object.prototype.hasOwnProperty.call(
+      payload,
+      "tldw_roleplay_resume_v1"
+    )
+    if (protectedResume && !options?.requestScope)
+      throw new Error("roleplay_resume_original_scope_required")
+    options?.signal?.throwIfAborted()
+    const body = protectedResume
+      ? parseRoleplayResumeCompletionRequest(payload)
+      : payload
+    const fields = requestScopeFields(options?.requestScope)
+    return trackServerChatWrite(
+      cid,
+      async () => {
+        const result = await bgRequest<Record<string, unknown>>({
+          ...fields,
+          path: `/api/v1/chats/${encodeURIComponent(cid)}/complete-v2`,
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...fields.headers },
+          body,
+          abortSignal: options?.signal,
+          onDispatch: options?.onDispatch
+        })
+        return protectedResume
+          ? parseRoleplayResumeCompletionReceipt(
+              cid,
+              parseRoleplayResumeCompletionRequest(body),
+              result
+            )
+          : result
+      },
+      { isAcknowledgedResult: (result) => result?.saved === true }
     )
   },
 
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
@@ -826,6 +892,7 @@ export const chatRagMethods = {
       ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
     options?.signal?.throwIfAborted()
+    if (options?.requireRoleplayResume) requireRoleplayResumeDetail(cid, res)
     if (
       options?.requireHistoryVersion &&
       (!res ||

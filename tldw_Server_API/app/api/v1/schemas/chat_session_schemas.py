@@ -357,6 +357,7 @@ class ChatSessionResponse(ChatSessionListItem):
     behavior_snapshot: "BehaviorSnapshotStatus" = Field(
         default_factory=lambda: BehaviorSnapshotStatus(status="missing")
     )
+    resume_completion: Optional["ResumeCompletionDisplay"] = None
     resume_eligible: bool = False
     resume_ineligible_reason: str | None = "behavior_snapshot_missing"
     settings_version: int | None = None
@@ -366,6 +367,13 @@ class ChatSessionResponse(ChatSessionListItem):
     )
 
     model_config = {"from_attributes": True}
+
+
+class ResumeCompletionDisplay(BaseModel):
+    """Original provider/model labels, excluding private prompts and runtime credentials."""
+
+    provider: str = Field(min_length=1, max_length=128)
+    model: str = Field(min_length=1, max_length=512)
 
 
 class BehaviorSnapshotStatus(BaseModel):

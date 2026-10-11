@@ -1,3 +1,4 @@
+import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
@@ -886,6 +887,7 @@ export const useServerChatLoader = ({
           if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
           if (!forkChild) await tldwClient.initialize().catch(() => null)
 
+          let savedRoleplay = useStoreMessageOption.getState().serverChatRoleplaySetup
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
           let characterId = serverChatCharacterId ?? null
@@ -928,6 +930,8 @@ export const useServerChatLoader = ({
                 }
                 return
               }
+              savedRoleplay = readSavedRoleplayPresentation(chat)
+              useStoreMessageOption.getState().setServerChatRoleplaySetup(savedRoleplay)
               const meta = chat as unknown as Record<string, unknown>
               chatTitle = String(meta?.title || chatTitle || "")
               const resolvedAssistantIdentity =
@@ -994,6 +998,12 @@ export const useServerChatLoader = ({
               }
             }
 
+            if (savedRoleplay && assistantKind === "character") {
+              if (!canCommitCurrentLoad()) return null
+              const selection = characterToAssistantSelection(savedRoleplay)
+              if (!(await applyOwnedAssistantSelection(selection))) return null
+              return { assistantName: savedRoleplay.name, assistantAvatarUrl: null }
+            }
             if (assistantKind === "persona" && assistantId) {
               try {
                 const persona = await tldwClient.getPersonaProfile(assistantId, {

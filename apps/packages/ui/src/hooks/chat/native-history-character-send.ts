@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "./roleplay-resume-source"
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
 import type { GreetingSeed } from "@/utils/character-greetings"
 import { createChatWithRecovery, acknowledgeChatCreation, markChatCreationBound, readChatCreationRecovery, markChatCreationSettled } from "@/services/pending-chat-promotion"
@@ -164,6 +165,45 @@ export const sendNativeHistoryCharacter = async (
   if (!params.originIsCurrent()) throw new Error("stale_selection")
   const greetingCurrent = () => !greetingSeed || params.greetingIsCurrent?.() !== false
   if (!greetingCurrent()) throw new Error("stale_selection")
+  const resumeOrigin = controller.getCurrent()
+  if (
+    !explicitAction &&
+    !greetingSeed &&
+    resumeOrigin.owner?.kind === "native" &&
+    (isSavedRoleplayConversation(controller) || params.privateDraft)
+  ) {
+    const owner = resumeOrigin.owner, view = resumeOrigin.view
+    const originalPreparationIsCurrent = () => params.originIsCurrent() && owner.validate_lease() &&
+      controller.getCurrent().owner === owner && controller.getCurrent().view === view
+    try {
+      const { sendSavedRoleplay } = await import("./roleplay-resume-send")
+      if (!originalPreparationIsCurrent()) throw new Error("stale_selection")
+      if (privateHandle && (privateHandle.ownerHash !== chatDraftOwnerKey(owner.request_scope) ||
+          privateHandle.ownerHash !== chatDraftOwnerKey(params.privateDraft!.requestScope)))
+        throw new Error("request_config_scope_changed")
+      const attempt = privateHandle ? await readChatCreationRecovery(privateHandle) : undefined
+      if (!originalPreparationIsCurrent()) throw new Error("stale_selection")
+      const saved = await sendSavedRoleplay({
+        controller,
+        signal,
+        originIsCurrent: originalPreparationIsCurrent,
+        sourceIsCurrent: () =>
+          draftIsCurrent() && params.sourceIsCurrent?.() !== false,
+        serverChatId: params.serverChatId,
+        historyId: params.historyId,
+        message: params.message,
+        image: params.image,
+        unsupportedContext: params.unsupportedContext,
+        setMessages: params.setMessages
+      })
+      if (saved && privateHandle && attempt?.state === "bound" &&
+          attempt.chatId === owner.conversation_id && attempt.inputText === params.message)
+        await markChatCreationSettled(privateHandle, owner.conversation_id, attempt.operationId)
+      return
+    } finally {
+      params.releaseActivity()
+    }
+  }
   const settingsState = useStoreChatModelSettings.getState()
   const toolsState = useMcpToolsStore.getState()
   const capturedSettings = { ...params.settings }
@@ -445,6 +485,29 @@ export const sendNativeHistoryCharacter = async (
       controller.getCurrent().view === originView &&
       originOwner.validate_lease()
     if (!preparingIsCurrent()) throw new Error("stale_selection")
+    if (
+      !explicitAction &&
+      (isSavedRoleplayConversation(controller) ||
+        privateHandle ||
+        (creationHandle && owner.scope?.type !== "workspace"))
+    ) {
+      const { sendSavedRoleplay } = await import("./roleplay-resume-send")
+      const saved = await sendSavedRoleplay({
+        controller,
+        signal: snapshot.scopeSignal,
+        originIsCurrent: preparingIsCurrent,
+        sourceIsCurrent: () =>
+          authValid() && params.sourceIsCurrent?.() !== false && draftIsCurrent(),
+        serverChatId: owner.conversation_id,
+        message: params.message,
+        image: params.image,
+        unsupportedContext: params.unsupportedContext,
+        setMessages: params.setMessages
+      })
+      if (saved && creationHandle)
+        await markChatCreationSettled(creationHandle, owner.conversation_id)
+      return
+    }
     let savedSettings: Record<string, unknown>
     try {
       savedSettings = requireServerSettingsResponse(owner.conversation_id,

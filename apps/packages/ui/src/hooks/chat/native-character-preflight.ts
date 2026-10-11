@@ -134,6 +134,37 @@ export const nativeCharacterPreflightMessage = (
     'playground:composer.sceneLoadError',
     'Scene settings could not be loaded. Existing chat setup was left unchanged.'
   );
+  if (
+    error instanceof NativeHistorySettingsReadError &&
+    error.cause instanceof Error &&
+    error.cause.message.startsWith("roleplay_resume_")
+  )
+    return nativeCharacterPreflightMessage(error.cause, t)
+  if (code === "roleplay_resume_server_unsupported")
+    return t(
+      "playground:composer.roleplayResumeUnsupported",
+      "This server cannot safely continue saved roleplay yet. Your message is kept. Update the server before retrying."
+    )
+  if (code === "roleplay_resume_unavailable")
+    return t(
+      "playground:composer.roleplayResumeUnavailable",
+      "The saved character setup could not be verified. Your message is kept. Reload this conversation before retrying."
+    )
+  if (code === "roleplay_resume_tail_required")
+    return t(
+      "playground:composer.roleplayResumeTail",
+      "Open the latest reply before continuing this saved roleplay. Your message is kept."
+    )
+  if (code === "roleplay_resume_review_required")
+    return t(
+      "playground:composer.roleplayResumeReview",
+      "Review the earlier roleplay request under Retained outcomes before sending another message."
+    )
+  if (code === "roleplay_resume_explicit_context_unsupported")
+    return t(
+      "playground:composer.roleplayResumeContext",
+      "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+    )
   if (error instanceof NativeHistorySettingsReadError)
     return t(
       'playground:composer.native_history_settings_unverified',

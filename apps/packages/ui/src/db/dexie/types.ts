@@ -286,6 +286,9 @@ export type HistoryTurnRecovery = {
   input_text: string;
   input_images: string[];
   result_text: string;
+  /** Earlier returned replies remain copyable across an explicit original-request retry. */
+  retained_result_texts?: string[];
+  recovery_storage?: "memory";
   state:
     | "dispatching"
     | "unknown"
@@ -293,6 +296,7 @@ export type HistoryTurnRecovery = {
     | "generated_unsaved"
     | "refused";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
+  roleplay_resume?: import("@/services/tldw/roleplay-resume").RoleplayResumeRecovery;
   /**
    * Set when the reply belongs back in the transcript rather than in review
    * (CS-04, #3104): "complete" (it finished but its view was gone),

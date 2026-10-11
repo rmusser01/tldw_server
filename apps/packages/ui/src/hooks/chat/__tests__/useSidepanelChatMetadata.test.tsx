@@ -336,3 +336,32 @@ it("UAT375: an old null-chat completion must not remove a foreign restored queue
   expect(useStoreMessageOption.getState().queuedMessages).toEqual(foreignQueue!)
   hook.unmount()
 })
+
+
+it("Compact restores the saved Roleplay identity without reading the changed live card", async () => {
+  io.getChat.mockResolvedValue({
+    ...characterChat,
+    assistant_name: "Original character",
+    scope_type: "global",
+    workspace_id: null,
+    behavior_snapshot: {
+      status: "valid",
+      schema_version: 1,
+      digest: "sha256:" + "d".repeat(64)
+    },
+    resume_eligible: true,
+    resume_ineligible_reason: null,
+    settings_version: 2,
+    history_version: 3,
+    tail: { message_id: "old-answer", message_version: 1 },
+    resume_completion: { provider: "openai", model: "original-model" }
+  })
+  io.getCharacter.mockResolvedValue({ id: 42, name: "Changed character" })
+  const hook = mountQueue()
+  await waitFor(() => expect(hook.result.current.metadata.isReady).toBe(true))
+  expect(io.selection).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "42", name: "Original character" }),
+    expect.anything()
+  )
+  expect(io.getCharacter).not.toHaveBeenCalled()
+})

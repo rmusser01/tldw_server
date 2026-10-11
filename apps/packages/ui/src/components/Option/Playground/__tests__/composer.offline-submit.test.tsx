@@ -7,12 +7,17 @@ import { usePlaygroundSubmit, type UsePlaygroundSubmitDeps } from "../hooks/useP
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
 import { normalizeChatSubmitResult, isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { normalizeChatModelId, findUnavailableChatModel } from "@/utils/chat-model-availability"
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 
 const t = (_key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? _key
 const makeForm = () => {
   const form = {
     values: { message: "KEEP RAW  ", image: "KEEP IMAGE" },
-    setFieldError: vi.fn(), setFieldValue: vi.fn(), reset: vi.fn(),
+    setFieldError: vi.fn(), setFieldValue: vi.fn(), reset: vi.fn(), getRevision: () => 0,
     onSubmit: (callback: (values: typeof form.values) => Promise<void>) => () => { pending = callback(form.values) }
   }
   let pending = Promise.resolve()
@@ -44,14 +49,15 @@ visit(ast)
 if (!callback) throw new Error("Missing actual compact submit callback")
 const source = ts.transpileModule(`const {
   isConnectionReady, connectionReadyRef, connectionGenerationRef, isSending, draftReady, greetingStarting, form, notification, resolveSubmissionIntent, selectedDocuments,
-  contextFiles, selectedModel, availableChatModelIds, queueSubmission, stopListening, stopServerDictation, sendCurrentFormMessageRef, t
+  contextFiles, selectedModel, availableChatModelIds, queueSubmission, stopListening, stopServerDictation, sendCurrentFormMessageRef, t,
+  greetingHistorySelection, isSavedRoleplayConversation
 } = scope;
 return ${callback.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const compactSubmit = new Function("React", "normalizeChatModelId", "findUnavailableChatModel", "scope", source)
 const makeCompact = (ready: boolean, busy: boolean, imageCommand: boolean) => {
   const web = makeWebDeps(ready, busy, imageCommand)
   const scope = {
-    ...web.deps, greetingStarting: false, connectionReadyRef: { current: ready }, connectionGenerationRef: { current: 0 }, notification: web.deps.notificationApi, contextFiles: [],
+    ...web.deps, isSavedRoleplayConversation, greetingHistorySelection: {getCurrent: () => ({owner:null})} as unknown as Pick<HistorySelectionController, "getCurrent">, greetingStarting: false, connectionReadyRef: { current: ready }, connectionGenerationRef: { current: 0 }, notification: web.deps.notificationApi, contextFiles: [],
     availableChatModelIds: new Set(["gpt-test"]), stopListening: vi.fn(async () => {}), stopServerDictation: vi.fn(), sendCurrentFormMessageRef: { current: web.deps.sendMessage }
   }
   return { ...web, scope, submit: compactSubmit({ useCallback: (fn: unknown) => fn }, normalizeChatModelId, findUnavailableChatModel, scope) as (message: string, image: string) => Promise<void> }
@@ -106,7 +112,9 @@ const helperSource = ts.transpileModule(`const {
   connectionReadyRef, connectionGenerationRef, sidepanelDocumentPreparationRef, resolveSubmissionIntent, notification, t, selectedDocuments, contextFiles,
   stopListening, selectedModel, availableChatModelIds, form, ensureEmbeddingModelAvailable, conversationContextComposition, history,
   submitDispatch, beginPromptAssistReset, textAreaFocus, markPromptAssistAttemptSaved, clearDraft, clearSelectedDocuments, setContextFiles,
-  setKnowledgeMentionActive, restorePromptAssistAttempt, knowledgeMentionRevision, clearSubmittedDocuments, captureCompletionGuard
+  setKnowledgeMentionActive, restorePromptAssistAttempt, knowledgeMentionRevision, clearSubmittedDocuments, captureCompletionGuard,
+  currentDocumentSelectionKeyRef, greetingHistorySelection, isSavedRoleplayConversation, captureChatDispatchSource, captureActorSceneSend,
+  nativeCharacterPreflightMessage, chatMode, webSearch, selectedSystemPrompt, toolChoice, pageContextActive
 } = scope;
 ${directHelper.getText(ast)}
 return sendCurrentFormMessage;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
@@ -122,6 +130,9 @@ it.each([false, true])("actual compact context preparation does not clear or sen
     connectionReadyRef: { current: true }, connectionGenerationRef: { current: 0 }, sidepanelDocumentPreparationRef: { current: null },
     stopListening: vi.fn(async () => {}), ensureEmbeddingModelAvailable: vi.fn(async () => true),
     conversationContextComposition: { composeForSend: vi.fn(() => waiting) }, submitDispatch: dispatcher.result.current.dispatch,
+    currentDocumentSelectionKeyRef: {current:""}, greetingHistorySelection: {getCurrent:()=>({owner:null})},
+    isSavedRoleplayConversation, captureChatDispatchSource, captureActorSceneSend: () => ({isCurrent:()=>true, read:async()=>({isCurrent:()=>true})}),
+    nativeCharacterPreflightMessage: (error:unknown)=>String(error), chatMode:"normal", webSearch:false, selectedSystemPrompt:"", toolChoice:"auto", pageContextActive:false,
     clearDraft: vi.fn(), setContextFiles: vi.fn(), setKnowledgeMentionActive: vi.fn(), knowledgeMentionRevision: {current:0}, clearSubmittedDocuments:vi.fn(),captureCompletionGuard:()=>()=>true
   }
   const send = compactDirect(normalizeChatModelId, findUnavailableChatModel, normalizeChatSubmitResult, isChatSubmitSuccess, scope) as (text: string, image: string) => Promise<void>
@@ -158,3 +169,147 @@ it("retired full-page preparation preserves input before optimistic reset", asyn
   expect(test.deps.sendMessage).not.toHaveBeenCalled();
   expect(error).toBeUndefined();
 });
+
+
+it("actual Compact saved Roleplay queue preserves literal text with no live model", async () => {
+  const test = makeCompact(true, true, false)
+  const conversation_id = "saved-compact-queue"
+  useStoreMessageOption.setState({
+    serverChatId: conversation_id,
+    serverChatAssistantKind: "character",
+    temporaryChat: false
+  })
+  test.scope.greetingHistorySelection = {
+    getCurrent: () => ({ owner: { kind: "native", conversation_id } })
+  } as unknown as Pick<HistorySelectionController, "getCurrent">
+  test.scope.selectedModel = ""
+  test.scope.selectedDocuments = []
+  test.scope.resolveSubmissionIntent.mockReturnValue({
+    message: "  Exact literal\n",
+    combinedMessage: "  Exact literal\n",
+    handled: false,
+    isImageCommand: false,
+    imageBackendOverride: "test"
+  })
+  const submit = compactSubmit(
+    { useCallback: (fn: unknown) => fn },
+    normalizeChatModelId,
+    findUnavailableChatModel,
+    test.scope
+  ) as (message: string, image: string) => Promise<void>
+  await submit("  Exact literal\n", "")
+  expect(test.deps.queueSubmission).toHaveBeenCalledWith(
+    expect.objectContaining({ promptText: "  Exact literal\n" })
+  )
+})
+
+it("actual Compact saved Roleplay preparation uses literal input without reading live Scene, settings or embedding context", async () => {
+  const test = makeWebDeps(true, false)
+  test.deps.resolveSubmissionIntent.mockReturnValue({
+    message: "  Exact literal\n",
+    combinedMessage: "  Exact literal\n",
+    handled: false,
+    isImageCommand: false,
+    imageBackendOverride: "test"
+  })
+  const conversation_id = "saved-compact-direct"
+  useStoreMessageOption.setState({
+    serverChatId: conversation_id,
+    serverChatAssistantKind: "character",
+    temporaryChat: false
+  })
+  const dispatcher = renderHook(() =>
+    useComposerSubmit({ sendMessage: test.deps.sendMessage })
+  )
+  const scope = {
+    ...test.deps,
+    notification: test.deps.notificationApi,
+    selectedDocuments: [],
+    contextFiles: [],
+    history: [],
+    connectionReadyRef: { current: true },
+    connectionGenerationRef: { current: 0 },
+    sidepanelDocumentPreparationRef: { current: null },
+    currentDocumentSelectionKeyRef: { current: "" },
+    knowledgeMentionRevision: { current: 0 },
+    form: test.form,
+    greetingHistorySelection: {
+      getCurrent: () => ({ owner: { kind: "native", conversation_id } })
+    },
+    isSavedRoleplayConversation,
+    captureChatDispatchSource,
+    captureActorSceneSend: vi.fn(() => {
+      throw new Error("live Scene forbidden")
+    }),
+    nativeCharacterPreflightMessage: (error: unknown) => String(error),
+    selectedModel: "",
+    availableChatModelIds: new Set<string>(),
+    chatMode: "normal",
+    webSearch: false,
+    selectedSystemPrompt: "",
+    toolChoice: "auto",
+    pageContextActive: false,
+    stopListening: vi.fn(async () => {
+      useStoreChatModelSettings.setState({ temperature: 1.9 })
+    }),
+    ensureEmbeddingModelAvailable: vi.fn(async () => true),
+    conversationContextComposition: { composeForSend: vi.fn(async () => null) },
+    captureCompletionGuard: () => () => true,
+    submitDispatch: dispatcher.result.current.dispatch,
+    clearDraft: vi.fn(),
+    setContextFiles: vi.fn(),
+    setKnowledgeMentionActive: vi.fn(),
+    clearSubmittedDocuments: vi.fn()
+  }
+  const send = compactDirect(
+    normalizeChatModelId,
+    findUnavailableChatModel,
+    normalizeChatSubmitResult,
+    isChatSubmitSuccess,
+    scope
+  ) as (text: string, image: string) => Promise<void>
+  await act(async () => {
+    await send("  Exact literal\n", "")
+  })
+  expect(test.deps.sendMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "  Exact literal\n" })
+  )
+  expect(scope.captureActorSceneSend).not.toHaveBeenCalled()
+  expect(scope.ensureEmbeddingModelAvailable).not.toHaveBeenCalled()
+  expect(
+    scope.conversationContextComposition.composeForSend
+  ).not.toHaveBeenCalled()
+})
+
+
+it.each(["streaming", "isProcessing"])(
+  "actual Compact queues behind shared %s activity even when its own mutation is idle",
+  async (activity) => {
+    let declaration: ts.VariableDeclaration | undefined
+    const find = (node: ts.Node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === "isSending"
+      )
+        declaration = node
+      ts.forEachChild(node, find)
+    }
+    find(ast)
+    const scope = {
+      isMutationPending: false,
+      streaming: activity === "streaming",
+      isProcessing: activity === "isProcessing"
+    }
+    const busy = declaration?.initializer
+      ? new Function(
+          "scope",
+          `const {isMutationPending, streaming, isProcessing} = scope; return ${declaration.initializer.getText(ast)};`
+        )(scope)
+      : false
+    const test = makeCompact(true, busy, false)
+    await test.submit(test.form.values.message, test.form.values.image)
+    expect(test.deps.queueSubmission).toHaveBeenCalledOnce()
+    expect(test.deps.sendMessage).not.toHaveBeenCalled()
+  }
+)

@@ -528,13 +528,14 @@ export const markChatCreationBound = async (
 }
 
 /** Hide private input only after the native server settlement proves it was saved. */
-export const markChatCreationSettled = async (handle: ChatDraftHandle, chatId: string) => {
+export const markChatCreationSettled = async (handle: ChatDraftHandle, chatId: string, expectedOperationId?: string) => {
   try {
     const attempt = await readChatCreationRecovery(handle)
     if (!attempt) return false
     const key = creationKey(attempt.handle)
     const record = await creationRecovery.get(key, { failClosed: true })
-    if (!record || !validCreationRecord(record.value) || record.value.chatId !== chatId || record.value.state !== "bound") return false
+    if (!record || !validCreationRecord(record.value) || record.value.chatId !== chatId || record.value.state !== "bound" ||
+        (expectedOperationId !== undefined && record.value.operationId !== expectedOperationId)) return false
     const settled = await creationRecovery.set(key, { ...record.value, state: "settled", inputText: "" }, record.updatedAt, record)
     if (settled) notifyCreationRecovery()
     return settled

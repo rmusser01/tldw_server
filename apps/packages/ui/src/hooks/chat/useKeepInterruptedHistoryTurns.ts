@@ -57,7 +57,7 @@ export function useKeepInterruptedHistoryTurns({
     const pending = recoveries
       .filter(
         (entry) =>
-          entry.turn.action === undefined &&
+          entry.turn.action === undefined && !entry.turn.roleplay_resume &&
           entry.turn.outcome &&
           !isHistoryTurnLive(entry.turn.operation_id) &&
           !keptRef.current.has(entry.turn.operation_id)
@@ -93,7 +93,7 @@ export function useKeepInterruptedHistoryTurns({
       ownerKind === "native"
         ? (recoveries ?? []).filter(
             (entry) =>
-              entry.turn.action === undefined &&
+              entry.turn.action === undefined && !entry.turn.roleplay_resume &&
               isRetainedPartialReply(entry.turn, ownerKind)
           )
         : [],
@@ -126,7 +126,7 @@ export function useKeepInterruptedHistoryTurns({
   return React.useCallback(
     (entry: HistoryTurnRecoveryEntry) =>
       isHistoryTurnLive(entry.turn.operation_id) ||
-      (entry.turn.action === undefined &&
+      (entry.turn.action === undefined && !entry.turn.roleplay_resume &&
         Boolean(entry.turn.outcome) &&
         (!isRetainedPartialReply(entry.turn, ownerKind) ||
           messages.some((message) => message.id === entry.turn.assistant_id))),

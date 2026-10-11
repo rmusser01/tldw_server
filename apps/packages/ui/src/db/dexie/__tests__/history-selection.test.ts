@@ -1884,3 +1884,276 @@ describe("local assistant settlement with captured document files", () => {
     })
   })
 })
+
+
+describe("genuine Roleplay recovery receipt arm", () => {
+  const original = {
+    version: 1 as const,
+    conversation_id: "chat",
+    assistant_message_id: "resume-assistant",
+    input: {
+      message_id: "resume-user",
+      content: "  Exact saved roleplay\n",
+      expected: {
+        version: 1 as const,
+        snapshot_digest: "sha256:" + "b".repeat(64),
+        settings_version: 2,
+        history_version: 1,
+        tail: { message_id: null, message_version: null }
+      }
+    }
+  }
+  const append = {
+    version: 1 as const,
+    conversation_id: "chat",
+    message_id: original.input.message_id,
+    message_version: 1,
+    parent_message_id: null,
+    fence: {
+      ...original.input.expected,
+      history_version: 2,
+      tail: { message_id: original.input.message_id, message_version: 1 }
+    }
+  }
+  const completion = {
+    chat_id: "chat",
+    character_id: 42,
+    provider: "openai",
+    model: "original",
+    saved: true,
+    user_message_id: original.input.message_id,
+    assistant_message_id: original.assistant_message_id,
+    assistant_content: "Exact generated answer",
+    tldw_roleplay_resume_v1: {
+      version: 1 as const,
+      input_message_id: original.input.message_id,
+      input_message_version: 1,
+      assistant_message_id: original.assistant_message_id,
+      assistant_message_version: 1,
+      expected: append.fence,
+      fence: {
+        ...append.fence,
+        history_version: 3,
+        tail: { message_id: original.assistant_message_id, message_version: 1 }
+      },
+      unsaved_reason: null
+    }
+  }
+  const pending = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const turn: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+      operation_id: "resume-original",
+      owner_key: owner.owner_key,
+      conversation_id: "chat",
+      origin_view: origin,
+      persistence: "server",
+      selection_digest: "selected",
+      request_context_digest: "resume-intent",
+      created_at: 1,
+      input_text: original.input.content,
+      input_images: [],
+      result_text: "",
+      state: "dispatching",
+      roleplay_resume: { intent: original }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, turn)
+    return { owner, origin, turn }
+  }
+  it("retains chosen IDs only in immutable intent until a genuine append acknowledgement", async () => {
+    const { owner } = await pending()
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.roleplay_resume?.intent).toEqual(original)
+    expect(entry.turn.input_id).toBeUndefined()
+    expect(entry.turn.assistant_id).toBeUndefined()
+    expect(entry.turn.admission).toBeUndefined()
+  })
+  it("promotes original receipts without fabricating H1 admission and keeps them on late downgrade", async () => {
+    const { owner, origin, turn } = await pending()
+    const accepted = {
+      ...turn,
+      input_id: original.input.message_id,
+      state: "accepted_unsent" as const,
+      roleplay_resume: { intent: original, append }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+    const settled = {
+      ...accepted,
+      state: "generated_unsaved" as const,
+      result_text: completion.assistant_content,
+      assistant_id: original.assistant_message_id,
+      settled_message_id: original.assistant_message_id,
+      outcome: "complete" as const,
+      roleplay_resume: { intent: original, append, completion }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, settled)
+    await history.saveHistoryTurnRecovery(bookmark, origin, turn)
+    expect(
+      (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+    ).toMatchObject(settled)
+  })
+  it.each([
+    "input-id",
+    "assistant-id",
+    "foreign-owner",
+    "changed-input",
+    "images",
+    "h1-admission",
+    "wrong-fence"
+  ])("refuses unsupported Roleplay journal evidence %s", async (change) => {
+    const { origin, turn } = await pending()
+    const patch =
+      change === "input-id"
+        ? { input_id: original.input.message_id }
+        : change === "assistant-id"
+          ? { assistant_id: original.assistant_message_id }
+          : change === "foreign-owner"
+            ? {
+                roleplay_resume: {
+                  intent: { ...original, conversation_id: "foreign" }
+                }
+              }
+            : change === "changed-input"
+              ? {
+                  roleplay_resume: {
+                    intent: {
+                      ...original,
+                      input: { ...original.input, content: "different" }
+                    }
+                  }
+                }
+              : change === "images"
+                ? { input_images: ["image"] }
+                : change === "h1-admission"
+                  ? {
+                      admission: {
+                        version: 1 as const,
+                        owner_key: turn.owner_key,
+                        conversation_id: "chat",
+                        input_message_id: original.input.message_id,
+                        input_message_revision: "1",
+                        selection_digest: "selected"
+                      }
+                    }
+                  : {
+                      roleplay_resume: {
+                        intent: original,
+                        append: {
+                          ...append,
+                          fence: { ...append.fence, settings_version: 3 }
+                        }
+                      }
+                    }
+    await expect(
+      history.saveHistoryTurnRecovery(bookmark, origin, { ...turn, ...patch })
+    ).rejects.toThrow()
+  })
+  it("does not promote an unsaved completion to canonical assistant identity", async () => {
+    const { origin, turn } = await pending()
+    const unsaved = {
+      ...completion,
+      saved: false,
+      assistant_message_id: null,
+      tldw_roleplay_resume_v1: {
+        ...completion.tldw_roleplay_resume_v1,
+        assistant_message_version: null,
+        fence: null,
+        unsaved_reason: "history_fence_changed"
+      }
+    }
+    await expect(
+      history.saveHistoryTurnRecovery(bookmark, origin, {
+        ...turn,
+        input_id: original.input.message_id,
+        assistant_id: original.assistant_message_id,
+        result_text: completion.assistant_content,
+        state: "generated_unsaved",
+        roleplay_resume: { intent: original, append, completion: unsaved }
+      })
+    ).rejects.toThrow()
+  })
+  it("whitelists credential-free recovery but keeps all unacknowledged generated text", async () => {
+    const { owner, origin, turn } = await pending()
+    const roleplay_resume = {
+      ...turn.roleplay_resume!,
+      servicePromptConfig: { apiKey: "never-store" }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...turn,
+      state: "generated_unsaved",
+      result_text: "x".repeat(1_000_001),
+      roleplay_resume
+    })
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.roleplay_resume).toEqual({ intent: original })
+    expect(entry.turn.result_text).toHaveLength(1_000_001)
+  })
+  it("freezes original Roleplay recovery before its optional validator is loaded", async () => {
+    const { owner, origin, turn } = await pending()
+    const record = structuredClone(turn)
+    const storing = history.saveHistoryTurnRecovery(bookmark, origin, record)
+    record.input_text = "Replaced input"
+    record.roleplay_resume!.intent.input.content = "Replaced input"
+    await storing
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.input_text).toBe(original.input.content)
+    expect(entry.turn.roleplay_resume!.intent.input.content).toBe(
+      original.input.content
+    )
+  })
+
+  it("drops unused nested completion diagnostics before durable recovery", async () => {
+    const { owner, origin, turn } = await pending()
+    await history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...turn,
+      input_id: original.input.message_id,
+      assistant_id: original.assistant_message_id,
+      result_text: completion.assistant_content,
+      state: "generated_unsaved",
+      outcome: "complete",
+      settled_message_id: original.assistant_message_id,
+      roleplay_resume: {
+        intent: original,
+        append,
+        completion: {
+          ...completion,
+          lorebook_diagnostics: [
+            { apiKey: "never-store", nested: { credential: "never-store" } }
+          ]
+        } as unknown as NonNullable<typeof turn.roleplay_resume>
+      }
+    })
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(JSON.stringify(entry.turn)).not.toContain("never-store")
+    expect(entry.turn.roleplay_resume?.completion?.saved).toBe(true)
+  })
+
+  it("does not resurrect window-only recovery after another view commits dismissal", async () => {
+    const { owner, origin, turn } = await pending()
+    await history.retainHistoryTurnRecoveryInMemory(bookmark, origin, {
+      ...turn,
+      result_text: "Window-only original reply",
+      state: "generated_unsaved"
+    })
+    const key = [
+      bookmark.profile_id,
+      bookmark.client_session_id,
+      owner.owner_key,
+      owner.conversation_id
+    ]
+    const record = await memory.historySelections.get(key)
+    await memory.historySelections.put({
+      ...record,
+      pending_turns: {},
+      history_turn_outcomes: { [turn.operation_id]: "dismissed" }
+    })
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([])
+    expect(
+      await history.dismissHistoryTurnRecovery(
+        bookmark,
+        owner,
+        turn.operation_id
+      )
+    ).toBe(false)
+  })
+})

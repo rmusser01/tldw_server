@@ -164,7 +164,7 @@ export const useSelectServerChat = () => {
       setServerChatClusterId(chat.cluster_id ?? null)
       setServerChatSource(chat.source ?? null)
       setServerChatExternalRef(chat.external_ref ?? null)
-      setServerChatMetaLoaded(true)
+      setServerChatMetaLoaded(assistantIdentity.assistantKind !== "character")
       usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id, acceptDraft)
       updatePageTitle(chat.title)
       navigate(chatPath)

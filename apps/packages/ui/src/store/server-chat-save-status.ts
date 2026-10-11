@@ -90,6 +90,7 @@ export const trackServerChatWrite = async <T,>(
   chatId: unknown,
   write: () => Promise<T>,
   options?: {
+    isAcknowledgedResult?: (result: T) => boolean
     isAcknowledgedError?: (error: unknown) => boolean
     isUnchangedError?: (error: unknown) => boolean
   }
@@ -97,7 +98,11 @@ export const trackServerChatWrite = async <T,>(
   const endWrite = beginServerChatWrite(chatId)
   try {
     const result = await write()
-    endWrite("saved")
+    endWrite(
+      options?.isAcknowledgedResult && !options.isAcknowledgedResult(result)
+        ? "failed"
+        : "saved"
+    )
     return result
   } catch (error) {
     let outcome: ServerChatWriteOutcome = "failed"

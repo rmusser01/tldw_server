@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
@@ -786,6 +787,7 @@ export const SidepanelForm = ({
     chatMode,
     stopStreamingRequest,
     streaming,
+    isProcessing,
     setChatMode,
     webSearch,
     setWebSearch,
@@ -1609,6 +1611,7 @@ export const SidepanelForm = ({
       dictionaryIds: []
     },
     settings: conversationContextSettings,
+    enabled: !isSavedRoleplayConversation(greetingHistorySelection),
     debounceMs: 250,
     updateSettings
   })
@@ -2092,7 +2095,8 @@ export const SidepanelForm = ({
       })
       return
     }
-    const trimmed = intent.combinedMessage.trim()
+    const savedRoleplay = isSavedRoleplayConversation(greetingHistorySelection)
+    const trimmed = savedRoleplay ? intent.message : intent.combinedMessage.trim()
     if (
       !intent.isImageCommand &&
       trimmed.length === 0 &&
@@ -2114,10 +2118,43 @@ export const SidepanelForm = ({
     }
     const completionIsCurrent = captureCompletionGuard()
     const inputRevision = form.getRevision()
-    const dispatchIsCurrent = captureChatDispatchSource({ selectedModel: selectedModel ?? "", selectionSource: { model: "global", toolChoice: "global" } })
+    const dispatchIsCurrent = savedRoleplay
+      ? () => true
+      : captureChatDispatchSource({
+          selectedModel: selectedModel ?? "",
+          selectionSource: { model: "global", toolChoice: "global" }
+        })
     const preparationIsCurrent = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
       (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
-    const sceneCapture = intent.isImageCommand ? null : captureActorSceneSend(greetingHistorySelection, () => completionIsCurrent() && dispatchIsCurrent())
+    if (
+      savedRoleplay &&
+      !intent.isImageCommand &&
+      (intent.combinedMessage !== intent.message ||
+        image ||
+        selectedDocuments.length ||
+        contextFiles.length ||
+        chatMode !== "normal" ||
+        webSearch ||
+        selectedSystemPrompt ||
+        toolChoice === "required" ||
+        pageContextActive)
+    ) {
+      form.setFieldError(
+        "message",
+        t(
+          "playground:composer.roleplayResumeContext",
+          "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+        )
+      )
+      return
+    }
+    const sceneCapture =
+      intent.isImageCommand || savedRoleplay
+        ? null
+        : captureActorSceneSend(
+            greetingHistorySelection,
+            () => completionIsCurrent() && dispatchIsCurrent()
+          )
     let actorSceneSend: ActorSceneSend | undefined
     let documentPreparation: {
       controller: AbortController
@@ -2135,8 +2172,10 @@ export const SidepanelForm = ({
     try {
       if (!intent.isImageCommand) {
         try {
-          if (!sceneCapture) throw new Error("actor_settings_unavailable")
-          actorSceneSend = await sceneCapture.read()
+          if (!savedRoleplay) {
+            if (!sceneCapture) throw new Error("actor_settings_unavailable")
+            actorSceneSend = await sceneCapture.read()
+          }
         } catch (error) {
           if (preparationIsCurrent() && sceneCapture?.isCurrent() !== false) notification.error({ message: t("error", { defaultValue: "Error" }),
             description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.sceneLoadError", "Scene settings could not be loaded. Existing chat setup was left unchanged.") })
@@ -2146,7 +2185,10 @@ export const SidepanelForm = ({
       if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
       await stopListening()
       if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
-      if (!intent.isImageCommand) {
+      if (
+        !intent.isImageCommand &&
+        !isSavedRoleplayConversation(greetingHistorySelection)
+      ) {
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
@@ -2168,14 +2210,14 @@ export const SidepanelForm = ({
           return
         }
       }
-      if (!intent.isImageCommand) {
+      if (!intent.isImageCommand && !savedRoleplay) {
         const hasEmbedding = await ensureEmbeddingModelAvailable()
         if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
         if (!hasEmbedding) {
           return
         }
       }
-      const contextSend = intent.isImageCommand
+      const contextSend = intent.isImageCommand || savedRoleplay
         ? null
         : await conversationContextComposition.composeForSend({
             message: trimmed,
@@ -2821,7 +2863,7 @@ export const SidepanelForm = ({
     }
   })
   greetingSubmitGateRef.current = isGreetingPreparing
-  const { mutateAsync: sendMessage, isPending: isSending } = useMutation({
+  const { mutateAsync: sendMessage, isPending: isMutationPending } = useMutation({
     mutationFn: onSubmit,
     onMutate: () => ({ canFocus: captureCompletionGuard(true) }),
     onSuccess: (_data, _variables, context) => {
@@ -2831,6 +2873,8 @@ export const SidepanelForm = ({
       if (context?.canFocus()) textAreaFocus()
     }
   })
+
+  const isSending = isMutationPending || streaming || isProcessing
 
   // Shared composer dispatch. Wraps sendMessage with before/after hooks so
   // Sidepanel's "reset + focus before, clear attachments after" pattern
@@ -2896,7 +2940,10 @@ export const SidepanelForm = ({
         )
       }
 
-      if (!sourceContext?.isImageCommand) {
+      if (
+        !sourceContext?.isImageCommand &&
+        !isSavedRoleplayConversation(greetingHistorySelection)
+      ) {
         const normalizedSelectedModel = normalizeChatModelId(
           item.snapshot.selectedModel
         )
@@ -2918,7 +2965,7 @@ export const SidepanelForm = ({
 
       return null
     },
-    [availableChatModelIds, isQueuedDispatchBlockedByComposerState, t]
+    [availableChatModelIds, greetingHistorySelection, isQueuedDispatchBlockedByComposerState, t]
   )
 
   const sendQueuedRequest = React.useCallback(
@@ -2941,6 +2988,34 @@ export const SidepanelForm = ({
           "playground:composer.queueChatChanged", "This chat or setup changed. Review the queued request before running it again."
         ))
       }
+      if (
+        isSavedRoleplayConversation(greetingHistorySelection) &&
+        !sourceContext?.isImageCommand
+      ) {
+        if (
+          item.image ||
+          sourceContext?.documents?.length ||
+          item.snapshot.chatMode !== "normal" ||
+          item.snapshot.webSearch ||
+          item.snapshot.selectedSystemPrompt ||
+          item.snapshot.toolChoice === "required"
+        )
+          throw new Error(
+            t(
+              "playground:composer.roleplayResumeContext",
+              "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+            )
+          )
+        assertPreparationCurrent()
+        const result = await sendMessage({
+          message: item.promptText,
+          image: "",
+          docs: []
+        })
+        throwIfChatSubmitUnsuccessful(result)
+        return
+      }
+
       const modelSettings = useStoreChatModelSettings.getState()
       const queuedModelSelection = resolveModelSelectorSelection((chatModels ?? []) as ModelSelectorDescriptor[], item.snapshot.selectedModel, modelSettings.apiProvider, {
         scope: modelSettings.activeSettingsScope,
@@ -2959,8 +3034,18 @@ export const SidepanelForm = ({
         selectionSource: { model: "explicit", toolChoice: "explicit" }
       })
 
-      sceneCapture = sourceContext?.isImageCommand ? null : captureActorSceneSend(greetingHistorySelection, () => assertQueuedDispatchCurrent.isSourceCurrent() && dispatchIsCurrent?.() !== false)
-      if (!sourceContext?.isImageCommand && !sceneCapture) throw new Error("actor_settings_unavailable")
+      const savedRoleplay = isSavedRoleplayConversation(greetingHistorySelection)
+      sceneCapture =
+        sourceContext?.isImageCommand || savedRoleplay
+          ? null
+          : captureActorSceneSend(
+              greetingHistorySelection,
+              () =>
+                assertQueuedDispatchCurrent.isSourceCurrent() &&
+                dispatchIsCurrent?.() !== false
+            )
+      if (!sourceContext?.isImageCommand && !savedRoleplay && !sceneCapture)
+        throw new Error("actor_settings_unavailable")
       const actorSceneSend = sceneCapture ? await sceneCapture.read() : undefined
       assertPreparationCurrent()
       await stopListening()
@@ -3196,7 +3281,25 @@ export const SidepanelForm = ({
         notification.info({ message: t("playground:composer.draftLoading", "Your draft is still loading. Try again in a moment.") })
         return
       }
-      const trimmed = intent.combinedMessage.trim()
+      const savedRoleplay = isSavedRoleplayConversation(greetingHistorySelection)
+      if (
+        savedRoleplay &&
+        !intent.isImageCommand &&
+        (intent.combinedMessage !== intent.message ||
+          image ||
+          selectedDocuments.length ||
+          contextFiles.length)
+      ) {
+        form.setFieldError(
+          "message",
+          t(
+            "playground:composer.roleplayResumeContext",
+            "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+          )
+        )
+        return
+      }
+      const trimmed = savedRoleplay ? intent.message : intent.combinedMessage.trim()
       if (
         !intent.isImageCommand &&
         trimmed.length === 0 &&
@@ -3218,7 +3321,10 @@ export const SidepanelForm = ({
         return
       }
 
-      if (!intent.isImageCommand) {
+      if (
+        !intent.isImageCommand &&
+        !isSavedRoleplayConversation(greetingHistorySelection)
+      ) {
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
@@ -3261,6 +3367,7 @@ export const SidepanelForm = ({
       contextFiles.length,
       draftReady,
       greetingStarting,
+      greetingHistorySelection,
       form,
       isSending,
       notification,

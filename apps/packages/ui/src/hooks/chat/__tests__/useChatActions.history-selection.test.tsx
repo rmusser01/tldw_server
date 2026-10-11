@@ -5,6 +5,8 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
+import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
+import { roleplayDetail, roleplayAppend, roleplayCompletion, captureRoleplayFixtureRows } from "./roleplay-resume-fixture"
 import { captureChatDraftSource, chatDraftAddressForReceipt } from "../chat-draft-transition"
 import type { HistoryLoadReceipt } from "../useHistorySelection"
 import { captureActorSceneSend, captureActorSceneSendForTarget } from "../actor-scene-source"
@@ -188,7 +190,7 @@ vi.mock("@/store/option", async (original) => {
 
 vi.mock("@/services/tldw/server-capabilities", async original => ({
   ...(await original<typeof import("@/services/tldw/server-capabilities")>()),
-  getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
+  getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false, hasRoleplayResumeV1: h1.roleplayEnabled }))
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -197,12 +199,18 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
     addChatMessage: addChatMessageMock,
-    getChat: vi.fn(async (id: string) => ({ id, title: "Actual owned chat", character_id: "12" })),
+    getChat: vi.fn(async (id: string, options?: { requireRoleplayResume?: boolean }) => options?.requireRoleplayResume ? { ...roleplayDetail(id, h1.roleplayState.get(id)!.tail), history_version: h1.roleplayState.get(id)!.historyVersion } : { id, title: "Actual owned chat", character_id: "12" }),
+    appendRoleplayResumeInput: (...args: unknown[]) => h1.roleplayAppend(...args),
+    completeCharacterChatTurn: (...args: unknown[]) => h1.roleplayComplete(...args),
     getChatSettings: vi.fn(async (id: string) => ({ conversation_id: id, settings: {} })),
     initialize: vi.fn(async () => null),
     getOpenAPISpec: (...args: unknown[]) => h1.spec(...args),
     getCharacter: h1.live,
-    captureHistorySelection: (...args: any[]) => h1.capture(...args),
+    captureHistorySelection: async (id: string, request: import("@/types/history-selection").HistoryCaptureRequestV1, options: unknown) => {
+      const capture = await h1.capture(id, request, options)
+      const state = h1.roleplayState.get(id)
+      return state ? captureRoleplayFixtureRows(capture, request, state.rows, state.content) : capture
+    },
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
     getConfig: vi.fn(async () => null),
     deleteMessage: vi.fn(async () => undefined),
@@ -213,9 +221,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 let nativeChatId = "tracked-chat-1"
-const createdNativeChat = (body: { id?: string }) => {
+const createdNativeChat = (body: { id?: string; character_id?: number | string }) => {
   if (!body.id) throw new Error("fixture requires the reserved client chat ID")
   nativeChatId = body.id
+  if (body.character_id != null) {
+    h1.roleplayEnabled = true
+    h1.roleplayState.set(body.id, { tail: h1.roleplayGreeting ? "opening-" + body.id : null, historyVersion: 9, rows: [], content: new Map() })
+  }
   return { id: body.id }
 }
 const creationReviewIdentity = async (
@@ -327,6 +339,11 @@ const createHookOptions = () => ({
 })
 
 const h1 = vi.hoisted(() => ({
+  roleplayEnabled: false,
+  roleplayGreeting: false,
+  roleplayState: new Map<string, { tail: string | null; historyVersion: number; rows: import("./roleplay-resume-fixture").RoleplayFixtureRow[]; content: Map<string, import("@/types/history-selection").HistorySelectionCaptureV1["selected_content"][number]> }>(),
+  roleplayAppend: vi.fn(),
+  roleplayComplete: vi.fn(),
   spec: vi.fn(),
   connected: false,
   create: vi.fn(),
@@ -606,13 +623,7 @@ beforeEach(async () => {
       requestBody: {
         content: {
           "application/json": {
-            schema: {
-              properties: {
-                tldw_history_branch: {
-                  anyOf: [{ type: "boolean" }, { type: "null" }]
-                }
-              }
-            }
+            schema: protectedEditRequestSchema()
           }
         }
       }
@@ -629,6 +640,27 @@ beforeEach(async () => {
 
   messageStoreState.editRows = null
   nativeChatId = "tracked-chat-1"
+  h1.roleplayEnabled = false
+  h1.roleplayGreeting = false
+  h1.roleplayState.clear()
+  h1.roleplayAppend.mockReset().mockImplementation(async (id, input, options) => {
+    options.onDispatch?.()
+    const state = h1.roleplayState.get(id)!
+    const receipt = roleplayAppend(id, input)
+    state.tail = receipt.fence.tail.message_id
+    state.historyVersion = receipt.fence.history_version
+    state.rows.push({ id: input.message_id, revision: "1", parent_id: input.expected.tail.message_id, role: "user", settled: true, message: input.content })
+    return receipt
+  })
+  h1.roleplayComplete.mockReset().mockImplementation(async (id, body, options) => {
+    options.onDispatch?.()
+    const reply = roleplayCompletion(id, body)
+    const state = h1.roleplayState.get(id)!
+    state.tail = reply.tldw_roleplay_resume_v1.fence.tail.message_id
+    state.historyVersion = reply.tldw_roleplay_resume_v1.fence.history_version
+    state.rows.push({ id: reply.assistant_message_id, revision: "1", parent_id: reply.user_message_id, role: "assistant", settled: true, message: reply.assistant_content })
+    return reply
+  })
   h1.connected = false
   h1.recover.mockReset()
   h1.dismiss.mockReset().mockResolvedValue(true)
@@ -636,6 +668,7 @@ beforeEach(async () => {
   h1.lookupAdmission.mockReset()
   vi.clearAllMocks()
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  vi.mocked(api.getChat).mockReset().mockImplementation(async (id, options) => options?.requireRoleplayResume ? { ...roleplayDetail(id, h1.roleplayState.get(id)!.tail), history_version: h1.roleplayState.get(id)!.historyVersion } : { id, title: "Actual owned chat", character_id: "12" })
   vi.mocked(api.getChatSettings).mockReset().mockImplementation(async id => ({ conversation_id: id, settings: {} }))
   localStorage.clear()
   sessionStorage.clear()
@@ -2408,11 +2441,9 @@ it.each([
       expect(load).not.toHaveBeenCalled()
       expect(options.setServerChatId).not.toHaveBeenCalled()
     } else {
-      expect(h1.wire).toHaveBeenCalledOnce()
-      expect(h1.wire.mock.calls[0][0]).toMatchObject({ model: modelId, api_provider: provider })
-      expect(
-        h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
-      ).toEqual([])
+      expect(h1.roleplayAppend).toHaveBeenCalledWith(nativeChatId, expect.objectContaining({ content: "next", expected: expect.objectContaining({ tail: { message_id: null, message_version: null } }) }), expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) }))
+      expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+      expect(h1.wire).not.toHaveBeenCalled()
       expect(options.setServerChatId).toHaveBeenCalledWith(nativeChatId)
     }
     expect(h1.live).not.toHaveBeenCalled()
@@ -3018,6 +3049,7 @@ const openingCapture = (id: string, request: import("@/types/history-selection")
 }
 
 const mountedNativeOpening = async () => {
+  h1.roleplayGreeting = true
   const { useStoreMessageOption: draftStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
   const { useStoreChatModelSettings: modelStore } = await import("@/store/model")
   const { useMcpToolsStore: toolsStore } = await import("@/store/mcp-tools")
@@ -3052,9 +3084,9 @@ it("a refused first native turn preserves acknowledged bound creation and its ex
     typeof import("@/db/dexie/history-selection")
   >("@/db/dexie/history-selection")
   h1.recover.mockImplementation(actual.saveHistoryTurnRecovery)
-  h1.wire.mockImplementation(async function* () {
-    yield await Promise.reject(savedContextRefusal())
-  })
+  h1.roleplayAppend.mockRejectedValueOnce(Object.assign(new Error("HTTP 409"), {
+    status: 409, details: { detail: { status: "resume_conflict", code: "settings_version_changed" } }
+  }))
   let submitted: unknown
   await act(async () => {
     submitted = await mounted.hook.result.current.onSubmit({
@@ -3101,7 +3133,9 @@ it("a refused first native turn preserves acknowledged bound creation and its ex
     mounted.options.notification.error.mock.lastCall?.[0].description
   ).toContain("Your message was not added")
   expect(createChatMock).toHaveBeenCalledOnce()
-  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+  expect(h1.roleplayComplete).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
   expect(h1.dismiss).not.toHaveBeenCalled()
   mounted.hook.unmount()
   mounted.selection.unmount()
@@ -3225,7 +3259,9 @@ it("an accepted native first load keeps its saved owner after later settings and
   const mounted = await mountedNativeOpening()
   await act(async () => { await mounted.hook.result.current.onSubmit({ message: "first", image: "" }) })
   const accepted = mounted.selection.result.current.getCurrent().owner
-  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+  expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+  expect(h1.wire).not.toHaveBeenCalled()
   expect(mounted.options.setServerChatId).toHaveBeenCalledWith(nativeChatId)
   expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   act(() => {
@@ -3678,7 +3714,7 @@ it.each(["owned", "outside"])("assistant-only bind respects %s keyboard focus", 
 })
 
 
-it.each(["bound-record", "send-capture"])("private native popup %s retires changed preparation while retaining its accepted owner", async stage => {
+it.each(["bound-record", "resume-detail", "resume-detail-current"])("private native popup %s retires changed preparation while retaining its accepted owner", async stage => {
   const mounted = await mountedNativeOpening()
   const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
   const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
@@ -3701,13 +3737,17 @@ it.each(["bound-record", "send-capture"])("private native popup %s retires chang
       if (key.startsWith("registry:chat-creation:") && value.value?.state === "bound") { enter(); await held }
       return null
     })
-  } else h1.capture.mockImplementation(async (id, request) => {
-    // Opening qualifies its initial leaf with two captures; the third is send preparation.
-    if (h1.capture.mock.calls.length === 3) { enter(); await held }
-    return openingCapture(id, request)
-  })
+  } else {
+    const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+    const original = vi.mocked(api.getChat).getMockImplementation()!
+    vi.mocked(api.getChat).mockImplementation(async (id, options) => {
+      if (options?.requireRoleplayResume) { enter(); await held }
+      return original(id, options)
+    })
+  }
   let pending!: Promise<unknown>
-  await act(async () => {
+  try {
+    await act(async () => {
     pending = sendNativeHistoryCharacter({ controller: mounted.selection.result.current,
       privateDraft: { handle, requestScope: snapshot.requestScope, isCurrent: () => true }, actorSceneSend, surface: "playground",
       originIsCurrent: () => preparationCurrent, signal: new AbortController().signal,
@@ -3715,18 +3755,24 @@ it.each(["bound-record", "send-capture"])("private native popup %s retires chang
       settings: {}, toolChoice: "none", message: "private popup input", image: "", t: ((key: string) => key) as import("i18next").TFunction,
       setServerChatId: vi.fn(), setMessages: vi.fn(), releaseActivity: vi.fn()
     }).catch(error => error)
-    await ready
+    await Promise.race([ready, pending.then(outcome => { throw new Error(`Sender finished before ${stage}: ${String(outcome)}`) })])
   })
-  preparationCurrent = false
+  preparationCurrent = stage === "resume-detail-current"
   await act(async () => { release(); await pending })
   const owner = mounted.selection.result.current.getCurrent().owner
   const acceptedOwnerValid = owner?.kind === "native" && owner.validate_lease()
-  write?.mockRestore()
-  snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
   expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.roleplayAppend).toHaveBeenCalledTimes(stage === "resume-detail-current" ? 1 : 0)
+  expect(h1.roleplayComplete).toHaveBeenCalledTimes(stage === "resume-detail-current" ? 1 : 0)
   expect(acceptedOwnerValid).toBe(true)
   expect(mounted.draftStore.getState().chatDraftAddress).toBe(before.chatDraftAddress)
   expect(mounted.draftStore.getState().chatDraftRevision).toBe(before.chatDraftRevision)
+  } finally {
+    release()
+    if (pending) await act(async () => { await pending })
+    write?.mockRestore()
+    snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
+  }
 })
 
 
@@ -3812,7 +3858,7 @@ it.each(["accepted", "bound-next", "image", "clipboard-denied", "newer-input", "
 })
 
 
-it.each([false, true])("private bound retry settles only the exact original input (changed %s)", async changed => {
+it.each([false, true].flatMap(changed => [false, true].map(saved => ({ changed, saved }))))("private bound retry settles only saved exact original input (changed $changed, saved $saved)", async ({ changed, saved }) => {
   const mounted = await mountedNativeOpening()
   const { sendNativeHistoryCharacter } = await import("../native-history-character-send")
   const { freshChatDraftAddress } = await import("@/utils/chat-draft-address")
@@ -3839,10 +3885,18 @@ it.each([false, true])("private bound retry settles only the exact original inpu
   expect(await readChatCreationRecovery(handle)).toMatchObject({ state: "bound", inputText: "  ORIGINAL INPUT  ", chatId: nativeChatId })
   preparationCurrent = true
   h1.capture.mockImplementation(async (id, request) => openingCapture(id, request))
+  if (!saved) h1.roleplayComplete.mockImplementationOnce(async (id, body, options) => {
+    options.onDispatch?.()
+    const reply = roleplayCompletion(id, body)
+    return { ...reply, saved: false, assistant_message_id: null,
+      tldw_roleplay_resume_v1: { ...reply.tldw_roleplay_resume_v1, assistant_message_version: null, fence: null, unsaved_reason: "history_conflict" } }
+  })
   await act(async () => { await send(changed ? "DIFFERENT INPUT" : "  ORIGINAL INPUT  ", nativeChatId) })
-  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+  expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+  expect(h1.wire).not.toHaveBeenCalled()
   expect(createChatMock).toHaveBeenCalledOnce()
-  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: changed ? "bound" : "settled", inputText: changed ? "  ORIGINAL INPUT  " : "" })
+  expect(await readChatCreationRecovery(handle)).toMatchObject({ state: changed || !saved ? "bound" : "settled", inputText: changed || !saved ? "  ORIGINAL INPUT  " : "" })
   snapshot.release(); mounted.hook.unmount(); mounted.selection.unmount()
 })
 
@@ -6555,4 +6609,134 @@ it("held full Character contract discovery cannot dispatch from an unmounted com
   expect(h1.wire).not.toHaveBeenCalled()
   expect(addChatMessageMock).not.toHaveBeenCalled()
   expect(h1.recover).not.toHaveBeenCalled()
+})
+
+
+it("an acknowledged first character creation uses saved Roleplay before UI metadata arrives", async () => {
+  const mounted = await mountedNativeOpening()
+  const sender = await import("../roleplay-resume-send")
+  const send = vi
+    .spyOn(sender, "sendSavedRoleplay")
+    .mockResolvedValue(true)
+  try {
+    await act(async () => {
+      await mounted.hook.result.current.onSubmit({
+        message: "Exact first character input",
+        image: ""
+      })
+    })
+    expect(createChatMock).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Exact first character input",
+        serverChatId: nativeChatId
+      })
+    )
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+  } finally {
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+    send.mockRestore()
+  }
+})
+
+
+it("mounted Full saved Roleplay dispatch bypasses mutable live Scene and model defaults", async () => {
+  const sender = await import("../roleplay-resume-send")
+  const send = vi
+    .spyOn(sender, "sendSavedRoleplay")
+    .mockResolvedValue(true)
+  const scenes = await import("@/services/actor-settings")
+  vi.mocked(scenes.getActorSceneForChat).mockRejectedValue(
+    new Error("live Scene forbidden")
+  )
+  messageStoreState.value.serverChatCharacterId = "12"
+  messageStoreState.value.serverChatAssistantKind = "character"
+  messageStoreState.value.selectedModel = ""
+  const options = { ...createHookOptions(), selectedModel: "" }
+  const hook = renderHook(() =>
+    useChatActions(options as Parameters<typeof useChatActions>[0])
+  )
+  try {
+    await act(async () => {
+      await hook.result.current.onSubmit({
+        message: "  Exact Full literal\n",
+        image: ""
+      })
+    })
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        controller: h1.controller,
+        message: "  Exact Full literal\n",
+        serverChatId: nativeChatId
+      })
+    )
+    expect(scenes.getActorSceneForChat).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+  } finally {
+    hook.unmount()
+    send.mockRestore()
+  }
+})
+
+
+it("an acknowledged workspace character creation keeps its existing native path", async () => {
+  const mounted = await mountedNativeOpening()
+  const sender = await import("../roleplay-resume-send")
+  const send = vi
+    .spyOn(sender, "sendSavedRoleplay")
+    .mockResolvedValue(true)
+  const { sendNativeHistoryCharacter } = await import(
+    "../native-history-character-send"
+  )
+  const workspace = {
+    type: "workspace" as const,
+    workspaceId: "owned-workspace"
+  }
+  const address = mounted.draftStore.getState().chatDraftAddress!
+  expect(
+    mounted.draftStore
+      .getState()
+      .setChatDraftAddress({ ...address, scope: workspace })
+  ).toBe(true)
+  createChatMock.mockImplementation((body) => ({
+    ...createdNativeChat(body),
+    scope_type: "workspace",
+    workspace_id: workspace.workspaceId
+  }))
+  try {
+    await act(async () => {
+      await sendNativeHistoryCharacter({
+        controller: mounted.selection.result.current,
+        surface: "playground",
+        originIsCurrent: () => true,
+        sourceIsCurrent: () => true,
+        signal: new AbortController().signal,
+        temporary: false,
+        scope: workspace,
+        characterId: "12",
+        model: "deepseek-chat",
+        settings: { apiProvider: "openai" },
+        message: "Workspace first character input",
+        image: "",
+        t: ((key: string) => key) as Parameters<
+          typeof sendNativeHistoryCharacter
+        >[0]["t"],
+        setServerChatId: vi.fn(),
+        setMessages: vi.fn(),
+        releaseActivity: vi.fn()
+      })
+    })
+    expect(createChatMock).toHaveBeenCalledOnce()
+    expect(mounted.selection.result.current.getCurrent().owner?.scope).toEqual(
+      workspace
+    )
+    expect(send).not.toHaveBeenCalled()
+  } finally {
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+    send.mockRestore()
+  }
 })

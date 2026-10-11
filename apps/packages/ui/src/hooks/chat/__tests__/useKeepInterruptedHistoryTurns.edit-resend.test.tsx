@@ -12,13 +12,13 @@ import type { HistorySelectionController } from "../useHistorySelection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
 
 describe("explicit edited branch recovery", () => {
-  it.each(["edit_resend", "regenerate"].flatMap(action => ["complete", "interrupted", "stopped"].map(outcome => ({ action, outcome }))))(
+  it.each(["edit_resend", "regenerate", "roleplay_resume"].flatMap(action => ["complete", "interrupted", "stopped"].map(outcome => ({ action, outcome }))))(
     "$action / $outcome remains in review without automatic keep, dismissal or transcript changes",
     async ({ action, outcome }) => {
       keep.mockClear()
       const turn: HistoryTurnRecovery = {
         operation_id: "edit",
-        action: action as HistoryTurnRecovery["action"],
+        ...(action === "roleplay_resume" ? {roleplay_resume:{} as HistoryTurnRecovery["roleplay_resume"]} : {action:action as HistoryTurnRecovery["action"]}),
         persistence: "server",
         outcome: outcome as HistoryTurnRecovery["outcome"],
         owner_key: "owner",

@@ -1,6 +1,12 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { useStoreMessageOption } from "@/store/option"
+import { parseRoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
+const roleplayRetry = vi.hoisted(() => ({ send: vi.fn() }))
+vi.mock("@/hooks/chat/roleplay-resume-send", () => ({
+  sendSavedRoleplay: roleplayRetry.send
+}))
 const reviewButtons = vi.hoisted(() => ({ open: [] as Array<() => void> }))
 vi.mock("@/components/Common/Button", async (original) => {
   const { Button } =
@@ -1389,4 +1395,140 @@ describe("acknowledged recovery actions", () => {
       }
     }
   )
+})
+
+
+const roleplaySelection = (saved: boolean) => {
+  const selection = completedEditedSelection()
+  const original = {
+    version: 1,
+    conversation_id: "review-resume",
+    input: {
+      message_id: "resume-input",
+      content: "Exact original input",
+      expected: {
+        version: 1,
+        snapshot_digest: "sha256:" + "c".repeat(64),
+        settings_version: 1,
+        history_version: 1,
+        tail: { message_id: null, message_version: null }
+      }
+    },
+    assistant_message_id: "saved-answer"
+  }
+  const append = {
+    version: 1,
+    conversation_id: original.conversation_id,
+    message_id: original.input.message_id,
+    message_version: 1,
+    parent_message_id: null,
+    fence: {
+      ...original.input.expected,
+      history_version: 2,
+      tail: { message_id: original.input.message_id, message_version: 1 }
+    }
+  }
+  const completion = {
+    chat_id: original.conversation_id,
+    character_id: 12,
+    provider: "openai",
+    model: "original-model",
+    saved: true,
+    user_message_id: original.input.message_id,
+    assistant_message_id: original.assistant_message_id,
+    assistant_content: "Original reply",
+    tldw_roleplay_resume_v1: {
+      version: 1,
+      input_message_id: original.input.message_id,
+      input_message_version: 1,
+      assistant_message_id: original.assistant_message_id,
+      expected: append.fence,
+      assistant_message_version: 1,
+      fence: {
+        ...append.fence,
+        history_version: 3,
+        tail: { message_id: original.assistant_message_id, message_version: 1 }
+      },
+      unsaved_reason: null
+    }
+  }
+  const protocol = parseRoleplayResumeRecovery({
+    intent: original,
+    append,
+    ...(saved ? { completion } : {})
+  })
+  selection.recoveries = [
+    {
+      scope: { profile_id: "profile", client_session_id: "original" },
+      turn: {
+        operation_id: "resume-review",
+        owner_key: "resume-owner",
+        conversation_id: original.conversation_id,
+        origin_view: {
+          owner_key: "resume-owner",
+          conversation_id: original.conversation_id,
+          view_session_id: "original",
+          selection_revision: 1,
+          interpretation: { kind: "parent_graph_v1" },
+          cursor: { kind: "empty" }
+        },
+        persistence: "server",
+        created_at: 1,
+        input_text: original.input.content,
+        input_images: [],
+        input_id: append.message_id,
+        result_text: saved ? completion.assistant_content : "",
+        state: saved ? "generated_unsaved" : "accepted_unsent",
+        ...(saved
+          ? {
+              assistant_id: original.assistant_message_id,
+              outcome: "complete",
+              settled_message_id: original.assistant_message_id
+            }
+          : {}),
+        roleplay_resume: protocol
+      }
+    }
+  ] as typeof selection.recoveries
+  selection.fence = () => () => true
+  selection.getCurrent = () =>
+    selection as unknown as ReturnType<HistorySelectionController["getCurrent"]>
+  return selection
+}
+
+it("a saved original Roleplay reply can be explicitly opened without an Edit or Regenerate action", () => {
+  const selection = roleplaySelection(true)
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText("Reply saved")).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Open saved reply" })).toBeTruthy()
+  expect(screen.queryByText(/Edited reply saved/)).toBeNull()
+})
+
+
+it("Retry owns shared response activity and keeps dismissal disabled until its original attempt settles", async () => {
+  useStoreMessageOption.getState().startNewChatDraft()
+  const selection = roleplaySelection(false)
+  let finish!: () => void
+  roleplayRetry.send.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+  )
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(
+    screen.getByRole("button", { name: "Retry original request" })
+  )
+  await waitFor(() => expect(roleplayRetry.send).toHaveBeenCalledOnce())
+  expect(useStoreMessageOption.getState().isProcessing).toBe(true)
+  expect(useStoreMessageOption.getState().streaming).toBe(true)
+  expect(
+    screen.getByRole("button", { name: "Dismiss recovery" })
+  ).toHaveProperty("disabled", true)
+  await act(async () => {
+    finish()
+    await Promise.resolve()
+  })
+  expect(useStoreMessageOption.getState().isProcessing).toBe(false)
+  expect(useStoreMessageOption.getState().streaming).toBe(false)
 })

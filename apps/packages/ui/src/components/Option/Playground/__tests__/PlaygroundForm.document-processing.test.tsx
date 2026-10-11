@@ -645,3 +645,73 @@ describe("Playground document processing submit", () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 })
+
+
+it("Full saved Roleplay reaches its sender with no live model or Scene read", async () => {
+  useStoreMessageOption.getState().startNewChatDraft()
+  useStoreMessageOption.setState({
+    serverChatId: "saved-roleplay-form",
+    serverChatAssistantKind: "character",
+    temporaryChat: false
+  })
+  const owner = {
+    kind: "native" as const,
+    conversation_id: "saved-roleplay-form",
+    owner_key: "owned-roleplay",
+    scope: { type: "global" as const },
+    request_scope: requestScope,
+    validate_lease: () => true
+  }
+  const controller = {
+    ...historySelection,
+    getCurrent: () => ({ status: "ready", owner })
+  } as unknown as HistorySelectionController
+  getActorSceneForChat
+    .mockReset()
+    .mockRejectedValue(new Error("live Scene must not be read"))
+  const sendMessage = vi.fn(async () => ({ status: "submitted" as const }))
+  const deps = baseDeps({
+    historySelection: controller,
+    uploadedFiles: [],
+    selectedModel: "",
+    sendMessage
+  })
+  const mounted = renderHook(() => usePlaygroundSubmit(deps))
+  act(() => mounted.result.current.submitForm())
+  await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce())
+  expect(getActorSceneForChat).not.toHaveBeenCalled()
+  expect(deps.validateSelectedChatModelsAvailability).not.toHaveBeenCalled()
+})
+
+
+it("Full saved Roleplay refuses extra documents before ingestion or optimistic reset", async () => {
+  useStoreMessageOption.getState().startNewChatDraft()
+  useStoreMessageOption.setState({
+    serverChatId: "saved-roleplay-form",
+    serverChatAssistantKind: "character",
+    temporaryChat: false
+  })
+  const owner = {
+    kind: "native" as const,
+    conversation_id: "saved-roleplay-form",
+    owner_key: "owned-roleplay",
+    scope: { type: "global" as const },
+    request_scope: requestScope,
+    validate_lease: () => true
+  }
+  const controller = {
+    ...historySelection,
+    getCurrent: () => ({ status: "ready", owner })
+  } as unknown as HistorySelectionController
+  prepareChatDocumentAttachmentsForSend.mockClear()
+  const deps = baseDeps({ historySelection: controller })
+  const mounted = renderHook(() => usePlaygroundSubmit(deps))
+  await act(async () => {
+    mounted.result.current.submitForm()
+    await Promise.resolve()
+  })
+  expect(prepareChatDocumentAttachmentsForSend).not.toHaveBeenCalled()
+  expect(deps.sendMessage).not.toHaveBeenCalled()
+  expect(deps.form.reset).not.toHaveBeenCalled()
+  expect(deps.notificationApi.error).toHaveBeenCalled()
+})

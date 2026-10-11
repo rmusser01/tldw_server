@@ -547,3 +547,49 @@ it("an image queue without an optional caller fence cannot send after synchronou
   expect(useStoreMessageOption.getState().messages).toEqual(replacement)
   hook.unmount()
 })
+
+
+it("Full saved Roleplay queue uses saved setup with no current model or Scene read and no settings publication", async () => {
+  useStoreMessageOption.getState().startNewChatDraft()
+  const conversation_id = "saved-roleplay-queue"
+  const owner = {
+    kind: "native" as const,
+    conversation_id,
+    owner_key: "saved-roleplay-owner",
+    scope: { type: "global" as const },
+    request_scope: requestScope,
+    validate_lease: () => true
+  }
+  useStoreMessageOption.setState({
+    serverChatId: conversation_id,
+    serverChatAssistantKind: "character",
+    temporaryChat: false
+  })
+  const selected = {
+    ...historySelection,
+    getCurrent: () => ({ status: "ready", owner })
+  } as unknown as HistorySelectionController
+  getActorSceneForChat
+    .mockReset()
+    .mockRejectedValue(new Error("live Scene forbidden"))
+  const deps = baseDeps({
+    historySelection: selected,
+    historyId: null,
+    serverChatId: conversation_id,
+    selectedModel: "",
+    uploadedFiles: [],
+    sendMessage: vi.fn(async () => ({ status: "submitted" }))
+  })
+  renderHook(() => usePlaygroundQueueManagement(deps))
+  const item = buildQueuedRequest({
+    promptText: "  Exact queued reply\n",
+    snapshot: { selectedModel: "", chatMode: "normal", toolChoice: "auto" }
+  })
+  await queueMock.args.sendQueuedRequest(item, () => {})
+  expect(deps.sendMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "  Exact queued reply\n" })
+  )
+  expect(getActorSceneForChat).not.toHaveBeenCalled()
+  expect(deps.setSelectedModel).not.toHaveBeenCalled()
+  expect(deps.setSelectedSystemPrompt).not.toHaveBeenCalled()
+})

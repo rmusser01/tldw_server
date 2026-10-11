@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source";
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
@@ -2871,6 +2872,91 @@ export const useMessage = () => {
       draftAssistantKind: selectedAssistant?.kind ?? null,
       draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
     });
+    if (
+      isSavedRoleplayConversation(historySelection) &&
+      !greetingSeed &&
+      !historyEditResend &&
+      !historyRegenerate &&
+      !isRegenerate
+    ) {
+      const activity = useStoreMessageOption.getState()
+      if (activity.streaming || activity.isProcessing || !beginResponse())
+        return chatSubmitSkipped("response_in_progress")
+      const activeController = controller ?? new AbortController()
+      const resumeSource = captureChatDraftSource(commandSessionIsCurrent)
+      activeNormalControllerRef.current = activeController
+      setAbortController(activeController)
+      setIsProcessing(true)
+      setStreaming(true)
+      try {
+        const { sendSavedRoleplay } = await import("./chat/roleplay-resume-send")
+        await sendSavedRoleplay({
+          controller: historySelection!,
+          signal: activeController.signal,
+          originIsCurrent: historyOriginIsCurrent!,
+          sourceIsCurrent: () =>
+            resumeSource.isCurrent() &&
+            (!assertQueuedDispatchCurrent ||
+              assertQueuedDispatchCurrent.isSourceCurrent?.() === true),
+          serverChatId: serverChatIdOverride || serverChatId,
+          historyId: historyIdOverride ?? historyId,
+          message,
+          image,
+          setMessages,
+          unsupportedContext: Boolean(
+            hasExplicitImageBackend ||
+              resolvedChatMode !== "normal" ||
+              uploadedFiles?.length ||
+              docs?.length ||
+              webSearch ||
+              selectedSystemPrompt ||
+              replyTarget ||
+              requestOverrides?.historyForModel ||
+              requestOverrides?.messageForModel ||
+              toolChoice === "required"
+          )
+        })
+        return chatSubmitSubmitted()
+      } catch (error) {
+        if (
+          resumeSource.isCurrent() &&
+          historyOriginIsCurrent?.() === true &&
+          currentHistorySelection?.owner?.kind === "native" &&
+          currentHistorySelection.owner.validate_lease() &&
+          !(
+            (error instanceof NativeHistoryBranchRefusal ||
+              error instanceof NativeHistoryContextRefusal ||
+              error instanceof NativeHistorySettingsReadError) &&
+            !error.isCurrent()
+          )
+        )
+          notification.error({
+            message: t("error"),
+            description:
+              nativeCharacterPreflightMessage(error, t) ??
+              (error instanceof Error
+                ? error.message
+                : "Saved roleplay could not be continued.")
+          })
+        return chatSubmitFailed(
+          error instanceof Error
+            ? error.message
+            : "Saved roleplay could not be continued."
+        )
+      } finally {
+        if (
+          activeNormalControllerRef.current === activeController &&
+          (!getAbortController || getAbortController() === activeController)
+        ) {
+          activeNormalControllerRef.current = null
+          setIsProcessing(false)
+          setStreaming(false)
+          setAbortController((current: AbortController | null) =>
+            current === activeController ? null : current
+          )
+        }
+      }
+    }
     const selectedLocalContextTurn = selectedHistoryTurn && currentHistorySelection?.owner?.kind === "local" &&
       (contextSendMode === "plain" || contextSendMode === "overlay");
     const alternateHistorySelection = historySelection && !temporaryChat && !isRegenerate &&
@@ -3432,6 +3518,8 @@ export const useMessage = () => {
               historyIdOverride,
             );
           } else if (sendMode === "tracked_persona" && isPersonaAssistantSelection(effectiveSelectedAssistant)) {
+            const personaPreparationIsCurrent = () =>
+              sourceIsCurrent() && normalHistoryPreparation.dispatchIsCurrent()
             const personaServerChat = await ensurePersonaServerChat({
               assistant: effectiveSelectedAssistant,
               serverChatIdOverride,
@@ -3450,13 +3538,28 @@ export const useMessage = () => {
               temporaryChat,
               requestScope: actorSceneSend.requestScope,
               signal,
-              isCurrent: actorSceneSend.isCurrent,
+              isCurrent: personaPreparationIsCurrent,
               createChat: (payload, options) => tldwClient.createChat(payload, options),
               ensureServerChatHistoryId: async () => historyId,
               invalidateServerChatHistory,
-              setServerChatId: assertQueuedDispatchCurrent
-                ? (id) => assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
-                : setServerChatId,
+              setServerChatId: (id) => {
+                signal.throwIfAborted()
+                if (!sourceIsCurrent() || !normalHistoryPreparation.dispatchIsCurrent()) throw new Error("actor_settings_scope_changed")
+                // Only this Persona operation can acknowledge its own reset or created ID.
+                commandIdentity.serverChatId = id
+                try {
+                  if (assertQueuedDispatchCurrent) assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
+                  else setServerChatId(id)
+                } catch (error) {
+                  identityRetired = true
+                  throw error
+                }
+                if (!ownIdentityIsCurrent()) {
+                  identityRetired = true
+                  throw new Error("actor_settings_scope_changed")
+                }
+                identityPublished = true
+              },
               setServerChatTitle,
               setServerChatCharacterId,
               setServerChatAssistantKind,
@@ -3471,7 +3574,11 @@ export const useMessage = () => {
               setServerChatExternalRef,
             });
             assertQueuedDispatchCurrent?.();
-    assertCurrent?.();
+            assertCurrent?.();
+            signal.throwIfAborted();
+            if (!personaPreparationIsCurrent()) throw new Error("actor_settings_scope_changed");
+            const personaSceneSend: ActorSceneSend = Object.freeze({ ...actorSceneSend,
+              isCurrent: () => personaPreparationIsCurrent() && !signal.aborted });
             return await normalChatMode(
               message,
               image,
@@ -3515,7 +3622,7 @@ export const useMessage = () => {
                 ...replyOverrides,
                 ...turnSetters,
                 actorScene: actorSceneSend.scene,
-                actorSceneSend,
+                actorSceneSend: personaSceneSend,
                 actorSettings: actorSceneSend.scene.settings,
               },
             );

@@ -2005,8 +2005,21 @@ def _convert_db_conversation_to_response(
         "message_count",
         conv_data.get('message_count', 0),
     )
+    participants = ((state.get("materialized_settings") or {}).get("values") or {}).get(
+        "participants", (snapshot.get("payload") or {}).get("participants")
+    )
+    if snapshot.get("status") == "valid" and isinstance(participants, list) and len(participants) == 1:
+        name = participants[0]["identity"]["name"]
+        detail_fields["character_name"] = name
+        detail_fields["assistant_name"] = name
+    effective = state.get("effective_completion")
     return ChatSessionResponse(
         **detail_fields,
+        resume_completion=(
+            {"provider": effective["provider"], "model": effective["model"]}
+            if state.get("resume_eligible") is True and isinstance(effective, dict)
+            else None
+        ),
         behavior_snapshot={
             "status": snapshot.get("status", "missing"),
             "schema_version": snapshot.get("schema_version"),

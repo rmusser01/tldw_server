@@ -171,6 +171,7 @@ export const createCoreSlice: StoreSlice<
         serverChatState: historyId ? null : state.serverChatState,
         serverChatVersion: historyId ? null : state.serverChatVersion,
         serverChatTitle: historyId ? null : state.serverChatTitle,
+        serverChatRoleplaySetup: historyId ? null : state.serverChatRoleplaySetup,
         serverChatCharacterId: historyId ? null : state.serverChatCharacterId,
         serverChatMetaLoaded: historyId ? false : state.serverChatMetaLoaded,
         serverChatLoadState: historyId ? "idle" : state.serverChatLoadState,

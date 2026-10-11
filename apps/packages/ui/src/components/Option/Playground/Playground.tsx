@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
@@ -3387,7 +3388,7 @@ const PlaygroundContent = () => {
       routeCharacterIntentId && !routeCharacterIntentChatId && routeCharacterIntentAppliedRef.current !== routeCharacterIntentId
         ? { active: true, title: t("playground:characterChatReadiness.routeSetupPending", "Finish character setup before sending."),
           actionLabel: t("playground:characterChatReadiness.character.action", "Choose character"), onAction: openCharacterSelectorFromReadiness }
-        : characterWorkflowActive &&
+        : !isSavedRoleplayConversation(historySelection) && characterWorkflowActive &&
       characterChatReadiness.status === "blocked" &&
       characterChatReadiness.missingRequirement === "chat-model" &&
       characterChatReadinessCopy
@@ -3403,7 +3404,7 @@ const PlaygroundContent = () => {
           }
         : null,
     [
-      characterChatReadiness,
+      historySelection, characterChatReadiness,
       characterChatReadinessCopy,
       characterWorkflowActive,
       handleCharacterChatReadinessAction,

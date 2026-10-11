@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import React from "react"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useChatActions } from "../useChatActions"
+import { useOriginalSdkSceneFixture } from "./sdk-original-scene-fixture"
 
 const {
   createChatMock,
@@ -20,14 +21,15 @@ const {
     saveLocalSuccessMock: vi.fn()
   }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async original => ({
+  ...await original<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: normalChatModeMock
 }))
 
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
     definitions: {}, scopeSignal: new AbortController().signal,
-    scopeInvalidatedSignal: new AbortController().signal,
+    scopeInvalidatedSignal: entryAccount.scopeInvalidatedSignal,
     requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" }, userId: null },
     release: vi.fn()
   })
@@ -98,8 +100,8 @@ vi.mock("@/db/dexie/branch", () => ({
   generateBranchFromMessageIds: vi.fn(async () => null)
 }))
 
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>()
 }))
 
 vi.mock("@/utils/selected-character-storage", () => ({
@@ -133,7 +135,7 @@ vi.mock("@/store/option", async original => {
   return {
     ...actual,
     useStoreMessageOption: {
-      getState: () => ({ ...actual.useStoreMessageOption.getState(), selectedModel: "deepseek-chat" as string | null }),
+      getState: actual.useStoreMessageOption.getState,
       setState: actual.useStoreMessageOption.setState
     }
   }
@@ -255,6 +257,10 @@ const createHookOptions = () => ({
   clearMessageSteering: vi.fn()
 })
 
+const entryAccount = { requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" as const }, userId: null }, scopeInvalidatedSignal: new AbortController().signal }
+const useChatActions = (options: Parameters<typeof useOriginalSdkSceneFixture>[0]) =>
+  useOriginalSdkSceneFixture(options, () => entryAccount)
+
 describe("useChatActions overlay integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -311,14 +317,19 @@ describe("useChatActions overlay integration", () => {
       const previous = store.getState()
       previous.startNewChatDraft()
       const options = createHookOptions()
+      options.ensureServerChatHistoryId.mockImplementationOnce(async (_id, _title, _signal, _snapshot, scene) => {
+        expect(scene.acceptHistoryMirror("saved-overlay")).toBe(true)
+        store.getState().setHistoryId("saved-overlay", { preserveServerChatId: true })
+        return "saved-overlay"
+      })
       let finishPersistence!: () => void
       const held = new Promise<void>((resolve) => {
         finishPersistence = resolve
       })
       const persist = vi.fn(
-        async (payload: { setHistoryId: (id: string) => void }) => {
+        async (payload: { setHistoryId: (id: string, options?: { preserveServerChatId: boolean }) => void }) => {
           await held
-          payload.setHistoryId("saved-overlay")
+          payload.setHistoryId("saved-overlay", { preserveServerChatId: true })
           return "saved-overlay"
         }
       )
@@ -326,6 +337,9 @@ describe("useChatActions overlay integration", () => {
       normalChatModeMock.mockImplementationOnce(
         async (...args: Parameters<typeof normalChatModeMock>) => {
           await args[6].saveMessageOnSuccess({
+            requestScope: args[6].servicePromptSnapshot?.requestScope,
+            scopeSignal: args[6].servicePromptSnapshot?.scopeSignal,
+            scopeInvalidatedSignal: args[6].servicePromptSnapshot?.scopeInvalidatedSignal,
             historyId: null,
             setHistoryId: args[6].setHistoryId,
             conversationId: "server-chat-42",
@@ -361,8 +375,9 @@ describe("useChatActions overlay integration", () => {
           await submission
         })
         if (boundary === "current") {
-          expect(options.setHistoryId).toHaveBeenCalledWith("saved-overlay")
-          expect(options.setServerChatId).toHaveBeenCalledWith("server-chat-42")
+          expect(options.setHistoryId).toHaveBeenCalledWith("saved-overlay", { preserveServerChatId: true })
+          expect(options.setServerChatId).not.toHaveBeenCalled()
+          expect(store.getState().serverChatId).toBe("server-chat-42")
           expect(syncChatSettingsForServerChatMock).toHaveBeenCalledOnce()
         } else {
           expect(options.setHistoryId).not.toHaveBeenCalled()
@@ -413,12 +428,22 @@ describe("useChatActions overlay integration", () => {
       })
       const options = createHookOptions()
       Object.assign(options, {
+        historyId: null,
         serverChatId: "server-chat-42",
+        serverChatCharacterId: "saved-character",
         setHistoryId: store.getState().setHistoryId
+      })
+      options.ensureServerChatHistoryId.mockImplementationOnce(async (_id, _title, _signal, _snapshot, scene) => {
+        expect(scene.acceptHistoryMirror("first-local-history")).toBe(true)
+        store.getState().setHistoryId("first-local-history", { preserveServerChatId: true })
+        return "first-local-history"
       })
       normalChatModeMock.mockImplementationOnce(
         async (...args: Parameters<typeof normalChatModeMock>) => {
           await args[6].saveMessageOnSuccess({
+            requestScope: args[6].servicePromptSnapshot?.requestScope,
+            scopeSignal: args[6].servicePromptSnapshot?.scopeSignal,
+            scopeInvalidatedSignal: args[6].servicePromptSnapshot?.scopeInvalidatedSignal,
             historyId: null,
             setHistoryId: args[6].setHistoryId,
             conversationId: "server-chat-42",
@@ -465,9 +490,13 @@ describe("useChatActions overlay integration", () => {
     const options = createHookOptions()
     normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
       const params = args[6] as {
+        servicePromptSnapshot?: ServicePromptSnapshot
         saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
       }
       await params.saveMessageOnSuccess({
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
         historyId: null,
         isRegenerate: false,
         selectedModel: "deepseek-chat",
@@ -494,8 +523,8 @@ describe("useChatActions overlay integration", () => {
       historyId: "history-overlay",
       serverChatId: "server-chat-42",
       allowScratchFallback: true,
-      requestScope: undefined,
-      signal: undefined,
+      requestScope: entryAccount.requestScope,
+      signal: normalChatModeMock.mock.calls[0][6].servicePromptSnapshot.scopeSignal,
       sourceDraftAddress: source.chatDraftAddress,
       validate_lease: expect.any(Function)
     })

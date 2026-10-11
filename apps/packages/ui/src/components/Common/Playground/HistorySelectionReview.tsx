@@ -1,3 +1,5 @@
+import { usePageAssist } from "@/context"
+import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { focusComposer } from "@/hooks/useComposerFocus"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
@@ -54,6 +56,13 @@ export function HistorySelectionReview({
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
     t(`historySelection.${key}`, fallback)
+  const savedSetup = useStoreMessageOption(
+    (state) => state.serverChatRoleplaySetup
+  )
+  const savedChatId = useStoreMessageOption((state) => state.serverChatId)
+  const { setController } = usePageAssist()
+  const [retrying, setRetrying] = React.useState<string | null>(null)
+  const retryAbort = React.useRef<AbortController | null>(null)
   const [openingRecovery, setOpeningRecovery] = React.useState<string | null>(null)
   const [openRecoveryError, setOpenRecoveryError] = React.useState<string | null>(null)
   const renderedSource = captureChatDraftSource()
@@ -84,6 +93,7 @@ export function HistorySelectionReview({
     mounted.current = true
     return () => {
       mounted.current = false
+      retryAbort.current?.abort()
       recoveryFocus.current?.()
       recoveryActionRef.current?.cancel()
     }
@@ -108,7 +118,7 @@ export function HistorySelectionReview({
         (!current || (current.owner === owner && current.view === view))
       )
     }
-    if (!sourceIsCurrent()) return
+    if (!sourceIsCurrent() || retryAbort.current) return
     const previous = recoveryActionRef.current
     if (previous?.pending && previous.isCurrent()) return
     previous?.cancel()
@@ -153,7 +163,7 @@ export function HistorySelectionReview({
     try {
       if (action === "copy")
         await navigator.clipboard.writeText(
-          entry.turn.result_text || entry.turn.input_text
+          [...(entry.turn.retained_result_texts ?? []), entry.turn.result_text || entry.turn.input_text].join("\n\n")
         )
       else if (!(await selection.dismissRecovery(entry, attempt.isCurrent)))
         throw new Error("recovery_dismissal_not_committed")
@@ -280,7 +290,7 @@ export function HistorySelectionReview({
     entry: HistorySelectionController["recoveries"][number]
   ) => {
     if (
-      openingRecoveryRef.current ||
+      openingRecoveryRef.current || retryAbort.current ||
       !renderedSource.isCurrent() ||
       !renderedSelectionIsCurrent()
     )
@@ -467,6 +477,73 @@ export function HistorySelectionReview({
       return next
     })
   }
+  const retryRoleplay = async (
+    entry: HistorySelectionController["recoveries"][number]
+  ) => {
+    if (
+      retryAbort.current ||
+      editorOpen() ||
+      !renderedSource.isCurrent() ||
+      !renderedSelectionIsCurrent() ||
+      useStoreMessageOption.getState().streaming ||
+      useStoreMessageOption.getState().isProcessing
+    )
+      return
+    const abort = new AbortController()
+    retryAbort.current = abort
+    const activity = {
+      originalReply: useStoreMessageOption.getState().messages.at(-1)
+    }
+    useStoreMessageOption.setState({
+      detachedHistoryResponse: activity,
+      isProcessing: true,
+      streaming: true
+    })
+    setController(abort)
+    const originIsCurrent = selection.fence()
+    const sourceIsCurrent = () =>
+      mounted.current &&
+      retryAbort.current === abort &&
+      renderedSource.isCurrent() &&
+      !editorOpen()
+    setRetrying(entry.turn.operation_id)
+    setOpenRecoveryError(null)
+    try {
+      const { sendSavedRoleplay } = await import(
+        "@/hooks/chat/roleplay-resume-send"
+      )
+      await sendSavedRoleplay({
+        controller: selection,
+        signal: abort.signal,
+        originIsCurrent,
+        sourceIsCurrent,
+        message: entry.turn.input_text,
+        retry: entry,
+        serverChatId: entry.turn.conversation_id,
+        setMessages: useStoreMessageOption.getState().setMessages
+      })
+    } catch {
+      if (sourceIsCurrent())
+        setOpenRecoveryError(
+          text(
+            "roleplayRetryFailed",
+            "The original request could not be confirmed. Its input and any reply are still retained here."
+          )
+        )
+    } finally {
+      setController((current) => (current === abort ? null : current))
+      if (useStoreMessageOption.getState().detachedHistoryResponse === activity)
+        useStoreMessageOption.setState({
+          detachedHistoryResponse: null,
+          isProcessing: false,
+          streaming: false
+        })
+      if (retryAbort.current === abort) {
+        retryAbort.current = null
+        if (mounted.current) setRetrying(null)
+      }
+    }
+  }
   const renderRecovery = (
     entry: HistorySelectionController["recoveries"][number]
   ) => (
@@ -474,7 +551,23 @@ export function HistorySelectionReview({
       key={entry.turn.operation_id}
       className="mb-3 rounded border p-3"
       role="status">
-      {(entry.turn.action === "edit_resend" ||
+      {entry.turn.roleplay_resume ? (
+        <>
+          <p className="font-medium">{entry.turn.roleplay_resume.completion?.saved
+            ? text("savedRoleplayReplyTitle", "Reply saved")
+            : entry.turn.state === "refused" ? text("roleplayMessageRefusedTitle", "Message not added")
+            : entry.turn.roleplay_resume.completion ? text("roleplayReplyUnsavedTitle", "Reply not saved")
+            : entry.turn.roleplay_resume.append ? text("roleplayReplyUnconfirmedTitle", "Reply save unconfirmed")
+            : text("roleplayInputUnconfirmedTitle", "Message save unconfirmed")}</p>
+          <p>{entry.turn.roleplay_resume.completion?.saved
+            ? text("savedRoleplayReplyMessage", "This reply is saved in the original conversation. Open it when you are ready.")
+            : entry.turn.state === "refused" ? text("roleplayMessageRefused", "The server refused this request before adding your message. Your input is retained here.")
+            : entry.turn.roleplay_resume.completion ? text("roleplayReplyUnsaved", "Your message is saved. The reply was generated but could not be saved. Copy it or explicitly retry the original request; earlier replies will remain available.")
+            : entry.turn.roleplay_resume.append
+              ? text("roleplayReplyUnconfirmedMessage", "Your message is saved. Any reply that arrived is retained here. Retry checks the original request without adding another message.")
+              : text("roleplayInputUnconfirmedMessage", "The server may have received this message. Retry checks the original request. Your input is retained here.")}</p>
+        </>
+      ) : (entry.turn.action === "edit_resend" ||
         entry.turn.action === "regenerate") &&
       entry.turn.outcome === "complete" &&
       entry.turn.settled_message_id ? (
@@ -564,6 +657,7 @@ export function HistorySelectionReview({
           </p>
         </>
       )}
+      {entry.turn.recovery_storage === "memory" && <p role="alert">{text("recoveryStorageFull", "Local storage could not keep all recovered text. Some text is retained in this window only; copy it before closing or reloading.")}</p>}
       <details>
         <summary>
           {text("inspectRecovery", "Inspect original input and result")}
@@ -574,6 +668,7 @@ export function HistorySelectionReview({
         <pre className="whitespace-pre-wrap break-words">
           {entry.turn.result_text}
         </pre>
+        {entry.turn.retained_result_texts?.map((value,index)=><pre key={index} className="whitespace-pre-wrap break-words">{value}</pre>)}
         {entry.turn.input_images
           ?.filter((image) =>
             /^data:image\/(?:png|jpeg|gif|webp|bmp|x-icon);base64,[A-Za-z0-9+/]*={0,2}$/.test(
@@ -599,24 +694,33 @@ export function HistorySelectionReview({
           ))}
       </details>
       <Button
-        disabled={recoveryAction?.pending || openingRecovery !== null}
+        disabled={retrying !== null || recoveryAction?.pending || openingRecovery !== null}
         loading={recoveryAction?.pending && recoveryAction.action === "copy" && recoveryAction.operationId === entry.turn.operation_id}
         onClick={(event) => void acknowledgeRecovery("copy", entry, event.currentTarget)}>
         {text("copyRecovery", "Copy recovered text")}
       </Button>
       {(entry.turn.action === "edit_resend" ||
-        entry.turn.action === "regenerate") &&
+        entry.turn.action === "regenerate" || entry.turn.roleplay_resume?.completion?.saved) &&
         entry.turn.outcome === "complete" &&
         entry.turn.settled_message_id && (
           <Button
-            disabled={openingRecovery !== null || recoveryAction?.pending || selection.status !== "ready"}
+            disabled={retrying !== null || openingRecovery !== null || recoveryAction?.pending || selection.status !== "ready"}
             loading={openingRecovery === entry.turn.operation_id}
             onClick={() => void openSavedReply(entry)}>
             {text("openSavedReply", "Open saved reply")}
           </Button>
         )}
+      {entry.turn.roleplay_resume && entry.turn.state !== "refused" && !entry.turn.roleplay_resume.completion?.saved && (
+        <Button disabled={retrying !== null || openingRecovery !== null || recoveryAction?.pending || selection.status !== "ready"}
+          loading={retrying === entry.turn.operation_id} onClick={() => void retryRoleplay(entry)}>
+          {text("retryOriginalRoleplay", "Retry original request")}
+        </Button>
+      )}
+      {retrying === entry.turn.operation_id && <Button onClick={() => retryAbort.current?.abort()}>
+        {text("cancelRoleplayRetry", "Stop retry")}
+      </Button>}
       <Button
-        disabled={openingRecovery !== null || recoveryAction?.pending}
+        disabled={retrying !== null || openingRecovery !== null || recoveryAction?.pending}
         loading={recoveryAction?.pending && recoveryAction.action === "dismiss" && recoveryAction.operationId === entry.turn.operation_id}
         onClick={(event) => void acknowledgeRecovery("dismiss", entry, event.currentTarget)}>
         {text("dismissRecovery", "Dismiss recovery")}
@@ -629,6 +733,11 @@ export function HistorySelectionReview({
     <section
       className="w-full min-w-0 px-3 py-2"
       aria-label={text("region", "Conversation history selection")}>
+      {savedSetup && savedChatId === selection.view?.conversation_id && (
+        <p className="mb-2 text-sm text-text-muted">{text("savedRoleplaySetup", "Saved roleplay setup")}: {savedSetup.name}
+          {savedSetup.provider && savedSetup.model ? ` · ${savedSetup.provider} / ${savedSetup.model}` : ""}.
+          {" "}{text("savedRoleplaySetupHelp", "This conversation keeps its saved character and settings.")}</p>
+      )}
       {selection.forkOperationsError && (
         <p role="alert">
           {text("forkLoadError", "Could not load retained fork outcomes.")}

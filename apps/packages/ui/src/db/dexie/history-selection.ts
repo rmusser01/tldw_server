@@ -1,3 +1,4 @@
+import type { RoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 /** Local H1 authority. All hashes run synchronously within the owning Dexie transaction. */
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
@@ -1072,34 +1073,188 @@ export const settleLocalAcceptedAssistant = (
 
 const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopped"])
 
+const projectHistoryTurnRecovery = async (
+  turn: HistoryTurnRecovery
+): Promise<HistoryTurnRecovery> => {
+  if (
+    turn.action !== undefined &&
+    turn.action !== "edit_resend" &&
+    turn.action !== "regenerate"
+  )
+    fail("unsupported_history_action")
+  if (
+    turn.action === "regenerate" &&
+    (turn.persistence !== "server" ||
+      turn.origin_view?.interpretation.kind !== "parent_graph_v1" ||
+      turn.origin_view.cursor.kind !== "after_message")
+  )
+    fail("unsupported_history_action")
+  // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
+  const detached: HistoryTurnRecovery = structuredClone({
+    operation_id: turn.operation_id,
+    origin_view: turn.origin_view,
+    ...(turn.action ? { action: turn.action } : {}),
+    selection_digest: turn.selection_digest,
+    request_context_digest: turn.request_context_digest,
+    owner_key: turn.owner_key,
+    conversation_id: turn.conversation_id,
+    persistence: turn.persistence ?? "client",
+    input_id: turn.input_id,
+    assistant_id: turn.assistant_id,
+    created_at: turn.created_at,
+    input_text: turn.input_text,
+    input_images: turn.input_images,
+    result_text: turn.result_text,
+    state: turn.state,
+    ...(turn.outcome && HISTORY_TURN_OUTCOMES.has(turn.outcome)
+      ? { outcome: turn.outcome }
+      : {}),
+    ...(turn.interruption_reason
+      ? { interruption_reason: turn.interruption_reason }
+      : {}),
+    ...(turn.settled_message_id
+      ? { settled_message_id: turn.settled_message_id }
+      : {}),
+    ...(turn.model_name ? { model_name: turn.model_name } : {}),
+    ...(turn.model_id ? { model_id: turn.model_id } : {}),
+    ...(turn.roleplay_resume !== undefined
+      ? { roleplay_resume: turn.roleplay_resume }
+      : {}),
+    ...(turn.retained_result_texts !== undefined
+      ? { retained_result_texts: turn.retained_result_texts }
+      : {}),
+    ...(turn.admission
+      ? {
+          admission: {
+            version: turn.admission.version,
+            owner_key: turn.admission.owner_key,
+            conversation_id: turn.admission.conversation_id,
+            input_message_id: turn.admission.input_message_id,
+            input_message_revision: turn.admission.input_message_revision,
+            selection_digest: turn.admission.selection_digest
+          }
+        }
+      : {})
+  }) as HistoryTurnRecovery
+  turn = detached
+  let roleplay: RoleplayResumeRecovery | undefined
+  if (turn.roleplay_resume !== undefined) {
+    try {
+      const { parseRoleplayResumeRecovery } = await import(
+        "@/services/tldw/roleplay-resume"
+      )
+      roleplay = parseRoleplayResumeRecovery(turn.roleplay_resume)
+    } catch {
+      fail("history_operation_conflict")
+    }
+    const completed = roleplay!.completion
+    if (
+      turn.persistence !== "server" ||
+      turn.action ||
+      turn.admission ||
+      turn.input_images.length ||
+      roleplay!.intent.conversation_id !== turn.conversation_id ||
+      roleplay!.intent.input.content !== turn.input_text ||
+      turn.input_id !== roleplay!.append?.message_id ||
+      turn.assistant_id !==
+        (completed?.saved ? completed.assistant_message_id : undefined) ||
+      (completed && turn.result_text !== completed.assistant_content) ||
+      (turn.settled_message_id &&
+        (!completed?.saved ||
+          turn.settled_message_id !== completed.assistant_message_id)) ||
+      (turn.outcome === "complete" && !completed?.saved)
+    )
+      fail("history_operation_conflict")
+  }
+  if (
+    turn.retained_result_texts !== undefined &&
+    (!roleplay ||
+      !Array.isArray(turn.retained_result_texts) ||
+      turn.retained_result_texts.some((value) => typeof value !== "string"))
+  )
+    fail("history_operation_conflict")
+  if (roleplay) detached.roleplay_resume = roleplay
+  return detached
+}
+
+// Storage failure keeps original-owner text in this window until it can be copied or saved.
+const memoryTurnRecoveries = new Map<
+  string,
+  { scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }
+>()
+const recoveryKey = (
+  scope: HistoryBookmarkScope,
+  turn: Pick<
+    HistoryTurnRecovery,
+    "owner_key" | "conversation_id" | "operation_id"
+  >
+) =>
+  canonicalHistoryJson([
+    scope.profile_id,
+    scope.client_session_id,
+    turn.owner_key,
+    turn.conversation_id,
+    turn.operation_id
+  ])
+const retainedTexts = (
+  prior: HistoryTurnRecovery,
+  later: HistoryTurnRecovery
+): string[] =>
+  [
+    ...new Set([
+      ...(prior.retained_result_texts ?? []),
+      ...(later.retained_result_texts ?? []),
+      ...(prior.result_text && prior.result_text !== later.result_text
+        ? [prior.result_text]
+        : [])
+    ])
+  ].filter((value) => value !== later.result_text)
+
+/** A detached result grants no ancestry and is visible only to its original verified owner. */
+export const retainHistoryTurnRecoveryInMemory = async (
+  scope: HistoryBookmarkScope,
+  view: HistoryViewSelectionV1,
+  turn: HistoryTurnRecovery
+): Promise<void> => {
+  const detached = await projectHistoryTurnRecovery(turn)
+  if (
+    !scope.profile_id ||
+    !scope.client_session_id ||
+    !detached.roleplay_resume ||
+    !detached.result_text ||
+    !detached.operation_id ||
+    detached.owner_key !== view.owner_key ||
+    detached.conversation_id !== view.conversation_id ||
+    detached.origin_view.owner_key !== view.owner_key ||
+    detached.origin_view.conversation_id !== view.conversation_id
+  )
+    fail("history_operation_conflict")
+  const key = recoveryKey(scope, detached),
+    prior = memoryTurnRecoveries.get(key)
+  if (prior) {
+    if (
+      canonicalHistoryJson(prior.turn.roleplay_resume?.intent) !==
+      canonicalHistoryJson(detached.roleplay_resume.intent)
+    )
+      fail("history_operation_conflict")
+    detached.retained_result_texts = retainedTexts(prior.turn, detached)
+  }
+  memoryTurnRecoveries.set(key, {
+    scope: structuredClone(scope),
+    turn: { ...detached, recovery_storage: "memory" }
+  })
+}
+
 /** Store a credential-free operation intent before dispatch, separate from all ancestry. */
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
 ): Promise<void> => {
-  if (turn.action !== undefined && turn.action !== "edit_resend" && turn.action !== "regenerate") fail("unsupported_history_action")
-  if (turn.action === "regenerate" && (turn.persistence !== "server" ||
-      turn.origin_view?.interpretation.kind !== "parent_graph_v1" || turn.origin_view.cursor.kind !== "after_message"))
-    fail("unsupported_history_action")
-  // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
-  const detached: HistoryTurnRecovery = structuredClone({
-    operation_id: turn.operation_id, origin_view: turn.origin_view,
-    ...(turn.action ? { action: turn.action } : {}),
-    selection_digest: turn.selection_digest, request_context_digest: turn.request_context_digest,
-    owner_key: turn.owner_key, conversation_id: turn.conversation_id,
-    persistence: turn.persistence ?? "client",
-    input_id: turn.input_id, assistant_id: turn.assistant_id, created_at: turn.created_at,
-    input_text: turn.input_text, input_images: turn.input_images, result_text: turn.result_text, state: turn.state,
-    ...(turn.outcome && HISTORY_TURN_OUTCOMES.has(turn.outcome) ? {outcome: turn.outcome} : {}),
-    ...(turn.interruption_reason ? {interruption_reason: turn.interruption_reason} : {}),
-    ...(turn.settled_message_id ? {settled_message_id: turn.settled_message_id} : {}),
-    ...(turn.model_name ? {model_name: turn.model_name} : {}),
-    ...(turn.model_id ? {model_id: turn.model_id} : {}),
-    ...(turn.admission ? {admission: {
-      version: turn.admission.version, owner_key: turn.admission.owner_key,
-      conversation_id: turn.admission.conversation_id, input_message_id: turn.admission.input_message_id,
-      input_message_revision: turn.admission.input_message_revision, selection_digest: turn.admission.selection_digest
-    }} : {})
-  }) as HistoryTurnRecovery
+  const detached = await projectHistoryTurnRecovery(turn)
+  const key = recoveryKey(scope, detached),
+    volatile = memoryTurnRecoveries.get(key)
+  if (volatile)
+    detached.retained_result_texts = retainedTexts(volatile.turn, detached)
+  let written = false
   await db.transaction("rw", [db.userSettings, db.historySelections], async () => {
     await assertBookmarkProfile(scope)
     if (!detached.operation_id || detached.owner_key !== view.owner_key || detached.conversation_id !== view.conversation_id)
@@ -1108,7 +1263,7 @@ export const saveHistoryTurnRecovery = async (
     if (previous?.history_turn_outcomes?.[detached.operation_id]) return
     if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || (detached.persistence !== "server" && (!detached.input_id || !detached.assistant_id)))
       fail("invalid_history_operation")
-    if (detached.persistence === "server" && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
+    if (detached.persistence === "server" && !detached.roleplay_resume && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
       fail("history_operation_conflict")
     if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (detached.action !== "regenerate" && detached.admission.selection_digest !== detached.selection_digest)))
       fail("history_operation_conflict")
@@ -1130,7 +1285,7 @@ export const saveHistoryTurnRecovery = async (
         operation_id: value.operation_id, action: value.action, owner_key: value.owner_key, conversation_id: value.conversation_id,
         persistence: value.persistence ?? "client",
         ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
-        input_text: value.input_text, input_images: value.input_images
+        input_text: value.input_text, input_images: value.input_images, roleplay_intent: value.roleplay_resume?.intent
       })
       if (canonicalHistoryJson(immutable(prior)) !== canonicalHistoryJson(immutable(detached))) fail("history_operation_conflict")
       if (prior.state === "refused") {
@@ -1145,6 +1300,34 @@ export const saveHistoryTurnRecovery = async (
         return
       }
 
+      if (prior.roleplay_resume) {
+        if (
+          prior.settled_message_id &&
+          detached.settled_message_id &&
+          prior.settled_message_id !== detached.settled_message_id
+        )
+          fail("history_operation_conflict")
+        if (
+          (prior.outcome === "complete" && detached.outcome !== "complete") ||
+          (prior.settled_message_id && !detached.settled_message_id)
+        )
+          return
+        if (prior.state === "unknown" && detached.state === "refused")
+          fail("history_operation_conflict")
+        for (const field of ["append", "completion"] as const) {
+          const earlier = prior.roleplay_resume[field]
+          const later = detached.roleplay_resume?.[field]
+          if (
+            earlier &&
+            later &&
+            (field === "append" || prior.roleplay_resume.completion?.saved) &&
+            canonicalHistoryJson(earlier) !== canonicalHistoryJson(later)
+          )
+            fail("history_operation_conflict")
+          if (earlier && !later) return
+        }
+        detached.retained_result_texts = retainedTexts(prior, detached)
+      }
       if (prior.persistence === "server") {
         if ((prior.input_id && detached.input_id && prior.input_id !== detached.input_id) || (prior.assistant_id && detached.assistant_id && prior.assistant_id !== detached.assistant_id)) fail("history_operation_conflict")
         if (prior.assistant_id && !detached.assistant_id) return
@@ -1157,24 +1340,73 @@ export const saveHistoryTurnRecovery = async (
       ...(previous ?? {...scope, owner_key: view.owner_key, conversation_id: view.conversation_id, view: structuredClone(view)}),
       pending_turns: {...previous?.pending_turns, [detached.operation_id]: detached}
     })
+    written = true
   })
+  if (written) memoryTurnRecoveries.delete(key)
 }
 
 /** Reopened views discover only the same profile and verified owner/conversation. */
 export const loadHistoryTurnRecoveries = async (
   scope: HistoryBookmarkScope, owner: {owner_key: string; conversation_id: string}
-): Promise<Array<{scope: HistoryBookmarkScope; turn: HistoryTurnRecovery}>> =>
-  db.transaction("r", [db.userSettings, db.historySelections], async () => {
+): Promise<Array<{scope: HistoryBookmarkScope; turn: HistoryTurnRecovery}>> => {
+  const {entries:durable,dismissedKeys} = await db.transaction("r", [db.userSettings, db.historySelections], async () => {
     await assertBookmarkProfile(scope)
     const bookmarks = await db.historySelections.where("owner_key").equals(owner.owner_key).toArray()
-    return bookmarks.filter(record => record.profile_id === scope.profile_id && record.conversation_id === owner.conversation_id)
-      .flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => {
+    const owned = bookmarks.filter(
+      (record) =>
+        record.profile_id === scope.profile_id &&
+        record.conversation_id === owner.conversation_id
+    )
+    const dismissedKeys = owned.flatMap((record) =>
+      Object.keys(record.history_turn_outcomes ?? {}).map((operation_id) =>
+        recoveryKey(
+          {
+            profile_id: record.profile_id,
+            client_session_id: record.client_session_id
+          },
+          { ...owner, operation_id }
+        )
+      )
+    )
+    const entries = owned.flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => {
         const { action, ...ordinary } = turn
         if (action !== undefined && action !== "edit_resend" && action !== "regenerate") fail("unsupported_history_action")
         return { scope: { profile_id: record.profile_id, client_session_id: record.client_session_id },
           turn: { ...ordinary, ...(action ? { action } : {}) } }
       }))
+    return { entries, dismissedKeys }
   })
+  for (const key of dismissedKeys) memoryTurnRecoveries.delete(key)
+  const results = new Map(
+    durable.map((entry) => [recoveryKey(entry.scope, entry.turn), entry])
+  )
+  for (const [key, entry] of memoryTurnRecoveries) {
+    if (
+      entry.scope.profile_id !== scope.profile_id ||
+      entry.turn.owner_key !== owner.owner_key ||
+      entry.turn.conversation_id !== owner.conversation_id
+    )
+      continue
+    const existing = results.get(key)
+    const active = existing?.turn.roleplay_resume?.completion?.saved
+      ? existing
+      : entry
+    results.set(key, {
+      scope: active.scope,
+      turn: {
+        ...active.turn,
+        recovery_storage: "memory",
+        retained_result_texts: existing
+          ? retainedTexts(
+              active === entry ? existing.turn : entry.turn,
+              active.turn
+            )
+          : entry.turn.retained_result_texts
+      }
+    })
+  }
+  return [...results.values()].map((entry) => structuredClone(entry))
+}
 
 export const dismissHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope,
@@ -1182,14 +1414,18 @@ export const dismissHistoryTurnRecovery = async (
   operationId: string,
   outcome: "completed" | "dismissed" = "dismissed",
   options?: HistoryOperationOptions
-): Promise<boolean> =>
-  transaction("rw", options, async () => {
+): Promise<boolean> => {
+  let tombstoned = false
+  const dismissed = await transaction("rw", options, async () => {
     assertLease(options)
     await assertBookmarkProfile(scope)
     assertLease(options)
     const prior = await db.historySelections.get(bookmarkKey(scope, owner))
     assertLease(options)
-    if (!prior?.pending_turns?.[operationId]) return false
+    if (!prior?.pending_turns?.[operationId]) {
+      tombstoned = Boolean(prior?.history_turn_outcomes?.[operationId])
+      return false
+    }
     const turns = { ...prior.pending_turns }
     delete turns[operationId]
     await db.historySelections.put({
@@ -1204,3 +1440,9 @@ export const dismissHistoryTurnRecovery = async (
     assertLease(options)
     return true
   })
+  if (dismissed || tombstoned)
+    memoryTurnRecoveries.delete(
+      recoveryKey(scope, { ...owner, operation_id: operationId })
+    )
+  return dismissed
+}

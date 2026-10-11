@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
@@ -84,6 +85,8 @@ import {
 import { resolveImageBackendCandidates } from "@/utils/image-backends"
 import {
   buildImageGenerationEventMirrorContent,
+  IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+  resolveImageGenerationEventId,
   isImageGenerationMessageType,
   PLAYGROUND_IMAGE_EVENT_SYNC_DEFAULT_STORAGE_KEY,
   resolveImageGenerationEventSyncMode,
@@ -223,14 +226,17 @@ const persistTrackedPersonaPlaygroundSession = async ({
   historyId,
   assistant,
   personaMemoryMode,
-  scopeKey
+  scopeKey,
+  isCurrent
 }: {
   chatId: string
   historyId: string | null
   assistant: AssistantSelection & { kind: "persona" }
   personaMemoryMode: "read_only" | "read_write"
   scopeKey?: string
+  isCurrent: () => boolean
 }) => {
+  if (!isCurrent()) return
   const assistantId = String(assistant.id)
   const trackedAssistantSelection = {
     ...assistant,
@@ -245,6 +251,7 @@ const persistTrackedPersonaPlaygroundSession = async ({
     const resolvedScopeKey = scopeKey || buildChatSurfaceScopeKeyFromConfig(
       await tldwClient.getConfig().catch(() => null)
     )
+    if (!isCurrent()) return
     usePlaygroundSessionStore.getState().saveSession({
       historyId,
       serverChatId: chatId,
@@ -281,6 +288,7 @@ type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
   serverMessagesAlreadyPersisted?: boolean
+  resolveAssistantMedia?: () => Pick<SaveMessageData, "assistantImages" | "generationInfo">
 }
 
 type TldwChatMeta =
@@ -905,64 +913,104 @@ export const useChatActions = ({
         mode: ImageGenerationEventSyncMode
         serverMessageId?: string
         error?: string
-      }
+      },
+      sourceIsCurrent: () => boolean
     ) => {
       const targetMessageId = payload.assistantMessageId
       if (!targetMessageId) return
+      const targetEventId = resolveImageGenerationEventId({
+        messageId: targetMessageId,
+        messageGenerationInfo: payload.generationInfo
+      })
       const now = Date.now()
 
-      let nextGenerationInfo: Record<string, unknown> | null = null
-      let nextImages: string[] = []
-
-      setMessages((prev) =>
-        prev.map((entry) => {
-          if (entry.id !== targetMessageId) return entry
-          const currentGenerationInfo =
-            entry.generationInfo &&
-            typeof entry.generationInfo === "object" &&
-            !Array.isArray(entry.generationInfo)
-              ? (entry.generationInfo as Record<string, unknown>)
-              : {}
-          const currentImageGeneration =
-            currentGenerationInfo.image_generation &&
-            typeof currentGenerationInfo.image_generation === "object" &&
-            !Array.isArray(currentGenerationInfo.image_generation)
-              ? (currentGenerationInfo.image_generation as Record<string, unknown>)
-              : {}
-
-          nextGenerationInfo = {
-            ...currentGenerationInfo,
-            image_generation: {
-              ...currentImageGeneration,
-              sync: {
-                mode: update.mode,
-                policy: update.policy,
-                status: update.status,
-                serverMessageId: update.serverMessageId,
-                error: update.error,
-                lastAttemptAt: now,
-                mirroredAt: update.status === "synced" ? now : undefined
-              }
-            }
+      const generationInfo =
+        payload.generationInfo &&
+        typeof payload.generationInfo === "object" &&
+        !Array.isArray(payload.generationInfo)
+          ? (payload.generationInfo as Record<string, unknown>)
+          : {}
+      const imageGeneration =
+        generationInfo.image_generation &&
+        typeof generationInfo.image_generation === "object" &&
+        !Array.isArray(generationInfo.image_generation)
+          ? (generationInfo.image_generation as Record<string, unknown>)
+          : {}
+      let nextGenerationInfo: Record<string, unknown> = {
+        ...generationInfo,
+        image_generation: {
+          ...imageGeneration,
+          sync: {
+            mode: update.mode,
+            policy: update.policy,
+            status: update.status,
+            serverMessageId: update.serverMessageId,
+            error: update.error,
+            lastAttemptAt: now,
+            mirroredAt: update.status === "synced" ? now : undefined
           }
-          nextImages = Array.isArray(entry.images)
-            ? entry.images.filter(
-                (image): image is string =>
-                  typeof image === "string" && image.length > 0
+        }
+      }
+      let nextImages = Array.isArray(payload.assistantImages)
+        ? payload.assistantImages.filter(
+            (image): image is string =>
+              typeof image === "string" && image.length > 0
+          )
+        : []
+      // A late acknowledgement belongs to its original payload, even after same-ID reopening.
+      const publishSyncToCurrentEvent = () => {
+        if (sourceIsCurrent())
+          setMessages((prev) => {
+            if (!sourceIsCurrent()) return prev
+            return prev.map((entry) => {
+              if (
+                entry.id !== targetMessageId &&
+                (entry.messageType !== IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE ||
+                  resolveImageGenerationEventId({
+                    messageId: entry.id,
+                    messageGenerationInfo: entry.generationInfo,
+                    variants: entry.variants
+                  }) !== targetEventId)
               )
-            : []
-          return {
-            ...entry,
-            generationInfo: nextGenerationInfo
-          }
-        })
-      )
+                return entry
+              const currentInfo =
+                entry.generationInfo &&
+                typeof entry.generationInfo === "object" &&
+                !Array.isArray(entry.generationInfo)
+                  ? (entry.generationInfo as Record<string, unknown>)
+                  : generationInfo
+              const currentGeneration =
+                currentInfo.image_generation &&
+                typeof currentInfo.image_generation === "object" &&
+                !Array.isArray(currentInfo.image_generation)
+                  ? (currentInfo.image_generation as Record<string, unknown>)
+                  : imageGeneration
+              nextGenerationInfo = {
+                ...currentInfo,
+                image_generation: {
+                  ...currentGeneration,
+                  sync: (
+                    nextGenerationInfo.image_generation as Record<string, unknown>
+                  ).sync
+                }
+              }
+              nextImages = Array.isArray(entry.images)
+                ? entry.images.filter(
+                    (image): image is string =>
+                      typeof image === "string" && image.length > 0
+                  )
+                : nextImages
+              return { ...entry, generationInfo: nextGenerationInfo }
+            })
+          })
+      }
+      publishSyncToCurrentEvent()
 
-      if (!nextGenerationInfo) return
       await updateMessageMedia(targetMessageId, {
         images: nextImages,
         generationInfo: nextGenerationInfo
       }).catch(() => null)
+      publishSyncToCurrentEvent()
       return {
         generationInfo: nextGenerationInfo,
         assistantImages: nextImages
@@ -975,8 +1023,11 @@ export const useChatActions = ({
     payload?: SaveMessagePayload,
     sourceIsCurrent: () => boolean = () => {
       const draft = useStoreMessageOption.getState()
-      return actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
+      return (
+        actionsMountedRef.current &&
+        draft.chatDraftRevision === renderedDraftRevision &&
         draft.chatDraftAddress === renderedSettingsDraft
+      )
     }
   ): Promise<string | null> => {
     if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
@@ -997,20 +1048,29 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
-          setHistoryId: (...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>) => {
+          setHistoryId: (
+            ...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>
+          ) => {
             if (!sourceIsCurrent()) return
             if (payload.setHistoryId) payload.setHistoryId(...args)
-            else setHistoryId(
-              args[0],
-              args[1] ?? (payloadConversationId || serverChatId
-                ? { preserveServerChatId: true }
-                : undefined)
-            )
+            else
+              setHistoryId(
+                args[0],
+                args[1] ??
+                  (payloadConversationId || serverChatId
+                    ? { preserveServerChatId: true }
+                    : undefined)
+              )
           }
         }
       : undefined
     const persistLocally = async (): Promise<string | null> => {
       throwIfScopeChanged()
+      if (payloadForLocalPersistence?.resolveAssistantMedia)
+        payloadForLocalPersistence = {
+          ...payloadForLocalPersistence,
+          ...payloadForLocalPersistence.resolveAssistantMedia()
+        }
       const key = await baseSaveMessageOnSuccess(payloadForLocalPersistence)
       throwIfScopeChanged()
       if (!payload?.historyId && key && sourceIsCurrent()) {
@@ -1018,227 +1078,84 @@ export const useChatActions = ({
       }
       return key
     }
-    let historyKey = scopeSignal ? null : await persistLocally()
+    let stopRetainingImageMedia: (() => void) | undefined
+    try {
+      let historyKey = scopeSignal ? null : await persistLocally()
 
-    if (temporaryChat) {
-      if (scopeSignal) historyKey = await persistLocally()
-      return historyKey
-    }
-
-    const mirrorOptions = scope || scopeSignal || payload?.requestScope
-      ? {
-          ...(scope ? { scope } : {}),
-          ...(scopeSignal ? { signal: scopeSignal } : {}),
-          ...(payload?.requestScope
-            ? { requestScope: payload.requestScope }
-            : {})
-        }
-      : undefined
-    const addMirroredMessage = async (
-      chatId: string,
-      message: Record<string, unknown>
-    ) => {
-      throwIfScopeChanged()
-      const result = mirrorOptions
-        ? await tldwClient.addChatMessage(chatId, message, mirrorOptions)
-        : await tldwClient.addChatMessage(chatId, message)
-      throwIfScopeChanged()
-      return result
-    }
-
-    let skipServerWrite = false
-    if (historyKey && payloadConversationId && !serverChatId && sourceIsCurrent()) {
-      try {
-        await syncChatSettingsForServerChat({
-          historyId: historyKey,
-          serverChatId: payloadConversationId,
-          allowScratchFallback: true,
-          sourceDraftAddress: renderedSettingsDraft,
-          requestScope: payload?.requestScope,
-          signal: scopeSignal,
-          validate_lease: () => {
-            const draft = useStoreMessageOption.getState()
-            return !scopeSignal?.aborted && !scopeInvalidatedSignal?.aborted && sourceIsCurrent() &&
-              actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
-              draft.chatDraftAddress === renderedSettingsDraft
-          },
-          ...(scope ? { scope } : {})
-        })
-      } catch {
-        // Best-effort scratch-to-server settings reconciliation.
+      if (temporaryChat) {
+        if (scopeSignal) historyKey = await persistLocally()
+        return historyKey
       }
-    }
-    const resolvedServerConversationId =
-      payloadConversationId ??
-      (serverChatId != null ? String(serverChatId) : null)
-    const serverConversationMatches = payloadConversationId
-      ? serverChatId != null
-        ? payloadConversationId === String(serverChatId)
-        : true
-      : true
-    const isServerConversation = Boolean(
-      resolvedServerConversationId && serverConversationMatches
-    )
-    const isImageGenerationNoOp =
-      isImageGenerationMessageType(payload?.userMessageType) ||
-      isImageGenerationMessageType(payload?.assistantMessageType)
-    const imageEventSyncPolicy = normalizeImageGenerationEventSyncPolicy(
-      payload?.imageEventSyncPolicy,
-      "inherit"
-    )
-    const imageEventSyncMode = resolveImageEventSyncModeForPayload(payload)
-    const updateImageSyncMetadata = async (
-      update: Parameters<typeof updateImageEventSyncMetadata>[1]
-    ) => {
-      if (!payload) return
-      const metadata = await updateImageEventSyncMetadata(payload, update)
-      if (scopeSignal && metadata && payloadForLocalPersistence) {
-        payloadForLocalPersistence = {
-          ...payloadForLocalPersistence,
-          ...metadata
-        }
-      }
-    }
 
-    if (isServerConversation && payload?.saveToDb) {
-      try {
-        throwIfScopeChanged()
-        const caps = await getServerCapabilities()
-        throwIfScopeChanged()
-        skipServerWrite = Boolean(caps?.hasChatSaveToDb)
-      } catch (error) {
-        if (
-          scopeInvalidatedSignal?.aborted ||
-          isRequestConfigScopeChangedError(error)
-        ) {
-          throw error
-        }
-        skipServerWrite = false
-      }
-    }
-
-    if (payload?.serverMessagesAlreadyPersisted) {
-      skipServerWrite = true
-    }
-
-    // When resuming a server-backed chat, mirror new turns to /api/v1/chats.
-    if (
-      resolvedServerConversationId &&
-      serverConversationMatches &&
-      !skipServerWrite
-    ) {
-      if (
-        isImageGenerationNoOp &&
-        imageEventSyncMode === "on" &&
-        payload?.assistantMessageId
-      ) {
-        await updateImageSyncMetadata({
-          status: "pending",
-          mode: imageEventSyncMode,
-          policy: imageEventSyncPolicy
-        })
-
-        try {
-          const generationInfo =
-            payload.generationInfo &&
-            typeof payload.generationInfo === "object" &&
-            !Array.isArray(payload.generationInfo)
-              ? (payload.generationInfo as Record<string, unknown>)
-              : {}
-          const imageGeneration =
-            generationInfo.image_generation &&
-            typeof generationInfo.image_generation === "object" &&
-            !Array.isArray(generationInfo.image_generation)
-              ? (generationInfo.image_generation as Record<string, unknown>)
-              : {}
-          const request =
-            imageGeneration.request &&
-            typeof imageGeneration.request === "object" &&
-            !Array.isArray(imageGeneration.request)
-              ? imageGeneration.request
-              : null
-          if (!request) {
-            throw new Error("Image event sync skipped: missing request metadata.")
-          }
-
-          const mirroredImages = Array.isArray(payload.assistantImages)
-            ? payload.assistantImages.filter(
-                (value): value is string =>
-                  typeof value === "string" && value.startsWith("data:image/")
-              )
-            : []
-          const latestPreview = mirroredImages[mirroredImages.length - 1]
-          const variantCount =
-            typeof imageGeneration.variant_count === "number" &&
-            Number.isFinite(imageGeneration.variant_count)
-              ? Math.max(1, Math.round(imageGeneration.variant_count))
-              : undefined
-          const activeVariantIndex =
-            typeof imageGeneration.active_variant_index === "number" &&
-            Number.isFinite(imageGeneration.active_variant_index)
-              ? Math.max(0, Math.round(imageGeneration.active_variant_index))
-              : undefined
-          const eventId =
-            typeof imageGeneration.event_id === "string" &&
-            imageGeneration.event_id.trim().length > 0
-              ? imageGeneration.event_id.trim()
-              : payload.assistantMessageId
-          const mirroredContent = buildImageGenerationEventMirrorContent({
-            kind: "image_generation_event",
-            version: 1,
-            eventId,
-            createdAt:
-              typeof imageGeneration.createdAt === "number" &&
-              Number.isFinite(imageGeneration.createdAt)
-                ? imageGeneration.createdAt
-                : Date.now(),
-            fileId:
-              typeof generationInfo.file_id === "string" &&
-              generationInfo.file_id.trim().length > 0
-                ? generationInfo.file_id.trim()
-                : undefined,
-            request: request as ImageGenerationRequestSnapshot,
-            promptMode:
-              imageGeneration.promptMode === "scene" ||
-              imageGeneration.promptMode === "expression" ||
-              imageGeneration.promptMode === "selfie" ||
-              imageGeneration.promptMode === "camera-angle" ||
-              imageGeneration.promptMode === "outfit" ||
-              imageGeneration.promptMode === "custom"
-                ? imageGeneration.promptMode
-                : undefined,
-            source:
-              imageGeneration.source === "slash-command" ||
-              imageGeneration.source === "generate-modal" ||
-              imageGeneration.source === "message-regen"
-                ? imageGeneration.source
-                : undefined,
-            refine:
-              imageGeneration.refine &&
-              typeof imageGeneration.refine === "object" &&
-              !Array.isArray(imageGeneration.refine)
-                ? (imageGeneration.refine as ImageGenerationRefineMetadata)
-                : undefined,
-            variantCount,
-            activeVariantIndex,
-            imageDataUrl: latestPreview
-          })
-
-          const mirroredMessage = await addMirroredMessage(
-            resolvedServerConversationId,
-            {
-              role: "assistant",
-              content: mirroredContent
+      const mirrorOptions =
+        scope || scopeSignal || payload?.requestScope
+          ? {
+              ...(scope ? { scope } : {}),
+              ...(scopeSignal ? { signal: scopeSignal } : {}),
+              ...(payload?.requestScope
+                ? { requestScope: payload.requestScope }
+                : {})
             }
-          )
+          : undefined
+      const addMirroredMessage = async (
+        chatId: string,
+        message: Record<string, unknown>
+      ) => {
+        throwIfScopeChanged()
+        const result = mirrorOptions
+          ? await tldwClient.addChatMessage(chatId, message, mirrorOptions)
+          : await tldwClient.addChatMessage(chatId, message)
+        throwIfScopeChanged()
+        return result
+      }
 
-          await updateImageSyncMetadata({
-            status: "synced",
-            mode: imageEventSyncMode,
-            policy: imageEventSyncPolicy,
-            serverMessageId:
-              mirroredMessage?.id != null ? String(mirroredMessage.id) : undefined
-          })
+      let skipServerWrite = false
+      const resolvedServerConversationId =
+        payloadConversationId ??
+        (serverChatId != null ? String(serverChatId) : null)
+      const serverConversationMatches = payloadConversationId
+        ? serverChatId != null
+          ? payloadConversationId === String(serverChatId)
+          : true
+        : true
+      const isServerConversation = Boolean(
+        resolvedServerConversationId && serverConversationMatches
+      )
+      const isImageGenerationNoOp =
+        isImageGenerationMessageType(payload?.userMessageType) ||
+        isImageGenerationMessageType(payload?.assistantMessageType)
+      const imageEventSyncPolicy = normalizeImageGenerationEventSyncPolicy(
+        payload?.imageEventSyncPolicy,
+        "inherit"
+      )
+      const imageEventSyncMode = resolveImageEventSyncModeForPayload(payload)
+      let latestImageSyncMetadata: Awaited<
+        ReturnType<typeof updateImageEventSyncMetadata>
+      >
+      const updateImageSyncMetadata = async (
+        update: Parameters<typeof updateImageEventSyncMetadata>[1]
+      ) => {
+        if (!payload) return
+        const metadata = await updateImageEventSyncMetadata(
+          payload,
+          update,
+          sourceIsCurrent
+        )
+        latestImageSyncMetadata = metadata
+        if (scopeSignal && metadata && payloadForLocalPersistence) {
+          payloadForLocalPersistence = {
+            ...payloadForLocalPersistence,
+            ...metadata
+          }
+        }
+      }
+
+      if (isServerConversation && payload?.saveToDb) {
+        try {
+          throwIfScopeChanged()
+          const caps = await getServerCapabilities()
+          throwIfScopeChanged()
+          skipServerWrite = Boolean(caps?.hasChatSaveToDb)
         } catch (error) {
           if (
             scopeInvalidatedSignal?.aborted ||
@@ -1246,80 +1163,313 @@ export const useChatActions = ({
           ) {
             throw error
           }
-          const reason =
-            error instanceof Error && error.message.trim().length > 0
-              ? error.message
-              : "Failed to mirror image event to server history."
-          await updateImageSyncMetadata({
-            status: "failed",
-            mode: imageEventSyncMode,
-            policy: imageEventSyncPolicy,
-            error: reason
-          })
+          skipServerWrite = false
         }
-      } else if (
-        !isImageGenerationNoOp &&
-        !(payload?.saveToDb === false && isLocalRagDiagnosticInfo(payload?.generationInfo)) &&
-        !payload?.isRegenerate &&
-        !payload?.isContinue &&
-        typeof payload?.message === "string" &&
-        typeof payload?.fullText === "string"
-      ) {
-        try {
-          const cid = resolvedServerConversationId
-          const userContent = payload.message.trim()
-          const assistantContent = payload.fullText.trim()
+      }
 
-          // Current-turn save receipts take precedence over capability discovery.
-          if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
-            await addMirroredMessage(
-              cid,
+      if (payload?.serverMessagesAlreadyPersisted) {
+        skipServerWrite = true
+      }
+
+      // When resuming a server-backed chat, mirror new turns to /api/v1/chats.
+      if (
+        resolvedServerConversationId &&
+        serverConversationMatches &&
+        !skipServerWrite
+      ) {
+        if (
+          isImageGenerationNoOp &&
+          imageEventSyncMode === "on" &&
+          payload?.assistantMessageId
+        ) {
+          await updateImageSyncMetadata({
+            status: "pending",
+            mode: imageEventSyncMode,
+            policy: imageEventSyncPolicy
+          })
+
+          let ownedMedia = payload
+          const ownedImageEventId = resolveImageGenerationEventId({
+            messageId: payload.assistantMessageId,
+            messageGenerationInfo: payload.generationInfo
+          })
+          const retainOwnedMedia = () => {
+            if (!sourceIsCurrent()) return
+            const row = useStoreMessageOption
+              .getState()
+              .messages.find(
+                (entry) =>
+                  entry.id === payload.assistantMessageId ||
+                  (entry.messageType ===
+                    IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE &&
+                    resolveImageGenerationEventId({
+                      messageId: entry.id,
+                      messageGenerationInfo: entry.generationInfo,
+                      variants: entry.variants
+                    }) === ownedImageEventId)
+              )
+            if (row)
+              ownedMedia = {
+                ...payload,
+                generationInfo: row.generationInfo,
+                assistantImages: row.images
+              }
+          }
+          retainOwnedMedia()
+          stopRetainingImageMedia =
+            useStoreMessageOption.subscribe(retainOwnedMedia)
+          if (payloadForLocalPersistence)
+            payloadForLocalPersistence.resolveAssistantMedia = () => {
+              const info = ownedMedia.generationInfo ?? {}
+              const imageGeneration =
+                info.image_generation &&
+                typeof info.image_generation === "object" &&
+                !Array.isArray(info.image_generation)
+                  ? (info.image_generation as Record<string, unknown>)
+                  : {}
+              // Resolve retained media at insertion; an ACK changes only sync metadata.
+              return {
+                assistantImages: ownedMedia.assistantImages,
+                generationInfo: {
+                  ...info,
+                  image_generation: {
+                    ...imageGeneration,
+                    sync: (
+                      latestImageSyncMetadata?.generationInfo.image_generation as
+                        | Record<string, unknown>
+                        | undefined
+                    )?.sync
+                  }
+                }
+              }
+            }
+          try {
+            const generationInfo =
+              payload.generationInfo &&
+              typeof payload.generationInfo === "object" &&
+              !Array.isArray(payload.generationInfo)
+                ? (payload.generationInfo as Record<string, unknown>)
+                : {}
+            const imageGeneration =
+              generationInfo.image_generation &&
+              typeof generationInfo.image_generation === "object" &&
+              !Array.isArray(generationInfo.image_generation)
+                ? (generationInfo.image_generation as Record<string, unknown>)
+                : {}
+            const request =
+              imageGeneration.request &&
+              typeof imageGeneration.request === "object" &&
+              !Array.isArray(imageGeneration.request)
+                ? imageGeneration.request
+                : null
+            if (!request) {
+              throw new Error(
+                "Image event sync skipped: missing request metadata."
+              )
+            }
+
+            const mirroredImages = Array.isArray(payload.assistantImages)
+              ? payload.assistantImages.filter(
+                  (value): value is string =>
+                    typeof value === "string" && value.startsWith("data:image/")
+                )
+              : []
+            const latestPreview = mirroredImages[mirroredImages.length - 1]
+            const variantCount =
+              typeof imageGeneration.variant_count === "number" &&
+              Number.isFinite(imageGeneration.variant_count)
+                ? Math.max(1, Math.round(imageGeneration.variant_count))
+                : undefined
+            const activeVariantIndex =
+              typeof imageGeneration.active_variant_index === "number" &&
+              Number.isFinite(imageGeneration.active_variant_index)
+                ? Math.max(0, Math.round(imageGeneration.active_variant_index))
+                : undefined
+            const eventId =
+              typeof imageGeneration.event_id === "string" &&
+              imageGeneration.event_id.trim().length > 0
+                ? imageGeneration.event_id.trim()
+                : payload.assistantMessageId
+            const mirroredContent = buildImageGenerationEventMirrorContent({
+              kind: "image_generation_event",
+              version: 1,
+              eventId,
+              createdAt:
+                typeof imageGeneration.createdAt === "number" &&
+                Number.isFinite(imageGeneration.createdAt)
+                  ? imageGeneration.createdAt
+                  : Date.now(),
+              fileId:
+                typeof generationInfo.file_id === "string" &&
+                generationInfo.file_id.trim().length > 0
+                  ? generationInfo.file_id.trim()
+                  : undefined,
+              request: request as ImageGenerationRequestSnapshot,
+              promptMode:
+                imageGeneration.promptMode === "scene" ||
+                imageGeneration.promptMode === "expression" ||
+                imageGeneration.promptMode === "selfie" ||
+                imageGeneration.promptMode === "camera-angle" ||
+                imageGeneration.promptMode === "outfit" ||
+                imageGeneration.promptMode === "custom"
+                  ? imageGeneration.promptMode
+                  : undefined,
+              source:
+                imageGeneration.source === "slash-command" ||
+                imageGeneration.source === "generate-modal" ||
+                imageGeneration.source === "message-regen"
+                  ? imageGeneration.source
+                  : undefined,
+              refine:
+                imageGeneration.refine &&
+                typeof imageGeneration.refine === "object" &&
+                !Array.isArray(imageGeneration.refine)
+                  ? (imageGeneration.refine as ImageGenerationRefineMetadata)
+                  : undefined,
+              variantCount,
+              activeVariantIndex,
+              imageDataUrl: latestPreview
+            })
+
+            const mirroredMessage = await addMirroredMessage(
+              resolvedServerConversationId,
               {
+                role: "assistant",
+                content: mirroredContent
+              }
+            )
+
+            payload = ownedMedia
+            await updateImageSyncMetadata({
+              status: "synced",
+              mode: imageEventSyncMode,
+              policy: imageEventSyncPolicy,
+              serverMessageId:
+                mirroredMessage?.id != null
+                  ? String(mirroredMessage.id)
+                  : undefined
+            })
+          } catch (error) {
+            if (
+              scopeInvalidatedSignal?.aborted ||
+              isRequestConfigScopeChangedError(error)
+            ) {
+              throw error
+            }
+            const reason =
+              error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : "Failed to mirror image event to server history."
+            payload = ownedMedia
+            await updateImageSyncMetadata({
+              status: "failed",
+              mode: imageEventSyncMode,
+              policy: imageEventSyncPolicy,
+              error: reason
+            })
+          }
+        } else if (
+          !isImageGenerationNoOp &&
+          !(
+            payload?.saveToDb === false &&
+            isLocalRagDiagnosticInfo(payload?.generationInfo)
+          ) &&
+          !payload?.isRegenerate &&
+          !payload?.isContinue &&
+          typeof payload?.message === "string" &&
+          typeof payload?.fullText === "string"
+        ) {
+          try {
+            const cid = resolvedServerConversationId
+            const userContent = payload.message.trim()
+            const assistantContent = payload.fullText.trim()
+
+            // Current-turn save receipts take precedence over capability discovery.
+            if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
+              await addMirroredMessage(cid, {
                 role: "user",
                 content: userContent,
                 ...(payload.userMetadataExtra
                   ? { metadata_extra: payload.userMetadataExtra }
                   : {})
-              }
-            )
-          }
+              })
+            }
 
-          if (
-            assistantContent.length > 0 &&
-            !payload.assistantServerMessageId?.trim()
-          ) {
-            await addMirroredMessage(
-              cid,
-              {
+            if (
+              assistantContent.length > 0 &&
+              !payload.assistantServerMessageId?.trim()
+            ) {
+              await addMirroredMessage(cid, {
                 role: "assistant",
                 content: assistantContent,
                 metadata_extra: payload.assistantMetadataExtra
-              }
-            )
+              })
+            }
+          } catch (error) {
+            if (
+              scopeInvalidatedSignal?.aborted ||
+              isRequestConfigScopeChangedError(error)
+            ) {
+              throw error
+            }
+            // Ignore sync errors; local history is still saved.
           }
-        } catch (error) {
-          if (
-            scopeInvalidatedSignal?.aborted ||
-            isRequestConfigScopeChangedError(error)
-          ) {
-            throw error
-          }
-          // Ignore sync errors; local history is still saved.
         }
       }
-    }
 
-    if (scopeSignal) historyKey = await persistLocally()
-    if (sourceIsCurrent() && payload?.saveToDb && payloadConversationId && !serverChatId && !compareModeActive) {
-      throwIfScopeChanged()
-      // Creation may already have published this ID during the current turn.
-      // Re-selecting it clears the resolved metadata in the server-chat store.
-      if (useStoreMessageOption.getState().serverChatId !== payloadConversationId) {
-        setServerChatId(payloadConversationId)
+      if (scopeSignal) historyKey = await persistLocally()
+      if (
+        historyKey &&
+        payloadConversationId &&
+        !serverChatId &&
+        sourceIsCurrent()
+      ) {
+        try {
+          await syncChatSettingsForServerChat({
+            historyId: historyKey,
+            serverChatId: payloadConversationId,
+            allowScratchFallback: true,
+            sourceDraftAddress: renderedSettingsDraft,
+            requestScope: payload?.requestScope,
+            signal: scopeSignal,
+            validate_lease: () => {
+              const draft = useStoreMessageOption.getState()
+              return (
+                !scopeSignal?.aborted &&
+                !scopeInvalidatedSignal?.aborted &&
+                sourceIsCurrent() &&
+                actionsMountedRef.current &&
+                draft.chatDraftRevision === renderedDraftRevision &&
+                draft.chatDraftAddress === renderedSettingsDraft
+              )
+            },
+            ...(scope ? { scope } : {})
+          })
+        } catch {
+          // Best-effort scratch-to-server settings reconciliation.
+        }
       }
-      invalidateServerChatHistory()
+      if (
+        sourceIsCurrent() &&
+        payload?.saveToDb &&
+        payloadConversationId &&
+        !serverChatId &&
+        !compareModeActive
+      ) {
+        throwIfScopeChanged()
+        // Creation may already have published this ID during the current turn.
+        // Re-selecting it clears the resolved metadata in the server-chat store.
+        if (
+          useStoreMessageOption.getState().serverChatId !== payloadConversationId
+        ) {
+          setServerChatId(payloadConversationId)
+        }
+        invalidateServerChatHistory()
+      }
+      return historyKey
+    } finally {
+      stopRetainingImageMedia?.()
     }
-    return historyKey
   }
 
   const buildChatModeParams = async (
@@ -1455,25 +1605,180 @@ export const useChatActions = ({
     }
   }
 
+  const captureSdkConversationPublication = React.useCallback(
+    ({
+      actorSceneSend,
+      commandSource,
+      commandSession,
+      signal,
+      servicePromptSnapshot,
+      capturedPromotion
+    }: {
+      actorSceneSend: ActorSceneSend
+      commandSource: ReturnType<typeof useStoreMessageOption.getState>
+      commandSession: ReturnType<typeof usePlaygroundSessionStore.getState>
+      signal: AbortSignal
+      servicePromptSnapshot?: ServicePromptSnapshot
+      capturedPromotion?: CapturedChatPromotion | null
+    }) => {
+      const originalCommandIsCurrent =
+        actorSceneSend.commandIsCurrent ?? actorSceneSend.isCurrent
+      let expectedHistoryId = commandSource.historyId
+      let expectedServerChatId = commandSource.serverChatId
+      let publishingHistoryId: string | undefined
+      let publishingServerChatId: string | null | undefined
+      const viewIsCurrent = () => {
+        const current = useStoreMessageOption.getState()
+        const session = usePlaygroundSessionStore.getState()
+        if (
+          !actionsMountedRef.current ||
+          actorSceneSend.scene.target.account?.isCurrent() !== true ||
+          current.chatDraftAddress !== commandSource.chatDraftAddress ||
+          current.chatDraftRevision !== commandSource.chatDraftRevision ||
+          session.restoreRevision !== commandSession.restoreRevision ||
+          session.sourceSelectionRevision !==
+            commandSession.sourceSelectionRevision ||
+          current.temporaryChat !== commandSource.temporaryChat
+        )
+          return false
+        const promotionPublication = capturedPromotion?.getPublication()
+        if (
+          promotionPublication &&
+          promotionPublication.historyId === commandSource.historyId &&
+          chatDraftOwnerKey(promotionPublication.requestScope) ===
+            chatDraftOwnerKey(actorSceneSend.requestScope) &&
+          current.historyId === commandSource.historyId &&
+          current.serverChatId === promotionPublication.chatId
+        )
+          expectedServerChatId = promotionPublication.chatId
+        if (
+          publishingHistoryId !== undefined &&
+          current.historyId === publishingHistoryId
+        ) {
+          expectedHistoryId = publishingHistoryId
+          publishingHistoryId = undefined
+        }
+        if (
+          publishingServerChatId !== undefined &&
+          current.serverChatId === publishingServerChatId
+        ) {
+          expectedServerChatId = publishingServerChatId
+          publishingServerChatId = undefined
+        }
+        return (
+          current.historyId === expectedHistoryId &&
+          current.serverChatId === expectedServerChatId
+        )
+      }
+      const isCurrent = () =>
+        viewIsCurrent() &&
+        originalCommandIsCurrent() &&
+        useStoreMessageOption.getState().selectedModelRevision ===
+          commandSource.selectedModelRevision &&
+        !signal.aborted &&
+        !servicePromptSnapshot?.scopeInvalidatedSignal.aborted &&
+        !servicePromptSnapshot?.scopeSignal.aborted
+      const throwIfTurnCancelled = () => {
+        throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+        servicePromptSnapshot?.scopeSignal.throwIfAborted()
+        signal.throwIfAborted()
+        if (!isCurrent())
+          throw new DOMException(
+            "The active chat changed before sending",
+            "AbortError"
+          )
+      }
+      const sceneSend: ActorSceneSend = Object.freeze({
+        ...actorSceneSend,
+        isCurrent,
+        acceptHistoryMirror: (id: string) => {
+          if (
+            !id ||
+            !isCurrent() ||
+            (publishingHistoryId !== undefined && publishingHistoryId !== id)
+          )
+            return false
+          publishingHistoryId = id
+          return true
+        }
+      })
+      const publish = (write: () => void) => {
+        throwIfTurnCancelled()
+        write()
+        throwIfTurnCancelled()
+      }
+      const publishServerChatId = (id: string | null) => {
+        throwIfTurnCancelled()
+        publishingServerChatId = id
+        setServerChatId(id)
+        throwIfTurnCancelled()
+        if (useStoreMessageOption.getState().serverChatId !== id)
+          throw createServicePromptScopeChangedError()
+      }
+      const ensureMirror = async (chatId: string, title?: string) => {
+        throwIfTurnCancelled()
+        const localId = await ensureServerChatHistoryId(
+          chatId,
+          title,
+          servicePromptSnapshot?.scopeInvalidatedSignal,
+          servicePromptSnapshot,
+          sceneSend
+        )
+        throwIfTurnCancelled()
+        if (!localId || useStoreMessageOption.getState().historyId !== localId)
+          throw createServicePromptScopeChangedError()
+        return localId
+      }
+      return {
+        sceneSend,
+        viewIsCurrent,
+        publish,
+        publishServerChatId,
+        ensureMirror,
+        throwIfTurnCancelled
+      }
+    },
+    [ensureServerChatHistoryId, setServerChatId]
+  )
+
   const ensurePersonaServerChatWithState = React.useCallback(
     async ({
       assistant,
       serverChatIdOverride,
       requestedPersonaMemoryMode,
       servicePromptSnapshot,
-      isCurrent
+      actorSceneSend,
+      commandSource,
+      commandSession,
+      signal,
+      capturedPromotion
     }: {
       assistant: AssistantSelection & { kind: "persona" }
       serverChatIdOverride?: string | null
       requestedPersonaMemoryMode?: PersonaMemoryMode | null
       servicePromptSnapshot?: ServicePromptSnapshot
-      isCurrent: () => boolean
+      actorSceneSend: ActorSceneSend
+      commandSource: ReturnType<typeof useStoreMessageOption.getState>
+      commandSession: ReturnType<typeof usePlaygroundSessionStore.getState>
+      signal: AbortSignal
+      capturedPromotion?: CapturedChatPromotion | null
     }): Promise<{
       chatId: string
       historyId: string | null
       personaMemoryMode: "read_only" | "read_write"
-    }> =>
-      ensurePersonaServerChat({
+      sceneSend: ActorSceneSend
+      viewIsCurrent: () => boolean
+    }> => {
+      const publication = captureSdkConversationPublication({
+        actorSceneSend,
+        commandSource,
+        commandSession,
+        signal,
+        servicePromptSnapshot,
+        capturedPromotion
+      })
+      publication.throwIfTurnCancelled()
+      const persona = await ensurePersonaServerChat({
         assistant,
         serverChatIdOverride,
         requestedPersonaMemoryMode,
@@ -1491,19 +1796,17 @@ export const useChatActions = ({
         historyId,
         temporaryChat,
         scope,
-        isCurrent,
-        requestScope: servicePromptSnapshot?.requestScope,
-        signal: servicePromptSnapshot?.scopeSignal,
-        scopeInvalidatedSignal:
-          servicePromptSnapshot?.scopeInvalidatedSignal,
+        isCurrent: publication.sceneSend.isCurrent,
+        requestScope: actorSceneSend.requestScope,
+        signal: servicePromptSnapshot?.scopeSignal ?? signal,
+        scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
         createChat: (payload, options) =>
           options
             ? tldwClient.createChat(payload, options)
             : tldwClient.createChat(payload),
-        ensureServerChatHistoryId: (chatId, title, signal) =>
-          ensureServerChatHistoryId(chatId, title, signal, servicePromptSnapshot),
+        ensureServerChatHistoryId: publication.ensureMirror,
         invalidateServerChatHistory,
-        setServerChatId,
+        setServerChatId: publication.publishServerChatId,
         setServerChatTitle,
         setServerChatCharacterId,
         setServerChatAssistantKind,
@@ -1516,9 +1819,16 @@ export const useChatActions = ({
         setServerChatClusterId,
         setServerChatSource,
         setServerChatExternalRef
-      }),
+      })
+      publication.throwIfTurnCancelled()
+      return {
+        ...persona,
+        sceneSend: publication.sceneSend,
+        viewIsCurrent: publication.viewIsCurrent
+      }
+    },
     [
-      ensureServerChatHistoryId,
+      captureSdkConversationPublication,
       historyId,
       invalidateServerChatHistory,
       serverChatAssistantId,
@@ -1538,7 +1848,6 @@ export const useChatActions = ({
       setServerChatCharacterId,
       setServerChatClusterId,
       setServerChatExternalRef,
-      setServerChatId,
       setServerChatMetaLoaded,
       setServerChatPersonaMemoryMode,
       setServerChatSource,
@@ -1577,67 +1886,9 @@ export const useChatActions = ({
       // dispatch through its acknowledged local alias and saved-chat metadata.
       if (!actorSceneSend.isCurrent()) throw createServicePromptScopeChangedError()
       if (temporaryChat || (scope?.type !== "workspace" && !allowGlobal)) return { chatId: null, historyId: null, sceneSend: actorSceneSend }
-      const originalCommandIsCurrent = actorSceneSend.commandIsCurrent ?? actorSceneSend.isCurrent
-      let expectedHistoryId = commandSource.historyId
-      let expectedServerChatId = commandSource.serverChatId
-      let publishingHistoryId: string | undefined
-      let publishingServerChatId: string | null | undefined
-      const viewIsCurrent = () => {
-        const current = useStoreMessageOption.getState()
-        const session = usePlaygroundSessionStore.getState()
-        if (!actionsMountedRef.current || actorSceneSend.scene.target.account?.isCurrent() !== true ||
-          current.chatDraftAddress !== commandSource.chatDraftAddress || current.chatDraftRevision !== commandSource.chatDraftRevision ||
-          session.restoreRevision !== commandSession.restoreRevision || session.sourceSelectionRevision !== commandSession.sourceSelectionRevision ||
-          current.temporaryChat !== commandSource.temporaryChat) return false
-        const promotionPublication = capturedPromotion?.getPublication()
-        if (promotionPublication && promotionPublication.historyId === commandSource.historyId &&
-          chatDraftOwnerKey(promotionPublication.requestScope) === chatDraftOwnerKey(actorSceneSend.requestScope) &&
-          current.historyId === commandSource.historyId && current.serverChatId === promotionPublication.chatId)
-          expectedServerChatId = promotionPublication.chatId
-        if (publishingHistoryId !== undefined && current.historyId === publishingHistoryId) {
-          expectedHistoryId = publishingHistoryId
-          publishingHistoryId = undefined
-        }
-        if (publishingServerChatId !== undefined && current.serverChatId === publishingServerChatId) {
-          expectedServerChatId = publishingServerChatId
-          publishingServerChatId = undefined
-        }
-        return current.historyId === expectedHistoryId && current.serverChatId === expectedServerChatId
-      }
-      const isCurrent = () => viewIsCurrent() && originalCommandIsCurrent() &&
-        useStoreMessageOption.getState().selectedModelRevision === commandSource.selectedModelRevision && !signal.aborted &&
-        !servicePromptSnapshot?.scopeInvalidatedSignal.aborted && !servicePromptSnapshot?.scopeSignal.aborted
-      const throwIfTurnCancelled = () => {
-        throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
-        servicePromptSnapshot?.scopeSignal.throwIfAborted()
-        signal.throwIfAborted()
-        if (!isCurrent()) throw new DOMException("The active chat changed before sending", "AbortError")
-      }
-      const sceneSend: ActorSceneSend = Object.freeze({
-        ...actorSceneSend,
-        isCurrent,
-        acceptHistoryMirror: (id: string) => {
-          if (!id || !isCurrent() || (publishingHistoryId !== undefined && publishingHistoryId !== id)) return false
-          publishingHistoryId = id
-          return true
-        }
-      })
-      const publish = (write: () => void) => { throwIfTurnCancelled(); write(); throwIfTurnCancelled() }
-      const publishServerChatId = (id: string | null) => {
-        throwIfTurnCancelled()
-        publishingServerChatId = id
-        setServerChatId(id)
-        throwIfTurnCancelled()
-        if (useStoreMessageOption.getState().serverChatId !== id) throw createServicePromptScopeChangedError()
-      }
+      const { sceneSend, viewIsCurrent, publish, publishServerChatId, ensureMirror, throwIfTurnCancelled } =
+        captureSdkConversationPublication({ actorSceneSend, commandSource, commandSession, signal, servicePromptSnapshot, capturedPromotion })
       const result = (chatId: string | null, linkedHistoryId: string | null) => ({ chatId, historyId: linkedHistoryId, sceneSend, viewIsCurrent })
-      const ensureMirror = async (chatId: string, title?: string) => {
-        throwIfTurnCancelled()
-        const localId = await ensureServerChatHistoryId(chatId, title, servicePromptSnapshot?.scopeInvalidatedSignal, servicePromptSnapshot, sceneSend)
-        throwIfTurnCancelled()
-        if (!localId || useStoreMessageOption.getState().historyId !== localId) throw createServicePromptScopeChangedError()
-        return localId
-      }
       throwIfTurnCancelled()
       const overrideChatId = typeof serverChatIdOverride === "string" && serverChatIdOverride.trim().length > 0 ? serverChatIdOverride.trim() : null
       if (servicePromptSnapshot && (allowGlobal || capturedPromotion)) {
@@ -1649,11 +1900,10 @@ export const useChatActions = ({
             chatDraftOwnerKey(publication.requestScope) !== chatDraftOwnerKey(actorSceneSend.requestScope) ||
             useStoreMessageOption.getState().serverChatId !== publication.chatId)
             throw createServicePromptScopeChangedError()
-          expectedServerChatId = publication.chatId
         }
         throwIfTurnCancelled()
       }
-      const resolvedServerChatId = overrideChatId || expectedServerChatId
+      const resolvedServerChatId = overrideChatId || useStoreMessageOption.getState().serverChatId
       if (resolvedServerChatId) {
         if (scope?.type !== "workspace") return result(resolvedServerChatId, await ensureMirror(resolvedServerChatId, serverChatTitle || undefined))
         let validatedServerChatId: string | null = null
@@ -1719,7 +1969,7 @@ export const useChatActions = ({
       publish(invalidateServerChatHistory)
       return result(normalizedId, ensuredHistoryId)
     },
-    [ensureServerChatHistoryId, invalidateServerChatHistory, scope, serverChatClusterId, serverChatExternalRef,
+    [captureSdkConversationPublication, invalidateServerChatHistory, scope, serverChatClusterId, serverChatExternalRef,
       serverChatSource, serverChatState, serverChatTitle, serverChatTopic, setServerChatAssistantId, setServerChatAssistantKind,
       setServerChatCharacterId, setServerChatClusterId, setServerChatExternalRef, setServerChatId, setServerChatMetaLoaded,
       setServerChatPersonaMemoryMode, setServerChatSource, setServerChatState, setServerChatTitle, setServerChatTopic,
@@ -3580,6 +3830,59 @@ export const useChatActions = ({
       (turnResolvedSendMode === "plain" || turnResolvedSendMode === "overlay")
 
     try {
+      if (
+        isSavedRoleplayConversation(historySelection) &&
+        !greetingSeed &&
+        !historyEditResend &&
+        !historyRegenerate &&
+        !isRegenerate
+      ) {
+        const resumeSource = captureChatDraftSource(
+          () =>
+            commandSessionIsCurrent() &&
+            useStoreMessageOption.getState().chatDraftRevision ===
+              renderedDraftRevision
+        )
+        setIsProcessing(true)
+        try {
+          const { sendSavedRoleplay } = await import("./roleplay-resume-send")
+          await sendSavedRoleplay({
+            controller: historySelection!,
+            signal,
+            originIsCurrent: historyOriginIsCurrent!,
+            sourceIsCurrent: resumeSource.isCurrent,
+            serverChatId: serverChatIdOverride || serverChatId,
+            historyId: historyIdOverride ?? historyId,
+            message,
+            image,
+            setMessages,
+            unsupportedContext: Boolean(
+              compareModeActive ||
+                isContinue ||
+                turnHasExplicitImageBackend ||
+                turnContextFiles.length ||
+                docs?.length ||
+                documentContext?.length ||
+                turnShouldUseRag ||
+                turnPromptIds.length ||
+                researchContext ||
+                turnDynamicUIRequest ||
+                shouldConsumeSteering ||
+                replyTarget ||
+                requestOverrides?.historyForModel ||
+                requestOverrides?.messageForModel ||
+                toolChoice === "required"
+            )
+          })
+          return { status: "submitted" }
+        } finally {
+          if (releaseAbortControllerIfOwned(signal)) {
+            setAbortController(null)
+            setIsProcessing(false)
+            setStreaming(false)
+          }
+        }
+      }
       if (historyRegenerate && (!isRegenerate || historyEditResend || historyRetryAdmission || !selectedHistoryTurn))
         throw new Error("unsupported_history_regeneration")
       if (greetingSeed && (!historySelection || turnResolvedSendMode !== "tracked_character" ||
@@ -3689,7 +3992,7 @@ export const useChatActions = ({
         actorSceneSend,
         {
           ...(requestOverrides ?? {}),
-          ...(!historySelection && !temporaryChat && !compareModeActive && (needsSavedNormalScope || (turnShouldUseRag && scope?.type === "workspace")) && !Object.prototype.hasOwnProperty.call(requestOverrides ?? {}, "historyId")
+          ...(!historySelection && !temporaryChat && !compareModeActive && (needsSavedNormalScope || turnResolvedSendMode === "tracked_persona" || (turnShouldUseRag && scope?.type === "workspace")) && !Object.prototype.hasOwnProperty.call(requestOverrides ?? {}, "historyId")
             ? { historyId: historyIdOverride ?? historyId } : {}),
           ragMediaIds: turnRagMediaIds,
           fileRetrievalEnabled: turnFileRetrievalEnabled,
@@ -4031,19 +4334,21 @@ export const useChatActions = ({
               serverChatIdOverride,
               requestedPersonaMemoryMode: selectedPersonaMemoryMode,
               servicePromptSnapshot: turnServicePromptSnapshot,
-              isCurrent: actorSceneSend.isCurrent
+              actorSceneSend, commandSource: commandDraftSource, commandSession, signal, capturedPromotion
             })
-            if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
+            sdkViewIsCurrent = personaServerChat.viewIsCurrent
+            if (!personaServerChat.sceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
             throwIfServicePromptScopeInvalidated(turnServicePromptSnapshot)
             await persistTrackedPersonaPlaygroundSession({
               chatId: personaServerChat.chatId,
               historyId: personaServerChat.historyId,
               assistant: trackedPersonaAssistantForSend,
               personaMemoryMode: personaServerChat.personaMemoryMode,
-              scopeKey: turnServicePromptSnapshot?.scopeKey
+              scopeKey: turnServicePromptSnapshot?.scopeKey,
+              isCurrent: personaServerChat.sceneSend.isCurrent
             })
             throwIfServicePromptScopeInvalidated(turnServicePromptSnapshot)
-            if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
+            if (!personaServerChat.sceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
             const assistantIdentity = {
               name: trackedPersonaAssistantForSend.name,
               avatarUrl:
@@ -4060,6 +4365,7 @@ export const useChatActions = ({
               signal,
               {
                 ...servicePromptChatModeParams,
+                actorSceneSend: personaServerChat.sceneSend,
                 assistantIdentity,
                 historyId: personaServerChat.historyId,
                 serverChatId: personaServerChat.chatId,
@@ -4067,7 +4373,7 @@ export const useChatActions = ({
                   saveMessageOnSuccess({
                     ...data,
                     conversationId: personaServerChat.chatId
-                  })
+                  }, personaServerChat.viewIsCurrent)
               }
             )
             return toChatSubmitResult(personaResult)

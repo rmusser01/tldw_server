@@ -320,3 +320,314 @@ describe("qualified metadata reads for an unresolved proposal", () => {
     expect(mocks.bgRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "/api/v1/chats/chat-1?scope_type=workspace&workspace_id=W", abortSignal: signal }))
   })
 })
+
+
+describe("saved Roleplay transport authority", () => {
+  const digest = "sha256:" + "a".repeat(64)
+  const fence = {
+    version: 1,
+    snapshot_digest: digest,
+    settings_version: 3,
+    history_version: 7,
+    tail: { message_id: "prior", message_version: 2 }
+  }
+  const intent = {
+    message_id: "user-original",
+    content: "  Exact roleplay text\n",
+    expected: fence
+  }
+  const appendReceipt = {
+    version: 1,
+    conversation_id: "saved-roleplay",
+    message_id: intent.message_id,
+    message_version: 1,
+    parent_message_id: "prior",
+    fence: {
+      ...fence,
+      history_version: 8,
+      tail: { message_id: intent.message_id, message_version: 1 }
+    }
+  }
+  const completion = {
+    tldw_roleplay_resume_v1: {
+      version: 1,
+      input_message_id: intent.message_id,
+      input_message_version: 1,
+      assistant_message_id: "assistant-original",
+      expected: appendReceipt.fence
+    },
+    stream: false,
+    save_to_db: true,
+    include_character_context: true,
+    append_user_message: false
+  }
+  const savedReply = {
+    chat_id: "saved-roleplay",
+    character_id: 42,
+    provider: "openai",
+    model: "saved-model",
+    saved: true,
+    user_message_id: intent.message_id,
+    assistant_message_id: "assistant-original",
+    assistant_content: "A saved answer",
+    tldw_roleplay_resume_v1: {
+      ...completion.tldw_roleplay_resume_v1,
+      assistant_message_version: 1,
+      fence: {
+        ...appendReceipt.fence,
+        history_version: 9,
+        tail: { message_id: "assistant-original", message_version: 1 }
+      },
+      unsaved_reason: null
+    }
+  }
+  const details = {
+    id: "saved-roleplay",
+    scope_type: "global",
+    workspace_id: null,
+    behavior_snapshot: { status: "valid", schema_version: 1, digest },
+    resume_eligible: true,
+    resume_ineligible_reason: null,
+    settings_version: 3,
+    history_version: 7,
+    tail: fence.tail
+  }
+  const requestScope = {
+    config: {
+      serverUrl: "https://original-owner.test",
+      authMode: "single-user" as const
+    },
+    userId: 1
+  }
+
+  beforeEach(() => {
+    mocks.bgRequest.mockReset()
+  })
+
+  it("preserves detached, qualified snapshot fences on the installed getChat method", async () => {
+    mocks.bgRequest.mockResolvedValue(details)
+    const result = await new TldwApiClient().getChat("saved-roleplay", {
+      requestScope,
+      requireRoleplayResume: true
+    })
+    expect(result).toMatchObject(details)
+    expect(result.tail).not.toBe(details.tail)
+  })
+
+  it.each([
+    { id: "foreign" },
+    { scope_type: "workspace", workspace_id: "other" },
+    { workspace_id: "other" },
+    { resume_eligible: "true" },
+    { resume_eligible: false },
+    { resume_ineligible_reason: "unsupported" },
+    { behavior_snapshot: { status: "valid", schema_version: "1", digest } },
+    { behavior_snapshot: { status: "missing", schema_version: 1, digest } },
+    {
+      behavior_snapshot: {
+        status: "valid",
+        schema_version: 1,
+        digest: "unqualified"
+      }
+    },
+    { settings_version: 0 },
+    { history_version: "7" },
+    { history_version: Number.MAX_SAFE_INTEGER },
+    { tail: { message_id: "prior", message_version: null } },
+    { tail: { message_id: null, message_version: 2 } }
+  ])(
+    "refuses unqualified saved Roleplay detail before normalized defaults %j",
+    async (patch) => {
+      mocks.bgRequest.mockResolvedValue({ ...details, ...patch })
+      await expect(
+        new TldwApiClient().getChat("saved-roleplay", {
+          requestScope,
+          requireRoleplayResume: true
+        })
+      ).rejects.toThrow()
+    }
+  )
+
+  it("uses the original owner and genuine transport dispatch for input admission", async () => {
+    mocks.bgRequest.mockResolvedValue(appendReceipt)
+    const signal = new AbortController().signal
+    const onDispatch = vi.fn()
+    const result = await new TldwApiClient().appendRoleplayResumeInput(
+      "saved-roleplay",
+      intent,
+      { requestScope, signal, onDispatch }
+    )
+    expect(result).toEqual(appendReceipt)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/saved-roleplay/roleplay/messages",
+        method: "POST",
+        body: intent,
+        servicePromptConfig: { ...requestScope.config, expectedUserId: 1 },
+        headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "1" }),
+        abortSignal: signal,
+        onDispatch
+      })
+    )
+    expect(onDispatch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { conversation_id: "foreign" },
+    { message_id: "different" },
+    { message_version: 2 },
+    { parent_message_id: null },
+    { fence: { ...appendReceipt.fence, history_version: 10 } },
+    { fence: { ...appendReceipt.fence, settings_version: 4 } },
+    {
+      fence: {
+        ...appendReceipt.fence,
+        tail: { message_id: "other", message_version: 1 }
+      }
+    }
+  ])("refuses mismatching original admission receipt %j", async (patch) => {
+    mocks.bgRequest.mockResolvedValue({ ...appendReceipt, ...patch })
+    await expect(
+      new TldwApiClient().appendRoleplayResumeInput("saved-roleplay", intent, {
+        requestScope
+      })
+    ).rejects.toThrow()
+  })
+
+  it("requires the original scope for protected writes", async () => {
+    await expect(
+      new TldwApiClient().completeCharacterChatTurn(
+        "saved-roleplay",
+        completion
+      )
+    ).rejects.toThrow()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("validates a saved completion before returning its receipt", async () => {
+    mocks.bgRequest.mockResolvedValue(savedReply)
+    const result = await new TldwApiClient().completeCharacterChatTurn(
+      "saved-roleplay",
+      completion,
+      { requestScope }
+    )
+    expect(result).toEqual(savedReply)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        servicePromptConfig: { ...requestScope.config, expectedUserId: 1 },
+        body: completion
+      })
+    )
+  })
+
+  it.each([
+    { chat_id: "foreign" },
+    { user_message_id: "foreign" },
+    { saved: "true" },
+    { assistant_message_id: "foreign" },
+    {
+      tldw_roleplay_resume_v1: {
+        ...savedReply.tldw_roleplay_resume_v1,
+        assistant_message_version: 2
+      }
+    },
+    {
+      tldw_roleplay_resume_v1: {
+        ...savedReply.tldw_roleplay_resume_v1,
+        expected: fence
+      }
+    },
+    {
+      tldw_roleplay_resume_v1: {
+        ...savedReply.tldw_roleplay_resume_v1,
+        fence: { ...fence, history_version: 9 }
+      }
+    }
+  ])(
+    "keeps generated text when completion acknowledgement is invalid %j",
+    async (patch) => {
+      mocks.bgRequest.mockResolvedValue({ ...savedReply, ...patch })
+      await expect(
+        new TldwApiClient().completeCharacterChatTurn(
+          "saved-roleplay",
+          completion,
+          { requestScope }
+        )
+      ).rejects.toMatchObject({ generatedText: savedReply.assistant_content })
+    }
+  )
+
+  it("retains the entire oversized unsaved reply and reports failed save status", async () => {
+    const { getServerChatSaveStatus, resetServerChatSaveStatus } = await import(
+      "@/store/server-chat-save-status"
+    )
+    resetServerChatSaveStatus()
+    const reply = {
+      ...savedReply,
+      saved: false,
+      assistant_message_id: null,
+      assistant_content: "x".repeat(1_000_001),
+      tldw_roleplay_resume_v1: {
+        ...savedReply.tldw_roleplay_resume_v1,
+        assistant_message_version: null,
+        fence: null,
+        unsaved_reason: "assistant_content_too_large"
+      }
+    }
+    mocks.bgRequest.mockResolvedValue(reply)
+    const result = await new TldwApiClient().completeCharacterChatTurn(
+      "saved-roleplay",
+      completion,
+      { requestScope }
+    )
+    expect(result.assistant_content).toBe(reply.assistant_content)
+    expect(getServerChatSaveStatus("saved-roleplay")).toBe("failed")
+  })
+
+  it("does not erase a legitimate acknowledgement when Stop arrives after dispatch", async () => {
+    const abort = new AbortController()
+    mocks.bgRequest.mockImplementation(async () => {
+      abort.abort()
+      return appendReceipt
+    })
+    expect(
+      await new TldwApiClient().appendRoleplayResumeInput(
+        "saved-roleplay",
+        intent,
+        { requestScope, signal: abort.signal }
+      )
+    ).toEqual(appendReceipt)
+  })
+
+  it("does not transport a protected operation whose signal is already stopped", async () => {
+    const abort = new AbortController()
+    abort.abort()
+    await expect(
+      new TldwApiClient().completeCharacterChatTurn(
+        "saved-roleplay",
+        completion,
+        { requestScope, signal: abort.signal }
+      )
+    ).rejects.toThrow()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { model: "current-model" },
+    { stream: true },
+    { save_to_db: false },
+    { tldw_roleplay_resume_v1: null }
+  ])(
+    "rejects current-setting overrides before protected transport %j",
+    async (patch) => {
+      await expect(
+        new TldwApiClient().completeCharacterChatTurn(
+          "saved-roleplay",
+          { ...completion, ...patch },
+          { requestScope }
+        )
+      ).rejects.toThrow()
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+    }
+  )
+})

@@ -1,4 +1,6 @@
 import React from "react"
+import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
+import { roleplayDetail, roleplayAppend, roleplayCompletion, captureRoleplayFixtureRows } from "@/hooks/chat/__tests__/roleplay-resume-fixture"
 import { createDefaultActorSettings } from "@/types/actor"
 import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
@@ -86,6 +88,7 @@ const mocks = vi.hoisted(() => {
     setServerChatId: vi.fn(),
     serverChatTitle: "",
     setServerChatTitle: vi.fn(),
+    setServerChatRoleplaySetup: vi.fn(),
     serverChatCharacterId: null,
     setServerChatCharacterId: vi.fn(),
     serverChatAssistantKind: null,
@@ -408,6 +411,11 @@ vi.mock("@/libs/get-html", () => ({
   }))
 }))
 
+vi.mock("@/services/tldw/server-capabilities", async original => ({
+  ...await original<typeof import("@/services/tldw/server-capabilities")>(),
+  getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false, hasRoleplayResumeV1: h1.roleplayEnabled }))
+}))
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
@@ -415,9 +423,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getOpenAPISpec: (...args: unknown[]) => h1.spec(...args),
     getCharacter: h1.live,
     createChat: (...args: any[]) => h1.create(...args),
-    getChat: vi.fn(async (id: string) => ({ id, title: "Owned opening", character_id: "12" })),
+    getChat: vi.fn(async (id: string, options?: { requireRoleplayResume?: boolean }) => options?.requireRoleplayResume ? { ...roleplayDetail(id, h1.roleplayState.get(id)!.tail), history_version: h1.roleplayState.get(id)!.historyVersion } : { id, title: "Owned opening", character_id: "12" }),
+    appendRoleplayResumeInput: (...args: unknown[]) => h1.roleplayAppend(...args),
+    completeCharacterChatTurn: (...args: unknown[]) => h1.roleplayComplete(...args),
     getChatSettings: vi.fn(async (id: string) => ({ conversation_id: id, settings: {} })),
-    captureHistorySelection: (...args: any[]) => h1.capture(...args),
+    captureHistorySelection: async (id: string, request: import("@/types/history-selection").HistoryCaptureRequestV1, options: unknown) => {
+      const capture = await h1.capture(id, request, options)
+      const state = h1.roleplayState.get(id)
+      return state ? captureRoleplayFixtureRows(capture, request, state.rows, state.content) : capture
+    },
     addChatMessage: (...args: any[]) => h1.append(...args),
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
     getConfig: async () => null,
@@ -493,6 +507,10 @@ import {
 } from "@/hooks/chat/sidepanel-send-gate"
 
 const h1 = vi.hoisted(() => ({
+  roleplayEnabled: false,
+  roleplayState: new Map<string, { tail: string | null; historyVersion: number; rows: import("@/hooks/chat/__tests__/roleplay-resume-fixture").RoleplayFixtureRow[]; content: Map<string, import("@/types/history-selection").HistorySelectionCaptureV1["selected_content"][number]> }>(),
+  roleplayAppend: vi.fn(),
+  roleplayComplete: vi.fn(),
   spec: vi.fn(),
   cookieConfig: null as { serverUrl: string; authMode: "single-user"; authSource: "cookie-session" } | null,
   native: false,
@@ -523,9 +541,13 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
   dismissHistoryTurnRecovery: h1.dismiss
 }))
 let nativeChatId = "tracked-chat-1"
-const createdNativeChat = (body: { id?: string }) => {
+const createdNativeChat = (body: { id?: string; character_id?: number | string }) => {
   if (!body.id) throw new Error("fixture requires the reserved client chat ID")
   nativeChatId = body.id
+  if (body.character_id != null) {
+    h1.roleplayEnabled = true
+    h1.roleplayState.set(body.id, { tail: null, historyVersion: 9, rows: [], content: new Map() })
+  }
   return { id: body.id }
 }
 
@@ -635,7 +657,8 @@ const bridgeDraftStore = (store: typeof import("@/store/option").useStoreMessage
       setChatDraftAddress: state.setChatDraftAddress,
       startNewChatDraft: state.startNewChatDraft,
       setHistoryId,
-      setServerChatId
+      setServerChatId,
+      setServerChatRoleplaySetup: state.setServerChatRoleplaySetup
     }
   }
 }
@@ -696,9 +719,35 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  h1.recover.mockReset()
+  h1.dismiss.mockReset()
+  const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
+  memory.historySelections.rows.clear()
+  await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
   nativeChatId = "tracked-chat-1"
+  h1.roleplayEnabled = false
+  h1.roleplayState.clear()
+  h1.roleplayAppend.mockReset().mockImplementation(async (id, input, options) => {
+    options.onDispatch?.()
+    const state = h1.roleplayState.get(id)!
+    const receipt = roleplayAppend(id, input)
+    state.tail = receipt.fence.tail.message_id
+    state.historyVersion = receipt.fence.history_version
+    state.rows.push({ id: input.message_id, revision: "1", parent_id: input.expected.tail.message_id, role: "user", settled: true, message: input.content })
+    return receipt
+  })
+  h1.roleplayComplete.mockReset().mockImplementation(async (id, body, options) => {
+    options.onDispatch?.()
+    const state = h1.roleplayState.get(id)!
+    const reply = roleplayCompletion(id, body)
+    state.tail = reply.tldw_roleplay_resume_v1.fence.tail.message_id
+    state.historyVersion = reply.tldw_roleplay_resume_v1.fence.history_version
+    state.rows.push({ id: reply.assistant_message_id, revision: "1", parent_id: reply.user_message_id, role: "assistant", settled: true, message: reply.assistant_content })
+    return reply
+  })
   h1.create.mockReset()
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  vi.mocked(api.getChat).mockReset().mockImplementation(async (id, options) => options?.requireRoleplayResume ? { ...roleplayDetail(id, h1.roleplayState.get(id)!.tail), history_version: h1.roleplayState.get(id)!.historyVersion } : { id, title: "Owned opening", character_id: "12" })
   vi.mocked(api.getChatSettings).mockReset().mockImplementation(async id => ({ conversation_id: id, settings: {} }))
   localStorage.clear()
   sessionStorage.clear()
@@ -722,13 +771,7 @@ beforeEach(async () => {
       requestBody: {
         content: {
           "application/json": {
-            schema: {
-              properties: {
-                tldw_history_branch: {
-                  anyOf: [{ type: "boolean" }, { type: "null" }]
-                }
-              }
-            }
+            schema: protectedEditRequestSchema()
           }
         }
       }
@@ -802,6 +845,239 @@ beforeEach(async () => {
     yield { choices: [{ delta: { content: "new answer" } }] }
   })
 })
+
+it.each(
+  [false, true].flatMap((cached) =>
+    ["current", "new", "same-id", "account", "stop"].map((boundary) => ({
+      cached,
+      boundary
+    }))
+  )
+)(
+  "compact SDK persona keeps exact creation ownership across $boundary (cached=$cached)",
+  async ({ cached, boundary }) => {
+    h1.persona = true
+    h1.controller = null
+    mocks.storeState.fileRetrievalEnabled = false
+    const store = await startFixtureDraft(false)
+    mocks.storeState.serverChatMetaLoaded = cached
+    if (cached) store.setState({ serverChatId: "compact-plain-before-persona" })
+    const original = store.getState()
+    const account = makeDraftAccount()
+    const commandIsCurrent = () => {
+      const latest = store.getState()
+      return (
+        account.isCurrent() &&
+        latest.chatDraftAddress === original.chatDraftAddress &&
+        latest.chatDraftRevision === original.chatDraftRevision
+      )
+    }
+    const { captureActorSettingsTarget } = await import(
+      "@/utils/actor-settings-target"
+    )
+    const { captureChatDraftSource } = await import(
+      "@/hooks/chat/chat-draft-transition"
+    )
+    const { captureActorSceneSendForTarget } = await import(
+      "@/hooks/chat/actor-scene-source"
+    )
+    const source = captureChatDraftSource(commandIsCurrent)
+    const target = captureActorSettingsTarget({
+      address: original.chatDraftAddress,
+      requestScope: account.requestScope,
+      accountIsCurrent: account.isCurrent,
+      isCurrent: source.isCurrent
+    })
+    const scene = await captureActorSceneSendForTarget(
+      target,
+      account,
+      source.isCurrent,
+      commandIsCurrent
+    )!.read()
+    let release!: (value: {
+      id: string
+      assistant_kind: string
+      assistant_id: string
+    }) => void
+    const created = new Promise<{
+      id: string
+      assistant_kind: string
+      assistant_id: string
+    }>((resolve) => {
+      release = resolve
+    })
+    h1.create.mockReturnValueOnce(created)
+    const normal = await import("@/hooks/chat-modes/normalChatMode")
+    const dispatch = vi
+      .spyOn(normal, "normalChatMode")
+      .mockImplementationOnce(
+        async (
+          _message,
+          _image,
+          _regenerate,
+          _rows,
+          _history,
+          _signal,
+          params
+        ) => {
+          expect(params.actorSceneSend?.isCurrent()).toBe(true)
+          return { status: "submitted" }
+        }
+      )
+    const hook = renderHook(() => useMessage())
+    const controller = new AbortController()
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = hook.result.current
+        .onSubmit({
+          message: "Original compact persona question",
+          image: "",
+          controller,
+          actorSceneSend: scene
+        })
+        .catch((error) => {
+          if (boundary !== "stop") throw error
+          expect(error).toMatchObject({ name: "AbortError" })
+          return { status: "skipped", reason: "aborted" }
+        })
+    })
+    try {
+      await waitFor(() => expect(h1.create).toHaveBeenCalledOnce())
+      mocks.storeState.setServerChatMetaLoaded.mockClear()
+      if (boundary === "new" || boundary === "same-id") {
+        store.getState().startNewChatDraft(false)
+        if (boundary === "same-id")
+          store.setState({
+            historyId: original.historyId,
+            serverChatId: original.serverChatId
+          })
+      }
+      if (boundary === "account") h1.auth.abort()
+      if (boundary === "stop") controller.abort()
+      await act(async () => {
+        release({
+          id: "compact-persona-created",
+          assistant_kind: "persona",
+          assistant_id: "12"
+        })
+        await pending
+      })
+      if (boundary === "current") {
+        expect(dispatch).toHaveBeenCalledOnce()
+        expect(store.getState().serverChatId).toBe("compact-persona-created")
+        expect(mocks.storeState.setServerChatMetaLoaded).toHaveBeenCalledWith(
+          true
+        )
+      } else {
+        expect(dispatch).not.toHaveBeenCalled()
+        expect(mocks.storeState.setServerChatMetaLoaded).not.toHaveBeenCalled()
+      }
+    } finally {
+      release({
+        id: "compact-persona-created",
+        assistant_kind: "persona",
+        assistant_id: "12"
+      })
+      await pending
+      hook.unmount()
+      dispatch.mockRestore()
+    }
+  }
+)
+
+it.each(["current", "model", "tool", "settings"])(
+  "compact reused Persona stops metadata publication after %s changes",
+  async (boundary) => {
+    h1.persona = true
+    h1.controller = null
+    mocks.storeState.fileRetrievalEnabled = false
+    const store = await startFixtureDraft(false)
+    store.setState({ serverChatId: "existing-persona" })
+    Object.assign(mocks.storeState, {
+      serverChatMetaLoaded: true,
+      serverChatAssistantKind: "persona",
+      serverChatAssistantId: "12"
+    })
+    const original = store.getState()
+    const account = makeDraftAccount()
+    const commandIsCurrent = () =>
+      account.isCurrent() &&
+      store.getState().chatDraftAddress === original.chatDraftAddress &&
+      store.getState().chatDraftRevision === original.chatDraftRevision
+    const { captureActorSettingsTarget } = await import(
+      "@/utils/actor-settings-target"
+    )
+    const { captureChatDraftSource } = await import(
+      "@/hooks/chat/chat-draft-transition"
+    )
+    const { captureActorSceneSendForTarget } = await import(
+      "@/hooks/chat/actor-scene-source"
+    )
+    const source = captureChatDraftSource(commandIsCurrent)
+    const target = captureActorSettingsTarget({
+      address: original.chatDraftAddress,
+      requestScope: account.requestScope,
+      accountIsCurrent: account.isCurrent,
+      isCurrent: source.isCurrent
+    })
+    const scene = await captureActorSceneSendForTarget(
+      target,
+      account,
+      source.isCurrent,
+      commandIsCurrent
+    )!.read()
+    const normal = await import("@/hooks/chat-modes/normalChatMode")
+    const dispatch = vi
+      .spyOn(normal, "normalChatMode")
+      .mockResolvedValueOnce({ status: "submitted" })
+    const { useStoreChatModelSettings } = await import("@/store/model")
+    const settings = vi.spyOn(
+      useStoreChatModelSettings.getState(),
+      "getEffectiveSettings"
+    )
+    mocks.storeState.setServerChatAssistantKind.mockImplementationOnce(() => {
+      if (boundary === "model")
+        mocks.storeState.selectedModel = "replacement-model"
+      if (boundary === "tool") mocks.storeState.toolChoice = "none"
+      if (boundary === "settings")
+        settings.mockReturnValue({ apiProvider: "replacement-provider" })
+    })
+    const hook = renderHook(() => useMessage())
+    try {
+      await act(async () => {
+        const send = hook.result.current.onSubmit({
+          message: "Existing compact Persona",
+          image: "",
+          actorSceneSend: scene
+        })
+        if (boundary === "current") await send
+        else await expect(send).rejects.toMatchObject({ status: 412 })
+      })
+      expect(h1.create).not.toHaveBeenCalled()
+      expect(mocks.storeState.setServerChatAssistantKind).toHaveBeenCalledWith(
+        "persona"
+      )
+      expect(mocks.storeState.setServerChatAssistantId).toHaveBeenCalledTimes(
+        boundary === "current" ? 1 : 0
+      )
+      expect(dispatch).toHaveBeenCalledTimes(boundary === "current" ? 1 : 0)
+      expect(
+        mocks.storeState.setServerChatPersonaMemoryMode
+      ).toHaveBeenCalledTimes(boundary === "current" ? 1 : 0)
+      expect(store.getState()).toMatchObject({
+        historyId: original.historyId,
+        serverChatId: original.serverChatId,
+        chatDraftAddress: original.chatDraftAddress,
+        chatDraftRevision: original.chatDraftRevision
+      })
+      expect(account.isCurrent()).toBe(true)
+    } finally {
+      hook.unmount()
+      dispatch.mockRestore()
+      settings.mockRestore()
+    }
+  }
+)
 
 it("edits an ordinary local sidepanel message while history selection is idle", async () => {
   localMutationController()
@@ -995,10 +1271,25 @@ it("an older sidepanel send cannot clear the newer send's activity or Stop contr
   })
 })
 
-it("mounted sidepanel native character uses owner selection and ACK without legacy persistence", async () => {
+const installWorkspaceCharacterFixture = () => {
+  const current = h1.controller.getCurrent()
+  if (current.owner?.kind !== "native") throw new Error("workspace fixture requires its accepted native owner")
+  current.owner.scope = { type: "workspace", workspaceId: "original-compact-workspace" }
+  installFixtureReceipt(current, undefined, mocks.chatBaseState.historyId)
+}
+const installSavedRoleplayFixture = () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  h1.roleplayEnabled = true
+  h1.roleplayState.set(nativeChatId, { tail: "a1", historyVersion: 9, rows: [], content: new Map() })
+}
+
+it("workspace H1: mounted sidepanel native character uses owner selection and ACK without legacy persistence", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   h1.wire.mockImplementation(async function* (request) {
     yield {
       tldw_history_admission_v1: {
@@ -1054,17 +1345,15 @@ const nativeAdmission = (request: any) => ({
 })
 
 it.each(["current", "navigation", "account", "owner lease"])("compact native settings-read feedback belongs to its %s source", async boundary => {
-  h1.native = true
-  mocks.storeState.serverChatCharacterId = "12"
-  mocks.storeState.serverChatAssistantKind = "character"
+  installSavedRoleplayFixture()
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   let rejectRead!: (error: Error) => void
-  vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise((_, reject) => { rejectRead = reject }))
+  vi.mocked(api.getChat).mockImplementationOnce(() => new Promise((_, reject) => { rejectRead = reject }))
   const { result } = renderHook(() => useMessage())
   let sending!: Promise<unknown>
   await act(async () => {
     sending = result.current.onSubmit({ message: "  exact input  ", image: "" })
-    await (await import("@testing-library/react")).waitFor(() => expect(api.getChatSettings).toHaveBeenCalledOnce())
+    await (await import("@testing-library/react")).waitFor(() => expect(api.getChat).toHaveBeenCalledOnce())
   })
   if (boundary === "navigation") h1.controller.navigate()
   else if (boundary === "account") h1.auth.abort()
@@ -1073,16 +1362,19 @@ it.each(["current", "navigation", "account", "owner lease"])("compact native set
   await act(async () => { rejectRead(new Error("failed read")); submitted = await sending })
   expect(submitted).toMatchObject({ status: "failed", errorMessage: "native_history_settings_unverified" })
   expect(h1.capture).not.toHaveBeenCalled()
+  expect(h1.roleplayAppend).not.toHaveBeenCalled()
+  expect(h1.roleplayComplete).not.toHaveBeenCalled()
   expect(h1.wire).not.toHaveBeenCalled()
   expect(h1.recover).not.toHaveBeenCalled()
   if (boundary === "current") expect(mocks.notification.error.mock.lastCall?.[0].description).toContain("Your message has not been sent")
   else expect(mocks.notification.error).not.toHaveBeenCalled()
 })
 
-it("compact native admitted transport text cannot certify a failed settings read", async () => {
+it("workspace H1: compact native admitted transport text cannot certify a failed settings read", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   h1.wire.mockImplementation(async function* (request) {
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield await Promise.reject(new Error("native_history_settings_unverified"))
@@ -1093,10 +1385,11 @@ it("compact native admitted transport text cannot certify a failed settings read
   expect(mocks.notification.error.mock.lastCall?.[0].description).not.toContain("Your message has not been sent")
 })
 
-it("compact native confirmed context refusal retains raw input and shows a failed result without a transcript row", async () => {
+it("workspace H1: compact native confirmed context refusal retains raw input and shows a failed result without a transcript row", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   h1.wire.mockImplementation(async function* () {
     yield await Promise.reject(
       Object.assign(new Error("HTTP 409"), {
@@ -1132,10 +1425,11 @@ it("compact native confirmed context refusal retains raw input and shows a faile
   expect(h1.wire).toHaveBeenCalledOnce()
 })
 
-it.each(["http502", "sse-afteradmission"])("native provider recovery for %s retains its receipt and exposes existing model settings", async failure => {
+it.each(["http502", "sse-afteradmission"])("workspace H1: native provider recovery for %s retains its receipt and exposes existing model settings", async failure => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   const safeMessage = "The selected provider credentials could not be authenticated."
   h1.wire.mockImplementation(async function* (request) {
     if (failure === "http502") throw Object.assign(new Error(safeMessage), {
@@ -1169,10 +1463,11 @@ it.each(["http502", "sse-afteradmission"])("native provider recovery for %s reta
   expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
 })
 
-it.each(["navigation", "account"])("native provider recovery cannot overwrite a changed %s", async boundary => {
+it.each(["navigation", "account"])("workspace H1: native provider recovery cannot overwrite a changed %s", async boundary => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   h1.wire.mockImplementation(async function* () {
     if (boundary === "navigation") h1.controller.navigate()
     else h1.auth.abort()
@@ -1189,10 +1484,11 @@ it.each(["navigation", "account"])("native provider recovery cannot overwrite a 
 })
 
 
-it("native before-first sends no historical content and retains unacknowledged text separately", async () => {
+it("workspace H1: native before-first sends no historical content and retains unacknowledged text separately", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   const current = h1.controller.getCurrent()
   current.view.cursor = { kind: "empty" }
   current.capture = captureFor(current.view)
@@ -1247,11 +1543,12 @@ it("native before-first sends no historical content and retains unacknowledged t
 })
 
 it.each(["wrong-selection", "result-before-admission", "wrong-conversation"])(
-  "native %s cannot supply an owner result",
+  "workspace H1: native %s cannot supply an owner result",
   async (failure) => {
     h1.native = true
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
     h1.wire.mockImplementation(async function* (request) {
       if (failure !== "result-before-admission")
         yield {
@@ -1284,10 +1581,11 @@ it.each(["wrong-selection", "result-before-admission", "wrong-conversation"])(
   }
 )
 
-it("native selection navigation preserves server ownership and never overwrites the new view", async () => {
+it("workspace H1: native selection navigation preserves server ownership and never overwrites the new view", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   const { result } = renderHook(() => useMessage())
   h1.wire.mockImplementation(async function* (request) {
     yield { tldw_history_admission_v1: nativeAdmission(request) }
@@ -1313,10 +1611,11 @@ it("native selection navigation preserves server ownership and never overwrites 
   expect(h1.append).not.toHaveBeenCalled()
 })
 
-it("native settings drift during capture prevents dispatch", async () => {
+it("workspace H1: native settings drift during capture prevents dispatch", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   const { useMcpToolsStore } = (await import("@/store/mcp-tools")) as any
   const previous = useMcpToolsStore.getState()
   h1.capture.mockImplementationOnce(async (_id, request) => {
@@ -1333,11 +1632,12 @@ it("native settings drift during capture prevents dispatch", async () => {
 })
 
 it.each(["account change", "disconnect"])(
-  "native %s retains accepted evidence under the origin without claiming response settlement",
+  "workspace H1: native %s retains accepted evidence under the origin without claiming response settlement",
   async (interruption) => {
     h1.native = true
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
     h1.wire.mockImplementation(async function* (request) {
       yield { tldw_history_admission_v1: nativeAdmission(request) }
       mocks.setMessages.mockClear()
@@ -1385,10 +1685,11 @@ it.each(["account change", "disconnect"])(
   }
 )
 
-it("a disconnect after the native owner ACK preserves the completed outcome", async () => {
+it("workspace H1: a disconnect after the native owner ACK preserves the completed outcome", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   h1.wire.mockImplementation(async function* (request) {
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield {
@@ -1492,10 +1793,9 @@ it.each([false, true])(
     } else {
       expect(draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId, ownerKey: "native-key" })
       expect(draftStore.getState().chatDraftTransition).toMatchObject({ kind: "bind", sourceAddress: sourceDraft })
-      expect(h1.wire).toHaveBeenCalledOnce()
-      expect(
-        h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
-      ).toEqual([])
+      expect(h1.roleplayAppend).toHaveBeenCalledWith(nativeChatId, expect.objectContaining({ content: "next", expected: expect.objectContaining({ tail: { message_id: null, message_version: null } }) }), expect.objectContaining({ requestScope: mocks.makeSnapshot().requestScope }))
+      expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+      expect(h1.wire).not.toHaveBeenCalled()
       expect(mocks.storeState.setServerChatId).toHaveBeenCalledWith(
         nativeChatId
       )
@@ -1540,7 +1840,9 @@ it("dispatches first native creation through a real controller epoch and accepte
   await act(async () => { await hook.result.current.onSubmit({ message: "first", image: "" }) })
   expect(sourceCurrent()).toBe(false)
   expect(h1.create).toHaveBeenCalledOnce()
-  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+  expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+  expect(h1.wire).not.toHaveBeenCalled()
   expect(actual.useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
   const boundTarget = captureCurrentActorSceneTarget(h1.controller)
   expect(boundTarget).not.toBeNull()
@@ -1549,7 +1851,7 @@ it("dispatches first native creation through a real controller epoch and accepte
   expect(boundScene.settings).toEqual(originalScene)
   expect(boundScene.originalRecord?.value).toEqual(sourceRecord!.value)
   expect(mocks.getActorScene).toHaveBeenCalledOnce()
-  expect(JSON.stringify(h1.wire.mock.calls[0][0])).not.toContain(originalScene.notes)
+  expect(JSON.stringify(h1.roleplayComplete.mock.calls[0][1])).not.toContain(originalScene.notes)
   hook.unmount()
   selection.unmount()
 })
@@ -1580,10 +1882,11 @@ it("native dispatch freezes workspace routing independently of the view owner", 
   expect(h1.live).not.toHaveBeenCalled()
 })
 
-it("an older native completion cannot release a newer operation's Stop control", async () => {
+it("workspace H1: an older native completion cannot release a newer operation's Stop control", async () => {
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
+  installWorkspaceCharacterFixture()
   let enterFirst!: () => void,
     enterSecond!: () => void,
     releaseFirst!: () => void,
@@ -2800,9 +3103,10 @@ describe("compact submission outcomes", () => {
   })
 
   it.each([false, true])(
-    "returns submitted after a verified native settlement (late disconnect=%s)",
+    "workspace H1: returns submitted after a verified native settlement (late disconnect=%s)",
     async (lateDisconnect) => {
       h1.native = true
+    installWorkspaceCharacterFixture()
       mocks.storeState.serverChatCharacterId = "12"
       mocks.storeState.serverChatAssistantKind = "character"
       h1.wire.mockImplementation(async function* (request) {
@@ -2828,8 +3132,9 @@ describe("compact submission outcomes", () => {
     }
   )
 
-  it("returns failed when native admission has no settlement, keeping the recovery receipt", async () => {
+  it("workspace H1: returns failed when native admission has no settlement, keeping the recovery receipt", async () => {
     h1.native = true
+    installWorkspaceCharacterFixture()
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
     h1.wire.mockImplementation(async function* (request) {
@@ -2981,12 +3286,13 @@ describe("side-panel send gate (XP-08)", () => {
 })
 
 
-it("keeps a failed actual scene read ahead of compact native admission and shows recovery guidance", async () => {
+it("workspace H1: keeps a failed actual scene read ahead of compact native admission and shows recovery guidance", async () => {
   const { Storage } = await import("@plasmohq/storage")
   const service = await vi.importActual<
     typeof import("@/services/actor-settings")
   >("@/services/actor-settings")
   mocks.getActorScene.mockImplementationOnce(service.getActorSceneForChat)
+  installWorkspaceCharacterFixture()
   const target = captureCurrentActorSceneTarget(h1.controller)
   expect(target).not.toBeNull()
   const read = vi
@@ -4849,9 +5155,10 @@ describe("rendered Delete ownership", () => {
 })
 
 it.each(["confirmed", "wrong-parent", "stream-evidence", "explicit-branch"])(
-  "native branch refusal distinguishes %s before any observed turn",
+  "workspace H1: native branch refusal distinguishes %s before any observed turn",
   async (kind) => {
     h1.native = true
+    installWorkspaceCharacterFixture()
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
     h1.controller.holdStaleSend = vi.fn(() => true)
@@ -4903,9 +5210,10 @@ it.each(["confirmed", "wrong-parent", "stream-evidence", "explicit-branch"])(
 )
 
 it.each(["H1", "account", "draft", "journal failure"])(
-  "native confirmed refusal owns its recovery through %s",
+  "workspace H1: native confirmed refusal owns its recovery through %s",
   async (boundary) => {
     h1.native = true
+    installWorkspaceCharacterFixture()
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
     const actualStore =
@@ -4960,8 +5268,9 @@ it.each(["H1", "account", "draft", "journal failure"])(
   }
 )
 
-it("mounted Character Send holds an older-server continuation locally, before any dispatch record or generation", async () => {
+it("workspace H1: mounted Character Send holds an older-server continuation locally, before any dispatch record or generation", async () => {
   h1.native = true
+    installWorkspaceCharacterFixture()
   mocks.storeState.serverChatCharacterId = "12"
   mocks.storeState.serverChatAssistantKind = "character"
   h1.spec.mockResolvedValue(null)
@@ -5013,9 +5322,10 @@ it("mounted Character Send holds an older-server continuation locally, before an
 })
 
 it.each(["H1", "account", "New", "unmount"])(
-  "held Character contract discovery cannot restore authority after %s",
+  "workspace H1: held Character contract discovery cannot restore authority after %s",
   async (boundary) => {
     h1.native = true
+    installWorkspaceCharacterFixture()
     mocks.storeState.serverChatCharacterId = "12"
     mocks.storeState.serverChatAssistantKind = "character"
     h1.controller.holdStaleSend = vi.fn(() => true)
@@ -5056,3 +5366,83 @@ it.each(["H1", "account", "New", "unmount"])(
     if (boundary !== "unmount") mounted.unmount()
   }
 )
+
+
+it("mounted Compact saved Roleplay dispatch bypasses mutable live Scene and model defaults", async () => {
+  const sender = await import("../chat/roleplay-resume-send")
+  const send = vi
+    .spyOn(sender, "sendSavedRoleplay")
+    .mockResolvedValue(true)
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  mocks.storeState.selectedModel = ""
+  mocks.getActorScene.mockRejectedValue(new Error("live Scene forbidden"))
+  const hook = renderHook(() => useMessage())
+  try {
+    await act(async () => {
+      await hook.result.current.onSubmit({
+        message: "  Exact Compact literal\n",
+        image: ""
+      })
+    })
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        controller: h1.controller,
+        message: "  Exact Compact literal\n",
+        serverChatId: nativeChatId
+      })
+    )
+    expect(mocks.getActorScene).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+  } finally {
+    hook.unmount()
+    send.mockRestore()
+  }
+})
+
+
+it("mounted Compact global saved Roleplay submits exact literal input with original protected receipts", async () => {
+  installSavedRoleplayFixture()
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "  Exact Compact literal\nSecond line.  ", image: "" }) })
+  expect(h1.roleplayAppend).toHaveBeenCalledWith(nativeChatId, expect.objectContaining({ content: "  Exact Compact literal\nSecond line.  ", expected: expect.objectContaining({ tail: { message_id: "a1", message_version: 1 } }) }), expect.objectContaining({ requestScope: mocks.makeSnapshot().requestScope }))
+  expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+  expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({ conversation_id: nativeChatId, view_session_id: "origin" }), h1.roleplayComplete.mock.calls[0][1].tldw_roleplay_resume_v1.assistant_message_id, expect.any(Function))
+  expect(mocks.getActorScene).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it("mounted Compact global saved Roleplay refuses a before-first cursor without changing its canonical tail", async () => {
+  installSavedRoleplayFixture()
+  const current = h1.controller.getCurrent()
+  current.view.cursor = { kind: "empty" }
+  current.capture = captureFor(current.view)
+  const { result } = renderHook(() => useMessage())
+  let submitted: unknown
+  await act(async () => { submitted = await result.current.onSubmit({ message: "  Keep original branch input  ", image: "" }) })
+  expect(submitted).toMatchObject({ status: "failed" })
+  expect(h1.roleplayState.get(nativeChatId)!.tail).toBe("a1")
+  expect(h1.roleplayAppend).not.toHaveBeenCalled()
+  expect(h1.roleplayComplete).not.toHaveBeenCalled()
+  expect(h1.recover).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it.each(["append", "completion"])("mounted Compact global saved Roleplay rejects a foreign %s receipt", async boundary => {
+  installSavedRoleplayFixture()
+  if (boundary === "append") h1.roleplayAppend.mockImplementationOnce(async (id, input, options) => {
+    options.onDispatch?.(); return { ...roleplayAppend(id, input), conversation_id: "foreign-chat" }
+  })
+  else h1.roleplayComplete.mockImplementationOnce(async (id, body, options) => {
+    options.onDispatch?.(); return { ...roleplayCompletion(id, body), chat_id: "foreign-chat" }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "  Original owned input  ", image: "" }) })
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ conversation_id: nativeChatId, input_text: "  Original owned input  ", state: boundary === "append" ? "unknown" : "generated_unsaved" })
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})

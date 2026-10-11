@@ -506,6 +506,7 @@ export const saveMessageOnSuccess = async ({
   fullText,
   source,
   assistantImages,
+  resolveAssistantMedia,
   message_source = "web-ui",
   message_type,
   userMessageType,
@@ -547,6 +548,7 @@ export const saveMessageOnSuccess = async ({
   fullText: string
   source: any[]
   assistantImages?: string[]
+  resolveAssistantMedia?: () => { assistantImages?: string[]; generationInfo?: unknown }
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
   userMessageType?: string
@@ -682,6 +684,7 @@ export const saveMessageOnSuccess = async ({
         const lastMessage = await getLastChatHistory(targetHistoryId)
         await updateMessage(targetHistoryId, lastMessage.id, fullText)
       } else {
+        const media = resolveAssistantMedia?.()
         await saveMessage({
           id: assistantMessageId,
           serverMessageId: assistantServerMessageId,
@@ -689,14 +692,14 @@ export const saveMessageOnSuccess = async ({
           name: selectedModel,
           role: "assistant",
           content: fullText,
-          images: assistantImages ?? [],
+          images: media?.assistantImages ?? assistantImages ?? [],
           source,
           time: 2,
           message_type: assistantMessageType ?? message_type,
           clusterId,
           modelId,
           parent_message_id: assistantParentMessageId ?? null,
-          generationInfo,
+          generationInfo: media?.generationInfo ?? generationInfo,
           metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
         })

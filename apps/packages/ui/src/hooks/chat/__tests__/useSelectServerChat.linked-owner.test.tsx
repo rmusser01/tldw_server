@@ -137,3 +137,23 @@ describe("linked Open through actual stores and shared admission", () => {
     ).toMatchObject({ chatId: "saved", onLoaded: expect.any(Function) })
   })
 })
+
+
+it("keeps character list metadata pending until the original scoped detail is loaded", () => {
+  const hook = renderHook(() => useSelectServerChat())
+  act(() =>
+    expect(
+      hook.result.current(
+        {
+          ...chat,
+          assistant_kind: "character",
+          assistant_id: "12",
+          character_id: 12
+        },
+        { temporaryChat: false }
+      )
+    ).toBe(true)
+  )
+  expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
+  hook.unmount()
+})

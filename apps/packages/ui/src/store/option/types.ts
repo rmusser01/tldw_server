@@ -241,6 +241,8 @@ export type State = {
   // Server-backed character chat id
   serverChatId: string | null
   setServerChatId: (id: string | null) => void
+  serverChatRoleplaySetup: import("@/services/tldw/roleplay-resume").SavedRoleplayPresentation | null
+  setServerChatRoleplaySetup: (setup: import("@/services/tldw/roleplay-resume").SavedRoleplayPresentation | null) => void
   serverChatTitle: string | null
   setServerChatTitle: (title: string | null) => void
   serverChatCharacterId: string | number | null

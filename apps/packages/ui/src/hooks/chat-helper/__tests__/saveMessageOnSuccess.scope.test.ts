@@ -129,6 +129,45 @@ describe("saveMessageOnSuccess request scope", () => {
     expect(mocks.saveHistory).toHaveBeenCalledWith("Generated title", false, "web-ui", undefined, undefined, requestScope)
   })
 
+  it("resolves owned assistant media after the user write and immediately before insertion", async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mocks.saveMessage.mockImplementationOnce(async () => {
+      await held
+    })
+    const currentMedia = {
+      assistantImages: ["latest-image"],
+      generationInfo: { selected: "latest" }
+    }
+    const resolveAssistantMedia = vi.fn(() => currentMedia)
+    const saving = saveMessageOnSuccess(
+      payload({
+        assistantImages: ["original-image"],
+        generationInfo: { selected: "original" },
+        resolveAssistantMedia
+      })
+    )
+    try {
+      await vi.waitFor(() => expect(mocks.saveMessage).toHaveBeenCalledOnce())
+      expect(resolveAssistantMedia).not.toHaveBeenCalled()
+      release()
+      await saving
+      expect(mocks.saveMessage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          role: "assistant",
+          images: currentMedia.assistantImages,
+          generationInfo: currentMedia.generationInfo
+        })
+      )
+      expect(resolveAssistantMedia).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await saving
+    }
+  })
+
   it("retains the server acknowledgement on each matching locally persisted row", async () => {
     await saveMessageOnSuccess(payload({ assistantServerMessageId: "server-assistant-1", userServerMessageId: "server-user-1" }))
     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -354,7 +393,7 @@ it("settles an accepted native parent without duplicating the user or serializin
     createdAt: 123,
     images: [],
     parent_message_id: "accepted"
-  })
+  }, undefined, [])
   expect(mocks.saveMessage).not.toHaveBeenCalled()
   expect(turn.complete).toHaveBeenCalledOnce()
 })

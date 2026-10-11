@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import React from "react"
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
@@ -294,11 +295,42 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         })
         return
       }
+      const savedRoleplay = isSavedRoleplayConversation(historySelection)
+      if (
+        savedRoleplay &&
+        !intent.isImageCommand &&
+        (value.image ||
+          selectedDocuments.length ||
+          uploadedFiles.length ||
+          webSearch ||
+          fileRetrievalEnabled ||
+          (!options?.ignorePinnedResults && ragPinnedResults.length) ||
+          compareModeActive ||
+          openUIRequestMode ||
+          importedSidepanelContext ||
+          researchContext)
+      ) {
+        form.setFieldError(
+          "message",
+          t(
+            "playground:composer.roleplayResumeContext",
+            "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+          )
+        )
+        notificationApi.error({
+          message: t("error"),
+          description: t(
+            "playground:composer.roleplayResumeContext",
+            "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+          )
+        })
+        return
+      }
       const nextMessage = intent.message
       const combinedMessage = intent.isImageCommand
         ? nextMessage
         : buildPinnedMessage(nextMessage, options)
-      const trimmed = combinedMessage.trim()
+      const trimmed = savedRoleplay ? combinedMessage : combinedMessage.trim()
       const visiblePrompt =
         !intent.isImageCommand &&
         trimmed.length === 0 &&
@@ -339,7 +371,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         return
       }
       const shouldQueueInsteadOfSend = isSending
-      if (!intent.isImageCommand) {
+      if (!intent.isImageCommand && !savedRoleplay) {
         if (!compareModeActive) {
           const normalizedSelectedModel = normalizeChatModelId(selectedModel)
           if (!normalizedSelectedModel) {
@@ -413,10 +445,21 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
       const completionIsCurrent = captureCompletionGuard?.() ?? (() => true)
       const inputRevision = form.getRevision?.()
-      const dispatchIsCurrent = captureChatDispatchSource({ selectedModel: selectedModel ?? "", selectionSource: { model: "global", toolChoice: "global" } })
+      const dispatchIsCurrent = savedRoleplay
+        ? () => true
+        : captureChatDispatchSource({
+            selectedModel: selectedModel ?? "",
+            selectionSource: { model: "global", toolChoice: "global" }
+          })
       const preparationIsCurrent = () => currentDraft() && completionIsCurrent() && form.getRevision?.() === inputRevision && dispatchIsCurrent() &&
         (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
-      const sceneCapture = intent.isImageCommand ? null : captureActorSceneSend(historySelection ?? null, () => currentDraft() && dispatchIsCurrent())
+      const sceneCapture =
+        intent.isImageCommand || savedRoleplay
+          ? null
+          : captureActorSceneSend(
+              historySelection ?? null,
+              () => currentDraft() && dispatchIsCurrent()
+            )
       let actorSceneSend: ActorSceneSend | undefined
       if (!intent.isImageCommand) {
         documentPreparation = {
@@ -428,8 +471,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         if (uploadedFiles.length > 0) setIsPreparingDocuments(true)
 
         try {
-          if (!sceneCapture) throw new Error("actor_settings_unavailable")
-          actorSceneSend = await sceneCapture.read()
+          if (!savedRoleplay) {
+            if (!sceneCapture) throw new Error("actor_settings_unavailable")
+            actorSceneSend = await sceneCapture.read()
+          }
         } catch (error) {
           if (preparationIsCurrent() && sceneCapture?.isCurrent() !== false) notificationApi.error({ message: t("error", { defaultValue: "Error" }),
             description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.sceneLoadError", "Scene settings could not be loaded. Existing chat setup was left unchanged.") })

@@ -1,4 +1,5 @@
 import React from "react"
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import { useStoreChatModelSettings } from "@/store/model"
 import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
@@ -286,7 +287,7 @@ export function usePlaygroundQueueManagement(
       const sourceContext = (item.sourceContext ??
         null) as PlaygroundQueuedSourceContext | null
 
-      if (!sourceContext?.isImageCommand) {
+      if (!sourceContext?.isImageCommand && !isSavedRoleplayConversation(historySelection)) {
         if (!item.snapshot.compareMode) {
           const normalizedSelectedModel = normalizeChatModelId(
             item.snapshot.selectedModel
@@ -347,6 +348,7 @@ export function usePlaygroundQueueManagement(
     [
       availableChatModelIds,
       compareModelsSupportCapability,
+      historySelection,
       isQueuedDispatchBlockedByComposerState,
       t
     ]
@@ -379,6 +381,37 @@ export function usePlaygroundQueueManagement(
       const queuedUploadedFiles = Array.isArray(sourceContext?.uploadedFiles)
         ? sourceContext.uploadedFiles
         : []
+
+      if (
+        isSavedRoleplayConversation(historySelection) &&
+        !sourceContext?.isImageCommand
+      ) {
+        if (
+          item.image ||
+          sourceContext?.documents?.length ||
+          sourceContext?.uploadedFiles?.length ||
+          sourceContext?.requestOverrides ||
+          item.snapshot.compareMode ||
+          item.snapshot.chatMode !== "normal" ||
+          item.snapshot.webSearch ||
+          item.snapshot.selectedSystemPrompt ||
+          item.snapshot.toolChoice === "required"
+        )
+          throw new Error(
+            t(
+              "playground:composer.roleplayResumeContext",
+              "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+            )
+          )
+        assertReady()
+        const result = await sendMessage({
+          message: item.promptText,
+          image: "",
+          docs: []
+        })
+        throwIfChatSubmitUnsuccessful(result)
+        return
+      }
 
       const modelSettings = useStoreChatModelSettings.getState()
       const queuedModelSelection = resolveModelSelectorSelection((composerModels ?? []) as ModelSelectorDescriptor[], item.snapshot.selectedModel, modelSettings.apiProvider, {

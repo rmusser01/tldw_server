@@ -1,3 +1,8 @@
+import type {
+  RoleplayResumeMetadata,
+  RoleplayResumeUserAppendRequest,
+  RoleplayResumeUserAppendReceipt
+} from "./roleplay-resume"
 import type { InitialChatSetupAttempt } from "@/utils/settings-return"
 import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
@@ -1105,7 +1110,7 @@ export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
   streamIdleTimeoutMs?: number
 }
 
-export interface ServerChatSummary {
+export interface ServerChatSummary extends RoleplayResumeMetadata {
   id: string
   title: string
   created_at: string
@@ -5975,22 +5980,35 @@ export class TldwApiClientBase {
     return chatRagMethods.createChat.call(this as unknown as TldwApiClientCore, payload, options)
   }
 
+  async appendRoleplayResumeInput(
+    chat_id: string | number,
+    payload: RoleplayResumeUserAppendRequest,
+    options: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<RoleplayResumeUserAppendReceipt> {
+    return chatRagMethods.appendRoleplayResumeInput.call(
+      this as unknown as TldwApiClientCore,
+      chat_id,
+      payload,
+      options
+    )
+  }
+
   async completeCharacterChatTurn(
     chat_id: string | number,
-    payload: Record<string, any>
-  ): Promise<any> {
-    const cid = String(chat_id)
-    return await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/complete-v2`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+    payload: Record<string, unknown>,
+    options?: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<Record<string, unknown>> {
+    return chatRagMethods.completeCharacterChatTurn.call(
+      this as unknown as TldwApiClientCore,
+      chat_id,
+      payload,
+      options
+    )
   }
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     return chatRagMethods.getChat.call(this as unknown as TldwApiClientCore, chat_id, options)
   }

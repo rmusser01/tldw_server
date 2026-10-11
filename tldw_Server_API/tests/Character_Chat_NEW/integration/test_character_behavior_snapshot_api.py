@@ -5164,3 +5164,28 @@ def test_module_creator_uses_database_owner_for_postgres_custom_preset(
         "id": "owner-only-preset",
         "version": 1,
     }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("source_change", ["rename", "delete"])
+def test_resume_detail_displays_frozen_identity_and_completion_after_source_change(
+    test_client, auth_headers, character_db, source_change,
+):
+    character_id = character_db.add_character_card({"name": "Original Ari", "description": "Private original description"})
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={"character_id": character_id, "client_id": str(character_db.client_id), "title": "Original conversation"},
+        provider="local-llm", model="original-model",
+    )
+    card = character_db.get_character_card_by_id(character_id)
+    if source_change == "rename":
+        assert character_db.update_character_card(character_id, {"name": "Changed Ari"}, expected_version=card["version"])
+    else:
+        assert character_db.soft_delete_character_card(character_id, expected_version=card["version"])
+    response = test_client.get(f"/api/v1/chats/{conversation_id}", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["assistant_name"] == "Original Ari"
+    assert body["character_name"] == "Original Ari"
+    assert body["resume_completion"] == {"provider": "local-llm", "model": "original-model"}
+    assert "Private original description" not in response.text

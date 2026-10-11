@@ -1,3 +1,4 @@
+import { parseRoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
 import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
@@ -1546,7 +1547,7 @@ export function useHistorySelection(
           live.current.view !== origin ||
           live.current.owner !== owner ||
           !saved ||
-          (saved.turn.action !== "edit_resend" && saved.turn.action !== "regenerate") ||
+          (saved.turn.action !== "edit_resend" && saved.turn.action !== "regenerate" && !saved.turn.roleplay_resume) ||
           saved.turn.action !== entry.turn.action ||
           saved.turn.persistence !== "server" ||
           saved.turn.outcome !== "complete" ||
@@ -1554,6 +1555,18 @@ export function useHistorySelection(
           saved.turn.settled_message_id !== entry.turn.settled_message_id
         )
           return false
+        if (saved.turn.roleplay_resume) {
+          const receipt = parseRoleplayResumeRecovery(
+            saved.turn.roleplay_resume
+          ).completion
+          if (
+            !receipt?.saved ||
+            receipt.chat_id !== origin.conversation_id ||
+            receipt.assistant_message_id !== saved.turn.settled_message_id ||
+            receipt.assistant_content !== saved.turn.result_text
+          )
+            return false
+        }
         const opened = await followResult(
           origin,
           saved.turn.settled_message_id,
@@ -1572,6 +1585,10 @@ export function useHistorySelection(
         )
           return false
         try {
+          if (saved.turn.retained_result_texts?.length) {
+            await refreshRecovery()
+            return true
+          }
           await dismissHistoryTurnRecovery(
             saved.scope,
             origin,
