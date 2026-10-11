@@ -3,12 +3,14 @@
 import asyncio
 import gc
 import inspect
+import time
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.LLM_Calls import usage_accounting
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
@@ -321,7 +323,6 @@ async def test_non_finite_usage_never_raises_and_counts_as_zero(rows) -> None:
 
 async def test_a_recorder_bug_never_reaches_the_caller(monkeypatch: pytest.MonkeyPatch, rows) -> None:
     """A failure inside the recorder neither changes a result nor masks a provider exception."""
-    from tldw_Server_API.app.core.LLM_Calls import usage_accounting
 
     def _bug(*args: Any, **kwargs: Any) -> None:
         """Fail like a bug in the recorder."""
@@ -391,6 +392,15 @@ async def test_the_system_prompt_is_counted_in_the_prompt_estimate(rows) -> None
         _NoUsageProvider().chat(request)
     (row,) = await _settled(rows)
     assert 1000 <= row["prompt_tokens"] <= 1030
+
+
+def test_the_prompt_estimate_stays_linear_on_a_crafted_prompt() -> None:
+    """Many ``data:image`` markers with no comma must not make the redaction quadratic."""
+    request = {"model": "m1", "messages": [{"role": "user", "content": "data:image" * 50_000}]}
+    started = time.monotonic()
+    estimate = usage_accounting._prompt_estimate(request)
+    assert time.monotonic() - started < 2.0
+    assert estimate > 100_000
 
 
 async def test_a_usage_block_without_token_fields_is_estimated(rows) -> None:

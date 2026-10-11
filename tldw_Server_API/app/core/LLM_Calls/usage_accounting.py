@@ -62,8 +62,10 @@ def _approx_tokens(char_count: int) -> int:
     return max(1, char_count // 4) if char_count > 0 else 0
 
 
-# The same redaction the chat endpoint's estimator applies (chat_service._DATA_URI_RE).
-_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
+# Redacts base64 image payloads before the estimate, as the chat endpoint's estimator does.
+# The media-type part is bounded: an unbounded ``[^,]*`` rescans to the end of the text for
+# every ``data:image`` with no comma after it, which is quadratic on a crafted prompt.
+_DATA_URI_RE = re.compile(r'(data:image[^,"\s]{0,128},)[^"\s]+', re.IGNORECASE)
 
 
 def _prompt_estimate(request: Any) -> int:
