@@ -23,6 +23,7 @@ import {
 } from "@/services/chat-history-selection"
 import {
   saveHistoryTurnRecovery,
+  retainHistoryTurnRecoveryInMemory,
   dismissHistoryTurnRecovery
 } from "@/db/dexie/history-selection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
@@ -59,7 +60,9 @@ import { systemPromptFormatter } from "@/utils/system-message"
 import type { ActorSettings } from "@/types/actor"
 import type { ActorSceneRead } from "@/services/actor-settings"
 import { bindActorSceneAfterLoad } from "@/hooks/chat/actor-scene-source"
-import { maybeInjectActorMessage } from "@/utils/actor"
+import { buildActorPrompt, maybeInjectActorMessage, shouldInjectActorForTemplates } from "@/utils/actor"
+import { removeReasoning } from "@/libs/reasoning"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { getSearchSettings } from "@/services/search"
@@ -692,6 +695,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       baseSystemPrompts.push(overlayPrompt)
     }
 
+    let currentSystemMessages: typeof applicationChatHistory = []
     if (baseSystemPrompts.length > 0) {
       const promptMessages = await Promise.all(
         baseSystemPrompts.map((content) =>
@@ -701,15 +705,22 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         )
       )
       ctx.assertPreparationCurrent?.()
-      applicationChatHistory = [...promptMessages, ...applicationChatHistory]
+      currentSystemMessages = promptMessages
     }
 
     const templatesActive = !!ctx.selectedSystemPrompt
-    applicationChatHistory = await maybeInjectActorMessage(
-      applicationChatHistory,
-      ctx.actorSettings || null,
-      templatesActive
-    )
+    const actor = ctx.actorSettings
+    const actorRewritesHistory = Boolean(actor &&
+      shouldInjectActorForTemplates({ settings: actor, templatesActive }) && buildActorPrompt(actor) &&
+      ((actor.chatRole && actor.chatRole !== "system") ||
+        (actor.chatPosition === "depth" && actor.chatDepth > 0)))
+    if (actorRewritesHistory) {
+      applicationChatHistory = await maybeInjectActorMessage(
+        [...currentSystemMessages, ...applicationChatHistory], actor, templatesActive)
+    } else {
+      currentSystemMessages = await maybeInjectActorMessage(currentSystemMessages, actor || null, templatesActive)
+      applicationChatHistory = [...currentSystemMessages, ...applicationChatHistory]
+    }
     ctx.assertPreparationCurrent?.()
 
     if (webSearchSystemMessage) {
@@ -718,6 +729,11 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 
     return {
       chatHistory: applicationChatHistory,
+      ...(!actorRewritesHistory && !(ctx.useOCR && ctx.image) && ctx.messageForModel === undefined &&
+        !ctx.historyTurn?.clientManagedContext &&
+        !(ctx.historyForModel ?? ctx.history).some(row => row.role === "system" || (row.role === "assistant" &&
+          (decodeChatErrorPayload(row.content) || removeReasoning(row.content) !== row.content)))
+        ? { nativeCurrentInput: [...currentSystemMessages, ...(webSearchSystemMessage ? [webSearchSystemMessage] : [])] } : {}),
       humanMessage,
       sources: webSearchSources,
       promptId,
@@ -1119,7 +1135,12 @@ const captureNormalHistoryTurn = async (
   const saveRecord = (next: HistoryTurnRecovery) => {
     const write = recoveryWrites.then(async () => {
       lastRecord = next
-      await saveHistoryTurnRecovery(bookmarkScope, view, next)
+      try { await saveHistoryTurnRecovery(bookmarkScope, view, next) }
+      catch (error) {
+        if (next.persistence !== "server" || !next.result_text) throw error
+        await retainHistoryTurnRecoveryInMemory(bookmarkScope, view, next)
+        console.warn("Recovered server reply text is retained in this window only.")
+      }
     })
     recoveryWrites = write.catch(() => undefined)
     return write
@@ -1142,8 +1163,11 @@ const captureNormalHistoryTurn = async (
     request_context_digest: turn.selection!.request_context_digest,
     owner_key: view.owner_key,
     conversation_id: view.conversation_id,
-    input_id: turn.input!.id,
-    assistant_id: turn.assistantId!,
+    ...(turn.persistence === "server" ? {
+      persistence: "server" as const,
+      ...(turn.admission ? { input_id: turn.admission.input_message_id } : {}),
+      ...(turn.resultId ? { assistant_id: turn.resultId } : {})
+    } : { input_id: turn.input!.id, assistant_id: turn.assistantId! }),
     created_at: turn.createdAt!,
     input_text: turn.input!.content,
     input_images: turn.input!.images ?? [],
@@ -1201,14 +1225,14 @@ const captureNormalHistoryTurn = async (
       if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
       if (owner.kind === "native" && turn.historyEdit)
-        await requireNativeHistoryEditAdmission(owner, capture, "messages", {
+        await requireNativeHistoryEditAdmission(owner, capture, turn.persistence === "server" ? "completion" : "messages", {
           signal, validate_lease: editPreparationIsCurrent
         })
       if (
         owner.kind === "native" &&
         turn.historyBranch === false &&
         !turn.retryAdmission &&
-        (await nativeHistoryNeedsBranchChoice(owner, capture, "messages", {
+        (await nativeHistoryNeedsBranchChoice(owner, capture, turn.persistence === "server" ? "completion" : "messages", {
           signal,
           validate_lease: editPreparationIsCurrent
         }))
@@ -1218,11 +1242,13 @@ const captureNormalHistoryTurn = async (
         )
 
       await saveRecord(record(turn, "", "dispatching"))
+      if (turn.persistence === "server" && owner.kind === "native")
+        endReplyWrite = beginServerChatWrite(owner.conversation_id)
       if ((editResend || branchIntent) && !editPreparationIsCurrent())
         throw new Error("stale_selection")
     },
     afterAdmission: async () => {
-      if (turn.owner.kind === "native")
+      if (turn.owner.kind === "native" && !endReplyWrite)
         endReplyWrite = beginServerChatWrite(turn.owner.conversation_id)
       await saveRecord(record(turn, "", "accepted_unsent"))
     },
@@ -1273,16 +1299,17 @@ const captureNormalHistoryTurn = async (
       }
 
       if (turn.resultId) {
+        endReplyWrite?.("saved")
         // Keep the acknowledged receipt until this view or a reopened view follows it.
         await recoveryWrites
         await saveRecord(record(turn, data.content, "generated_unsaved", {
-          outcome: "complete",
+          outcome: turn.outcome ?? "complete",
           settled_message_id: turn.resultId
         }))
         return
       }
       // A reply the server never received leaves the server copy incomplete.
-      endReplyWrite?.(data.content.trim() ? "failed" : "unknown")
+      endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
       await saveRecord(
         record(
           turn,
@@ -1324,7 +1351,7 @@ const captureNormalHistoryTurn = async (
           content ?? lastRecord?.result_text ?? "",
           "generated_unsaved",
           {
-            outcome: "complete",
+            outcome: turn.outcome ?? "complete",
             settled_message_id: turn.resultId
           }
         )
@@ -1352,19 +1379,19 @@ const captureNormalHistoryTurn = async (
     finish: async (followed) => {
       await recoveryWrites
       if (followed || !turn.resultId) {
-        await dismissHistoryTurnRecovery(
-          bookmarkScope,
-          view,
-          operationId,
-          "completed"
-        )
+        try {
+          await dismissHistoryTurnRecovery(bookmarkScope, view, operationId, "completed")
+        } catch (error) {
+          if (turn.persistence !== "server" || !turn.admission || !turn.resultId) throw error
+          console.warn("The server saved the reply; its recovery record could not be cleared.")
+        }
         return
       }
       // The view went away before it could follow the settled reply (the
       // user left /chat): the next view of this chat follows it instead.
       await saveRecord(
         record(turn, lastRecord?.result_text ?? "", "generated_unsaved", {
-          outcome: "complete",
+          outcome: turn.outcome ?? "complete",
           settled_message_id: turn.resultId
         })
       )
@@ -1474,6 +1501,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
         params.userParentMessageId !== selectedParent
       )
         throw new Error("unsupported_history_reply_target")
+      historyTurn.clientManagedContext = params.historyForModel !== undefined
       messages = displayMessages
       params = {
         ...params,

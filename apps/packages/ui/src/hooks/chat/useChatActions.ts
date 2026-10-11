@@ -5557,6 +5557,8 @@ export const useChatActions = ({
       const question = messages[replyIndex - 1]
       if (!question || question.isBot || !question.id) return null
       const current = selection.getCurrent()
+      if (current.owner?.kind === "native" && current.capture?.status === "captured" &&
+        current.capture.snapshot.nodes.some(row => row.id === reply.id && row.role === "assistant" && row.settled)) return null
       const sourceFence = renderedRetryFence!
       const sourceDraft = renderedRetryDraft
       const sameSource = () => {
@@ -5582,9 +5584,9 @@ export const useChatActions = ({
           : selection.recoveries ?? []
       if (!sourceFence() || !sameSource()) return retired()
       const retained = recoveries.filter(
-        (entry) =>
+        (entry) => entry.turn.persistence !== "server" && (
           entry.turn.input_id === question.id ||
-          entry.turn.admission?.input_message_id === question.id
+          entry.turn.admission?.input_message_id === question.id)
       )
       // A server chat's partial reply exists only in its record on this
       // device; a local chat stores the question with its admission.

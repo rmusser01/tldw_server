@@ -1,4 +1,5 @@
 import { ChatTldw } from "./ChatTldw"
+import type { ChatScope } from "@/types/chat-scope"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
@@ -35,6 +36,7 @@ type PageAssistModelOptions = {
   extraBody?: string
   researchContext?: ChatResearchContext
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
   refreshImageCapability?: boolean
   clientMessageId?: string
@@ -71,6 +73,7 @@ export const pageAssistModel = async ({
   extraBody,
   researchContext,
   requestScope,
+  scope,
   retryFailedTurn,
   refreshImageCapability,
   clientMessageId,
@@ -297,6 +300,7 @@ export const pageAssistModel = async ({
     extraBody: resolvedExtraBody,
     researchContext,
     requestScope,
+    scope,
     retryFailedTurn,
     clientMessageId,
     regenerateFromMessageId,

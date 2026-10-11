@@ -578,7 +578,12 @@ export const saveMessageOnSuccess = async ({
   sessionFilesToAdd?: UploadedFile[]
 }) => {
   if (historyTurn) {
-    if (!historyTurn.admission) throw new Error("missing_history_admission")
+    if (!historyTurn.admission) throw new Error('missing_history_admission');
+    if (historyTurn.persistence === 'server') {
+      if (!historyTurn.resultId) throw new Error('missing_native_completion_receipt');
+      await historyTurn.complete?.(fullText);
+      return historyId ?? historyTurn.admission.conversation_id;
+    }
     const native = historyTurn.owner.kind === "native"
     // ponytail: native history retains full reasoning text, not client elapsed-time telemetry.
     // Add a negotiated metadata field if cross-client timing becomes required.

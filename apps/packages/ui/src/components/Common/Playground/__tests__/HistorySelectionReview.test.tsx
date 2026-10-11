@@ -518,6 +518,39 @@ const completedEditedSelection = () =>
     dismissRecovery: vi.fn(async () => true)
   }) as unknown as HistorySelectionController
 
+it.each([true, false])(
+  'ordinary server partial recovery reports known saved ID=%s honestly',
+  async (saved) => {
+    const selection = completedEditedSelection();
+    selection.recoveries[0].turn = {
+      ...selection.recoveries[0].turn,
+      action: undefined,
+      outcome: 'interrupted',
+      ...(saved ? {} : { settled_message_id: undefined }),
+    };
+    render(<HistorySelectionReview selection={selection} />);
+    expect(screen.queryByText(/it was not saved to your server/)).toBeNull();
+    if (saved) {
+      expect(screen.getByText('Reply saved')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Open saved reply' }));
+      await waitFor(() => expect(selection.openRecoveryResult).toHaveBeenCalledOnce());
+    } else {
+      expect(screen.getByText(/server may have saved a reply/)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Open saved reply' })).toBeNull();
+    }
+  }
+);
+
+it.each(['edit_resend', 'regenerate'] as const)(
+  'ordinary partial opening does not widen the existing %s completion gate',
+  (action) => {
+    const selection = completedEditedSelection();
+    Object.assign(selection.recoveries[0].turn, { action, outcome: 'interrupted' });
+    render(<HistorySelectionReview selection={selection} />);
+    expect(screen.queryByRole('button', { name: 'Open saved reply' })).toBeNull();
+  }
+);
+
 it("a saved edited reply has truthful copy and opens only on an explicit action", async () => {
   const selection = completedEditedSelection()
   render(<HistorySelectionReview selection={selection} />)

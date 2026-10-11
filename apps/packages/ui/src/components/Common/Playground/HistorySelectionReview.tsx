@@ -592,6 +592,18 @@ export function HistorySelectionReview({
                 )}
           </p>
         </>
+      ) : entry.turn.persistence === 'server' &&
+        entry.turn.action === undefined &&
+        entry.turn.settled_message_id ? (
+        <>
+          <p className="font-medium">{text('savedNativeReplyTitle', 'Reply saved')}</p>
+          <p>
+            {text(
+              'savedNativeReplyMessage',
+              'The server saved this reply. Open it to review its status and continue from the saved history.'
+            )}
+          </p>
+        </>
       ) : entry.turn.action === "regenerate" ? (
         <>
           <p className="font-medium">
@@ -611,8 +623,8 @@ export function HistorySelectionReview({
                 )}
           </p>
         </>
-      ) : entry.turn.outcome === "stopped" ||
-        entry.turn.outcome === "interrupted" ? (
+      ) : entry.turn.persistence !== 'server' &&
+        (entry.turn.outcome === 'stopped' || entry.turn.outcome === 'interrupted') ? (
         <>
           {/* A partial reply kept on this device only (CS-04, #3104). */}
           <p className="font-medium">
@@ -646,8 +658,10 @@ export function HistorySelectionReview({
           </p>
           <p>
             {text(
-              "recoveryMessage",
-              "The original send outcome is retained separately from history. It will not be sent again automatically."
+              entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
+              entry.turn.persistence === 'server'
+                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat before trying again; recovery will not send it again automatically.'
+                : 'The original send outcome is retained separately from history. It will not be sent again automatically.'
             )}
           </p>
           <p>
@@ -702,9 +716,13 @@ export function HistorySelectionReview({
         onClick={(event) => void acknowledgeRecovery("copy", entry, event.currentTarget)}>
         {text("copyRecovery", "Copy recovered text")}
       </Button>
-      {(entry.turn.action === "edit_resend" ||
-        entry.turn.action === "regenerate" || entry.turn.roleplay_resume?.completion?.saved) &&
-        entry.turn.outcome === "complete" &&
+      {(((entry.turn.action === 'edit_resend' ||
+        entry.turn.action === 'regenerate' ||
+        entry.turn.roleplay_resume?.completion?.saved) &&
+        entry.turn.outcome === 'complete') ||
+        (entry.turn.persistence === 'server' &&
+          entry.turn.action === undefined &&
+          !entry.turn.roleplay_resume)) &&
         entry.turn.settled_message_id && (
           <Button
             disabled={retrying !== null || openingRecovery !== null || recoveryAction?.pending || selection.status !== "ready"}

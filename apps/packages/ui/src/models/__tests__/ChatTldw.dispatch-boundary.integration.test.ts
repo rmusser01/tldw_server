@@ -98,12 +98,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("one-response consumption at the actual chat transport boundary", () => {
-  it("retains steering when actual service initialization fails before dispatch", async () => {
-    vi.mocked(tldwClient.initialize).mockRejectedValueOnce(
-      new Error("Initialization failed")
-    )
-    const consumed = vi.fn()
+describe('one-response consumption at the actual chat transport boundary', () => {
+  it('retains steering when actual service initialization fails before dispatch', async () => {
+    vi.mocked(tldwClient.initialize).mockRejectedValueOnce(new Error('Initialization failed'));
+    const consumed = vi.fn();
     await expect(start(new AbortController().signal, consumed)).rejects.toThrow(
       "Stream completion failed"
     )
@@ -518,13 +516,81 @@ describe("TASK-13274 reasoning through the actual model transport", () => {
         'data: {"choices":[{"delta":{"reasoning_content":"Private thought"}}]}\n\ndata: {"choices":[{"delta":{"reasoning_content":" more","content":"Answer"}}]}\n\ndata: [DONE]\n\n',
         { headers: { "Content-Type": "text/event-stream" } }
       )
-    )
-    const chunks: string[] = []
-    for await (const token of tldwChat.streamMessage(
-      [{ role: "user", content: "Question" }],
-      { model: "test", requestScope }
-    ))
-      chunks.push(token)
-    expect(chunks).toEqual(["Answer"])
-  })
-})
+    );
+    const chunks: string[] = [];
+    for await (const token of tldwChat.streamMessage([{ role: 'user', content: 'Question' }], {
+      model: 'test',
+      requestScope,
+    }))
+      chunks.push(token);
+    expect(chunks).toEqual(['Answer']);
+  });
+  it.each(['web', 'extension'] as const)(
+    'native completion forwards original Workspace and raw metadata through %s',
+    async (transport) => {
+      const frames = [
+        { tldw_history_admission_v1: { input_message_id: 'canonical-input' } },
+        { choices: [{ delta: { content: 'Answer' } }] },
+        {
+          tldw_conversation_id: 'original-chat',
+          tldw_user_message_id: 'canonical-input',
+          tldw_message_id: 'canonical-reply',
+        },
+      ];
+      const handoff = vi.fn(),
+        listeners: Array<(value: unknown) => void> = [];
+      if (transport === 'extension') {
+        boundary.runtimeId = 'extension-fixture';
+        boundary.connect.mockReturnValue({
+          postMessage: (payload: unknown) => {
+            handoff(payload);
+            queueMicrotask(() => {
+              for (const listener of listeners) {
+                for (const frame of frames)
+                  listener({ event: 'data', data: JSON.stringify(frame) });
+                listener({ event: 'done' });
+              }
+            });
+          },
+          disconnect: vi.fn(),
+          onMessage: {
+            addListener: (listener: (value: unknown) => void) => listeners.push(listener),
+            removeListener: vi.fn(),
+          },
+          onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
+        });
+      } else
+        boundary.fetch.mockResolvedValue(
+          new Response(
+            frames.map((frame) => 'data: ' + JSON.stringify(frame) + '\n\n').join('') +
+              'data: [DONE]\n\n',
+            { headers: { 'Content-Type': 'text/event-stream' } }
+          )
+        );
+      const model = new ChatTldw({
+        model: 'test',
+        saveToDb: true,
+        conversationId: 'original-chat',
+        requestScope,
+        scope: { type: 'workspace', workspaceId: 'original-workspace' },
+      });
+      const observe = vi.fn(async (_value: unknown) => {});
+      const preparedRequest = model.prepareNativeHistoryRequest([
+        new HumanMessage('Current literal'),
+      ]);
+      let answer = '';
+      for await (const token of await model.stream([], { preparedRequest, onChunk: observe }))
+        answer += token;
+      expect(answer).toBe('Answer');
+      expect(observe.mock.calls.map(([frame]) => frame)).toEqual(frames);
+      expect(model.serverMessageId).toBeUndefined();
+      const url =
+        transport === 'web'
+          ? String(boundary.fetch.mock.calls[0][0])
+          : (handoff.mock.calls[0][0] as { path: string }).path;
+      expect(url).toContain('scope_type=workspace');
+      expect(url).toContain('workspace_id=original-workspace');
+      expect(preparedRequest).toMatchObject({ save_to_db: true, conversation_id: 'original-chat' });
+    }
+  );
+});

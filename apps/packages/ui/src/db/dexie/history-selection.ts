@@ -1216,11 +1216,13 @@ export const retainHistoryTurnRecoveryInMemory = async (
   view: HistoryViewSelectionV1,
   turn: HistoryTurnRecovery
 ): Promise<void> => {
-  const detached = await projectHistoryTurnRecovery(turn)
+  const detached = await projectHistoryTurnRecovery(turn);
+  const ordinary =
+    detached.persistence === 'server' && !detached.roleplay_resume && detached.action === undefined;
   if (
     !scope.profile_id ||
     !scope.client_session_id ||
-    !detached.roleplay_resume ||
+    (!detached.roleplay_resume && !ordinary) ||
     !detached.result_text ||
     !detached.operation_id ||
     detached.owner_key !== view.owner_key ||
@@ -1228,16 +1230,63 @@ export const retainHistoryTurnRecoveryInMemory = async (
     detached.origin_view.owner_key !== view.owner_key ||
     detached.origin_view.conversation_id !== view.conversation_id
   )
-    fail("history_operation_conflict")
+    fail('history_operation_conflict');
+  if (
+    ordinary &&
+    (!detached.selection_digest ||
+      !detached.request_context_digest ||
+      (detached.admission &&
+        (detached.admission.owner_key !== detached.owner_key ||
+          detached.admission.conversation_id !== detached.conversation_id ||
+          detached.admission.input_message_id !== detached.input_id ||
+          detached.admission.selection_digest !== detached.selection_digest)) ||
+      (!detached.admission && (detached.input_id || detached.assistant_id)) ||
+      (detached.settled_message_id &&
+        (!detached.admission || detached.settled_message_id !== detached.assistant_id)))
+  )
+    fail('history_operation_conflict');
   const key = recoveryKey(scope, detached),
     prior = memoryTurnRecoveries.get(key)
   if (prior) {
-    if (
+    if (ordinary) {
+      if (prior.turn.roleplay_resume) fail('history_operation_conflict');
+      for (const field of [
+        'persistence',
+        'action',
+        'origin_view',
+        'selection_digest',
+        'request_context_digest',
+        'created_at',
+        'input_text',
+        'input_images',
+      ] as const)
+        if (
+          canonicalHistoryJson(prior.turn[field] ?? null) !==
+          canonicalHistoryJson(detached[field] ?? null)
+        )
+          fail('history_operation_conflict');
+      if (
+        (prior.turn.admission &&
+          detached.admission &&
+          canonicalHistoryJson(prior.turn.admission) !==
+            canonicalHistoryJson(detached.admission)) ||
+        (prior.turn.input_id && detached.input_id && prior.turn.input_id !== detached.input_id) ||
+        (prior.turn.assistant_id &&
+          detached.assistant_id &&
+          prior.turn.assistant_id !== detached.assistant_id)
+      )
+        fail('history_operation_conflict');
+      if (
+        (prior.turn.admission && !detached.admission) ||
+        (prior.turn.settled_message_id && !detached.settled_message_id)
+      )
+        return;
+    } else if (
       canonicalHistoryJson(prior.turn.roleplay_resume?.intent) !==
-      canonicalHistoryJson(detached.roleplay_resume.intent)
+      canonicalHistoryJson(detached.roleplay_resume?.intent)
     )
-      fail("history_operation_conflict")
-    detached.retained_result_texts = retainedTexts(prior.turn, detached)
+      fail('history_operation_conflict');
+    if (!ordinary) detached.retained_result_texts = retainedTexts(prior.turn, detached);
   }
   memoryTurnRecoveries.set(key, {
     scope: structuredClone(scope),
@@ -1252,7 +1301,7 @@ export const saveHistoryTurnRecovery = async (
   const detached = await projectHistoryTurnRecovery(turn)
   const key = recoveryKey(scope, detached),
     volatile = memoryTurnRecoveries.get(key)
-  if (volatile)
+  if (volatile && detached.roleplay_resume)
     detached.retained_result_texts = retainedTexts(volatile.turn, detached)
   let written = false
   await db.transaction("rw", [db.userSettings, db.historySelections], async () => {
@@ -1395,15 +1444,16 @@ export const loadHistoryTurnRecoveries = async (
       scope: active.scope,
       turn: {
         ...active.turn,
-        recovery_storage: "memory",
-        retained_result_texts: existing
-          ? retainedTexts(
-              active === entry ? existing.turn : entry.turn,
-              active.turn
-            )
-          : entry.turn.retained_result_texts
-      }
-    })
+        recovery_storage: 'memory',
+        ...(active.turn.roleplay_resume
+          ? {
+              retained_result_texts: existing
+                ? retainedTexts(active === entry ? existing.turn : entry.turn, active.turn)
+                : entry.turn.retained_result_texts,
+            }
+          : {}),
+      },
+    });
   }
   return [...results.values()].map((entry) => structuredClone(entry))
 }

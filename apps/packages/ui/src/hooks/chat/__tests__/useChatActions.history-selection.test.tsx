@@ -163,26 +163,40 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", async (original) => {
-  const actual = await original<typeof import("@/store/option")>()
+vi.mock('@/store/option', async (original) => {
+  const actual = await original<typeof import('@/store/option')>();
+  type State = ReturnType<typeof actual.useStoreMessageOption.getState>;
+  const frames = new WeakMap<State, State>();
+  const getState = () => {
+    const state = actual.useStoreMessageOption.getState();
+    const projected = {
+      ...state,
+      ...messageStoreState.value,
+      ...messageStoreState.draftFields?.(),
+      ...(messageStoreState.editRows ? { messages: messageStoreState.editRows() } : {}),
+    };
+    const previous = frames.get(state);
+    if (
+      previous &&
+      Object.keys(projected).every(
+        (key) => projected[key as keyof State] === previous[key as keyof State]
+      )
+    )
+      return previous;
+    frames.set(state, projected);
+    return projected;
+  };
   return {
     ...actual,
     useStoreMessageOption: Object.assign(
-      (
-        select: (
-          state: ReturnType<typeof actual.useStoreMessageOption.getState>
-        ) => unknown
-      ) => actual.useStoreMessageOption(select),
+      (select: (state: State) => unknown) => actual.useStoreMessageOption(select),
       {
         setState: actual.useStoreMessageOption.setState,
-        getState: () => ({
-          ...actual.useStoreMessageOption.getState(),
-          ...messageStoreState.value,
-          ...messageStoreState.draftFields?.(),
-          ...(messageStoreState.editRows
-            ? { messages: messageStoreState.editRows() }
-            : {})
-        })
+        getState,
+        subscribe: (listener: (state: State, previous: State) => void) =>
+          actual.useStoreMessageOption.subscribe((state, previous) =>
+            listener(getState(), frames.get(previous) ?? previous)
+          ),
       }
     )
   }
@@ -412,15 +426,15 @@ vi.mock("@/services/tldw-server", async (original) => ({
 vi.mock("@/utils/human-message", async () => {
   const { HumanMessage } = await import("@/types/messages")
   return {
-    humanMessageFormatter: async ({ content }: any) =>
-      new HumanMessage({ content })
-  }
-})
-vi.mock("@/utils/actor", () => ({
-  maybeInjectActorMessage: async (rows: any) => rows
-}))
-vi.mock("@/models", async () => {
-  const { ChatTldw } = await import("@/models/ChatTldw")
+    humanMessageFormatter: async ({ content }: any) => new HumanMessage({ content }),
+  };
+});
+vi.mock('@/utils/actor', async (original) => ({
+  ...(await original<typeof import('@/utils/actor')>()),
+  maybeInjectActorMessage: async (rows: any) => rows,
+}));
+vi.mock('@/models', async () => {
+  const { ChatTldw } = await import('@/models/ChatTldw');
   return {
     pageAssistModel: async (options: any) => {
       await h1.beforeModel()
@@ -3940,21 +3954,69 @@ const mountInterruptedRetry = async (local = false, invalidCompare = false) => {
     const authority = await vi.importActual<typeof import("@/db/dexie/history-selection")>("@/db/dexie/history-selection")
     h1.localCapture.mockImplementation(authority.captureLocalHistorySnapshot)
   }
-  const selection = renderHook(() => useHistorySelection())
-  await act(async () => { expect(await selection.result.current.loadConversation(local ? { historyId: "history-1" } : { serverChatId: nativeChatId })).toBe(true) })
-  h1.controller = Object.assign(selection.result.current, { draftAccount: declaredDraftAccount() })
-  const current = selection.result.current.getCurrent()
-  installAcceptedSource(current as HistoryLoadReceipt)
-  const admission = { version: 1, owner_key: current.view!.owner_key, conversation_id: current.view!.conversation_id, input_message_id: "u-old", input_message_revision: "r1", selection_digest: "accepted", messages: [], originating_selection_revision: 1 }
-  const entry = { scope: current.bookmarkScope!, turn: { version: 1, operation_id: "interrupted-retry", owner_key: current.view!.owner_key, conversation_id: current.view!.conversation_id, origin_view: current.view, input_id: "u-old", input_text: "old question", result_text: "partial", state: "generated_unsaved", persistence: "server", admission } }
-  const options = { ...ordinaryOptions(), ...(invalidCompare ? { compareModeActive: true, compareFeatureEnabled: true, compareSelectedModels: [] } : {}), ...(local ? { serverChatId: null, historyId: "history-1" } : {}), messages: [ { id: "u-old", isBot: false, message: "old question", sources: [] }, { id: "a1", isBot: true, message: "partial", generationInfo: { interrupted: true }, sources: [] } ] }
-  const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
-  const choose = vi.spyOn(selection.result.current, "choose")
-  const dismiss = vi.spyOn(selection.result.current, "dismissRecovery")
-  normalChatModeMock.mockResolvedValue({ status: "submitted" })
-  h1.lookupRecoveries.mockResolvedValue([entry])
-  return { selection, hook, options, draftStore, entry, admission, choose, dismiss }
-}
+  const selection = renderHook(() => useHistorySelection());
+  await act(async () => {
+    expect(
+      await selection.result.current.loadConversation(
+        local ? { historyId: 'history-1' } : { serverChatId: nativeChatId }
+      )
+    ).toBe(true);
+  });
+  h1.controller = Object.assign(selection.result.current, { draftAccount: declaredDraftAccount() });
+  const current = selection.result.current.getCurrent();
+  installAcceptedSource(current as HistoryLoadReceipt);
+  const admission = {
+    version: 1,
+    owner_key: current.view!.owner_key,
+    conversation_id: current.view!.conversation_id,
+    input_message_id: 'u-old',
+    input_message_revision: 'r1',
+    selection_digest: 'accepted',
+    messages: [],
+    originating_selection_revision: 1,
+  };
+  const entry = {
+    scope: current.bookmarkScope!,
+    turn: {
+      version: 1,
+      operation_id: 'interrupted-retry',
+      owner_key: current.view!.owner_key,
+      conversation_id: current.view!.conversation_id,
+      origin_view: current.view,
+      input_id: 'u-old',
+      input_text: 'old question',
+      result_text: 'partial',
+      state: 'generated_unsaved',
+      persistence: 'client',
+      admission,
+    },
+  };
+  const options = {
+    ...ordinaryOptions(),
+    ...(invalidCompare
+      ? { compareModeActive: true, compareFeatureEnabled: true, compareSelectedModels: [] }
+      : {}),
+    ...(local ? { serverChatId: null, historyId: 'history-1' } : {}),
+    messages: [
+      { id: 'u-old', isBot: false, message: 'old question', sources: [] },
+      {
+        id: 'interrupted-device-reply',
+        isBot: true,
+        message: 'partial',
+        generationInfo: { interrupted: true },
+        sources: [],
+      },
+    ],
+  };
+  const hook = renderHook(() =>
+    useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+  );
+  const choose = vi.spyOn(selection.result.current, 'choose');
+  const dismiss = vi.spyOn(selection.result.current, 'dismissRecovery');
+  normalChatModeMock.mockResolvedValue({ status: 'submitted' });
+  h1.lookupRecoveries.mockResolvedValue([entry]);
+  return { selection, hook, options, draftStore, entry, admission, choose, dismiss };
+};
 
 it.each(["view", "new", "account"])("interrupted retry cannot replace a later %s after held recovery lookup", async boundary => {
   const mounted = await mountInterruptedRetry()

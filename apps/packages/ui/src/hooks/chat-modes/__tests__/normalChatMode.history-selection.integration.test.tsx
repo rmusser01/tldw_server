@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ChatTldwOptions } from "@/models/ChatTldw"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import * as servicePrompts from "@/services/service-prompts"
-import type { HistoryInfo, Message } from "@/db/dexie/types"
+import { dismissHistoryTurnRecovery, loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
+import { getServerChatSaveStatus } from "@/store/server-chat-save-status"
+import type { HistoryInfo, HistoryTurnRecovery, Message } from "@/db/dexie/types"
 
 // Table-engine double only: creation, public sanitization, rereads, mounted
 // selection, capture, admission and settlement use production implementations.
@@ -125,7 +127,6 @@ import type { ChatDocuments } from "@/models/ChatTypes"
 import type { UploadedFile } from "@/db/dexie/types"
 import { HistorySelectionContext, useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
-import { loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import { formatSelectedHistory, saveHistory, saveMessage } from "@/db/dexie/helpers"
 import { saveMessageOnSuccess, saveMessageOnError } from "@/hooks/chat-helper"
@@ -2482,7 +2483,7 @@ describe("real full and compact Scene consumers across persistence and steering"
     }
   }
 
-  const declareNativeMirrorTransport = () => {
+  const declareNativeMirrorTransport = (serverCompletion: boolean | "unsupported" = false) => {
     const rows: Array<{
       id: string
       role: string
@@ -2524,7 +2525,11 @@ describe("real full and compact Scene consumers across persistence and steering"
                   message: row.content,
                   images: []
                 })),
-          storage_context_digest: "storage"
+          storage_context_digest: "storage",
+          ...(serverCompletion ? { native_completion_v1: {
+            policy: "selected_history_v1", supported: serverCompletion === true,
+            storage_context_digest: "storage"
+          } } : {})
         } as never
       }
     )
@@ -2558,6 +2563,190 @@ describe("real full and compact Scene consumers across persistence and steering"
       })
     return { rows, append }
   }
+
+  it.each((["full", "compact"] as const).flatMap(surface =>
+    (["complete", "duplicate", "provider partial", "drop after saved", "missing admission", "missing final", "foreign CID", "foreign user", "conflicting admission", "conflicting final", "final before admission"] as const)
+      .map(boundary => ({ surface, boundary }))))(
+    "actual mounted $surface native completion uses server settlement at $boundary without browser appends",
+    async ({ surface, boundary }) => {
+      const scoped = answerSnapshot()
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
+      const { rows, append } = declareNativeMirrorTransport(true)
+      const journal = vi.spyOn(storage.tables.historySelections, "put")
+      vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options, onChunk) {
+        options.onDispatch?.()
+        const selection = options.preparedRequest?.tldw_history_selection_v1
+        const final = { tldw_conversation_id: newServerId, tldw_user_message_id: "canonical-input", tldw_message_id: "canonical-reply" }
+        if (selection) {
+          rows.push({ id: "canonical-input", role: "user", content: "Original native completion question", parent_message_id: null })
+          const admission = { tldw_history_admission_v1: { version: 1, owner_key: "server-owner", conversation_id: newServerId,
+            input_message_id: "canonical-input", input_message_revision: "1", selection_digest: selection.selection_digest,
+            messages: selection.messages, originating_selection_revision: selection.selection_revision } }
+          if (boundary === "final before admission") await onChunk?.(final)
+          if (boundary !== "missing admission") await onChunk?.(admission)
+          if (boundary === "duplicate") await onChunk?.(admission)
+          if (boundary === "conflicting admission") await onChunk?.({ tldw_history_admission_v1: { ...admission.tldw_history_admission_v1, input_message_id: "foreign-input" } })
+        }
+        yield "First answer"
+        if (boundary === "provider partial") await onChunk?.({ error: { message: "Declared provider interruption" } })
+        if (selection && boundary !== "missing final") {
+          rows.push({ id: "canonical-reply", role: "assistant", content: "First answer", parent_message_id: "canonical-input" })
+          await onChunk?.({ ...final, ...(boundary === "foreign CID" ? { tldw_conversation_id: "foreign" } : {}),
+            ...(boundary === "foreign user" ? { tldw_user_message_id: "foreign" } : {}) })
+          if (boundary === "duplicate") await onChunk?.(final)
+          if (boundary === "conflicting final") await onChunk?.({ ...final, tldw_message_id: "conflicting-reply" })
+          if (boundary === "drop after saved") throw new Error("Declared drop after saved receipt")
+        }
+      })
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({ state: { ...initialConnection, isConnected: true,
+        phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+      const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full" })
+      try {
+        let result: ChatSubmitResult | void
+        await act(async () => { result = await consumer.mounted.result.current.onSubmit({ message: "Original native completion question", image: "" }) })
+        const request = vi.mocked(tldwChat.streamMessage).mock.calls[0][1]?.preparedRequest
+        expect(request).toMatchObject({ save_to_db: true, conversation_id: newServerId })
+        expect(request?.tldw_history_selection_v1).toBeDefined()
+        expect(append).not.toHaveBeenCalled()
+        if (["complete", "duplicate", "provider partial", "drop after saved", "conflicting final"].includes(boundary)) {
+          expect(normalizeChatSubmitResult(result!)).toEqual({ status: "submitted" })
+          expect(getServerChatSaveStatus(newServerId)).toBe("saved")
+          const savedRecords = journal.mock.calls.flatMap(([row]) => Object.values((row.pending_turns ?? {}) as Record<string, HistoryTurnRecovery>))
+          expect(savedRecords.some(turn => turn.settled_message_id === "canonical-reply" &&
+            turn.outcome === (["provider partial", "drop after saved", "conflicting final"].includes(boundary) ? "interrupted" : "complete"))).toBe(true)
+          expect(rows.map(row => [row.id, row.role, row.content])).toEqual([
+            ["canonical-input", "user", "Original native completion question"], ["canonical-reply", "assistant", "First answer"]
+          ])
+          expect(consumer.selection.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "canonical-reply" })
+        } else {
+          expect(normalizeChatSubmitResult(result!).status).not.toBe("submitted")
+          expect(consumer.selection.getCurrent().view?.cursor).not.toEqual({ kind: "after_message", message_id: "canonical-reply" })
+          await act(async () => { await consumer.selection.refreshRecovery?.() })
+          const recovery = consumer.selection.recoveries?.[0]?.turn
+          expect(recovery).toMatchObject({ persistence: "server" })
+          expect(recovery?.settled_message_id).toBeUndefined()
+          expect(getServerChatSaveStatus(newServerId)).toBe("unknown")
+        }
+      } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }
+    }
+  )
+
+  it.each((["full", "compact"] as const).flatMap(surface =>
+    (["two turns", "held journal", "New before admission", "New after receipt", "New with quota", "followed with quota", "earlier cursor"] as const).map(boundary => ({ surface, boundary }))))(
+    "actual mounted $surface native completion preserves original receipt at $boundary",
+    async ({ surface, boundary }) => {
+      const scoped = answerSnapshot()
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
+      const { rows, append } = declareNativeMirrorTransport(true)
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({ state: { ...initialConnection, isConnected: true, phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+      const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full", keepInterruptedTurns: true })
+      useStoreChatModelSettings.getState().setSystemPrompt("Original current instructions")
+      let turn = 0, release!: () => void, ended!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      const providerEnded = new Promise<void>(resolve => { ended = resolve })
+      let original: ReturnType<HistorySelectionController["getCurrent"]> | undefined
+      const put = storage.tables.historySelections.put
+      const journalPut = vi.spyOn(storage.tables.historySelections, "put").mockImplementation(async value => {
+        const records = Object.values((value.pending_turns ?? {}) as Record<string, HistoryTurnRecovery>)
+        if (boundary === "held journal" && records.some(record => record.state === "accepted_unsent")) await held
+        if (boundary === "New with quota" && records.some(record => record.persistence === "server" && record.result_text)) throw new Error("Declared journal quota")
+        if (boundary === "followed with quota" && (records.some(record => record.persistence === "server" && record.result_text) || Object.values(value.history_turn_outcomes ?? {}).includes("completed"))) throw new Error("Declared completed journal and dismissal quota")
+        return put(value)
+      })
+      const moveToNew = () => {
+        consumer.selection.reset()
+        const core = useStoreMessageOption.getState()
+        core.startNewChatDraft(false); core.setHistoryId(null); core.setServerChatId(null); core.setMessages([]); core.setHistory([])
+      }
+      vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options, onChunk) {
+        options.onDispatch?.()
+        original = consumer.selection.getCurrent()
+        turn++
+        const selection = options.preparedRequest!.tldw_history_selection_v1!
+        const input = "canonical-input-" + turn, result = "canonical-reply-" + turn
+        const literal = turn === 1 ? "First native question" : "  Second literal question  "
+        if (boundary === "New before admission" || boundary === "New with quota") moveToNew()
+        rows.push({ id: input, role: "user", content: literal, parent_message_id: selection.messages.at(-1)?.id ?? null })
+        await onChunk?.({ tldw_history_admission_v1: { version: 1, owner_key: "server-owner", conversation_id: newServerId,
+          input_message_id: input, input_message_revision: "1", selection_digest: selection.selection_digest,
+          messages: selection.messages, originating_selection_revision: selection.selection_revision } })
+        yield "Answer " + turn
+        if (boundary === "earlier cursor") await consumer.selection.choose({ kind: "empty" })
+        rows.push({ id: result, role: "assistant", content: "Answer " + turn, parent_message_id: input })
+        await onChunk?.({ tldw_conversation_id: newServerId, tldw_user_message_id: input, tldw_message_id: result })
+        if (boundary === "New after receipt") moveToNew()
+        ended()
+      })
+      let pending: Promise<ChatSubmitResult | void> | undefined
+      try {
+        act(() => { pending = consumer.mounted.result.current.onSubmit({ message: "First native question", image: "" }) })
+        // Admission journal IO must not block raw text/final receipt delivery.
+        await providerEnded
+        release()
+        await act(async () => { expect(normalizeChatSubmitResult(await pending!)).toEqual({ status: "submitted" }) })
+        if (boundary.startsWith("New")) {
+          expect(useStoreMessageOption.getState().messages).toEqual([])
+          expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+          const retained = await loadHistoryTurnRecoveries(original!.bookmarkScope!, original!.view!)
+          expect(retained[0].turn).toMatchObject({ persistence: "server", input_id: "canonical-input-1", assistant_id: "canonical-reply-1", settled_message_id: "canonical-reply-1", outcome: "complete" })
+          if (boundary === "New with quota") expect(retained[0].turn.recovery_storage).toBe("memory")
+        } else if (boundary === "earlier cursor") {
+          expect(consumer.selection.getCurrent().view?.cursor).toEqual({ kind: "empty" })
+          await act(async () => { await consumer.selection.refreshRecovery?.() })
+          await waitFor(() => expect(consumer.selection.recoveries).toHaveLength(1))
+          const entry = consumer.selection.recoveries[0]
+          expect(entry.turn.settled_message_id).toBe("canonical-reply-1")
+          await act(async () => { expect(await consumer.selection.openRecoveryResult(entry, () => true)).toBe(true) })
+          expect(consumer.selection.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "canonical-reply-1" })
+        } else {
+          expect(consumer.selection.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "canonical-reply-1" })
+        }
+        if (boundary === "two turns") {
+          await act(async () => { expect(normalizeChatSubmitResult(await consumer.mounted.result.current.onSubmit({ message: "  Second literal question  ", image: "" }))).toEqual({ status: "submitted" }) })
+          const request = vi.mocked(tldwChat.streamMessage).mock.calls[1][1].preparedRequest!
+          expect(request).toMatchObject({ save_to_db: true, conversation_id: newServerId })
+          expect(request.tldw_history_selection_v1?.messages.map(row => row.id)).toEqual(["canonical-input-1", "canonical-reply-1"])
+          expect(JSON.stringify(request.messages)).not.toContain("First native question")
+          expect(JSON.stringify(request.messages)).not.toContain("Answer 1")
+          expect(JSON.stringify(request.messages).match(/Original current instructions/g)).toHaveLength(1)
+          expect(JSON.stringify(request.messages)).toContain("  Second literal question  ")
+          expect(rows).toHaveLength(4)
+        }
+        expect(append).not.toHaveBeenCalled()
+      } finally {
+        release(); await pending?.catch(() => undefined)
+        journalPut.mockRestore()
+        if (original?.bookmarkScope && original.view) {
+          const records = await loadHistoryTurnRecoveries(original.bookmarkScope, original.view)
+          for (const entry of records) await dismissHistoryTurnRecovery(entry.scope, original.view, entry.turn.operation_id, "dismissed")
+        }
+        consumer.unmount(); useConnectionStore.setState({ state: initialConnection })
+      }
+    }
+  )
+
+  it.each((["full", "compact"] as const).flatMap(surface =>
+    ([false, "unsupported"] as const).map(capability => ({ surface, capability }))))(
+    "actual mounted $surface native completion preserves client persistence for $capability capability",
+    async ({ surface, capability }) => {
+      const scoped = answerSnapshot()
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
+      const { rows, append } = declareNativeMirrorTransport(capability)
+      const initialConnection = useConnectionStore.getState().state
+      useConnectionStore.setState({ state: { ...initialConnection, isConnected: true, phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+      const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full" })
+      try {
+        await act(async () => { expect(normalizeChatSubmitResult(await consumer.mounted.result.current.onSubmit({ message: "Compatibility question", image: "" }))).toEqual({ status: "submitted" }) })
+        const request = vi.mocked(tldwChat.streamMessage).mock.calls[0][1].preparedRequest!
+        expect(request.save_to_db).toBe(false)
+        expect(request).not.toHaveProperty("tldw_history_selection_v1")
+        expect(append).toHaveBeenCalledTimes(2)
+        expect(rows.map(row => [row.role, row.content])).toEqual([["user", "Compatibility question"], ["assistant", "First answer"]])
+      } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }
+    }
+  )
 
   it.each(
     (["full", "compact"] as const).flatMap((surface) =>

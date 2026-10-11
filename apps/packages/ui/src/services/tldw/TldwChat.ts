@@ -1,3 +1,4 @@
+import type { ChatScope } from '@/types/chat-scope';
 import {
   tldwClient,
   ChatMessage,
@@ -368,8 +369,9 @@ export interface TldwChatOptions {
   chatDebugMetadata?: ChatRequestDebugMetadata
   // Caller-owned AbortSignal (e.g. the UI Stop signal). When it fires, the
   // internal per-call controller is aborted so the underlying request stops.
-  signal?: AbortSignal
-  requestScope?: ServicePromptRequestScope
+  signal?: AbortSignal;
+  requestScope?: ServicePromptRequestScope;
+  scope?: ChatScope;
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
@@ -500,9 +502,10 @@ export class TldwChatService {
       const response = await tldwClient.createChatCompletion(request, {
         debugMetadata: options.chatDebugMetadata,
         signal: options.signal,
-        requestScope: options.requestScope
-      })
-      const data = await response.json().catch(() => null)
+        requestScope: options.requestScope,
+        scope: options.scope,
+      });
+      const data = await response.json().catch(() => null);
       if (onResponse) {
         onResponse(data)
       }
@@ -526,18 +529,18 @@ export class TldwChatService {
   streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
-    onChunk?: (chunk: ChatStreamChunk) => void
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>
   ): AsyncGenerator<string, void, unknown>
   streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
-    onChunk: ((chunk: ChatStreamChunk) => void) | undefined,
+    onChunk: ((chunk: ChatStreamChunk) => void | Promise<void>) | undefined,
     includeReasoning: true
   ): AsyncGenerator<string | ChatStreamChunk, void, unknown>
   async *streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
-    onChunk?: (chunk: ChatStreamChunk) => void,
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>,
     includeReasoning = false
   ): AsyncGenerator<string | ChatStreamChunk, void, unknown> {
     // Per-call abort controller: concurrent streams must not cancel each other.
@@ -601,8 +604,9 @@ export class TldwChatService {
         signal: controller.signal,
         streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
-        requestScope: options.requestScope
-      })
+        requestScope: options.requestScope,
+        scope: options.scope,
+      });
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       let startupTimer: ReturnType<typeof setTimeout> | null = null
@@ -659,7 +663,7 @@ export class TldwChatService {
 
             // Call the onChunk callback if provided
             if (onChunk) {
-              onChunk(chunk)
+              await onChunk(chunk);
             }
 
             if (includeReasoning && hasReasoningProgress(chunk)) {

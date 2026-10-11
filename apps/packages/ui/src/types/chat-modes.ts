@@ -35,8 +35,10 @@ export interface HistorySendTurn {
   validateLease: () => boolean
   canUpdateView: () => boolean
   /** Original command or its accepted bind, required until user admission. */
-  preparationIsCurrent?: () => boolean
-  admission?: HistoryAdmissionReferenceV1
+  preparationIsCurrent?: () => boolean;
+  persistence?: 'server';
+  clientManagedContext?: boolean;
+  admission?: HistoryAdmissionReferenceV1;
   /**
    * Retry of a reply that ended early (CS-04): the question was admitted when
    * it was first sent, so the turn settles a new reply against this admission

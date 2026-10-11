@@ -1261,6 +1261,43 @@ it("terminal recovery outcomes fence late callbacks without erasing another oper
   ).toEqual(["other"])
 })
 
+it.each(["input_text", "selection_digest", "request_context_digest"] as const)("ordinary server memory recovery rejects changed %s", async field => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const bookmark = { profile_id: owner.profile_id, client_session_id: "ordinary-memory" }
+  const pending = { operation_id: "ordinary-memory", persistence: "server" as const, origin_view: origin,
+    owner_key: owner.owner_key, conversation_id: owner.conversation_id, selection_digest: "selected",
+    request_context_digest: "prepared", created_at: 1, input_text: "question", input_images: [],
+    result_text: "Unconfirmed original server text", state: "unknown" as const }
+  await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, result_text: "", state: "dispatching" })
+  try {
+    await history.retainHistoryTurnRecoveryInMemory(bookmark, origin, pending)
+    expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject({ result_text: pending.result_text, recovery_storage: "memory" })
+    await expect(history.retainHistoryTurnRecoveryInMemory(bookmark, origin, { ...pending, [field]: "changed" })).rejects.toThrow("history_operation_conflict")
+  } finally { expect(await history.dismissHistoryTurnRecovery(bookmark, origin, pending.operation_id, "dismissed")).toBe(true) }
+})
+
+it("ordinary window recovery replaces streamed prefixes and restores the latest durable text", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  const bookmark = { profile_id: owner.profile_id, client_session_id: "ordinary-prefix" }
+  const pending = { operation_id: "ordinary-prefix", persistence: "server" as const, origin_view: origin,
+    owner_key: owner.owner_key, conversation_id: owner.conversation_id, selection_digest: "selected",
+    request_context_digest: "prepared", created_at: 1, input_text: "question", input_images: [],
+    result_text: "", state: "dispatching" as const }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  try {
+    for (const result_text of ["A", "An", "Answer"])
+      await history.retainHistoryTurnRecoveryInMemory(bookmark, origin, { ...pending, result_text, state: "unknown" })
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.result_text).toBe("Answer")
+    expect(entry.turn.retained_result_texts).toBeUndefined()
+    await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, result_text: "Answer", state: "unknown" })
+    const [saved] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(saved.turn.retained_result_texts).toBeUndefined()
+    expect(saved.turn.recovery_storage).toBeUndefined()
+  } finally { expect(await history.dismissHistoryTurnRecovery(bookmark, origin, pending.operation_id)).toBe(true) }
+})
+
 it("native recovery begins without canonical IDs and binds monotonically to owner evidence", async () => {
   const owner = await history.getLocalHistoryOwner("chat")
   const origin = view(owner)

@@ -13,6 +13,7 @@ import {
   type ChatResearchContext
 } from "@/services/tldw"
 import type { ToolCall } from "@/types/tool-calls"
+import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
@@ -62,6 +63,7 @@ export interface ChatTldwOptions {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
@@ -95,6 +97,7 @@ export class ChatTldw {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
@@ -132,6 +135,7 @@ export class ChatTldw {
     this.researchContext = options.researchContext
     this.chatDebugMetadata = options.chatDebugMetadata
     this.requestScope = options.requestScope
+    this.scope = options.scope
     this.retryFailedTurn = options.retryFailedTurn
     this.clientMessageId = options.clientMessageId
     this.regenerateFromMessageId = options.regenerateFromMessageId
@@ -150,6 +154,7 @@ export class ChatTldw {
       signal?: AbortSignal
       preparedRequest?: ChatCompletionRequest
       onDispatch?: () => void
+      onChunk?: (chunk: unknown) => Promise<void>
       // Matches the shape used in normalChatMode/search/rag, where
       // callbacks: [{ handleLLMEnd(output) { ... } }]
       callbacks?: Array<{ handleLLMEnd?: (output: any) => any }>
@@ -199,7 +204,7 @@ export class ChatTldw {
       })
     }
 
-    const handleChunk = (chunk: any) => {
+    const consumeChunk = (chunk: any) => {
       if (signal?.aborted) return
       const streamedConversationId =
         typeof chunk?.tldw_conversation_id === "string" &&
@@ -211,16 +216,16 @@ export class ChatTldw {
             : null
       // Nonpersisted completions also carry a request-scoped conversation UUID.
       // It must not turn local history into a link to a nonexistent server chat.
-      if (streamedConversationId && this.saveToDb !== false) {
+      if (!options?.onChunk && streamedConversationId && this.saveToDb !== false) {
         this.conversationId = streamedConversationId
         this.saveToDb = true
       }
-      if (this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
+      if (!options?.onChunk && this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
         const savedMessageId = chunk.tldw_message_id.trim()
         if (savedMessageId) this.serverMessageId = savedMessageId
       }
 
-      if (this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
+      if (!options?.onChunk && this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
         const savedUserMessageId = chunk.tldw_user_message_id.trim()
         if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
       }
@@ -242,6 +247,9 @@ export class ChatTldw {
         applyToolCallDelta(deltas)
       }
     }
+
+    const handleChunk = (chunk: unknown) => options?.onChunk
+      ? options.onChunk(chunk).then(() => consumeChunk(chunk)) : consumeChunk(chunk)
 
     const stream = tldwChat.streamMessage(
       tldwMessages,
@@ -276,7 +284,8 @@ export class ChatTldw {
         extraBody: this.extraBody,
         researchContext: this.researchContext,
         chatDebugMetadata: this.chatDebugMetadata,
-        requestScope: this.requestScope
+        requestScope: this.requestScope,
+        scope: this.scope
       },
       handleChunk,
       true
@@ -286,7 +295,7 @@ export class ChatTldw {
     // server write. Record its outcome so chat persistence labels only claim
     // the server once it has acknowledged the turn (CS-03 / XS-05, #3104).
     const serverWriteChatId =
-      this.saveToDb === true && !this.clientManagedHistory
+      this.saveToDb === true && !this.clientManagedHistory && !options?.onChunk
         ? this.conversationId
         : undefined
 
@@ -346,6 +355,16 @@ export class ChatTldw {
   prepareClientManagedRequest(messages: BaseMessage[]): ChatCompletionRequest {
     if (!this.clientManagedHistory)
       throw new Error("client_managed_history_required")
+    return this.prepareHistoryRequest(messages)
+  }
+
+  prepareNativeHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
+    if (this.clientManagedHistory || this.saveToDb !== true || !this.conversationId)
+      throw new Error("native_history_persistence_required")
+    return this.prepareHistoryRequest(messages)
+  }
+
+  private prepareHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
     // Custom provider objects can contain credentials. No implicit redaction/projection.
     if (this.extraBody && Object.keys(this.extraBody).length) {
       throw new Error("unsupported_history_custom_provider_body")
@@ -382,7 +401,8 @@ export class ChatTldw {
       tools: this.tools,
       apiProvider: this.apiProvider,
       extraHeaders: this.extraHeaders,
-      saveToDb: false,
+      saveToDb: this.clientManagedHistory ? false : this.saveToDb,
+      ...(!this.clientManagedHistory ? { conversationId: this.conversationId } : {}),
       researchContext: this.researchContext,
       slashCommandInjectionMode: this.slashCommandInjectionMode
     })
@@ -423,6 +443,7 @@ export class ChatTldw {
       researchContext: this.researchContext,
       chatDebugMetadata: this.chatDebugMetadata,
       requestScope: this.requestScope,
+      scope: this.scope,
       signal: options?.signal
     })
 
