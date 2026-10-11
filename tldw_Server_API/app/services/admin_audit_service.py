@@ -31,24 +31,25 @@ async def emit_admin_account_audit_event(
     raise_on_failure: bool = False,
 ) -> None:
     """Persist now or defer until the owning AuthNZ transaction commits."""
-    payload = {
-        "actor_id": actor_id,
-        "target_user_id": target_user_id,
-        "event_type": event_type,
-        "category": category,
-        "resource_type": resource_type,
-        "resource_id": resource_id,
-        "action": action,
-        "metadata": dict(metadata or {}),
-        "raise_on_failure": raise_on_failure,
-    }
+    # A closure over the typed parameters (rather than a dict + **unpacking)
+    # keeps mypy able to check the persist call site (PR #3219 CI fix for a
+    # pre-existing dev breakage).
+    async def _persist_now() -> None:
+        await _persist_admin_account_audit_event(
+            actor_id=actor_id,
+            target_user_id=target_user_id,
+            event_type=event_type,
+            category=category,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action=action,
+            metadata=dict(metadata or {}),
+            raise_on_failure=raise_on_failure,
+        )
 
-    async def _deferred_emit() -> None:
-        await _persist_admin_account_audit_event(**payload)
-
-    if not raise_on_failure and defer_until_after_commit(_deferred_emit):
+    if not raise_on_failure and defer_until_after_commit(_persist_now):
         return
-    await _persist_admin_account_audit_event(**payload)
+    await _persist_now()
 
 
 async def emit_storage_quota_audit_event(*, actor_id: int | None, target_user_id: int, quota_mb: int | None) -> None:
