@@ -181,9 +181,10 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
-    invalidateQueries: vi.fn()
-  })
-}))
+    cancelQueries: vi.fn(),
+    invalidateQueries: vi.fn(),
+  }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({

@@ -4558,6 +4558,7 @@ export const useChatActions = ({
             {
               ...scopedNormalModeParams,
               surface: "playground",
+              onServerChatMutated: invalidateServerChatHistory,
               historyPreparation: normalHistoryPreparation,
               setServerChatId,
               scope,

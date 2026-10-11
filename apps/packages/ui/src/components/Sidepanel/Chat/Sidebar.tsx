@@ -1487,10 +1487,12 @@ export const SidepanelChatSidebar = ({
                         item.title ||
                         t("common:untitled", { defaultValue: "Untitled" }),
                       metaLabel:
-                        item.kind === "server"
-                          ? t("common:chatSidebar.serverLabel", "Server")
-                          : t("common:chatSidebar.localLabel", "Local"),
-                      topic: item.kind === "server" ? item.chat.topic_label ?? null : null,
+                        item.kind === 'server'
+                          ? t('common:chatSidebar.serverLabel', 'Server')
+                          : item.origin === 'server-copy'
+                            ? t('common:chatSidebar.serverCopyLabel', 'Server copy')
+                            : t('common:chatSidebar.localLabel', 'Local'),
+                      topic: item.kind === 'server' ? (item.chat.topic_label ?? null) : null,
                       // Each opens in its own tab (XS-01).
                       onOpen: () =>
                         item.kind === "server"

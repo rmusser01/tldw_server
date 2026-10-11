@@ -709,3 +709,22 @@ describe("exact character filter and scoped cache", () => {
     queryClient.clear()
   })
 })
+
+
+it("refreshes an explicitly invalidated inactive finder on mount without refreshing unchanged caches", async () => {
+  const { queryClient, wrapper } = createWrapper()
+  listChatsWithMetaMock.mockResolvedValue({ chats: [createChat(1)], total: 1 })
+  const first = renderHook(() => useServerChatHistory("", { mode: "overview" }), { wrapper })
+  await waitFor(() => expect(first.result.current.data.map(row => row.id)).toEqual(["chat-1"]))
+  first.unmount()
+  const unchanged = renderHook(() => useServerChatHistory("", { mode: "overview" }), { wrapper })
+  await waitFor(() => expect(unchanged.result.current.data.map(row => row.id)).toEqual(["chat-1"]))
+  expect(listChatsWithMetaMock).toHaveBeenCalledTimes(1)
+  unchanged.unmount()
+  await queryClient.invalidateQueries({ queryKey: ["serverChatHistory"], refetchType: "none" })
+  listChatsWithMetaMock.mockResolvedValue({ chats: [createChat(2), createChat(1)], total: 2 })
+  const changed = renderHook(() => useServerChatHistory("", { mode: "overview" }), { wrapper })
+  await waitFor(() => expect(changed.result.current.data.map(row => row.id)).toEqual(["chat-2", "chat-1"]))
+  changed.unmount()
+  queryClient.clear()
+})

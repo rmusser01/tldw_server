@@ -66,7 +66,7 @@ export const createSaveMessageOnSuccess = (
         ...(e?.saveToDb === false ? { conversationId: undefined } : {}),
         setHistoryId: resolvedSetHistoryId
       })
-      if (conversationId.length > 0) {
+      if (conversationId.length > 0 && !e?.historyTurn) {
         options?.onServerConversationLinked?.(conversationId, e, historyId)
       }
       return historyId

@@ -389,7 +389,7 @@ export const useServerChatHistory = (
     },
     staleTime: 60_000,
     gcTime: 5 * 60_000,
-    refetchOnMount: false,
+    refetchOnMount: (cached) => cached.state.isInvalidated,
     retry: (failureCount, error) =>
       !isRecoverableServerChatHistoryError(error) && failureCount < 1
   })

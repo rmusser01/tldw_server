@@ -188,7 +188,8 @@ const buildWebSearchSources = (results: any[]) => {
 }
 
 type NormalChatModeParams = {
-  surface?: "playground" | "sidepanel"
+  surface?: 'playground' | 'sidepanel';
+  onServerChatMutated?: (isCurrent: () => boolean) => void | Promise<void>;
   historyPreparation?: {
     dispatchIsCurrent: () => boolean
     draftIsCurrent: () => boolean
@@ -272,11 +273,22 @@ type NormalChatModeParams = {
 }
 
 /** Existing H1 ownership and preparation shared by the local context modes. */
-export type HistoryChatModeParams = Pick<NormalChatModeParams,
-  | "surface" | "historyPreparation" | "historySelection" | "historyTurn"
-  | "selectionSource" | "serverChatId" | "setServerChatId" | "scope"
-  | "actorScene" | "webSearch" | "uploadedFiles" | "onResponseDispatch"
->
+export type HistoryChatModeParams = Pick<
+  NormalChatModeParams,
+  | 'surface'
+  | 'historyPreparation'
+  | 'historySelection'
+  | 'historyTurn'
+  | 'selectionSource'
+  | 'serverChatId'
+  | 'setServerChatId'
+  | 'scope'
+  | 'actorScene'
+  | 'webSearch'
+  | 'uploadedFiles'
+  | 'onResponseDispatch'
+  | 'onServerChatMutated'
+>;
 
 const isBackendUnavailableError = (error: unknown): boolean => {
   if (!error) return false
@@ -783,17 +795,30 @@ const captureNormalHistoryTurn = async (
   retainIdWatcher: (stop: () => void) => void
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
-  let creationHandle: ChatDraftHandle | undefined
-  if (temporary || params.historyId === "temp")
-    throw new Error("temporary_history_unavailable")
-  if (!originIsCurrent()) throw new Error("stale_selection")
-  let current = controller.getCurrent()
-  let selectionCurrent = originIsCurrent
-  let targetHistoryId = params.historyId
-  let targetServerChatId = params.serverChatId
-  const preparationIsCurrent = () => draftIsCurrent() && acceptDraftBind?.isCurrent() !== false &&
-    !signal.aborted && !snapshot.scopeInvalidatedSignal.aborted && dispatchIsCurrent()
-  if (!preparationIsCurrent()) throw new Error("stale_selection")
+  const notifyServerMutation = () => {
+    if (snapshot.scopeInvalidatedSignal.aborted) return;
+    try {
+      void Promise.resolve(
+        params.onServerChatMutated?.(() => !snapshot.scopeInvalidatedSignal.aborted)
+      ).catch(() => console.warn('Could not refresh the server conversation list.'));
+    } catch {
+      console.warn('Could not refresh the server conversation list.');
+    }
+  };
+  let creationHandle: ChatDraftHandle | undefined;
+  if (temporary || params.historyId === 'temp') throw new Error('temporary_history_unavailable');
+  if (!originIsCurrent()) throw new Error('stale_selection');
+  let current = controller.getCurrent();
+  let selectionCurrent = originIsCurrent;
+  let targetHistoryId = params.historyId;
+  let targetServerChatId = params.serverChatId;
+  const preparationIsCurrent = () =>
+    draftIsCurrent() &&
+    acceptDraftBind?.isCurrent() !== false &&
+    !signal.aborted &&
+    !snapshot.scopeInvalidatedSignal.aborted &&
+    dispatchIsCurrent();
+  if (!preparationIsCurrent()) throw new Error('stale_selection');
   if (
     params.actorScene &&
     (!params.actorScene.target.isCurrent() ||
@@ -827,8 +852,8 @@ const captureNormalHistoryTurn = async (
         inputText: message,
         setup: {},
         isCurrent: () => originIsCurrent() && preparationIsCurrent(),
-        create: (id) =>
-          tldwClient.createChat(
+        create: async (id) => {
+          const created = await tldwClient.createChat(
             {
               id,
               title: message.trim().slice(0, 80) || "Untitled Chat",
@@ -836,9 +861,11 @@ const captureNormalHistoryTurn = async (
                 scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE
             },
             { scope, signal, requestScope: snapshot.requestScope }
-          )
-      })
-
+          );
+          if (created.id === id) notifyServerMutation();
+          return created;
+        },
+      });
       // The recovery record keeps a late ACK even when this view can no longer bind.
       if (!originIsCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
       serverId = created.id
@@ -1127,7 +1154,14 @@ const captureNormalHistoryTurn = async (
   const operationId = crypto.randomUUID()
   // Until this turn ends, no view may keep its record: the reply is still
   // being written (CS-04). Released by normalChatMode when the turn ends.
-  markHistoryTurnLive(operationId)
+  markHistoryTurnLive(operationId);
+  let admissionNotified = false;
+  let settlementNotified = false;
+  const notifyServerSettlement = () => {
+    if (settlementNotified || owner.kind !== 'native' || !turn.resultId) return;
+    settlementNotified = true;
+    notifyServerMutation();
+  };
   // Record writes run in order, so a late checkpoint never replaces the final
   // record of the turn.
   let recoveryWrites: Promise<void> = Promise.resolve()
@@ -1248,6 +1282,15 @@ const captureNormalHistoryTurn = async (
         throw new Error("stale_selection")
     },
     afterAdmission: async () => {
+      if (
+        turn.owner.kind === 'native' &&
+        !turn.retryAdmission &&
+        turn.admission &&
+        !admissionNotified
+      ) {
+        admissionNotified = true;
+        notifyServerMutation();
+      }
       if (turn.owner.kind === "native" && !endReplyWrite)
         endReplyWrite = beginServerChatWrite(turn.owner.conversation_id)
       await saveRecord(record(turn, "", "accepted_unsent"))
@@ -1299,7 +1342,8 @@ const captureNormalHistoryTurn = async (
       }
 
       if (turn.resultId) {
-        endReplyWrite?.("saved")
+        endReplyWrite?.('saved');
+        notifyServerSettlement();
         // Keep the acknowledged receipt until this view or a reopened view follows it.
         await recoveryWrites
         await saveRecord(record(turn, data.content, "generated_unsaved", {
@@ -1342,9 +1386,10 @@ const captureNormalHistoryTurn = async (
     },
     complete: async (content) => {
       // The reply is settled. Its record stays until the view follows it.
-      stopCheckpoints()
-      endReplyWrite?.("saved")
-      await recoveryWrites
+      stopCheckpoints();
+      endReplyWrite?.('saved');
+      notifyServerSettlement();
+      await recoveryWrites;
       await saveRecord(
         record(
           turn,

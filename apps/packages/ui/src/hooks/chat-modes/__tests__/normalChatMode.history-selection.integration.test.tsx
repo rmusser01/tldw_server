@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client"
 import { createElement, useEffect, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
@@ -2399,7 +2400,7 @@ describe("real full and compact Scene consumers across persistence and steering"
         markCompareHistoryCreated: vi.fn(),
         ensureServerChatHistoryId,
         messageSteeringPrompts: null,
-        invalidateServerChatHistory: vi.fn(),
+        invalidateServerChatHistory: (isCurrent?: () => boolean) => refreshServerChatHistory(queryClient, isCurrent),
         selectedCharacter: null,
         selectedAssistant: null
       })
@@ -2469,6 +2470,7 @@ describe("real full and compact Scene consumers across persistence and steering"
     )
     return {
       mounted,
+      queryClient,
       originalScope,
       draftAccount,
       receipts,
@@ -2564,6 +2566,31 @@ describe("real full and compact Scene consumers across persistence and steering"
     return { rows, append }
   }
 
+  it.each(["full", "compact"] as const)("refreshes $surface exact native creation before local ACK storage can fail", async surface => {
+    const scoped = answerSnapshot()
+    vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
+    const { rows } = declareNativeMirrorTransport(true)
+    const originalSet = Storage.prototype.set
+    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+      if (key.startsWith("registry:chat-creation:") && value?.value?.state === "acknowledged")
+        throw new Error("Declared creation ACK journal quota")
+      return originalSet.call(this, key, value)
+    })
+    const initialConnection = useConnectionStore.getState().state
+    useConnectionStore.setState({ state: { ...initialConnection, isConnected: true,
+      phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+    const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full" })
+    const refresh = vi.spyOn(consumer.queryClient, "invalidateQueries")
+    try {
+      await act(async () => { await consumer.mounted.result.current.onSubmit({ message: "Exact acknowledged creation", image: "" }).catch(error => {
+        expect(error).toMatchObject({ code: "chat_creation_unconfirmed" })
+      }) })
+      expect(refresh).toHaveBeenCalledOnce()
+      expect(rows).toEqual([])
+      expect(tldwChat.streamMessage).not.toHaveBeenCalled()
+    } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }
+  })
+
   it.each((["full", "compact"] as const).flatMap(surface =>
     (["complete", "duplicate", "provider partial", "drop after saved", "missing admission", "missing final", "foreign CID", "foreign user", "conflicting admission", "conflicting final", "final before admission"] as const)
       .map(boundary => ({ surface, boundary }))))(
@@ -2602,6 +2629,12 @@ describe("real full and compact Scene consumers across persistence and steering"
       useConnectionStore.setState({ state: { ...initialConnection, isConnected: true,
         phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
       const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full" })
+      const refresh = vi.spyOn(consumer.queryClient, "invalidateQueries")
+      const cancellation = vi.spyOn(consumer.queryClient, "cancelQueries")
+      const heldKey = ["serverChatHistory", { pendingFirstOverview: true }]
+      let releaseOverview!: (rows: string[]) => void
+      const heldOverview = consumer.queryClient.fetchQuery({ queryKey: heldKey,
+        queryFn: () => new Promise<string[]>(resolve => { releaseOverview = resolve }) }).catch(() => undefined)
       try {
         let result: ChatSubmitResult | void
         await act(async () => { result = await consumer.mounted.result.current.onSubmit({ message: "Original native completion question", image: "" }) })
@@ -2609,7 +2642,14 @@ describe("real full and compact Scene consumers across persistence and steering"
         expect(request).toMatchObject({ save_to_db: true, conversation_id: newServerId })
         expect(request?.tldw_history_selection_v1).toBeDefined()
         expect(append).not.toHaveBeenCalled()
-        if (["complete", "duplicate", "provider partial", "drop after saved", "conflicting final"].includes(boundary)) {
+        const acknowledged = ["complete", "duplicate", "provider partial", "drop after saved", "conflicting final"].includes(boundary)
+        expect(refresh).toHaveBeenCalledTimes(1 + (boundary === "missing admission" || boundary === "final before admission" ? 0 : 1) + (acknowledged ? 1 : 0))
+        expect(refresh).toHaveBeenCalledWith({ queryKey: ["serverChatHistory"] })
+        expect(cancellation).toHaveBeenCalledTimes(1 + (boundary === "missing admission" || boundary === "final before admission" ? 0 : 1) + (acknowledged ? 1 : 0))
+        releaseOverview(["obsolete pre-creation page"])
+        await heldOverview
+        expect(consumer.queryClient.getQueryData(heldKey)).toBeUndefined()
+        if (acknowledged) {
           expect(normalizeChatSubmitResult(result!)).toEqual({ status: "submitted" })
           expect(getServerChatSaveStatus(newServerId)).toBe("saved")
           const savedRecords = journal.mock.calls.flatMap(([row]) => Object.values((row.pending_turns ?? {}) as Record<string, HistoryTurnRecovery>))
@@ -2642,6 +2682,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       const initialConnection = useConnectionStore.getState().state
       useConnectionStore.setState({ state: { ...initialConnection, isConnected: true, phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
       const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full", keepInterruptedTurns: true })
+      const refresh = vi.spyOn(consumer.queryClient, "invalidateQueries")
       useStoreChatModelSettings.getState().setSystemPrompt("Original current instructions")
       let turn = 0, release!: () => void, ended!: () => void
       const held = new Promise<void>(resolve => { release = resolve })
@@ -2686,6 +2727,7 @@ describe("real full and compact Scene consumers across persistence and steering"
         await providerEnded
         release()
         await act(async () => { expect(normalizeChatSubmitResult(await pending!)).toEqual({ status: "submitted" }) })
+        expect(refresh).toHaveBeenCalledTimes(3)
         if (boundary.startsWith("New")) {
           expect(useStoreMessageOption.getState().messages).toEqual([])
           expect(useStoreMessageOption.getState().serverChatId).toBeNull()
@@ -2713,6 +2755,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           expect(JSON.stringify(request.messages).match(/Original current instructions/g)).toHaveLength(1)
           expect(JSON.stringify(request.messages)).toContain("  Second literal question  ")
           expect(rows).toHaveLength(4)
+          expect(refresh).toHaveBeenCalledTimes(5)
         }
         expect(append).not.toHaveBeenCalled()
       } finally {
@@ -2737,11 +2780,13 @@ describe("real full and compact Scene consumers across persistence and steering"
       const initialConnection = useConnectionStore.getState().state
       useConnectionStore.setState({ state: { ...initialConnection, isConnected: true, phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
       const consumer = mountConsumer(surface, scoped, { actualOption: surface === "full" })
+      const refresh = vi.spyOn(consumer.queryClient, "invalidateQueries")
       try {
         await act(async () => { expect(normalizeChatSubmitResult(await consumer.mounted.result.current.onSubmit({ message: "Compatibility question", image: "" }))).toEqual({ status: "submitted" }) })
         const request = vi.mocked(tldwChat.streamMessage).mock.calls[0][1].preparedRequest!
         expect(request.save_to_db).toBe(false)
         expect(request).not.toHaveProperty("tldw_history_selection_v1")
+        expect(refresh).toHaveBeenCalledTimes(3)
         expect(append).toHaveBeenCalledTimes(2)
         expect(rows.map(row => [row.role, row.content])).toEqual([["user", "Compatibility question"], ["assistant", "First answer"]])
       } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }
@@ -5384,6 +5429,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       const consumer = mountConsumer("full", scoped, {
         keepInterruptedTurns: true
       })
+      const refresh = vi.spyOn(consumer.queryClient, "invalidateQueries")
       const serverChatId = "native-public-Retry-entry"
       const question = "Original admitted native Retry question"
       const partial = "Original physically interrupted native answer"
@@ -5554,6 +5600,7 @@ describe("real full and compact Scene consumers across persistence and steering"
         await act(async () => {
           await consumer.selection.refreshRecovery()
         })
+        refresh.mockClear()
         const original = useStoreMessageOption.getState()
         const selected = consumer.selection.getCurrent()
         const retained = await loadHistoryTurnRecoveries(
@@ -5709,6 +5756,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           expect(normalizeChatSubmitResult(settled.result)).toEqual({
             status: "submitted"
           })
+          expect(refresh).toHaveBeenCalledOnce()
           expect(tldwChat.streamMessage).toHaveBeenCalledTimes(2)
           const retryWire = vi.mocked(tldwChat.streamMessage).mock.calls[1]
           expect(retryWire[1]?.requestScope).toEqual(consumer.originalScope)
@@ -5754,6 +5802,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           })
           expect(currentScene.originalRecord).toEqual(scene.originalRecord)
         } else {
+          expect(refresh).not.toHaveBeenCalled()
           // The entry was retired before its own chooser or dismissal. A late
           // onSubmit refusal cannot recover the removed partial/recovery record.
           expect(capture.mock.calls).toHaveLength(captureOffset)

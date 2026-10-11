@@ -1,6 +1,8 @@
 import React from "react"
 
-import { PageAssistDatabase, watchOnDeviceHistoryChanges } from "@/db/dexie/chat"
+import { PageAssistDatabase, watchOnDeviceHistoryChanges, isOnDeviceHistory, isOwnedCachedServerHistory } from "@/db/dexie/chat"
+import { db } from "@/db/dexie/schema"
+import type { OnDeviceHistoryScope } from "@/db/dexie/chat"
 import type { HistoryInfo } from "@/db/dexie/types"
 import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import {
@@ -16,10 +18,16 @@ const RECENT_LOCAL_FETCH = 20
 
 export type SidepanelRecentChat =
   | { kind: "server"; key: string; title: string; at: number; chat: ServerChatHistoryItem }
-  | { kind: "local"; key: string; title: string; at: number; history: HistoryInfo }
+  | { kind: "local"; key: string; title: string; at: number; history: HistoryInfo; origin: "local" | "server-copy" }
 
 const finiteOrZero = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value) ? value : 0
+
+const isRecentHistory = (history: HistoryInfo, scope: OnDeviceHistoryScope) =>
+  scope.isCurrent() && (isOnDeviceHistory(history, scope) ||
+    (isOwnedCachedServerHistory(history, scope) &&
+      (!history.server_scope_type || history.server_scope_type === "global") &&
+      !history.server_workspace_id))
 
 /**
  * Merge recent server chats and this device's chat histories, newest first.
@@ -30,12 +38,14 @@ const finiteOrZero = (value: number | null | undefined) =>
 export const mergeRecentChats = ({
   server,
   local,
+  historyScope,
   openHistoryIds,
   openServerChatIds,
   limit = SIDEPANEL_RECENT_CHAT_LIMIT
 }: {
   server: readonly ServerChatHistoryItem[]
   local: readonly HistoryInfo[]
+  historyScope: OnDeviceHistoryScope | null
   openHistoryIds: ReadonlySet<string>
   openServerChatIds: ReadonlySet<string>
   limit?: number
@@ -51,6 +61,7 @@ export const mergeRecentChats = ({
       chat
     }))
   const localItems: SidepanelRecentChat[] = local
+    .filter(history => historyScope && isRecentHistory(history, historyScope))
     .filter(
       (history) =>
         !openHistoryIds.has(history.id) &&
@@ -62,6 +73,7 @@ export const mergeRecentChats = ({
     )
     .map((history) => ({
       kind: "local",
+      origin: historyScope && isOwnedCachedServerHistory(history, historyScope) ? "server-copy" : "local",
       key: `local-${history.id}`,
       title: history.title,
       at: finiteOrZero(history.createdAt),
@@ -114,6 +126,7 @@ export const useSidepanelRecentChats = ({
   const [local, setLocal] = React.useState<{
     owner?: RecentChatsOwner
     revision: number
+    scope?: OnDeviceHistoryScope
     items: HistoryInfo[]
   }>({ revision: 0, items: [] })
 
@@ -126,25 +139,30 @@ export const useSidepanelRecentChats = ({
   React.useEffect(() => {
     if (!active || !owner) return
     let live = true
-    const ownerKey = owner.ownerKey
-    const belongsToOwner = (history: HistoryInfo) =>
-      history.server_scope_key === ownerKey
+    const isCurrent = () => live && revision === readRevision.current && owner.isCurrent()
     void (async () => {
       try {
+        const settings = await db.userSettings.get("main")
+        if (!isCurrent()) return
+        const scope: OnDeviceHistoryScope = {
+          profileId: settings?.history_profile_id ?? null,
+          serverScopeKey: owner.ownerKey,
+          isCurrent
+        }
+        const qualifies = (history: HistoryInfo) => isRecentHistory(history, scope)
         const items = await new PageAssistDatabase().getRecentChatHistories(
           RECENT_LOCAL_FETCH,
-          belongsToOwner
+          qualifies
         )
-        if (live && revision === readRevision.current && owner.isCurrent()) {
-          setLocal({ owner, revision, items: items.filter(belongsToOwner) })
+        if (isCurrent()) {
+          setLocal({ owner, revision, scope, items: items.filter(qualifies) })
         }
       } catch (error) {
         console.warn(
           "[sidepanel] Could not read recent chats on this device",
           error
         )
-        if (live && revision === readRevision.current && owner.isCurrent())
-          setLocal({ owner, revision, items: [] })
+        if (isCurrent()) setLocal({ owner, revision, items: [] })
       }
     })()
     return () => {
@@ -156,7 +174,8 @@ export const useSidepanelRecentChats = ({
   const localChats =
     local.owner === owner &&
     local.revision === revision &&
-    local.revision === readRevision.current
+    local.revision === readRevision.current &&
+    local.scope?.isCurrent()
       ? local.items
       : null
 
@@ -166,10 +185,11 @@ export const useSidepanelRecentChats = ({
         ? mergeRecentChats({
             server: serverChats ?? [],
             local: localChats ?? [],
+            historyScope: local.scope ?? null,
             openHistoryIds,
             openServerChatIds
           })
         : [],
-    [active, localChats, openHistoryIds, openServerChatIds, serverChats]
+    [active, localChats, local.scope, openHistoryIds, openServerChatIds, serverChats]
   )
 }

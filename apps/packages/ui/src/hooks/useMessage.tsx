@@ -20,6 +20,7 @@ import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client";
 import { systemPromptForNonRag } from "~/services/tldw-server";
 import { useStoreMessageOption, type Message } from "~/store/option";
 import { useStoreMessage } from "~/store";
@@ -85,7 +86,7 @@ type CompactModeOptions = {
   scopeInvalidatedSignal?: AbortSignal;
   historyParams?: Pick<Parameters<typeof normalChatMode>[6],
     "surface" | "historyPreparation" | "historySelection" | "selectionSource" |
-    "ownsAbortController" | "releaseAbortControllerIfOwned">;
+    "ownsAbortController" | "releaseAbortControllerIfOwned" | "onServerChatMutated">;
 };
 
 const createStreamingTextScheduler = (
@@ -213,9 +214,8 @@ export const useMessage = () => {
 
   const { t } = useTranslation("option");
   const queryClient = useQueryClient();
-  const invalidateServerChatHistory = React.useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
-  }, [queryClient]);
+  const invalidateServerChatHistory = React.useCallback((isCurrent?: () => boolean) =>
+    refreshServerChatHistory(queryClient, isCurrent), [queryClient]);
   const { selectedModel, setSelectedModel } = useSelectedModel();
   const currentChatModelSettings = useStoreChatModelSettings();
   const {
@@ -3162,6 +3162,7 @@ export const useMessage = () => {
     };
     const alternateHistoryParams: CompactModeOptions["historyParams"] = {
       surface: "sidepanel", selectionSource, historyPreparation: normalHistoryPreparation,
+      onServerChatMutated: invalidateServerChatHistory,
       historySelection: alternateHistorySelection ? {
         controller: alternateHistorySelection, originIsCurrent: historyOriginIsCurrent!,
         sourceIsCurrent: commandSessionIsCurrent, onResultFollow: consumeReplyTarget, createServerChat: false
@@ -3651,6 +3652,7 @@ export const useMessage = () => {
                 serverChatId,
                 setServerChatId,
                 surface: "sidepanel",
+                onServerChatMutated: invalidateServerChatHistory,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
@@ -3723,6 +3725,7 @@ export const useMessage = () => {
                 serverChatId,
                 setServerChatId,
                 surface: "sidepanel",
+                onServerChatMutated: invalidateServerChatHistory,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,

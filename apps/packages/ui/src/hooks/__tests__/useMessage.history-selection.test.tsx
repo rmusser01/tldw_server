@@ -240,9 +240,9 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() })
-}))
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ cancelQueries: vi.fn(), invalidateQueries: vi.fn() }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({

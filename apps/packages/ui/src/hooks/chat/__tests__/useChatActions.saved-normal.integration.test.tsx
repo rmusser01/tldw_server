@@ -151,7 +151,8 @@ vi.mock("@/utils/human-message", async () => {
       : { role: "user", content: Array.isArray(options.content) ? options.content[0]?.type === "text" ? options.content[0].text : "" : options.content }
   }
 })
-vi.mock("@/utils/actor", () => ({
+vi.mock("@/utils/actor", async original => ({
+  ...await original<typeof import("@/utils/actor")>(),
   maybeInjectActorMessage: mocks.injectActor
 }))
 vi.mock("@/db/dexie/server-chat-mirror", async original => ({
