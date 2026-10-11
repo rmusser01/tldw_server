@@ -3613,7 +3613,7 @@ test-only measurements corrected. ADR059 governs official task tracking.
 **Goal**: Settle history operations and cancel fixture-owned delayed navigation without changing product behavior or test deadlines.
 **Success Criteria**: Preserve all original assertions; finite regressions, owning file and full UI pass; reviewed integrated source remains exact through normal preflight.
 **Tests**: Six distinct finite RED/GREEN regressions; owning99; full407; matched lint and original assertion multiplicity; source-composed runtime/frontend/build qualification.
-**Status**: In Progress
+**Status**: Complete
 
 Original407 UI7901PASS4FAIL and focused93 91PASS2FAIL remain failed. Third
 different-angle timing observation6PASS87nonselected measured query cost, not
@@ -3646,3 +3646,38 @@ read exact, queueUNSET/auto_mergeNULL/human740-byte suffix exact. Normal
 dirty-note backups retained. No commit/push/PRbody/hosted/native/service mutation
 or PRmerge/cleanup yet. Normal preflight/publication and successor hosted gates
 remain pending. Hosted timeout causes remain unproved; no infrastructure retry.
+
+Stage44 completion applies ONLY to the bounded finite correction, qualification
+and normal publication, not overall hosted/native acceptance or PR landing.
+Actual1087-file preflight passed/source unchanged. Normal commit993a5a6873c15737871adb9ea7f4f38ec723105d
+treef8e670ac3fe91fc849901e14e6ca33d40fef2c75 has exact parents1a51 and3b68;
+all27164 committed source entries read back exact. Normal fast-forward1a51..993a
+published with fresh exact1a51 lease, EXPLICITGitHubURL and retained LFS hook.
+Readback verified actual GitHub head/tree/parents/dev/explicitrefs and live body
+SHA0e62c34c295e23fca6e0cd88db1d457d722dc47cbf620d12b5952ef89bc5ee26;
+human740-byte suffix remains exact. No history rewrite/admin/hook bypass,
+automatic-precommit installation claim, GC cleanup or protected-resource action.
+New993a actual hosted qualification is pending; prior1a51 failures remain failed,
+not rerun/relabelled. Overall Stage26/native/acceptance/TASK13421.1 InProgress.
+No PRmerge/cleanup; two native inputs consumed/fullUATfalse/liveStopunproved.
+
+## Stage 45: Assign the new reload regression to existing hosted shards
+**Goal**: Correct the newly detected993a shard-routing omission without weakening coverage.
+**Success Criteria**: Official guard RED/GREEN; exactly five routing additions, all other parsed workflow semantics exact; scoped review and normal preflight/publication.
+**Tests**: Official check_shard_coverage.py, parsed YAML five-matrix comparison, source binding and normal preflight.
+**Status**: In Progress
+
+Actual993a Shard coverage guard114388212390/run38111618368 fails because
+test_main_reload_ownership.py is assigned to no shard. Original raw24136-byte
+log/SHA7df93a292ce45661c72e0f649ab1d748de40da690b10e3f2036c49f23f11ca23
+retained. Local official guard RED exit1/new_uncovered1, minimum five explicit
+path additions to existing platform-services-main-routing matrices then GREEN
+exit0/new_uncovered0. Linux3.12/3.13/macOS3.12/Windows3.12/OS3.13release all covered.
+Structured YAML comparison verifies all other semantics exact; no ignore,
+guard, deadlines, environments or budgets changed. Carver scoped independent
+static review completed/closed/no actionableP1/P2, not hosted qualification.
+No Python/application/test-source change, Bandit not applicable to YAML-only
+delta; retained runtime/frontend/UI executions remain source-composed with an
+explicit later NONOWNING CI-routing configuration difference, not fresh runs.
+Normal preflight/commit/publication pending; original993a failure stays failed,
+no retries/cancellations/reset. ADRrequiredNO: existing shard ownership repaired.
