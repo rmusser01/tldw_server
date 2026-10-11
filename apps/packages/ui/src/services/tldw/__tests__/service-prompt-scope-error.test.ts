@@ -148,6 +148,23 @@ describe("Service Prompt scope policy", () => {
     expect(servicePromptTargetsMatch(current, captured)).toBe(true)
   })
 
+  it.each([undefined, null, ""])("keeps implicit manual authentication stable for %s", (authSource) => {
+    const implicit = { serverUrl: "https://api.example.test", authMode: "single-user", authSource }
+    const explicit = { ...implicit, authSource: "manual" }
+    expect(servicePromptTargetsMatch(implicit, explicit)).toBe(true)
+    expect(servicePromptTargetsMatch(explicit, implicit)).toBe(true)
+  })
+
+  it.each([
+    { authSource: "cookie-session" },
+    { serverUrl: "https://other.example.test" },
+    { authMode: "multi-user" },
+    { orgId: "other-org" }
+  ])("keeps changed target authority rejected for %j", (change) => {
+    const original = { serverUrl: "https://api.example.test", authMode: "single-user", orgId: "owned-org" }
+    expect(servicePromptTargetsMatch(original, { ...original, ...change })).toBe(false)
+  })
+
   it("requires the captured single-user API-key scope to match", () => {
     const expected = deriveSingleUserApiKeyCredentialScope(
       "single-user",

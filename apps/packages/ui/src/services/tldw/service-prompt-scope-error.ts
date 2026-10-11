@@ -15,12 +15,11 @@ type ServicePromptTarget = Readonly<{
 export const servicePromptTargetsMatch = (
   current: ServicePromptTarget,
   checked: ServicePromptTarget
-): boolean => ([
-  "serverUrl",
-  "authMode",
-  "authSource",
-  "orgId"
-] as const).every((key) => (current[key] ?? null) === (checked[key] ?? null))
+): boolean =>
+  (current.authSource || "manual") === (checked.authSource || "manual") &&
+  (["serverUrl", "authMode", "orgId"] as const).every(
+    (key) => (current[key] ?? null) === (checked[key] ?? null)
+  )
 
 export const servicePromptPrincipalMatches = (
   current: Readonly<{
