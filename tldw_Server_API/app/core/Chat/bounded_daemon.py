@@ -13,6 +13,11 @@ from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    capture_llm_call_state,
+    run_with_llm_call_state,
+)
+
 
 class DaemonCapacityError(RuntimeError):
     """Raised when detached streaming work cannot be admitted safely."""
@@ -129,10 +134,12 @@ class BoundedDaemonPool:
         """Start *target* as a daemon or fail closed without invoking it."""
 
         self._acquire_capacity(exhaustion_message)
+        # Only the LLM call state crosses into the thread; no other context does.
+        llm_state = capture_llm_call_state()
 
         def guarded_target() -> None:
             try:
-                target()
+                run_with_llm_call_state(llm_state, target)
             finally:
                 self._release_capacity()
                 if released_event is not None:
