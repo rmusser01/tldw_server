@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
@@ -1929,6 +1929,9 @@ Proposal
     expect(modal.title).toBe("Literature Matrix")
     // Keep the real lazy viewer in the controlled test root, not Modal.info's timer-owned root.
     render(<>{modal.content}</>)
+    await act(async () => {
+      await import("../StudioPane/ArtifactModalContent")
+    })
 
     expect(await screen.findByRole("button", { name: "Export CSV" }))
       .toBeInTheDocument()

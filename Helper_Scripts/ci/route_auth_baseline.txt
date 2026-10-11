@@ -29,6 +29,8 @@ GET /api/v1/config/jobs
 GET /api/v1/config/providers
 GET /api/v1/config/quickstart
 GET /api/v1/config/tokenizer
+# TASK-13421.1: metadata-only registration split; same signed webhook handler and effective GET/POST method set as the former combined entry. Provider shared secret (X-Goog-Channel-Token / clientState), not identity auth.
+GET /api/v1/connectors/providers/{provider}/webhook
 # TASK-13399: visible once the ratchet mounted flag-gated routers. OAuth redirect callback (code/state are the credential); matches /api/v1/auth/federation/{provider_slug}/callback above.
 GET /api/v1/discord/oauth/callback
 GET /api/v1/embeddings/health
@@ -161,8 +163,6 @@ GET /favicon.ico
 GET /health
 GET /setup
 GET,HEAD /internal/ready
-# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: provider-specific shared secret (X-Goog-Channel-Token / clientState), not identity auth.
-GET,POST /api/v1/connectors/providers/{provider}/webhook
 HEAD /health
 POST /api/v1/acp/triggers/webhook/{trigger_id}
 POST /api/v1/auth/forgot-password
@@ -175,6 +175,8 @@ POST /api/v1/auth/register
 POST /api/v1/auth/resend-verification
 POST /api/v1/auth/reset-password
 POST /api/v1/config/validate-provider
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: provider-specific shared secret (X-Goog-Channel-Token / clientState), not identity auth.
+POST /api/v1/connectors/providers/{provider}/webhook
 # TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Discord Ed25519 request signature, verified in-handler, not identity auth.
 POST /api/v1/discord/interactions
 # TASK-13399: visible once the ratchet mounted flag-gated routers. Invite-token gated (the token is the credential); matches /api/v1/auth/register above.

@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.services.admin_audit_service import emit_storage_quota_audit_event
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
 
 router = APIRouter()
@@ -48,6 +49,9 @@ async def set_user_quota(
 
     try:
         result = await service.set_user_quota(user_id, request.quota_mb, updated_by=principal.user_id)
+        await emit_storage_quota_audit_event(
+            actor_id=principal.user_id, target_user_id=user_id, quota_mb=request.quota_mb
+        )
         pct = result.get("usage_percentage")
         status_data = {
             "quota_mb": result.get("storage_quota_mb"),

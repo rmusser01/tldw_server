@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
@@ -19,13 +20,13 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
-    AuthnzStorageQuotasRepo,
     DEFAULT_HARD_LIMIT_PCT,
-    DEFAULT_ORG_QUOTA_MB,
     DEFAULT_SOFT_LIMIT_PCT,
-    DEFAULT_TEAM_QUOTA_MB,
+    AuthnzStorageQuotasRepo,
 )
+from tldw_Server_API.app.services.admin_audit_service import emit_storage_quota_audit_event
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
 router = APIRouter(prefix="/storage-quotas", tags=["admin-storage-quotas"])
@@ -143,11 +144,13 @@ async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
 async def update_user_storage_quota(
     user_id: int,
     body: UpdateUserQuotaRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> StorageQuotaResponse:
     """Set (or, with null, remove) a user's own storage quota (limits.storage_quota_mb)."""
     try:
         service = await get_storage_service()
-        await service.set_user_quota(user_id, body.quota_mb, updated_by=None)
+        await service.set_user_quota(user_id, body.quota_mb, updated_by=principal.user_id)
+        await emit_storage_quota_audit_event(actor_id=principal.user_id, target_user_id=user_id, quota_mb=body.quota_mb)
         return StorageQuotaResponse(**await service.user_quota_status(user_id))
     except UserNotFoundError as exc:
         raise HTTPException(status_code=404, detail="User not found") from exc

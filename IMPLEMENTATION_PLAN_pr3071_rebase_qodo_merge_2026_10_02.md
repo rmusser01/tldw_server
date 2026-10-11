@@ -2983,7 +2983,7 @@ linked-run policy and callback transitions; held KnowledgeQA generator clear,
 supersession and direct abort with timer cleanup; warmed/concurrent ModelDb
 instances and storage error/legacy compatibility. Then official contract,
 owning UI/frontend/types/build/unchanged budgets, security/manual/preflight.
-**Status**: In Progress
+**Status**: Complete
 
 Design: reuse existing account generations, request ownership, scoped result
 publisher, DOM selection validation, React reconciliation and catalog record
@@ -3095,7 +3095,7 @@ existing real React/AntD, API-double, semantic or timing contracts.
 review/security/preflight and fresh full owning qualification before integration.
 **Tests**: Pending one-shot API replies across the actual shared fixture reset;
 then the complete Character file and full current owning UI selection.
-**Status**: In Progress
+**Status**: Complete
 
 Mandatory three-attempt reassessment is recorded in
 incoming-character-three-attempt-reassessment-20261009.json. Full owning failed;
@@ -3245,8 +3245,404 @@ readback. Fresh successor required and owning hosted gates remain separate.
 **Tests**: Frozen27124 candidate source, complete7903/405 UI, source-composed
 528/15 frontend/types/build/unchanged budgets and extension artifact/compile,
 453/12 safe runtime, official contract, scoped manual/security and preflight.
-**Status**: In Progress
+**Status**: Complete
 
 FullUatPassedfalse/liveStopunproved/two native Sends consumed. No third Send,
 replay, inference, browser probe/reopen, fourth native Character-root, protected
 service/data/profile mutation, PR merge or cleanup follows from local success.
+
+Stage40 actual NORMAL commit/publication/readback completed on2026-10-09UTC:
+head1a51e48e6e0fc7e5f8768a87e1ad60018db09c9d, treee4593764f382ea90c3902231c23f28906f08207b,
+exact parents42f7b57b135fe205fb7726d403b86b466c108c61 and
+4d6a85c4c693c4c83480d0f7c8046cfda0634c55. Explicit GitHub refs and separate dev
+branch API agreed; queueUNSET/auto_mergeNULL/policies exact. Normal explicit
+GitHub URL fast-forwardc2fc..1a51 used fresh exactc2fc lease and retained LFS
+prepush. All70 intended paths/all27124 committed source inputs match current
+qualification and GitHub immutable tree/parents readback. NoMERGE_HEAD or staged
+changes. Full1037-file normal preflight passed/source unchanged; inherited
+precommit remains absent, no installation/automatic-hook/bypass claim. Existing
+GC warnings were ignored without prune/log removal/recovery cleanup.
+
+Publication AI evidence updated honestly; whole-bodySHA
+e5415350194494e3c66847112253e35028209dbe09c50ec83b845174e7de85fe.
+Human740-byte suffix000648a4a82d7bdf77ef25cc68e0ee0438a4e53d903727e649726fddf775c65f
+and content after header remain byte-exact. Two read-only publication guard
+failures are retained separately: old ignored generated contract artifacts,
+then a wrong receipt hook-field name. Neither reached commit/push/body mutation.
+Only the two ignored owned contract outputs were backed up and aligned to the
+already-qualified official outputs; tracked source/index unchanged, never staged.
+No original qualification receipt or failed/incomplete run was rewritten.
+
+Stages37/38 Complete only for the corrected/reviewed finite scopes and current
+owning qualification, not whole-file/native/actual-storage/cancellation review
+or causal proof of original8 failures/missing-result run. Fresh successor hosted
+qualification remains pending; published predecessorc2fc success cannot qualify
+1a51. Stages26/30 native/33 overall acceptance and TASK13421.1 remain In Progress;
+no epic closure, NORMAL PR merge or cleanup. All native/protected restrictions
+and retained own oldc2fc UAT services/data/profile/evidence remain unchanged.
+These postpublication notes intentionally remain uncommitted/unpublished; no
+notes-only push or CI reset. Final own-note preflight/readback will be retained.
+
+## Stage 41: Current-Head CI Failure Diagnosis And Bounded Corrections
+**Goal**: Diagnose actual1a51 backend route-inventory and frontend literature
+export failures without resetting healthy CI or changing application authority.
+**Success Criteria**: Preserve actual failed logs and exact source; prove the
+metadata-only webhook method-set equivalence; identify the frontend failure
+boundary before any correction. Independent review, official inventory,
+unchanged assertions/deadlines/security, full owning source qualification and
+normal preflight precede necessary successor publication.
+**Tests**: Actual backend54PASS1FAIL/core2255PASS1FAIL2SKIP and frontend607PASS1FAIL
+retained; exact private COW focused literature selection; official isolated
+route-auth inventory and related tests for any verified baseline correction.
+**Status**: In Progress
+
+2026-10-10UTC read-only exact-head snapshot independently agrees1a51/4d6,
+queueUNSET/auto_mergeNULL/humanbodyexact. Required backend/frontend gates failed;
+mainCI remains active and healthy jobs are preserved. No hostedretry/cancel,
+sourcepublication/native/provider/model/service/protected mutation/PRmerge or
+cleanup. Baseline currently stores GET,POST while the metadata-only same-handler
+split reports separateGET+POST; no new effective methods/public paths are implied.
+Frontend ExportCSV missing in real lazy-viewer fixture remains unresolved, not
+infrastructure/flaky/causally repaired by earlier local fullUI success.
+ADR required: no for metadata inventory representation or finite fixture setup
+that preserves authority; reassess if a proposed fix changes durable policy.
+ADR059 governs tracking. Two native Sends remain consumed/fullUATfalse/liveStop
+unproved; no third input/browser probe/profile reopen or acceptance waiver.
+
+Stage41 bounded private candidate evidence: official inventory RED exit1,
+official generated inventory exit0, and effective method/path set equality
+prove the GET,POST-to-singleton representation update adds no public method or
+path. Original baseline comments retained; signed webhook handler, dependencies,
+validation and ratchet comparator unchanged. Goodall security review completed
+and closed. Actual current candidate64PASS/zeroFAIL/ERROR/SKIP/exit0, with27124
+source inputs unchanged, includes the55 tenant-isolation ratchet tests plus
+webhook/OpenAPI owning tests. Unchanged connector Bandit has zero findings.
+
+The actual minimal literature fixture adds RTL act and awaits the real lazy
+viewer AFTER the original render. Corrected33PASS/zeroFAIL/PENDING/exit0/all7412
+exact; all old assertions and timeout values retained. Query time starts after
+fixture settlement, so this is not cold-open/native performance or hosted
+causality proof. Meitner final actual two-file review completed and closed with
+no actionable P1/P2; rejected outer-act proposal was never applied. Actual lint
+0errors6INHERITEDwarnings/ZEROnew. Retained frontend528/types/build/budgets and
+extension artifact/compile executions have precisely TWO later NONOWNING TS
+fixture exceptions/all7410 other inputs exact; compiler inventories are not new
+compilations. Three composition collector failures and mandatory reassessment
+are retained; revised source-bound composition passed, no original rewriting.
+
+Current full405 UI candidate run remains active and has an actual failure in
+the unchanged world-book edit/save Character case (raw938601ms). This is not
+one of the prior eight failed cases; prior owning101 and full7903 execution
+passed that case. Final counts/error/exit remain pending, cause unproved. Do not
+integrate or publish the candidate, speculate infrastructure/flakiness, weaken
+assertions/deadlines, or run another unchanged Character/workflow probe. Existing
+1a51/4d6 refs and four hosted failed jobs unchanged at00:57; healthy CI preserved.
+No current native acceptance, app-source integration, publication, merge or
+cleanup. Stage41/TASK13421.1 remain In Progress pending actual final evidence.
+
+Stage41 final full405 execution completedFAILED01:07:52UTC:7902PASS1FAIL,
+zeroPENDING/TODO/actualcode1/signalnull/all7412 inputs unchanged. Actual failed
+Character world-book edit/save case retains explicit60000ms deadline; default
+log says Test timed out in60000ms, measured938601.229ms. JSON collection stack
+alone does not locate the slow operation or prove sleep/OOM/infrastructure/
+flakiness/callback cause. Current literature33 all passed in this full run;
+overall candidate owning qualification nevertheless FAILED. Raw binding/JSON/
+log and distinct failure inspection retained, no rerun or source alteration.
+Private two-file candidate must remain unintegrated/unpublished. Next bounded
+work is connected diagnosis of this new exact case before any independently
+justified different-angle finite run; not another unchanged Character/workflow
+probe, deadline/assertion weakening or success inference from prior passes.
+All necessary qualification exec sessions and reviewers completed/drained;
+normal two-owned-note preflight and final read-only hosted snapshot follow.
+
+Stage41 final read-only hosted01:08:52UTC still agrees1a51/4d6/queueUNSET/
+autoNULL/bodyhumanexact, but now FIVE actual failed checks/jobs. Newly completed
+db-privileges job114075042058 on mainCI38005544010 logs3048PASS14SKIP/5998warnings,
+then Fatal Python error: Aborted during Garbage-collecting with no Python frame,
+and actual step exit124 at the unchanged outer55m/SIGABRT deadline. Job remains
+FAILED, not qualified by the passing test summary. Actual raw666121-byte log,
+SHA receipt and distinct attribution retained. Shutdown/callback/infrastructure/
+flaky cause unproved; mainCI still active, no retry or deadline/GC/guard change.
+Next bounded investigation must include this shutdown failure as well as the
+new Character deadline failure, without broad local DB/model/provider runs or
+protected resource actions. Normal final own-note preflight0 follows these
+honest notes; no notes-only publication or epic/task completion.
+
+Stage41 read-only heartbeat01:46:54UTC independently agrees1a51/4d6,
+queueUNSET/autoNULL/bodyhumanexact; SIX actual failed checks/jobs. Newly completed
+product-notes-persona job114075052875 on mainCI38005544010 exhausted the unchanged
+outer55m guard while tests were still running. Actual collected2199, last complete
+progress70%, then partial Persona/test_persona_visuals_api.py dots and Fatal Python
+error: Aborted/step exit124. No final passing test summary or exact interrupted
+case identification is available. The sampled current-thread stack is pytest
+teardown logging -> main._safe_logging_addHandler -> caller guard -> explicit
+pytest-runtime environment lookup; it is a sample, NOT a proved hot path,
+deadlock, logging recursion, cold-schema cause or infrastructure/flaky attribution.
+Actual raw738196-byte log/SHA and independent attribution receipt retained.
+platform-kanban remains active; healthy jobs preserved, no hosted retry/reset.
+
+Historical c2fc db-privileges log was separately read: actual3048PASS14SKIP in
+2631.59s/exit0 versus current3283.08s/exit124 after the same test counts. Both raw
+logs report Python3.12.15/pytest9.1.1; timing difference is NOT a causal comparison
+or current-head qualification. Connected lifecycle/cache/teardown/logging source
+inspection did not establish either shutdown or new shard cause. No broad local
+DB/Persona/model/provider/native run, guard/deadline/GC change, fixture alteration,
+candidate integration or publication. Stage41/TASK13421.1 remain In Progress;
+private two-file candidate still lacks complete owning UI qualification. Only
+owned notes changed; normal own-note preflight follows, no notes-only push.
+
+Stage41 read-only heartbeat collected04:45:43UTC: published/local1a51 unchanged,
+but explicit GitHub refs and independent dev branch API now agree0c53973f17eede4.
+PR3217 added seven files/95insertions31deletions for per-user storage quota audit
+events, including endpoint principal attribution, shared audit emitter and tests.
+This is runtime/security-relevant, NOT docs-only or source-equivalent; comparison
+patches read, no connected independent review/test/integration qualification.
+Other-owner TASK13510 untouched. Latest governing policies read from actualdev,
+byte-exact owned checkout; queueUNSET/autoNULL/bodyhumanexact. No base chasing.
+
+MainCI38005544010 now completedFAILED, all224 jobs present. New platform-kanban
+job114075056729 failed at01:54:59UTC/actualstep124 under unchanged outer55m guard.
+Collected349/last complete progress28%/partial API dots, no final passing summary
+or exact interrupted-case identification. Sampled main thread waits in TestClient
+startup via anyio future, from client_with_kanban_db line58; one worker is in
+Pydantic JSON-schema hashing, another in notifications CollectionsDB setup.
+Eight connected source inputs are exact published1a51. Function-scoped Kanban
+fixtures reload the full app; each new app loses the prior instance schema cache,
+and current lifespan awaits schema generation before yield. Repeated cold-schema
+startup cost is a HYPOTHESIS, not proved timing/root cause or infrastructure/flaky
+attribution. No startup/GC/health/deadline/budget weakening or broad local run.
+Raw226167-byte log/SHA and attribution retained. New FullSuite aggregate
+114103207148 failed only because the Python3.12 shard result was failure.
+AllEIGHT actual failed jobs inspected/raw logs retained;286SUCCESS43SKIP8FAIL,
+one nonrequired cancelled license audit/no active jobs. Comments/reviews/all15
+resolved threads unchanged. No retry/reset/cancel/publication/merge/cleanup.
+Private64backend/33literature scoped candidate remains unintegrated/unpublished;
+full405 UI7902PASS1FAIL remains FAILED. Stage41/TASK13421.1 In Progress, no native
+acceptance waiver. Only owned notes changed; fresh normal own-note preflight
+follows, nothing staged and no notes-only push.
+
+Stage41 new read-only host power evidence, 2026-10-10 13:56UTC continuation:
+actual macOS history records Clamshell Sleep at2026-10-09 17:35:17-0700 followed
+by first DarkWake at17:50:47, a930-second interruption within the failed
+Manager.first-use file window17:33:54..17:55:00. Seven actual transition rows
+retained; three scheduled Wake Requests excluded. Serialized prior26 durations
+project the failed case APPROXIMATELY17:35:09.568..17:50:48.169, closely bracketing
+the sleep. The938601.229ms result exceeds measured sleep by8601.229ms. Pinned
+Vitest4.0.18 JSON reporter does not serialize per-case start timestamps; duration
+spans hooks/callback/cleanup, so this supports a material host interruption,
+not exclusive operation-level cause or timeout-firing phase. Original full405
+7902PASS1FAIL/code1 remains FAILED and private two-file candidate UNQUALIFIED.
+
+Evidence1a51-worldbook-power-history-1356-v2-20261010.json/log binds original
+failed JSON/defaultlog/exit receipt and pinned reporter/runner bytes. Initial
+power text filter also matched historical Assertions and was truncated; actual
+event-column reader excludes those and Wake Requests. Initial receipt collector
+exit1 incorrectly expected timeout text in JSON, which contains STACK_TRACE_ERROR;
+revised reader verifies actual60000ms message in defaultlog. Raw initial helper
+and transition log remain separate, no test rerun or result relabeling. Earlier
+distinct CPU observation1PASS100NONSELECTED remains scoped, not full owning
+qualification. No automatic retry, speculative fixture/query/deadline change,
+power-setting change or browser/profile/process discovery. This local macOS
+evidence does NOT attribute hosted Ubuntu timeouts or grant hosted retry.
+Fresh13:56:57UTC exact1a51/dev0c539/queueUNSET/autoNULL/bodyhumanexact and all eight
+known completed hosted failures/comments/reviews/15resolvedthreads unchanged.
+Stage41/TASK13421.1 remain In Progress. Only own plan/task evidence notes changed;
+no app-source integration/publication/PRmerge/cleanup/native/model/service action.
+ADRassessment unchanged/non-code evidence only; Bandit not applicable to notes.
+Fresh normal two-note preflight follows; nothing staged/no notes-only push.
+
+Stage41 independently justified frozen owning requalification completed
+2026-10-10 15:59:08UTC: actual7903PASS405files/zeroFAIL/PENDING/TODO/code0/
+signalnull. All27124 candidate inputs and all7412 UI inputs remained exact;
+selection, assertions, deadlines, config, guards, memory, budgets and power
+settings unchanged. Read-only power boundaries contain ZERO recorded sleep/
+wake transitions during this run. Original7902PASS1FAIL/code1 remains FAILED;
+measured prior930-second sleep justified this distinct owning qualification,
+not a causal repair claim, automatic retry or fourth old Character/workflow/
+native probe. World-book edit/save passed12480ms in this full execution.
+
+Evidence1a51-frozen-owning-ui-sleep-bounded-1526-etGO60 retains actual exit before
+result read, complete JSON/defaultlog and power-before/after logs. Epicurus
+independent reporting review found P2 aggregate-only qualification could accept
+internally empty suites. Raw report retained/reviewer completed and closed;
+active controller was NOT edited or rerun. Distinct post-run assert-selfchecked
+reader reconciles EXACT405 frozen file identities and all7903 serialized passed
+case identities INCLUDING multiplicity against original full result, no failed/
+pending/todo/unknown cases, all27124+7412 inputs freshly exact. Receipt
+1a51-complete-serialized-owning-ui-verification-1526-20261010.json qualifies the
+actual complete run; original aggregate-only helper remains a recorded limit,
+not a fabricated replacement execution. Private two-file candidate now has
+complete owning UI qualification alongside actual64backend/33literature and
+retained source-composed frontend/types/build/extension evidence. It remains
+UNINTEGRATED/UNPUBLISHED, not successor hosted or native acceptance.
+
+Read-only current exact-head timeout artifact inventory/download retained
+platform-kanban/persona logs (NO final JUnit) and complete db-privileges JUnit.
+Historical c2fc DB artifact separately verified. Structured defusedxml reader
+matches all3062 unique case identities/statuses: both3048PASS14SKIP; current
+reported testcase-duration sum3233.181s versus historical2593.508s, distributed
+across classes. Ten connected top-class/plugin/conftest inputs byte-exact both
+heads and owned source. Largest class delta is an unchanged direct DB fixture
+path, not a proved OpenAPI phase cost. JUnit durations include hooks/call and
+different hosted heads/jobs are NOT a causal comparison. Current passing JUnit
+does NOT qualify step124; exact interrupted Kanban/Persona cases, startup/
+shutdown cause and infrastructure-retry eligibility remain unproved. No broad
+local DB/provider run, hosted retry or guard/deadline/GC/warmup weakening.
+
+Fresh15:27UTC explicit GitHub refs and separate dev API agree published1a51 and
+actualdev3b68f2dbc2daa1b94099a8a3d56c809fd2c808db. Earlier0c539 storage-quota
+production delta and new40-file performance-harness/docs/task delta remain
+unintegrated/unqualified; no base chasing or other-owner task edits. Stage41/
+TASK13421.1 remain In Progress pending necessary current-dev integration,
+qualification/publication and actual successor hosted/applicable acceptance.
+No app-source/index/body/commit/push/PRmerge/cleanup/browser/native/provider/
+model/service action. TWO native Sends still consumed/fullUATfalse/liveStop
+unproved. ADR assessment unchanged/no durable rule change; ADR059 tracking.
+Only owned plan/task result notes updated; normal two-note preflight follows.
+
+## Stage 42: Incoming Performance Harness Measurement and Cleanup
+**Goal**: Correct only independently verified incoming canned-stream measurement
+and cleanup defects before any necessary latest-dev integration/publication.
+**Success Criteria**: Finite source-bound RED/GREEN, preserved assertions and
+deadlines, no new lint findings, substantive scoped review, then separately
+qualified actual incoming union; no native/browser/model or shared-service run.
+**Tests**: Actual selected measurement callback with finite store/DOM/timer
+doubles; launch-prefix/finally projection with launch skip/reject, context-close
+reject and body-reject doubles. Full browser harness and incoming owning suites
+remain separate, unexecuted requirements, not inferred from these finite checks.
+**Status**: In Progress
+
+2026-10-10 16:05 continuation: immutable actual3b68 incoming source bundle and
+fresh16:06:54UTC head/dev explicit refs plus separate branch API retained.
+Published/local1a51, eight known completed hosted failures, body/human suffix
+and all15 resolved threads remain unchanged; no hosted retry/cancel/reset.
+Parent connected quota-audit review of four entire incoming Python files and
+15 selected connected inputs established no actionable P1/P2 in reviewed scope;
+no runtime/isolated fixture/Bandit/integration qualification inferred.
+
+Beauvoir independent read-only four-harness review completed/closed; parent
+verified two incoming P2s: cursor-only assistant stub starts first-token/growth
+counters, and browser-launch skip/reject or context-close rejection bypasses
+the listening mock-server cleanup. Incoming source is not integrated. A DISTINCT
+private one-file candidate in1a51-incoming-performance-finite-1605-20261010 fixes
+only trailing-cursor content-length measurement, launch-inside-cleanup ownership
+and unconditional server shutdown after context close. Original incoming bytes
+and original qualified two-file candidate retained unchanged. Finite selected
+actual callback/control-flow checks: RED1PASS5FAIL0ERROR/code1 then GREEN6PASS/
+zeroFAIL/ERROR/code0. Cleanup projection deliberately replaces browser body with
+a finite failure boundary; this is NOT whole-browser harness qualification.
+
+Actual original/candidate ESLint0errors8INHERITEDwarnings/ZEROnew/rawCleanfalse;
+all23 original AST assertions INCLUDING multiplicity and every test.setTimeout
+call exact. Only import/measurement/canned-test top-level statements differ.
+Existing lint configuration reports inherited React-detection/pages-directory
+environment warnings; no policy/config/suppression change. Full typecheck,
+actual browser launch/HTTP-server/native/provider/model/service action UNRUN.
+Final Chandrasekhar independent tiny-candidate review completed/CLOSED; parent
+evaluated final source-bound report/no actionable P1/P2 IN REVIEWED CORRECTED
+SCOPES. Reviewer ran NO tests; actual parent RED/GREEN is distinct. Finite
+observers are no-ops, timeout callback is manually fired, skip/reject share a
+throw double, and browser body is deliberately projected out. Initial populated
+store normalization, batching/rendering, transport100chunks, partial-launch
+allocations, real sidepanel cleanup/server shutdown remain unexecuted. These
+limits are not reclassified as actual browser qualification. Three new ordinary
+Vitest bench files are included by existing globs and must enter future actual
+owning selections; old405/15 selections do not qualify pending incoming union.
+
+Initial report serialization used double-quoted shell JavaScript and Markdown
+backticks caused unknown-name substitutions/zsh parse error/actual127 before
+intended Node extraction; target directory and report absent at corrected guard.
+Raw tool output and separate failure receipt retained; corrected whole-argument
+single-quote serialization succeeded. Not a test/hosted failure or qualification.
+ADR required: no; test-only existing measurement/resource ownership corrections
+change no durable API, persistence, security/provider policy or architecture.
+ADR059 remains task-editor governance. TASK13421.1/Stages41/42 and overall
+acceptance remain In Progress. No actual checkout application-source/index/body/
+commit/push/integration/merge/cleanup or protected/native action. TWO native
+Sends consumed/fullUATfalse/liveStopunproved; all protections remain unchanged.
+
+## Stage 43: Direct Failure Corrections and Integrated Qualification
+**Goal**: Fix verified app ownership, auth inventory, viewer fixture and incoming
+benchmark defects without weakening guards, assertions or resource limits.
+**Success Criteria**: Independently reviewed finite RED/GREEN corrections;
+complete frozen owning UI/runtime/frontend qualification; normal preflight and
+publication. Hosted timeout causality and native acceptance remain separate.
+**Tests**: App-bound OpenAPI cache and wrapper retention/guard regressions;
+auth inventory/webhook contracts; real lazy viewer and storage benchmark spies;
+407 UI files, 19 safe runtime paths, 16 frontend files, types/build/token/budget
+checks. No broad PostgreSQL, Persona/Kanban, native/browser or model run.
+**Status**: In Progress
+
+2026-10-10 America/Los_Angeles direct-human continuation: private candidate only;
+published/owned HEAD1a51 and independently verified dev3b68 remain unchanged.
+Three-line main fix binds custom_openapi to its owning app and unwraps prior
+Loguru delegates; unchanged baseline five-test fixture fails4/passes1, corrected
+fixture passes5. Bacon scoped review completed; formatted follow-up checked by
+parent. This does not prove causal repair of hosted shard timeouts.
+Incoming benchmark spies now target the actual localStorage prototype. Original
+UI benchmark1PASS1FAIL/frontend1FAIL retained; corrected UI2PASS/frontend1PASS.
+Franklin scoped review completed; all original assertions/deadlines retained.
+Private full runtime526PASS/19safe paths and frontend529PASS/16files completed;
+types/build/tokens/UNCHANGEDbudgets all0, artifactNOTSERVED. Distinct sandbox
+frontend528PASS1FAIL from ephemeral-port EPERM remains FAILED. Official contract
+export/typegen/check0/0/0; touched production Bandit0, inherited lint retained.
+Finite AST test Bandit B101/B102 findings disclosed, no suppression/global-clean
+claim. Existing extension build/types are source-composed historical executions,
+not fresh browser/performance-harness qualification.
+
+Human interruption left initial407-file UI run incomplete:363 completed file
+lines, no final JSON or recorded child exit code/signal. Original receipt/log
+retained; no passing result inferred. Exact owned worker inspection found none.
+Human 'continue' authorizes one replacement owning run on unchanged frozen
+27164 inputs, all original assertions/deadlines/selection/config/budgets retained.
+direct-ui-resumed-20261011 completed FAILED:407files7901PASS4FAIL/code1/signalnull.
+All4 failures are in unchanged ServicePromptsSettings; three5000ms timeouts and
+one delayed-SPA missing heading. Focused unchanged93cases91PASS2FAIL at different
+5000ms cases. Initial wrong dependency-path command failed before collection,
+not a test. Dewey completed independent fixture review identifies premature
+history assertions, unowned delayed navigation after unmount and unestablished
+accepted-leave confirmation. These are real risks, not proven timeout causes.
+A third different-angle timing observation is prepared in a distinct private
+copy; no fourth unchanged repro. Candidate remains unintegrated/unpublished and
+integration/preflight helpers remain ineligible. No native inputs/services
+or hosted reruns/cancellation/reset. All protected resources remain unchanged.
+ADR required: no new durable rule; existing app/resource ownership restored,
+test-only measurements corrected. ADR059 governs official task tracking.
+
+## Stage 44: Correct Service Prompts fixture ownership and qualify integration
+**Goal**: Settle history operations and cancel fixture-owned delayed navigation without changing product behavior or test deadlines.
+**Success Criteria**: Preserve all original assertions; finite regressions, owning file and full UI pass; reviewed integrated source remains exact through normal preflight.
+**Tests**: Six distinct finite RED/GREEN regressions; owning99; full407; matched lint and original assertion multiplicity; source-composed runtime/frontend/build qualification.
+**Status**: In Progress
+
+Original407 UI7901PASS4FAIL and focused93 91PASS2FAIL remain failed. Third
+different-angle timing observation6PASS87nonselected measured query cost, not
+original failure cause. Finite fixture corrections own delayed timers, await
+destination/reversal in separate React act calls, guard the original operation
+signal and drain the entire history operation through listener cleanup.
+Initial owning97 89PASS8FAIL retained; per-event act and abort corrections then
+owning98PASS. Singer's additional whole-operation settlement P2 was verified
+by distinct RED1FAIL, then final six GREEN and owning99PASS. All750 original
+AST assertion calls retained including multiplicity,24 added, zero new lint.
+Final Cicero static scoped review completed/closed, no actionable P1/P2; prior
+OPEN reports remain retained. No global/native approval or timeout-cause claim.
+
+Final direct-service-ui-final-20261011 actual7911PASS407files, zero failures,
+pending/todo, code0/signalnull and all27164 current/executed inputs exact.
+Structured identity verification preserves all7903 predecessor passed cases
+including multiplicity plus2 incoming bench cases and6 new finite regressions.
+Retained runtime526PASS19safe paths and frontend529PASS16files/types/build/
+tokens/unchanged budgets0 are source-composed with exactly one later nonowning
+ServicePromptsSettings test fixture difference. Current/executed TS5.9.3 program
+inventories exclude that fixture; inventories are not fresh typechecks.
+Historical extension artifact/types remain source-composed with four disclosed
+nonowning fixture differences, not fresh browser or full-harness qualification.
+Original failed/incomplete runs are not relabelled. FullUatPassed remains false.
+
+Fresh explicit GitHub refs and separate dev API agree1a51/3b68; current policies
+read exact, queueUNSET/auto_mergeNULL/human740-byte suffix exact. Normal
+--no-commit --no-ff integration3b68 and eight qualified corrections succeeded,
+52paths staged/no conflicts; all nonnote source exact, recoveryref and exact
+dirty-note backups retained. No commit/push/PRbody/hosted/native/service mutation
+or PRmerge/cleanup yet. Normal preflight/publication and successor hosted gates
+remain pending. Hosted timeout causes remain unproved; no infrastructure retry.
