@@ -8,6 +8,7 @@ import shutil
 import stat
 import tempfile
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -124,6 +125,104 @@ class LocalSyncBlobStore:
             _discard_temp_path(temp_path)
             raise SyncBlobStoreError("Sync blob upload commit failed") from exc
         return final_key
+
+    @staticmethod
+    def _write_native_chunk(
+        *,
+        root_directory: int,
+        upload_id: str,
+        chunk_index: int,
+        payload: bytes,
+        expected_hash: str,
+        expected_total_size: int,
+    ) -> str:
+        """Write one bounded native chunk through no-follow directory descriptors."""
+        _require_native_storage_capabilities()
+        upload = _safe_segment(upload_id, field_name="upload_id")
+        if (
+            type(expected_total_size) is not int
+            or expected_total_size < 1
+            or type(chunk_index) is not int
+            or chunk_index < 0
+            or chunk_index * STREAM_CHUNK_SIZE >= expected_total_size
+            or len(payload) != min(STREAM_CHUNK_SIZE, expected_total_size - chunk_index * STREAM_CHUNK_SIZE)
+        ):
+            raise SyncBlobStoreError("Native chunk layout does not match reserved size")
+        if _sha256(payload) != expected_hash:
+            raise SyncBlobStoreError("Native chunk hash does not match payload")
+        name = f"{chunk_index}.part"
+        with _open_directory_chain(root_directory, ("_uploads", upload), create=True) as directory:
+            with _temporary_file_at(directory, prefix=f"{chunk_index}.") as (temporary, handle):
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+                _publish_native_file_at(
+                    handle,
+                    directory=directory,
+                    temporary=temporary,
+                    name=name,
+                    payload_hash=expected_hash,
+                    expected_size=len(payload),
+                )
+        return f"_uploads/{upload}/{name}"
+
+    @staticmethod
+    def _commit_native_upload(
+        *,
+        root_directory: int,
+        upload_id: str,
+        storage_namespace_id: str,
+        payload_hash: str,
+        expected_size: int,
+        chunk_indexes: list[int],
+    ) -> str:
+        """Assemble and durably publish exact native bytes without pathname traversal."""
+        _require_native_storage_capabilities()
+        upload = _safe_segment(upload_id, field_name="upload_id")
+        namespace = _storage_namespace_id(storage_namespace_id)
+        digest = _hash_digest(payload_hash)
+        if (
+            type(expected_size) is not int
+            or expected_size < 1
+            or type(chunk_indexes) is not list
+            or len(chunk_indexes) != (expected_size + STREAM_CHUNK_SIZE - 1) // STREAM_CHUNK_SIZE
+            or any(type(index) is not int or index != position for position, index in enumerate(chunk_indexes))
+        ):
+            raise SyncBlobStoreError("Native upload layout does not match reserved size")
+        name = f"{digest}.blob"
+        with _open_directory_chain(root_directory, ("blobs", "v2", namespace), create=True) as directory:
+            try:
+                existing = _open_target_at(directory, name)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None:
+                with existing:
+                    _verify_named_open_blob(
+                        existing, directory=directory, name=name, payload_hash=payload_hash, expected_size=expected_size
+                    )
+                    os.fsync(existing.fileno())
+                    os.fsync(directory)
+                return LocalSyncBlobStore.namespace_storage_key(namespace, payload_hash)
+            with _temporary_file_at(directory, prefix=f"{digest}.{upload}.") as (temporary, output):
+                with _open_directory_chain(root_directory, ("_uploads", upload), create=False) as chunks:
+                    for index in chunk_indexes:
+                        with _open_target_at(chunks, f"{index}.part") as source:
+                            expected_chunk = min(STREAM_CHUNK_SIZE, expected_size - index * STREAM_CHUNK_SIZE)
+                            if os.fstat(source.fileno()).st_size != expected_chunk:
+                                raise SyncBlobStoreError("Native chunk size does not match reservation")
+                            while chunk := source.read(STREAM_CHUNK_SIZE):
+                                output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+                _publish_native_file_at(
+                    output,
+                    directory=directory,
+                    temporary=temporary,
+                    name=name,
+                    payload_hash=payload_hash,
+                    expected_size=expected_size,
+                )
+        return LocalSyncBlobStore.namespace_storage_key(namespace, payload_hash)
 
     @staticmethod
     def legacy_storage_key(payload_hash: str) -> str:
@@ -458,7 +557,7 @@ def _require_secure_relocation_capabilities() -> None:
 
 @contextmanager
 def _open_directory_chain(
-    root: Path,
+    root: Path | int,
     segments: tuple[str, ...],
     *,
     create: bool,
@@ -472,7 +571,7 @@ def _open_directory_chain(
         | getattr(os, "O_CLOEXEC", 0)
     )
     try:
-        current = os.open(root, flags)
+        current = os.dup(root) if type(root) is int else os.open(root, flags)
     except OSError as exc:
         raise SyncBlobStoreError("Sync blob root could not be opened safely") from exc
     try:
@@ -522,6 +621,72 @@ def _open_directory_chain(
         yield current
     finally:
         os.close(current)
+
+
+def _require_native_storage_capabilities() -> None:
+    """Native publication/cleanup has no pathname fallback on unsupported platforms."""
+    _require_secure_relocation_capabilities()
+    supported = {function.__name__ for function in getattr(os, "supports_dir_fd", set())}
+    followed = {function.__name__ for function in getattr(os, "supports_follow_symlinks", set())}
+    if (
+        not {"link", "rename", "unlink", "rmdir"}.issubset(supported)
+        or "link" not in followed
+        or not getattr(os, "O_CLOEXEC", 0)
+        or not getattr(shutil.rmtree, "avoids_symlink_attacks", False)
+    ):
+        raise SyncBlobStoreError("Native secure storage primitives are unavailable")
+
+
+def _publish_native_file_at(
+    handle: BinaryIO, *, directory: int, temporary: str, name: str, payload_hash: str, expected_size: int
+) -> None:
+    """Atomically publish a verified inode; an existing different file is never replaced."""
+    expected = os.fstat(handle.fileno())
+    _verify_named_open_blob(
+        handle,
+        directory=directory,
+        name=temporary,
+        payload_hash=payload_hash,
+        expected_size=expected_size,
+        expected_inode=expected,
+    )
+    try:
+        os.link(temporary, name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+    except FileExistsError:
+        with _open_target_at(directory, name) as existing:
+            _verify_named_open_blob(
+                existing, directory=directory, name=name, payload_hash=payload_hash, expected_size=expected_size
+            )
+    else:
+        with _open_target_at(directory, name) as published:
+            _verify_named_open_blob(
+                published,
+                directory=directory,
+                name=name,
+                payload_hash=payload_hash,
+                expected_size=expected_size,
+                expected_inode=expected,
+            )
+    os.fsync(directory)
+
+
+@contextmanager
+def _temporary_file_at(directory: int, *, prefix: str) -> Iterator[tuple[str, BinaryIO]]:
+    """Own a no-follow temporary file in an already anchored directory."""
+    name = _safe_segment(prefix + uuid.uuid4().hex + ".tmp", field_name="temporary file name")
+    descriptor = os.open(
+        name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=directory
+    )
+    try:
+        with os.fdopen(descriptor, "w+b") as handle:
+            yield name, handle
+    finally:
+        try:
+            os.unlink(name, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("Failed to remove temporary native blob {}: {}", name, exc)
 
 
 def _open_lock_file_at(directory: int, name: str) -> int:
@@ -594,7 +759,7 @@ def _open_lock_file_at(directory: int, name: str) -> int:
 
 
 @contextmanager
-def _lock_file_at(directory: int, name: str, *, timeout: float) -> Iterator[None]:
+def _lock_file_at(directory: int, name: str, *, timeout: float) -> Iterator[int]:
     """Lock a no-follow file descriptor without reopening its pathname."""
 
     descriptor = _open_lock_file_at(directory, name)
@@ -612,7 +777,7 @@ def _lock_file_at(directory: int, name: str, *, timeout: float) -> Iterator[None
                         f"Failed to acquire sync relocation lock within {timeout}s"
                     ) from None
                 time.sleep(min(0.1, max(0, deadline - time.monotonic())))
-        yield
+        yield descriptor
     finally:
         if acquired:
             try:

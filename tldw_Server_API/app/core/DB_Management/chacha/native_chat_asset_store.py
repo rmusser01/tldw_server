@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -47,6 +48,8 @@ class NativeChatAssetStore:
         generation: int, now: datetime, *, conn: Any,
     ) -> datetime:
         """Lock and validate the one generation allowed to write candidate state."""
+        if owner.client_id != self._db.client_id:
+            raise ValueError("operation_owner_mismatch")
         if type(generation) is not int or generation < 1:
             raise ValueError("invalid_candidate_identity")
         if now.tzinfo is None or now.utcoffset() is None:
@@ -95,6 +98,18 @@ class NativeChatAssetStore:
                 or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", representation) is None):
             raise ValueError("invalid_candidate_identity")
         now = self._require_live_attempt(owner, kind, operation_id, request_digest, generation, now, conn=conn)
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            keys = {
+                int.from_bytes(
+                    hashlib.sha256(f"native_candidate_path\0{owner.client_id}\0{kind}\0{value}".encode()).digest()[:8],
+                    "big",
+                    signed=True,
+                )
+                for kind, value in (("namespace", namespace_id), ("upload", upload_id))
+            }
+            for key in sorted(keys):
+                conn.execute("SELECT pg_advisory_xact_lock(?)", (key,)).fetchone()
+        self._require_exclusive_paths(owner.client_id, candidate_id, namespace_id, upload_id, conn=conn)
         timestamp = now.isoformat()
         conn.execute(
             "INSERT INTO native_chat_asset_candidates "
@@ -119,6 +134,121 @@ class NativeChatAssetStore:
         if any(row[key] != value for key, value in expected.items()):
             raise ValueError("candidate_id_conflict")
         return NativeCandidate(candidate_id, generation, row["state"])
+
+    def _require_exclusive_paths(
+        self,
+        client_id: str,
+        candidate_id: str,
+        namespace_id: str,
+        upload_id: str,
+        *,
+        conn: Any,
+    ) -> None:
+        """Retain path ownership even after discard so old workers cannot alias new bytes."""
+        other = conn.execute(
+            "SELECT 1 FROM native_chat_asset_candidates WHERE client_id = ? AND candidate_id <> ? "
+            "AND (storage_namespace_id = ? OR upload_id = ?) LIMIT 1",
+            (client_id, candidate_id, namespace_id, upload_id),
+        ).fetchone()
+        if other is not None:
+            raise ValueError("candidate_storage_identity_conflict")
+
+    def read_candidate_for_write(
+        self,
+        owner: Any,
+        kind: str,
+        operation_id: str,
+        request_digest: str,
+        generation: int,
+        candidate_id: str,
+        *,
+        now: datetime,
+        conn: Any,
+    ) -> dict[str, Any]:
+        """Detach one reserved descriptor after the guarded writer's short admission."""
+        self._require_live_attempt(owner, kind, operation_id, request_digest, generation, now, conn=conn)
+        row = self._candidate_row(owner.client_id, candidate_id, conn=conn)
+        if row is None or any(
+            (
+                row["owner_key"] != owner.owner_key,
+                row["operation_kind"] != kind,
+                row["operation_id"] != operation_id,
+                row["attempt_generation"] != generation,
+            )
+        ):
+            raise ValueError("candidate_not_found")
+        if row["state"] != "reserved":
+            raise ValueError("candidate_state_conflict")
+        self._require_exclusive_paths(
+            owner.client_id, candidate_id, row["storage_namespace_id"], row["upload_id"], conn=conn
+        )
+        quota = conn.execute(
+            "SELECT owner_key,size_bytes,state FROM native_chat_quota_intents "
+            "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'",
+            (owner.client_id, candidate_id),
+        ).fetchone()
+        if quota is None or quota["state"] != "confirmed":
+            raise ValueError("quota_reservation_unconfirmed")
+        if quota["owner_key"] != owner.owner_key or quota["size_bytes"] != row["expected_size_bytes"]:
+            raise ValueError("quota_intent_mismatch")
+        if (
+            conn.execute(
+                "SELECT 1 FROM native_chat_quota_intents WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'release'",
+                (owner.client_id, candidate_id),
+            ).fetchone()
+            is not None
+        ):
+            raise ValueError("candidate_release_started")
+        self._require_live_attempt(
+            owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn
+        )
+        return dict(row)
+
+    def record_release_after_removal(
+        self,
+        owner: Any,
+        kind: str,
+        operation_id: str,
+        request_digest: str,
+        candidate_id: str,
+        generation: int,
+        *,
+        conn: Any,
+    ) -> None:
+        """Record a pending authority reconciliation only after guarded physical removal."""
+        _, row = self._locked_candidate_for_operation(
+            owner, kind, operation_id, request_digest, candidate_id, conn=conn
+        )
+        if row["attempt_generation"] != generation or row["state"] != "reclaiming":
+            raise ValueError("stale_reclamation")
+        self._require_unclaimed(owner, candidate_id, conn=conn)
+        reserve = conn.execute(
+            "SELECT owner_key,size_bytes FROM native_chat_quota_intents "
+            "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'",
+            (owner.client_id, candidate_id),
+        ).fetchone()
+        if reserve is None:
+            return
+        if reserve["owner_key"] != owner.owner_key or reserve["size_bytes"] != row["expected_size_bytes"]:
+            raise ValueError("quota_intent_mismatch")
+        stamp = self._db._get_current_utc_timestamp_iso()
+        conn.execute(
+            "INSERT INTO native_chat_quota_intents "
+            "(client_id,candidate_id,intent_kind,owner_key,size_bytes,state,created_at,updated_at) "
+            "VALUES (?,?,'release',?,?,'pending',?,?) ON CONFLICT (client_id,candidate_id,intent_kind) DO NOTHING",
+            (owner.client_id, candidate_id, owner.owner_key, row["expected_size_bytes"], stamp, stamp),
+        )
+        release = conn.execute(
+            "SELECT owner_key,size_bytes FROM native_chat_quota_intents "
+            "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'release'",
+            (owner.client_id, candidate_id),
+        ).fetchone()
+        if (
+            release is None
+            or release["owner_key"] != owner.owner_key
+            or release["size_bytes"] != row["expected_size_bytes"]
+        ):
+            raise ValueError("quota_intent_mismatch")
 
     def mark_candidate_prepared(
         self, owner: Any, kind: str, operation_id: str, request_digest: str,
@@ -155,6 +285,8 @@ class NativeChatAssetStore:
         self, owner: Any, kind: str, operation_id: str, request_digest: str,
         candidate_id: str, *, conn: Any,
     ) -> tuple[dict[str, Any], Any]:
+        if owner.client_id != self._db.client_id:
+            raise ValueError("operation_owner_mismatch")
         operation = self._db.native_forks._row(owner, kind, operation_id, conn=conn)
         if operation is None:
             raise ValueError("operation_not_recorded")
