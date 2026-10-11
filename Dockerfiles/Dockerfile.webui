@@ -16,6 +16,7 @@ COPY apps/bun.lock /app/apps/bun.lock
 COPY apps/scripts /app/apps/scripts
 COPY apps/extension/package.json /app/apps/extension/package.json
 COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs
+COPY apps/packages/api-types/package.json /app/apps/packages/api-types/package.json
 COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
