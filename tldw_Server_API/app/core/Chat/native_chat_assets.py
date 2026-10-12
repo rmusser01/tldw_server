@@ -9,15 +9,18 @@ import os
 import re
 import shutil
 import stat
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeQuotaReleasePendingError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Sync.v2.blob_store import (
+    STREAM_CHUNK_SIZE,
     LocalSyncBlobStore,
     SyncBlobStoreError,
     _lock_file_at,
@@ -31,6 +34,7 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import (
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
+    from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeCandidate
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
         NativeQuotaOwner,
@@ -42,8 +46,8 @@ if TYPE_CHECKING:
 class NativeChatAssetIO:
     """Use only server-derived user storage and original durable candidate descriptors.
 
-    This private foundation reconciles quota reservations but does not mark MIME-ready
-    candidates. Public native capabilities stay disabled until those callers qualify.
+    Preparation verifies uploaded bytes before prepared CAS; it does not adopt claims.
+    Public native capabilities stay disabled until their callers qualify.
     """
 
     def __init__(self, db: CharactersRAGDB, *, user_id: int) -> None:
@@ -254,6 +258,164 @@ class NativeChatAssetIO:
             )
             check()
             return key
+
+    def _upload_policy(self, row: dict[str, Any], filename: str, validator: Any) -> tuple[str, int]:
+        """Reuse destination policy without treating a filename as byte evidence."""
+        from tldw_Server_API.app.core.config import get_config_value, settings
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.document_upload_preflight import (
+            DEFAULT_MAX_CHAT_UPLOAD_BYTES,
+            _media_type_for,
+        )
+        from tldw_Server_API.app.core.Utils.image_validation import get_allowed_image_mime_types
+
+        representation = row["representation"]
+        if representation in {"embedded_image_v1", "generated_image_revision_v1"}:
+            if row["mime_type"] not in get_allowed_image_mime_types():
+                raise ValueError("native_asset_mime_unsupported")
+            media_type = "image"
+            limit = int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024))
+        elif representation in {"document_original_v1", "document_text_v1"}:
+            media_type = _media_type_for(filename)
+            if media_type == "unsupported":
+                raise ValueError("native_asset_representation_unsupported")
+            if representation == "document_text_v1" and row["mime_type"] not in {"text/plain", "text/markdown"}:
+                raise ValueError("native_asset_mime_unsupported")
+            key = {"pdf": "max_pdf_file_size_mb", "ebook": "max_epub_file_size_mb", "document": "max_document_file_size_mb"}[media_type]
+            default = "100" if media_type == "ebook" else "50"
+            current_bytes = int(float(get_config_value("Media-Processing", key, default=default)) * 1024 * 1024)
+            limit = min(DEFAULT_MAX_CHAT_UPLOAD_BYTES, current_bytes)
+        else:
+            raise ValueError("native_asset_representation_unsupported")
+        config = validator.get_media_config(media_type)
+        if not config or row["mime_type"] not in config.get("allowed_mimetypes", set()):
+            raise ValueError("native_asset_mime_unsupported")
+        configured_bytes = int(config["max_size_mb"] * 1024 * 1024)
+        limit = min(limit, configured_bytes)
+        if limit < 1 or row["expected_size_bytes"] > limit:
+            raise ValueError("native_asset_size_limit")
+        return media_type, limit
+
+    async def prepare_upload(
+        self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, request_digest: str,
+        generation: int, candidate_id: str, *, upload: Any,
+    ) -> NativeCandidate:
+        """Validate through the house sink, then prepare the original reserved candidate."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
+            TempDirManager,
+            save_uploaded_files,
+        )
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import get_default_file_validator
+
+        self._require_outermost(owner)
+        row = self._descriptor(owner, kind, operation_id, request_digest, generation, candidate_id)
+        filename = getattr(upload, "filename", None)
+        if not isinstance(filename, str) or not filename:
+            raise ValueError("native_upload_filename_required")
+        validator = get_default_file_validator()
+        media_type, limit = self._upload_policy(row, filename, validator)
+        with TempDirManager(prefix="native_chat_upload_") as directory:
+            files, errors = await save_uploaded_files(
+                [upload], directory, validator, expected_media_type_key=media_type,
+                max_upload_bytes=min(limit, row["expected_size_bytes"]),
+            )
+            self._require_outermost(owner)
+            if errors or len(files) != 1:
+                raise ValueError("native_upload_validation_failed")
+            cancelled = threading.Event()
+            work = asyncio.create_task(asyncio.to_thread(
+                self._prepare_upload, owner, kind, operation_id, request_digest,
+                generation, candidate_id, Path(files[0]["path"]), filename, validator, cancelled,
+            ))
+            try:
+                return await asyncio.shield(work)
+            except asyncio.CancelledError:
+                cancelled.set()
+                # Keep the private staging directory until even repeated cancellation drains the worker.
+                while not work.done():
+                    try:
+                        await asyncio.wait({work})
+                    except asyncio.CancelledError:
+                        continue
+                if not work.cancelled() and work.exception() is not None:
+                    from loguru import logger
+                    logger.debug("Cancelled native upload worker settled (error_type={})", type(work.exception()).__name__)
+                raise
+
+    def _prepare_upload(
+        self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, digest: str,
+        generation: int, candidate_id: str, path: Path, filename: str, validator: Any, cancelled: threading.Event,
+    ) -> NativeCandidate:
+        from tldw_Server_API.app.core.Utils.image_validation import validate_uploaded_image_bytes
+
+        def require_active() -> None:
+            if cancelled.is_set():
+                raise ValueError("native_upload_cancelled")
+
+        require_active()
+        with self._guard(owner, candidate_id) as (root, check):
+            row = self._descriptor(owner, kind, operation_id, digest, generation, candidate_id)
+            media_type, limit = self._upload_policy(row, filename, validator)
+            with path.open("rb") as handle:
+                payload = handle.read(row["expected_size_bytes"] + 1)
+            if len(payload) != row["expected_size_bytes"] or hashlib.sha256(payload).hexdigest() != row["expected_hash"]:
+                raise ValueError("native_asset_content_mismatch")
+            if media_type == "image":
+                if not validate_uploaded_image_bytes(payload, row["mime_type"], max_bytes=limit)[0]:
+                    raise ValueError("native_asset_image_invalid")
+            elif row["mime_type"] in {"text/plain", "text/markdown"}:
+                try:
+                    payload.decode("utf-8", errors="strict")
+                except UnicodeDecodeError as exc:
+                    raise ValueError("native_asset_text_invalid") from exc
+            else:
+                config = validator.get_media_config(media_type)
+                result = validator.validate_file(
+                    path, original_filename=filename, media_type_key=media_type,
+                    allowed_extensions_override=config["allowed_extensions"],
+                    allowed_mimetypes_override={row["mime_type"]}, max_size_mb_override=limit / (1024 * 1024),
+                )
+                if result.mime_detection_source not in {"magic", "python-magic"}:
+                    raise ValueError("native_asset_mime_unverified")
+                if not result or result.detected_mime_type != row["mime_type"]:
+                    raise ValueError("native_asset_mime_mismatch")
+            check()
+            indexes = []
+            for offset in range(0, len(payload), STREAM_CHUNK_SIZE):
+                require_active()
+                self._descriptor(owner, kind, operation_id, digest, generation, candidate_id)
+                check()
+                require_active()
+                chunk = payload[offset:offset + STREAM_CHUNK_SIZE]
+                index = offset // STREAM_CHUNK_SIZE
+                LocalSyncBlobStore._write_native_chunk(
+                    root_directory=root, upload_id=row["upload_id"], chunk_index=index, payload=chunk,
+                    expected_hash="sha256:" + hashlib.sha256(chunk).hexdigest(), expected_total_size=len(payload),
+                )
+                indexes.append(index)
+            require_active()
+            self._descriptor(owner, kind, operation_id, digest, generation, candidate_id)
+            check()
+            require_active()
+            key = LocalSyncBlobStore._commit_native_upload(
+                root_directory=root, upload_id=row["upload_id"], storage_namespace_id=row["storage_namespace_id"],
+                payload_hash="sha256:" + row["expected_hash"], expected_size=len(payload), chunk_indexes=indexes,
+            )
+            check()
+            require_active()
+            with self._db.transaction() as conn:
+                current = self._db.native_assets.read_candidate_for_write(
+                    owner, kind, operation_id, digest, generation, candidate_id,
+                    now=datetime.now(timezone.utc), conn=conn,
+                )
+                self._upload_policy(current, filename, validator)
+                require_active()
+                prepared = self._db.native_assets.mark_candidate_prepared(
+                    owner, kind, operation_id, digest, generation, candidate_id,
+                    row["expected_hash"], len(payload), row["mime_type"], key,
+                    now=datetime.now(timezone.utc), conn=conn,
+                )
+                require_active()
+                return prepared
 
     @staticmethod
     def _remove_directory(root: int, parents: tuple[str, ...], name: str) -> None:

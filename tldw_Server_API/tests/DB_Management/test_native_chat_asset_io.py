@@ -64,6 +64,8 @@ def _reserve(
     operation: str = "fork-one",
     payload: bytes = PAYLOAD,
     confirmed: bool = True,
+    mime_type: str = "text/plain",
+    representation: str = "file_v1",
 ) -> int:
     reserve(db, operation_id=operation)
     now = datetime.now(timezone.utc)
@@ -80,8 +82,8 @@ def _reserve(
             upload,
             hashlib.sha256(payload).hexdigest(),
             len(payload),
-            "text/plain",
-            "file_v1",
+            mime_type,
+            representation,
             now=now,
             conn=conn,
         )

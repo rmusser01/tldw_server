@@ -373,3 +373,12 @@ Canonical full-app generation and fingerprint/path checks pass at2129 paths/3301
 TASK13589 public route/contract gate is now qualified; normal exact-owned hooks and bounded completion recording follow. All master criteria and public H2/MIME/adoption/reader/send/frozen-character/original D7/Sync/persona/surface/theme/scale/package/physical PostgreSQL/AT/study gates remain open. No physical download or installed-extension acceptance is claimed.
 
 Bounded completion: all 18 exact-owned normal repository hooks passed without bypass. TASK-13589 and TASK-13590 acceptance criteria and definitions of done are complete. Only their two owned completed plans retire to private evidence; the tracked accounting-plan removal is part of this unit. Final metadata hooks and the incremental local commit follow. Master criteria and the explicitly listed broader acceptance gates remain open.
+
+
+### TASK13591 — Actual native upload validation and admission fences (2026-10-11)
+
+The private preparation adapter reuses the house sink, actual MIME evidence and bounded raster decode. Original bytes and truthful UTF-8 text retain exact reserved identity. Optional native sink bounds preserve ordinary defaults; EPUB marker admission is bounded before decompression. Cancellation drains staging workers and rechecks after every durable byte admission; final current policy is rechecked after prepared-state locks. Causal RED covers these roots, including stale subsequent byte calls and cancelled descriptor waits. No new parser/quota or public capability is introduced.
+
+Connected ten-file base446 passed/163 skips; final affected four-file138 passed/89 skips/1 inherited YARA expected failure. Supported compilation, matched-filename Ruff0/0 and four-production Bandit0/errors0 pass; both final independent source reviews CLEAR. Full record: [TASK13591](CHAT_ASSET_VALIDATION_13591_2026_10_11.md). Normal hooks/contract confirmation and bounded completion recording follow. Public H2/adoption/reader/send/character and all master acceptance remain open; no physical PostgreSQL, AT, participant or installed-extension acceptance is inferred.
+
+TASK13591 bounded completion: unchanged full canonical contract and all11 exact-owned normal hooks pass; all4AC/all6DOD complete. Own completed plan retires privately. Master remains In Progress with all criteria open; final metadata hooks/local commit follow.
