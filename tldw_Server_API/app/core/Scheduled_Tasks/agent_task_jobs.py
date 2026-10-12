@@ -393,9 +393,9 @@ async def handle_agent_task_job(
         executor = _EXECUTORS.get(definition.family)
         if executor is None:
             # Not a failure: no executor is wired for this family in this
-            # deployment phase (phase 1 wires recurring_question only --
-            # agent_task messages are redacted at rest). The skip carries an
-            # actionable reason.
+            # deployment (both phase-2 families are wired by default; a
+            # test or a partial deployment may unregister one). The skip
+            # carries an actionable reason.
             _finish(
                 sdb,
                 cdb,

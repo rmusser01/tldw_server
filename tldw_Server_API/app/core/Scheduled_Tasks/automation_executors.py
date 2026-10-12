@@ -117,12 +117,14 @@ def resolve_execution_target(
 def _definition_user_prompt(definition: DefinitionRow) -> str:
     """Extract the generation-only user prompt from a definition's input.
 
-    Only ``recurring_question`` is wired in phase 1 — its ``question``
+    Only ``recurring_question`` takes this path directly — its ``question``
     persists in full. ``agent_task`` input is redacted at rest by the
     automation service (``message_redacted`` metadata replaces the raw
-    message), so a usable prompt surviving persistence is not a state
-    production can reach; if one ever appears it is used, otherwise the
-    LookupError records an honest failed run.
+    message); that family resolves its prompt from the encrypted store in
+    ``_execute_agent_task`` instead (ADR-184 1A), so a usable prompt
+    surviving THIS path is not a state production reaches for it — if one
+    ever appears it is used, otherwise the LookupError records an honest
+    failed run.
     """
     source: dict[str, Any] = (
         definition.input if isinstance(definition.input, dict) else {}
