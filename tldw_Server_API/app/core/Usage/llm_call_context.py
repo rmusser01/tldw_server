@@ -104,3 +104,14 @@ def run_with_llm_call_state(state: LLMCallState | None, fn: Callable[..., Any], 
     finally:
         _IN_ACCOUNTED_CALL.reset(flag_token)
         _CTX.reset(ctx_token)
+
+
+def bind_llm_call_user(user_id: int | None) -> None:
+    """Set the user for the rest of the current task; ``None`` binds nothing.
+
+    For a task that serves one user for its whole life, such as a WebSocket
+    handler. Everything else uses ``llm_call_context`` or ``llm_call_root``,
+    which restore the previous user when they exit.
+    """
+    if user_id is not None:
+        _CTX.set(replace(_CTX.get(), user_id=user_id))

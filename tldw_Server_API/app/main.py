@@ -1261,6 +1261,9 @@ async def lifespan(app: FastAPI):
     from tldw_Server_API.app.core.Usage.llm_accounting import set_accounting_loop
 
     set_accounting_loop(asyncio.get_running_loop())
+    from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor
+
+    ensure_llm_state_executor(asyncio.get_running_loop())
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,
     )
