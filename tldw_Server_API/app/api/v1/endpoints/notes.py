@@ -1688,7 +1688,11 @@ def _normalize_import_note_row(
 
     provenance = row.get("knowledge_provenance")
     provenance = (
-        validate_notes_provenance_payload(provenance) if provenance is not None else read_notes_provenance(content)
+        validate_notes_provenance_payload(provenance)
+        if provenance is not None
+        else read_notes_provenance(content)
+        if row.get("content_language") in (None, "markdown")
+        else None
     )
     provenance_version = row.get("expected_provenance_version", row.get("knowledge_provenance_version"))
     if provenance_version is not None and (
@@ -3706,9 +3710,9 @@ async def import_notes(
                         else None
                     )
                     imported_id = parsed_note.get("id")
-                    provenance = parsed_note.get("knowledge_provenance") or read_notes_provenance(
-                        parsed_note["content"]
-                    )
+                    provenance = parsed_note.get("knowledge_provenance")
+                    if provenance is None and parsed_note.get("content_language") in (None, "markdown"):
+                        provenance = read_notes_provenance(parsed_note["content"])
                     provenance_version = parsed_note.get("expected_provenance_version")
                     local_provenance_save = coordinator is None and provenance is not None
                     raw_note_payload = {
@@ -7799,7 +7803,11 @@ async def bulk_create_notes(
                     note_fields={
                         "title": (getattr(item, "title", None) or ""),
                         "content": item.content,
-                **({"content_language": item.content_language} if _field_supplied(item, "content_language") else {}),
+                        **(
+                            {"content_language": item.content_language}
+                            if _field_supplied(item, "content_language")
+                            else {}
+                        ),
                         "conversation_id": _normalize_optional_id(item.conversation_id),
                         "message_id": _normalize_optional_id(item.message_id),
                         "auto_title": item.auto_title,

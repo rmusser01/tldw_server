@@ -623,7 +623,9 @@ def sync_v2_server_supported_adapter_versions(
         domain: (
             []
             if domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not personal_context_sync_ready
-            else [1, 2] if domain == "attachment.ref" or (domain == "notes.note" and notes_v2_ready) else [1]
+            else [1, 2]
+            if domain == "attachment.ref" or (domain == "notes.note" and notes_v2_ready)
+            else [1]
         )
         for domain in domains
     }

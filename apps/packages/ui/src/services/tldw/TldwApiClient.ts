@@ -1,4 +1,3 @@
-import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
 import { decodeNotesLanguageCapability, type NotesLanguageCapability } from "@/services/note-language-capability"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"

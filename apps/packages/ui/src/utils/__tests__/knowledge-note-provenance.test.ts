@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  knowledgeNoteWriteFields,
   stripKnowledgeNoteProvenance,
   validateKnowledgeNoteProvenance,
   readKnowledgeNoteProvenance,
@@ -243,4 +244,17 @@ it("explicit capture references coexist with original references using strict v1
       [source]
     )
   ).toBeNull()
+})
+
+
+it.each(['yaml', 'json', 'text', 'future/mode'])('preserves exact structured source with %s provenance metadata', content_language => {
+  const content = `  <>&\r\n${marker(original)}\r\n `
+  expect(retainKnowledgeNoteProvenance(content, { ...active, content_language })).toBe(content)
+})
+
+
+it.each(['yaml', 'json', 'text', 'future/mode'])('does not promote marker-shaped structured %s source into canonical evidence', content_language => {
+ const content = marker(original);
+ expect(knowledgeNoteWriteFields(content, {content_language}, {create:true})).toEqual({});
+ expect(knowledgeNoteWriteFields(content, {...active, content_language}, {create:true})).toEqual({knowledge_provenance: active.knowledge_provenance, expected_provenance_version:0});
 })

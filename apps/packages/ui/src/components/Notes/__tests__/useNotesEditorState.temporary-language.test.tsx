@@ -280,7 +280,6 @@ describe("temporary language at the actual canonical owner", () => {
         expect(view.result.current.effectiveContentLanguage).toBe("yaml");
     },
   );
-
 });
 
 describe("export capture at the actual canonical owner", () => {

@@ -1,19 +1,19 @@
 /** I1 candidate only: not imported by production. Native history has no shadow stack. */
-import type { OnMount } from '@monaco-editor/react';
+import type { OnMount } from "@monaco-editor/react";
 import {
   createDocumentRequest,
   type DocumentRequest,
   type FormatResult,
   type RequestKey,
-} from '@/services/document-editing/types';
+} from "@/services/document-editing/types";
 
 type Editor = Parameters<OnMount>[0];
 
 /** Refuse model-normalized representations before editing; never normalize a draft. */
-export function sourceProfile(text: string): '\n' | '\r\n' | null {
-  if (text.startsWith('\ufeff') || /\r(?!\n)/.test(text)) return null;
-  const crlf = text.includes('\r\n');
-  return crlf && /(?<!\r)\n/.test(text) ? null : crlf ? '\r\n' : '\n';
+export function sourceProfile(text: string): "\n" | "\r\n" | null {
+  if (text.startsWith("\ufeff") || /\r(?!\n)/.test(text)) return null;
+  const crlf = text.includes("\r\n");
+  return crlf && /(?<!\r)\n/.test(text) ? null : crlf ? "\r\n" : "\n";
 }
 
 function sameKey(a: RequestKey, b: RequestKey): boolean {
@@ -28,7 +28,11 @@ function sameKey(a: RequestKey, b: RequestKey): boolean {
 }
 
 // Linear UTF-16 anchor mapping, including literal whitespace and surrogate halves.
-function mapOffset(source: string, replacement: string, offset: number): number {
+function mapOffset(
+  source: string,
+  replacement: string,
+  offset: number,
+): number {
   if (offset === source.length) return replacement.length;
   let rank = 0;
   for (let i = 0; i < offset; i++) if (!/\s/.test(source[i])) rank++;
@@ -56,7 +60,7 @@ export class MonacoFormatBridge {
 
   constructor(
     private readonly editor: Editor,
-    private readonly monaco: Parameters<OnMount>[1]
+    private readonly monaco: Parameters<OnMount>[1],
   ) {
     this.model = editor.getModel();
   }
@@ -69,7 +73,11 @@ export class MonacoFormatBridge {
     this.request = null;
   }
 
-  applyFormat(result: FormatResult, currentKey: RequestKey, editable: boolean): boolean {
+  applyFormat(
+    result: FormatResult,
+    currentKey: RequestKey,
+    editable: boolean,
+  ): boolean {
     const { editor, model, request } = this;
     if (
       this.disposed ||
@@ -87,11 +95,11 @@ export class MonacoFormatBridge {
       !sameKey(result.key, currentKey) ||
       !sameKey(request.key, currentKey) ||
       !sameKey(result.check.key, currentKey) ||
-      result.state !== 'formatted' ||
+      result.state !== "formatted" ||
       result.replacement === null ||
       !result.check.format_allowed ||
       !result.check.complete ||
-      result.check.state !== 'checked' ||
+      result.check.state !== "checked" ||
       result.check.truncated ||
       model.getEOL() !== request.newline ||
       sourceProfile(request.text) === null ||
@@ -107,23 +115,34 @@ export class MonacoFormatBridge {
       ? mapOffset(
           request.text,
           result.replacement,
-          model.getOffsetAt(selection.getSelectionStart())
+          model.getOffsetAt(selection.getSelectionStart()),
         )
       : 0;
     const active = selection
-      ? mapOffset(request.text, result.replacement, model.getOffsetAt(selection.getPosition()))
+      ? mapOffset(
+          request.text,
+          result.replacement,
+          model.getOffsetAt(selection.getPosition()),
+        )
       : 0;
     editor.pushUndoStop();
     const applied = editor.executeEdits(
-      'notes.format',
+      "notes.format",
       [{ range: model.getFullModelRange(), text: result.replacement }],
       () => {
         const start = model.getPositionAt(anchor),
           end = model.getPositionAt(active);
         return selection
-          ? [new this.monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column)]
+          ? [
+              new this.monaco.Selection(
+                start.lineNumber,
+                start.column,
+                end.lineNumber,
+                end.column,
+              ),
+            ]
           : null;
-      }
+      },
     );
     editor.pushUndoStop();
     editor.setScrollPosition({ scrollTop: top, scrollLeft: left });

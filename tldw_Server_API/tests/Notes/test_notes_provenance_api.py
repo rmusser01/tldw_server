@@ -3,6 +3,8 @@
 import csv
 import io
 import json
+import secrets
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -963,3 +965,30 @@ def test_reads_fence_committed_child_ahead_of_rolled_back_applied_head(client, s
     assert current["content"] == "Later body"
     assert current["knowledge_provenance"] == payload
     assert (current["version"], current["knowledge_provenance_version"]) == (2, 3)
+
+
+@pytest.mark.parametrize("language", ["yaml", "json", "text", "future/mode"])
+def test_structured_provenance_export_retains_exact_source(api, language, sync_service):
+    sync_service.settings = replace(sync_service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    client, _ = api
+    source = retain_notes_provenance("  source: <>&\r\n", {"origin": "reviewed_sources"}) + "\r\n "
+    saved = create(api, content=source, content_language=language)
+    exported = client.post(BASE + "/export", json={"note_ids": [saved["id"]]}).json()["notes"][0]
+    assert exported["content"] == source
+    assert exported["content_language"] == language
+    assert exported["knowledge_provenance"] == PAYLOAD
+    assert client.get(BASE + "/" + saved["id"]).json()["content"] == source
+
+
+def test_structured_source_import_does_not_infer_markdown_provenance(api, sync_service):
+    sync_service.settings = replace(sync_service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    client, _ = api
+    source = retain_notes_provenance("source: <>&", PAYLOAD)
+    response = client.post(
+        BASE + "/import", json={"items": [{"format": "source", "file_name": "config.yaml", "content": source}]}
+    )
+    assert response.status_code == 200, response.text
+    row = client.get(BASE + "/").json()["notes"][0]
+    assert row["content"] == source
+    assert row["content_language"] == "yaml"
+    assert row["knowledge_provenance_state"] == "absent"

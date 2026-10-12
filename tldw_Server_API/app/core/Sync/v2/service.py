@@ -5145,9 +5145,7 @@ class SyncV2Service:
                         SyncPushRejected(
                             client_envelope_id=envelope.client_envelope_id,
                             error_code="personal_context_storage_unavailable",
-                            message=(
-                                "Personal Context storage encryption is unavailable"
-                            ),
+                            message=("Personal Context storage encryption is unavailable"),
                             retryable=True,
                         )
                     )

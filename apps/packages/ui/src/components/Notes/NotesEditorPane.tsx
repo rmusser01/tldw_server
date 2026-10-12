@@ -515,7 +515,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     !editorDisabled &&
     !loadingDetail &&
     !showEmptyState &&
-    saveRecoveryNotice?.kind !== "conflict" &&
+    saveIssue?.kind !== "conflict" &&
     currentOfflineDraft?.syncState !== "conflict" &&
     editorMode !== "preview" &&
     (!structured || nativeReady);
@@ -590,7 +590,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       editable={
         !editorDisabled &&
         !loadingDetail &&
-        saveRecoveryNotice?.kind !== "conflict" &&
+        saveIssue?.kind !== "conflict" &&
         currentOfflineDraft?.syncState !== "conflict"
       }
       onReady={setNativeReady}
@@ -617,7 +617,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     replaceEditableHtml(node, wysiwygHtml)
     appliedWysiwygRef.current = { node, revision: wysiwygRevision }
   })
-  const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
   const saveIssueKind = saveIssue?.kind ?? null
 
   // A new conflict or error after an explicit Save moves focus to its choices;
@@ -1497,8 +1496,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         )}
         {onContentLanguageChange && <DocumentDiagnostics language={contentLanguage} persistence={languagePersistence}
           languageDisabled={editorDisabled || loadingDetail || !documentRequest}
-          disabled={!active || composing || !documentRequest} formatDisabled={!structured || !active || composing || !documentRequest || currentFormatUnavailable}
-          status={diagnostics.status} announce={diagnostics.announce} diagnostics={diagnostics.diagnostics} complete={diagnostics.result?.complete} truncated={diagnostics.result?.truncated} source={content}
+          disabled={!active || composing || !documentRequest} formatDisabled={!structured || !active || composing || !documentRequest || formatRefused}
+          formatRefused={formatRefused} status={diagnostics.status} announce={diagnostics.announce} diagnostics={diagnostics.diagnostics} complete={diagnostics.result?.complete} truncated={diagnostics.result?.truncated} source={content}
           onLanguageChange={onContentLanguageChange} onCheck={diagnostics.checkNow} onFormat={() => void formatDocument()}
           onNavigate={(start, end) => {
             if (structured) nativeSource.current?.navigate(start, end)
@@ -1850,110 +1849,51 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     />
                     {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
                       <div
-                        ref={richEditorRef}
-                        role="textbox"
-                        aria-multiline="true"
-                        contentEditable={!editorDisabled}
-                        suppressContentEditableWarning
-                        className="w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
-                        onInput={handleWysiwygInput}
-                        onPaste={handleWysiwygPaste}
-                        onBlur={() => setEditorCursorIndex(null)}
-                        aria-label={t("option:notesSearch.editorAriaLabel", {
-                          defaultValue: "Note content",
+                        className="mt-2 rounded-lg border border-border bg-surface p-1"
+                        role="listbox"
+                        aria-label={t('option:notesSearch.wikilinkSuggestionsLabel', {
+                          defaultValue: 'Wikilink suggestions'
                         })}
-                        aria-describedby={contentDescribedBy}
-                        data-testid="notes-wysiwyg-editor"
-                        dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
-                      />
-                    ) : (
-                      <>
-                        <textarea
-                          ref={contentTextareaRef}
-                          className="w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
-                          value={content}
-                          onChange={handleEditorChange}
-                          onKeyDown={handleEditorKeyDown}
-                          onSelect={handleEditorSelectionUpdate}
-                          onClick={handleEditorSelectionUpdate}
-                          onKeyUp={handleEditorSelectionUpdate}
-                          onFocus={handleEditorSelectionUpdate}
-                          onBlur={() => setEditorCursorIndex(null)}
-                          placeholder={t(
-                            "option:notesSearch.editorPlaceholder",
-                            {
-                              defaultValue:
-                                "Write your note here... (Markdown supported)",
-                            },
-                          )}
-                          readOnly={editorDisabled}
-                          aria-label={t("option:notesSearch.editorAriaLabel", {
-                            defaultValue: "Note content",
-                          })}
-                          aria-describedby={contentDescribedBy}
-                        />
-                        {activeWikilinkQuery &&
-                          wikilinkSuggestions.length > 0 && (
-                            <div
-                              className="mt-2 rounded-lg border border-border bg-surface p-1"
-                              role="listbox"
-                              aria-label={t(
-                                "option:notesSearch.wikilinkSuggestionsLabel",
-                                {
-                                  defaultValue: "Wikilink suggestions",
-                                },
-                              )}
-                              data-testid="notes-wikilink-suggestions"
+                        data-testid="notes-wikilink-suggestions"
+                      >
+                        {wikilinkSuggestions.map((candidate, index) => {
+                          const duplicateCount =
+                            wikilinkSuggestionDisplayCounts.get(candidate.title.toLowerCase()) || 0
+                          const label =
+                            duplicateCount > 1 ? `${candidate.title} (${candidate.id})` : candidate.title
+                          return (
+                            <button
+                              key={`${candidate.id}-${candidate.title}`}
+                              type="button"
+                              className={`block w-full rounded px-2 py-1 text-left text-xs ${
+                                index === wikilinkSelectionIndex
+                                  ? 'bg-surface2 text-text'
+                                  : 'text-text-muted hover:bg-surface2 hover:text-text'
+                              }`}
+                              aria-selected={index === wikilinkSelectionIndex}
+                              onMouseDown={(event) => {
+                                event.preventDefault()
+                                applyWikilinkSuggestion(candidate)
+                              }}
+                              data-testid={`notes-wikilink-suggestion-${candidate.id.replace(/[^a-z0-9_-]/gi, '_')}`}
                             >
-                              {wikilinkSuggestions.map((candidate, index) => {
-                                const duplicateCount =
-                                  wikilinkSuggestionDisplayCounts.get(
-                                    candidate.title.toLowerCase(),
-                                  ) || 0;
-                                const label =
-                                  duplicateCount > 1
-                                    ? `${candidate.title} (${candidate.id})`
-                                    : candidate.title;
-                                return (
-                                  <button
-                                    key={`${candidate.id}-${candidate.title}`}
-                                    type="button"
-                                    className={`block w-full rounded px-2 py-1 text-left text-xs ${
-                                      index === wikilinkSelectionIndex
-                                        ? "bg-surface2 text-text"
-                                        : "text-text-muted hover:bg-surface2 hover:text-text"
-                                    }`}
-                                    aria-selected={
-                                      index === wikilinkSelectionIndex
-                                    }
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      applyWikilinkSuggestion(candidate);
-                                    }}
-                                    data-testid={`notes-wikilink-suggestion-${candidate.id.replace(/[^a-z0-9_-]/gi, "_")}`}
-                                  >
-                                    {label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                      </>
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </div>
                     )}
+                  </>
+                )}
                 <Typography.Text
                   id={NOTES_EDITOR_CONTENT_HELP_ID}
                   type="secondary"
                   className="block text-[11px] mt-1 text-text-muted"
                 >
-                      {!markdownAllowed
-                        ? t("option:notesDocument.rawSource", {
-                            defaultValue: "Exact source",
-                          })
-                        : editorInputMode === "wysiwyg"
-                          ? t("option:notesSearch.wysiwygSupportHint", {
-                              defaultValue:
-                                "WYSIWYG mode keeps markdown structure while you edit.",
-                            })
+                  {!markdownAllowed ? t('option:notesDocument.rawSource', {defaultValue: 'Exact source'}) : editorInputMode === 'wysiwyg'
+                    ? t('option:notesSearch.wysiwygSupportHint', {
+                        defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
+                      })
                     : t('option:notesSearch.editorSupportHint', {
                         defaultValue: 'Markdown + LaTeX supported'
                       })}
@@ -2047,107 +1987,51 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   />
                   {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
                     <div
-                      ref={richEditorRef}
-                      role="textbox"
-                      aria-multiline="true"
-                      contentEditable={!editorDisabled}
-                      suppressContentEditableWarning
-                      className="w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
-                      onInput={handleWysiwygInput}
-                      onPaste={handleWysiwygPaste}
-                      onBlur={() => setEditorCursorIndex(null)}
-                      aria-label={t("option:notesSearch.editorAriaLabel", {
-                        defaultValue: "Note content",
+                      className="mt-2 rounded-lg border border-border bg-surface p-1"
+                      role="listbox"
+                      aria-label={t('option:notesSearch.wikilinkSuggestionsLabel', {
+                        defaultValue: 'Wikilink suggestions'
                       })}
-                      aria-describedby={contentDescribedBy}
-                      data-testid="notes-wysiwyg-editor"
-                      dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
-                    />
-                  ) : (
-                    <>
-                      <textarea
-                        ref={contentTextareaRef}
-                        className="w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
-                        value={content}
-                        onChange={handleEditorChange}
-                        onKeyDown={handleEditorKeyDown}
-                        onSelect={handleEditorSelectionUpdate}
-                        onClick={handleEditorSelectionUpdate}
-                        onKeyUp={handleEditorSelectionUpdate}
-                        onFocus={handleEditorSelectionUpdate}
-                        onBlur={() => setEditorCursorIndex(null)}
-                        placeholder={t("option:notesSearch.editorPlaceholder", {
-                          defaultValue:
-                            "Write your note here... (Markdown supported)",
-                        })}
-                        readOnly={editorDisabled}
-                        aria-label={t("option:notesSearch.editorAriaLabel", {
-                          defaultValue: "Note content",
-                        })}
-                        aria-describedby={contentDescribedBy}
-                      />
-                      {activeWikilinkQuery &&
-                        wikilinkSuggestions.length > 0 && (
-                          <div
-                            className="mt-2 rounded-lg border border-border bg-surface p-1"
-                            role="listbox"
-                            aria-label={t(
-                              "option:notesSearch.wikilinkSuggestionsLabel",
-                              {
-                                defaultValue: "Wikilink suggestions",
-                              },
-                            )}
-                            data-testid="notes-wikilink-suggestions"
+                      data-testid="notes-wikilink-suggestions"
+                    >
+                      {wikilinkSuggestions.map((candidate, index) => {
+                        const duplicateCount =
+                          wikilinkSuggestionDisplayCounts.get(candidate.title.toLowerCase()) || 0
+                        const label =
+                          duplicateCount > 1 ? `${candidate.title} (${candidate.id})` : candidate.title
+                        return (
+                          <button
+                            key={`${candidate.id}-${candidate.title}`}
+                            type="button"
+                            className={`block w-full rounded px-2 py-1 text-left text-xs ${
+                              index === wikilinkSelectionIndex
+                                ? 'bg-surface2 text-text'
+                                : 'text-text-muted hover:bg-surface2 hover:text-text'
+                            }`}
+                            aria-selected={index === wikilinkSelectionIndex}
+                            onMouseDown={(event) => {
+                              event.preventDefault()
+                              applyWikilinkSuggestion(candidate)
+                            }}
+                            data-testid={`notes-wikilink-suggestion-${candidate.id.replace(/[^a-z0-9_-]/gi, '_')}`}
                           >
-                            {wikilinkSuggestions.map((candidate, index) => {
-                              const duplicateCount =
-                                wikilinkSuggestionDisplayCounts.get(
-                                  candidate.title.toLowerCase(),
-                                ) || 0;
-                              const label =
-                                duplicateCount > 1
-                                  ? `${candidate.title} (${candidate.id})`
-                                  : candidate.title;
-                              return (
-                                <button
-                                  key={`${candidate.id}-${candidate.title}`}
-                                  type="button"
-                                  className={`block w-full rounded px-2 py-1 text-left text-xs ${
-                                    index === wikilinkSelectionIndex
-                                      ? "bg-surface2 text-text"
-                                      : "text-text-muted hover:bg-surface2 hover:text-text"
-                                  }`}
-                                  aria-selected={
-                                    index === wikilinkSelectionIndex
-                                  }
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    applyWikilinkSuggestion(candidate);
-                                  }}
-                                  data-testid={`notes-wikilink-suggestion-${candidate.id.replace(/[^a-z0-9_-]/gi, "_")}`}
-                                >
-                                  {label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                    </>
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   )}
+                </>
+              )}
               <Typography.Text
                 id={NOTES_EDITOR_CONTENT_HELP_ID}
                 type="secondary"
                 className="block text-[11px] mt-1 text-text-muted"
               >
-                    {!markdownAllowed
-                      ? t("option:notesDocument.rawSource", {
-                          defaultValue: "Exact source",
-                        })
-                      : editorInputMode === "wysiwyg"
-                        ? t("option:notesSearch.wysiwygSupportHint", {
-                            defaultValue:
-                              "WYSIWYG mode keeps markdown structure while you edit.",
-                          })
+                {!markdownAllowed ? t('option:notesDocument.rawSource', {defaultValue: 'Exact source'}) : editorInputMode === 'wysiwyg'
+                  ? t('option:notesSearch.wysiwygSupportHint', {
+                      defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
+                    })
                   : t('option:notesSearch.editorSupportHint', {
                       defaultValue: 'Markdown + LaTeX supported'
                     })}

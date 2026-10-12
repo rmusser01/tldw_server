@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from .errors import SyncStoreError
 from .materializers.base import MaterializationResult
 from .materializers.notes import NotesMaterializer
-from .models import SyncDataset, SyncEnvelope, SyncEnvelopeCreate, SyncObjectState, validate_notes_note_upsert_payload
+from .models import SyncDataset, SyncEnvelope, SyncEnvelopeCreate, SyncObjectState, complete_note_snapshot
 from .mutation_group_validation import (
     materialization_group_view,
     mutation_group_plan_hash,
@@ -98,9 +98,9 @@ def notes_provenance_bootstrap_matches_source(
     ):
         return False
     if envelope.domain == "notes.note":
-        payload = validate_notes_note_upsert_payload(
-            {key: note.get(key) for key in ("title", "content", "conversation_id", "message_id")}
-        )
+        payload = complete_note_snapshot(note)
+        if envelope.adapter_version == 1 and payload["content_language"] is None:
+            payload.pop("content_language")
         return (
             envelope.object_revision == note["version"]
             and envelope.payload == payload
@@ -253,7 +253,7 @@ def capture_note_with_provenance(
     )
 
     dataset = ensure_notes_provenance_ready(service=service, note_db=note_db, user_id=user_id, required_note_id=note_id)
-    payload = validate_notes_note_upsert_payload(note_payload)
+    payload = complete_note_snapshot(note_payload)
     value = validate_notes_provenance_payload(provenance)
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -282,6 +282,8 @@ def capture_note_with_provenance(
             operation="upsert",
             object_id=note_id,
             payload=payload,
+            schema_version=2,
+            adapter_version=2,
             object_revision=expected_note_version + 1,
             base_object_revision=expected_note_version or None,
             base_object_hash=parent.payload_hash if parent else None,
@@ -446,10 +448,11 @@ def ensure_notes_provenance_ready(
             raise SyncStoreError("notes_provenance_bootstrap_source_invalid")
         return note
 
-    def core_payload(note: Mapping[str, object]) -> dict:
-        return validate_notes_note_upsert_payload(
-            {key: note.get(key) for key in ("title", "content", "conversation_id", "message_id")}
-        )
+    def core_payload(note: Mapping[str, object], version: int = 2) -> dict:
+        payload = complete_note_snapshot(note)
+        if version == 1 and payload["content_language"] is None:
+            payload.pop("content_language")
+        return payload
 
     def verified(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
         return notes_provenance_bootstrap_matches_source(note_db, envelope)
@@ -464,7 +467,13 @@ def ensure_notes_provenance_ready(
                 note_id = note["id"]
                 canonical = service.store.get_current_head(dataset.dataset_id, "notes.provenance", note_id)
                 record = note_db.note_provenance_store.get(note_id, include_deleted=True)
-                if prepare_markers and canonical is None and record is None and not note["deleted"]:
+                if (
+                    prepare_markers
+                    and canonical is None
+                    and record is None
+                    and not note["deleted"]
+                    and note.get("content_language") in (None, "markdown")
+                ):
                     marker = read_notes_provenance(note["content"])
                     if marker is not None:
                         with note_db.transaction() as conn:
@@ -519,6 +528,8 @@ def ensure_notes_provenance_ready(
                         operation="tombstone" if note["deleted"] else "upsert",
                         object_id=note_id,
                         payload=core_payload(note),
+                        schema_version=2,
+                        adapter_version=2,
                         object_revision=note["version"],
                         routing_metadata=routing,
                     )
@@ -528,7 +539,7 @@ def ensure_notes_provenance_ready(
                 or parent.operation != ("tombstone" if note["deleted"] else "upsert")
                 or (
                     parent.operation == "upsert"
-                    and parent.payload_hash != canonical_payload_hash(core_payload(note))[0]
+                    and parent.payload_hash != canonical_payload_hash(core_payload(note, parent.adapter_version))[0]
                 )
             ):
                 raise SyncStoreError("notes_provenance_bootstrap_parent_changed")

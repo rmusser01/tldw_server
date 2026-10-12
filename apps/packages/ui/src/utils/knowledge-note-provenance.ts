@@ -251,7 +251,7 @@ export const resolveKnowledgeNoteProvenance = (
   content = "",
 ) => {
   const record = isRecord(note) ? note : {};
-  const marker =
+  const marker = typeof record.content_language === "string" && record.content_language !== "markdown" ? null :
     readKnowledgeNoteProvenance(content) ||
     readKnowledgeNoteProvenance(
       typeof record.content === "string" ? record.content : "",
@@ -307,6 +307,7 @@ export const retainKnowledgeNoteProvenance = (
   content: string,
   metadata?: unknown,
 ): string => {
+  if (isRecord(metadata) && typeof metadata.content_language === "string" && metadata.content_language !== "markdown") return content;
   const { provenance, state } = resolveKnowledgeNoteProvenance(
     metadata,
     content,

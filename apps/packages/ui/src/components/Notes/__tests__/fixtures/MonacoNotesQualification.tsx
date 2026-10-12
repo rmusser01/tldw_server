@@ -1,13 +1,13 @@
 /** Removable I1 harness. All visible source changes pass through the real Notes handler. */
-import React from 'react';
-import { loader, type OnMount } from '@monaco-editor/react';
+import React from "react";
+import { loader, type OnMount } from "@monaco-editor/react";
 import {
   createCheckResult,
   createDocumentRequest,
   createFormatResult,
   type RequestKey,
-} from '@/services/document-editing/types';
-import { MonacoFormatBridge, sourceProfile } from './monaco-format-candidate';
+} from "@/services/document-editing/types";
+import { MonacoFormatBridge, sourceProfile } from "./monaco-format-candidate";
 
 type Props = {
   value: string;
@@ -34,7 +34,10 @@ export type QualificationProbe = {
     key: RequestKey;
   };
   capture: (replacement?: string) => void;
-  complete: (options?: { key?: Partial<RequestKey>; editable?: boolean }) => boolean;
+  complete: (options?: {
+    key?: Partial<RequestKey>;
+    editable?: boolean;
+  }) => boolean;
   select: (anchor: number, active: number) => void;
   scroll: (top: number, left?: number) => void;
   readOnly: (value: boolean) => void;
@@ -58,11 +61,13 @@ export function MonacoNotesQualification(props: Props) {
     const initial = current.current;
     if (sourceProfile(initial.value) === null) {
       setReason(
-        'Representation refused; original source retained (BOM, mixed newlines or lone CR).'
+        "Representation refused; original source retained (BOM, mixed newlines or lone CR).",
       );
       return;
     }
-    loader.config({ paths: { vs: new URL('/i1-monaco/vs', window.location.href).href } });
+    loader.config({
+      paths: { vs: new URL("/i1-monaco/vs", window.location.href).href },
+    });
     void loader
       .init()
       .then((monaco: Parameters<OnMount>[1]) => {
@@ -70,49 +75,53 @@ export function MonacoNotesQualification(props: Props) {
         // Same-origin static worker bootstraps also satisfy extension CSP (no blob/eval).
         (
           globalThis as typeof globalThis & {
-            MonacoEnvironment: { getWorker: (moduleId: string, label: string) => Worker };
+            MonacoEnvironment: {
+              getWorker: (moduleId: string, label: string) => Worker;
+            };
           }
         ).MonacoEnvironment = {
           getWorker: (_moduleId, label) =>
             new Worker(
               new URL(
-                `/i1-monaco/${['json', 'css', 'html', 'typescript', 'javascript'].includes(label) ? (label === 'typescript' || label === 'javascript' ? 'ts' : label) : 'editor'}-worker.js`,
-                window.location.href
-              )
+                `/i1-monaco/${["json", "css", "html", "typescript", "javascript"].includes(label) ? (label === "typescript" || label === "javascript" ? "ts" : label) : "editor"}-worker.js`,
+                window.location.href,
+              ),
             ),
         };
-        const model = monaco.editor.createModel(initial.value, 'plaintext');
+        const model = monaco.editor.createModel(initial.value, "plaintext");
         // Set the explicit source EOL at document load, including newline-free inputs.
         model.setEOL(
-          sourceProfile(initial.value) === '\r\n'
+          sourceProfile(initial.value) === "\r\n"
             ? monaco.editor.EndOfLineSequence.CRLF
-            : monaco.editor.EndOfLineSequence.LF
+            : monaco.editor.EndOfLineSequence.LF,
         );
         if (model.getValue(undefined, true) !== initial.value) {
           model.dispose();
-          setReason('Model round-trip changed the representation; original source retained.');
+          setReason(
+            "Model round-trip changed the representation; original source retained.",
+          );
           return;
         }
         const editor = monaco.editor.create(container.current, {
           model,
-          ariaLabel: 'Note content',
+          ariaLabel: "Note content",
           automaticLayout: true,
           readOnly: !current.current.editable,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
-          wordWrap: 'off',
+          wordWrap: "off",
           links: false,
           contextmenu: false,
           quickSuggestions: false,
           suggestOnTriggerCharacters: false,
           formatOnType: false,
           formatOnPaste: false,
-          autoIndent: 'none',
-          autoClosingBrackets: 'never',
-          autoClosingQuotes: 'never',
-          autoSurround: 'never',
+          autoIndent: "none",
+          autoClosingBrackets: "never",
+          autoClosingQuotes: "never",
+          autoSurround: "never",
           trimAutoWhitespace: false,
-          unusualLineTerminators: 'off',
+          unusualLineTerminators: "off",
           editContext: false,
         });
         editorRef.current = editor;
@@ -136,7 +145,9 @@ export function MonacoNotesQualification(props: Props) {
           current.current.onChange({
             target: {
               value,
-              selectionStart: position ? model.getOffsetAt(position) : value.length,
+              selectionStart: position
+                ? model.getOffsetAt(position)
+                : value.length,
             },
           } as React.ChangeEvent<HTMLTextAreaElement>);
         });
@@ -168,11 +179,11 @@ export function MonacoNotesQualification(props: Props) {
               key: key(),
               text,
               language: current.current.language,
-              newline: sourceProfile(text) ?? '\n',
+              newline: sourceProfile(text) ?? "\n",
             });
             bridge.captureRequest(request);
             const check = createCheckResult(request, {
-              state: 'checked',
+              state: "checked",
               complete: true,
               diagnostics: [],
               truncated: false,
@@ -180,7 +191,7 @@ export function MonacoNotesQualification(props: Props) {
             });
             pending = createFormatResult({
               key: request.key,
-              state: 'formatted',
+              state: "formatted",
               replacement,
               check,
             });
@@ -191,16 +202,22 @@ export function MonacoNotesQualification(props: Props) {
             bridge.applyFormat(
               pending,
               { ...key(), ...options.key },
-              current.current.editable && options.editable !== false
+              current.current.editable && options.editable !== false,
             ),
           select: (anchor, active) => {
             const a = model.getPositionAt(anchor),
               b = model.getPositionAt(active);
             editor.setSelection(
-              new monaco.Selection(a.lineNumber, a.column, b.lineNumber, b.column)
+              new monaco.Selection(
+                a.lineNumber,
+                a.column,
+                b.lineNumber,
+                b.column,
+              ),
             );
           },
-          scroll: (top, left = 0) => editor.setScrollPosition({ scrollTop: top, scrollLeft: left }),
+          scroll: (top, left = 0) =>
+            editor.setScrollPosition({ scrollTop: top, scrollLeft: left }),
           readOnly: (readOnly) => editor.updateOptions({ readOnly }),
         };
         window.__i1Monaco = probe;
@@ -233,7 +250,12 @@ export function MonacoNotesQualification(props: Props) {
       {reason ? (
         <>
           <p role="status">{reason}</p>
-          <pre tabIndex={0} role="textbox" aria-label="Note content" aria-readonly="true">
+          <pre
+            tabIndex={0}
+            role="textbox"
+            aria-label="Note content"
+            aria-readonly="true"
+          >
             {props.value}
           </pre>
         </>

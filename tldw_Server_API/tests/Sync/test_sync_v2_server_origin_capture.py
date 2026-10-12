@@ -1273,6 +1273,7 @@ def test_active_sync_wikilink_rewrite_and_undo_are_captured_as_server_origin_ups
     assert linker_envelopes[-1].payload == {
         "title": "Linker",
         "content": "See [[New title]].",
+        "content_language": None,
         "conversation_id": None,
         "message_id": None,
     }

@@ -87,7 +87,7 @@ def test_upgrade_v76_repeatable(db):
         migrated = CharactersRAGDB(db.db_path, client_id="alice")
         try:
             assert migrated.note_provenance_store.get("own") is None
-            assert migrated._get_db_version(migrated.get_connection()) == 78
+            assert migrated._get_db_version(migrated.get_connection()) == 79
         finally:
             migrated.close_all_connections()
 
@@ -109,7 +109,7 @@ def test_postgres_migration_and_forced_owner_rls(pg_database_config):
                 "SELECT qual, with_check FROM pg_policies WHERE tablename = 'notes_knowledge_provenance'"
             ).fetchall()
             assert len(policies) == 1 and "app.current_user_id" in policies[0]["qual"]
-        assert database._POSTGRES_SCHEMA_VERSION == 82
+        assert database._POSTGRES_SCHEMA_VERSION == 83
     finally:
         database.close_all_connections()
 
@@ -253,7 +253,7 @@ def test_upgrade_v77_receipts_repeatable(db):
     for _ in range(2):
         migrated = CharactersRAGDB(db.db_path, client_id="alice")
         try:
-            assert migrated._get_db_version(migrated.get_connection()) == 78
+            assert migrated._get_db_version(migrated.get_connection()) == 79
             assert migrated.note_provenance_store.read_receipt("missing", "fp") is None
         finally:
             migrated.close_all_connections()

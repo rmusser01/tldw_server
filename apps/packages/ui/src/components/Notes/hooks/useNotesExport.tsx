@@ -60,7 +60,7 @@ const readReportedTotal = (res: any): number | null => {
 const toExportNote = (n: any): NoteListItem => ({
   id: n?.id,
   title: n?.title,
-  content: retainKnowledgeNoteProvenance(String(n?.content || ""), n),
+  content: typeof n?.content === "string" ? retainKnowledgeNoteProvenance(n.content, n) : undefined,
   content_language: n?.content_language,
   created_at: n?.created_at,
   updated_at: n?.updated_at ?? n?.last_modified,
@@ -122,7 +122,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     studioPaperSize,
   } = deps
 
-  const content = retainKnowledgeNoteProvenance(editorContent, originalMetadata)
+  const content = retainKnowledgeNoteProvenance(editorContent, {...originalMetadata, content_language: contentLanguage})
 
   const [exportProgress, setExportProgress] = React.useState<ExportProgressState | null>(null)
   const exportAbortRef = React.useRef<AbortController | null>(null)
@@ -373,6 +373,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
       const { arr } = gathered
       if (!arr.length) { message.info('No notes to export'); return }
       maybeWarnExportLimits(gathered)
+      if (arr.some(note => typeof note.content !== 'string')) throw new Error('Portable export requires complete source records')
       const blob = new Blob(
         [
           JSON.stringify(

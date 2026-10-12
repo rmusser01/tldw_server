@@ -794,6 +794,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
+
     _CURRENT_SCHEMA_VERSION = 79  # Nullable note source language after provenance receipts
     _POSTGRES_SCHEMA_VERSION = 83
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"

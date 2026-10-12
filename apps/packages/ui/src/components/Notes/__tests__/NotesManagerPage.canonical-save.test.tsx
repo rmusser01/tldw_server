@@ -474,84 +474,60 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     ['{"n":900719925474099312345}\n{"control":"\\u0001"}\n', "jsonl"],
     ["future source  ", " Future Mode "],
   ])(
-    "retains newer typing through source navigation and restart while an older save is pending (%s, %s)",
+    "waits for current save settlement and retains exact source through navigation/restart (%s, %s)",
     async (source, language) => {
-      const view = renderSourceRoute("/notes?source_ref_id=11");
-      const input = await screen.findByPlaceholderText(
-        "Write your note here... (Markdown supported)",
-      );
-      await waitFor(() => expect(input).toHaveValue("Saved body"));
-      fireEvent.change(input, { target: { value: "Saved at click time" } });
       const original = mockBgRequest.getMockImplementation()!;
+      let remote: Record<string, unknown> = { id: 11, title: 'Saved note', content: 'Saved body', content_language: null, version: 1 };
       const pendingSave = deferred<unknown>();
-      mockBgRequest.mockImplementation((request) =>
-        request.path === "/api/v1/notes/11" && request.method === "PUT"
-          ? pendingSave.promise
-          : request.path === "/api/v1/notes/12"
-            ? Promise.resolve({
-                id: 12,
-                content: "Requested source body",
-                version: 1,
-              })
-            : original(request),
-      );
-      fireEvent.click(screen.getByTestId("notes-save-button"));
-      await waitFor(() => expect(updateCalls()).toHaveLength(1));
-      fireEvent.change(input, { target: { value: source } });
-      act(() => canonicalBoundary.editor!.setContentLanguage(language));
-      fireEvent.click(screen.getByRole("link", { name: "Open source twelve" }));
-      await waitFor(() =>
-        expect(
-          screen.getByPlaceholderText(
-            "Write your note here... (Markdown supported)",
-          ),
-        ).toHaveValue("Requested source body"),
-      );
-      const recovery = canonicalBoundary.editor!.offlineDraftQueue["note:11"];
-      expect(recovery).toMatchObject({
-        content: source,
-        content_language: language,
-        baseVersion: 1,
+      let puts = 0;
+      mockBgRequest.mockImplementation((request) => {
+        if (request.path === '/api/v1/notes/11' && request.method === 'GET') return Promise.resolve(remote);
+        if (request.path === '/api/v1/notes/11' && request.method === 'PUT') {
+          puts += 1;
+          if (puts === 1) return pendingSave.promise;
+          remote = {...request.body, id: 11, version: 3};
+          return Promise.resolve(remote);
+        }
+        if (request.path === '/api/v1/notes/12') return Promise.resolve({id: 12, content: 'Requested source body', content_language: null, version: 1});
+        return original(request);
       });
+      const view = renderSourceRoute('/notes?source_ref_id=11');
+      await waitFor(() => expect(canonicalBoundary.editor?.content).toBe('Saved body'));
+      const input = screen.getByPlaceholderText('Write your note here... (Markdown supported)');
+      fireEvent.change(input, {target: {value: 'Saved at click time'}});
+      fireEvent.click(screen.getByTestId('notes-save-button'));
+      await waitFor(() => expect(puts).toBe(1));
+      act(() => {
+        canonicalBoundary.editor!.setContent(source);
+        canonicalBoundary.editor!.setContentLanguage(language);
+        canonicalBoundary.editor!.setIsDirty(true);
+      });
+      fireEvent.click(screen.getByRole('link', {name: 'Open source twelve'}));
+      await waitFor(() => expect(canonicalBoundary.editor!.offlineDraftQueue['note:11']?.content).toBe(source));
+      const recovery = canonicalBoundary.editor!.offlineDraftQueue['note:11'];
+      expect(recovery).toMatchObject({content: source, content_language: language, baseVersion: 1});
       expect(recovery.revision).toBeGreaterThan(0);
-      expect(updateCalls()[0][0].body.content).toBe("Saved at click time");
-      await act(async () =>
-        pendingSave.resolve({
-          id: 11,
-          content: "Saved at click time",
-          version: 2,
-          last_modified: "2026-09-15T12:00:00Z",
-        }),
-      );
-      expect(
-        canonicalBoundary.editor!.offlineDraftQueue["note:11"],
-      ).toMatchObject({
-        content: source,
-        content_language: language,
-        revision: recovery.revision,
-        baseVersion: 1,
-      });
+      expect(canonicalBoundary.editor!.content).toBe(source);
+      expect(mockBgRequest.mock.calls.some(([r]) => r.path === '/api/v1/notes/12')).toBe(false);
+      expect(screen.getByTestId('notes-save-status')).not.toHaveAttribute('data-state', 'saved');
+      remote = {...remote, content: 'Saved at click time', version: 2};
+      await act(async () => pendingSave.resolve(remote));
+      if (source === '') {
+        const stay = await screen.findByRole('button', {name: 'Stay on this note'});
+        fireEvent.click(stay);
+        expect(canonicalBoundary.editor!.content).toBe('');
+        expect(canonicalBoundary.editor!.offlineDraftQueue['note:11']).toMatchObject({content: '', content_language: language, baseVersion: 2});
+        expect(puts).toBe(1);
+      } else {
+        await waitFor(() => expect(canonicalBoundary.editor?.content).toBe('Requested source body'));
+        expect(puts).toBe(2);
+        expect(remote).toMatchObject({content: source, content_language: language, version: 3});
+      }
       view.unmount();
-      renderSourceRoute("/notes?source_ref_id=11");
-      await waitFor(() =>
-        expect(canonicalBoundary.editor?.selectedId).toBe("11"),
-      );
-      await waitFor(() =>
-        expect(canonicalBoundary.editor!.content).toBe(recovery.content),
-      );
+      renderSourceRoute('/notes?source_ref_id=11');
+      await waitFor(() => expect(canonicalBoundary.editor?.content).toBe(source));
       expect(canonicalBoundary.editor!.contentLanguage).toBe(language);
-      expect(
-        canonicalBoundary.editor!.offlineDraftQueue["note:11"],
-      ).toMatchObject({
-        content: source,
-        content_language: language,
-        revision: recovery.revision,
-        baseVersion: 1,
-      });
-      expect(screen.getByTestId("notes-save-status")).not.toHaveAttribute(
-        "data-state",
-        "saved",
-      );
+      if (source === '') expect(canonicalBoundary.editor!.offlineDraftQueue['note:11']).toMatchObject({content: '', baseVersion: 2});
     },
   );
 

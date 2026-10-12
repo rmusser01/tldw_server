@@ -309,7 +309,9 @@ def capture_server_origin_mutation_batch(
                 inserted = admission_store.insert_envelopes_atomic(
                     envelopes,
                     trusted_notes_organization_bootstrap_id=trusted_bootstrap_id,
-                    trusted_notes_provenance_bootstrap=(bootstrap_step_verifier if trusted_notes_provenance_bootstrap_id is not None else None),
+                    trusted_notes_provenance_bootstrap=(
+                        bootstrap_step_verifier if trusted_notes_provenance_bootstrap_id is not None else None
+                    ),
                     trusted_notes_task_bootstrap_id=(
                         trusted_notes_task_bootstrap_id or trusted_notes_task_activity_bootstrap_id
                     ),
