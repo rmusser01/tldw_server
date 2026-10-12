@@ -459,6 +459,84 @@ class NativeChatAssetStore:
             (owner.client_id, claim_id),
         ).fetchone())
 
+    def read_committed_asset(
+        self, owner: Any, conversation_id: str, asset_id: str, revision: str, *, conn: Any,
+    ) -> dict[str, Any]:
+        """Detach an exact committed fork claim; this grants no bundle readiness."""
+        from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+
+        self._db.native_forks._require_active_transaction(conn)
+        if owner.client_id != self._db.client_id:
+            raise ValueError("operation_owner_mismatch")
+        if any(not isinstance(value, str) or not 1 <= len(value) <= bound
+               for value, bound in ((conversation_id, 256), (asset_id, 256), (revision, 128))):
+            raise ValueError("invalid_native_asset_identity")
+        matches = conn.execute(
+            "SELECT a.claim_id,a.candidate_id,a.asset_revision,c.operation_kind,c.operation_id "
+            "FROM native_chat_asset_claims a JOIN native_chat_asset_candidates c "
+            "ON c.client_id = a.client_id AND c.candidate_id = a.candidate_id "
+            "WHERE a.client_id = ? AND a.owner_key = ? AND a.conversation_id = ? AND a.asset_id = ? "
+            "AND a.asset_revision = ?",
+            (owner.client_id, owner.owner_key, conversation_id, asset_id, revision),
+        ).fetchall()
+        if len(matches) != 1 or str(matches[0]["asset_revision"]) != revision:
+            raise ValueError("native_asset_not_found")
+        initial = matches[0]
+        if initial["operation_kind"] != "native_fork_v1":
+            raise ValueError("native_asset_read_unsupported")
+        operation = self._db.native_forks._row(owner, "native_fork_v1", initial["operation_id"], conn=conn)
+        if operation is None:
+            raise ValueError("operation_not_recorded")
+        self._db.native_forks._check_identity(operation, owner, operation["request_digest"])
+        if operation["state"] != "committed" or operation["child_conversation_id"] != conversation_id:
+            raise ValueError("native_asset_operation_uncommitted")
+        self._db.native_forks.lock_open_workspace(owner, conn=conn)
+        lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        child = conn.execute(
+            "SELECT scope_type,workspace_id,deleted,required_projection_version,"
+            "native_creation_operation_kind,native_creation_operation_id "
+            "FROM conversations WHERE client_id = ? AND id = ?" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (owner.client_id, conversation_id),
+        ).fetchone()
+        if child is None or any((
+            child["scope_type"] != owner.scope.kind, child["workspace_id"] != owner.scope.workspace_id,
+            bool(child["deleted"]), child["required_projection_version"] != "native-fork-v1",
+            child["native_creation_operation_kind"] != "native_fork_v1",
+            child["native_creation_operation_id"] != initial["operation_id"],
+        )):
+            raise ValueError("native_asset_conversation_unavailable")
+        candidate = self._candidate_row(owner.client_id, initial["candidate_id"], conn=conn)
+        claim = conn.execute(
+            "SELECT * FROM native_chat_asset_claims WHERE client_id = ? AND claim_id = ?" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (owner.client_id, initial["claim_id"]),
+        ).fetchone()
+        if candidate is None or claim is None or any((
+            candidate["state"] != "adopted", candidate["owner_key"] != owner.owner_key,
+            candidate["attempt_generation"] != operation["attempt_generation"],
+            candidate["operation_kind"] != "native_fork_v1", candidate["operation_id"] != initial["operation_id"],
+            claim["state"] != "live", claim["owner_key"] != owner.owner_key,
+            claim["conversation_id"] != conversation_id, claim["asset_id"] != asset_id,
+            str(claim["asset_revision"]) != revision, claim["candidate_id"] != candidate["candidate_id"],
+            claim["content_hash"] != candidate["expected_hash"], claim["size_bytes"] != candidate["expected_size_bytes"],
+            claim["mime_type"] != candidate["mime_type"], claim["representation"] != candidate["representation"],
+            claim["size_bytes"] < 1, claim["representation"] not in {
+                "embedded_image_v1", "generated_image_revision_v1", "document_original_v1", "document_text_v1",
+            },
+        )):
+            raise ValueError("native_asset_claim_conflict")
+        self._require_confirmed_quota(owner, candidate, conn=conn)
+        self._require_exclusive_paths(owner.client_id, candidate["candidate_id"], candidate["storage_namespace_id"], candidate["upload_id"], conn=conn)
+        key = LocalSyncBlobStore.namespace_storage_key(candidate["storage_namespace_id"], "sha256:" + candidate["expected_hash"])
+        if candidate["storage_key"] != key:
+            raise ValueError("candidate_storage_identity_conflict")
+        return {
+            **{field: claim[field] for field in (
+                "claim_id", "client_id", "owner_key", "conversation_id", "candidate_id", "asset_id", "asset_revision",
+                "content_hash", "size_bytes", "mime_type", "representation",
+            )},
+            **{field: candidate[field] for field in ("storage_namespace_id", "upload_id", "storage_key", "attempt_generation")},
+        }
+
     def _locked_candidate_for_operation(
         self, owner: Any, kind: str, operation_id: str, request_digest: str,
         candidate_id: str, *, conn: Any,

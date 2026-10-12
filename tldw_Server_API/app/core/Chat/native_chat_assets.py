@@ -1,4 +1,4 @@
-"""Private native candidate byte fencing; quota authority and MIME admission are separate."""
+"""Private native preparation, guarded exact reads and conservative byte reclamation."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeQuotaReleasePendingError
@@ -433,6 +433,51 @@ class NativeChatAssetIO:
                 raise SyncBlobStoreError("Native candidate removal is unconfirmed")
         except _MissingBlobDirectoryError:
             return
+
+    @contextmanager
+    def read_owned_asset(
+        self, owner: AuthorizedNativeOwner, conversation_id: str, asset_id: str, revision: str,
+    ) -> Iterator[tuple[dict[str, Any], BinaryIO]]:
+        """Yield exact committed fork bytes under the guard, without source fallback.
+
+        The trusted caller owns bounded consumption inside this context. Public
+        streaming, retention claims and canonical bundle admission remain unqualified.
+        """
+        self._require_outermost(owner)
+
+        def descriptor() -> dict[str, Any]:
+            self._require_outermost(owner)
+            with self._db.transaction() as conn:
+                return self._db.native_assets.read_committed_asset(owner, conversation_id, asset_id, revision, conn=conn)
+
+        admitted = descriptor()
+        key = self._canonical_key(
+            admitted["storage_namespace_id"], admitted["upload_id"], admitted["content_hash"],
+            admitted["size_bytes"], admitted["storage_key"],
+        )
+        with self._guard(owner, admitted["candidate_id"]) as (root, check):
+            if descriptor() != admitted:
+                raise ValueError("native_asset_claim_conflict")
+            with _open_directory_chain(root, ("blobs", "v2", admitted["storage_namespace_id"]), create=False) as directory:
+                name = key.rsplit("/", 1)[1]
+                with _open_target_at(directory, name) as handle:
+                    check()
+                    inode = _verify_named_open_blob(
+                        handle, directory=directory, name=name,
+                        payload_hash="sha256:" + admitted["content_hash"], expected_size=admitted["size_bytes"],
+                    )
+                    check()
+                    if descriptor() != admitted:
+                        raise ValueError("native_asset_claim_conflict")
+                    check()
+                    yield dict(admitted), handle
+                    check()
+                    _verify_named_open_blob(
+                        handle, directory=directory, name=name, expected_inode=inode,
+                        payload_hash="sha256:" + admitted["content_hash"], expected_size=admitted["size_bytes"],
+                    )
+                    if descriptor() != admitted:
+                        raise ValueError("native_asset_claim_conflict")
 
     def reclaim(
         self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, request_digest: str, candidate_id: str
