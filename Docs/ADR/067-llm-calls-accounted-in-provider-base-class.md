@@ -37,7 +37,7 @@ Only `/chat/completions`, the router, the claims engine and embeddings recorded 
 - **Threads.** `BoundedDaemonPool.start` and the chat request queue carry the call state into their threads and workers.
 - **Tests that replace a provider method** on an instance or class replace the wrapped method, so that call is not accounted. Accounting tests use a fake `ChatProvider` subclass.
 - **Embeddings** are excluded from the LLM token counter. They are still recorded.
-- **Background roots.** Background work gets its user from `llm_call_root`. The loop's default executor carries the LLM call state, so `loop.run_in_executor(None, ...)` keeps the user. A thread pool created at a call site must carry the state itself.
+- **Background roots.** Background work gets its user from `llm_call_root`. The loop's default executor carries the LLM call state, so `loop.run_in_executor(None, ...)` keeps the user. A thread pool created at a call site must carry the state itself. Three do: claims extraction, the article extractor and web search.
 - **Still unrecorded,** each with its reason:
   - MCP tool calls: MCP authentication sets no content scope.
   - The in-process claims rebuild threads: their tasks carry no owner.
