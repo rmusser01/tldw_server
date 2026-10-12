@@ -797,8 +797,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 79  # Frozen native quota authority descriptors after Knowledge receipts
-    _POSTGRES_SCHEMA_VERSION = 83
+    _CURRENT_SCHEMA_VERSION = 80  # Explicit native attachment reference roles
+    _POSTGRES_SCHEMA_VERSION = 84
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -8816,6 +8816,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (76, "_migrate_from_v76_to_v77"),
             (77, "_migrate_from_v77_to_v78"),
             (78, "_migrate_from_v78_to_v79"),
+            (79, "_migrate_from_v79_to_v80"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17998,6 +17999,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v79_to_v80(self, conn: sqlite3.Connection) -> None:
+        """Preserve unknown legacy roles rather than infer them from representation."""
+        conn.execute(
+            "ALTER TABLE native_chat_asset_references ADD COLUMN role TEXT "
+            "CHECK (role IN ('message_image','document_context','generated_image','reference_image'))"
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 80 WHERE schema_name = ? AND version = 79",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 80:
+            raise SchemaError("Native reference role migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v83_to_v84_postgres(self, conn: Any) -> None:
+        """Add explicit roles without changing existing forced-owner RLS or rows."""
+        self.backend.execute(
+            "ALTER TABLE native_chat_asset_references ADD COLUMN role TEXT "
+            "CHECK (role IN ('message_image','document_context','generated_image','reference_image'))",
+            connection=conn,
+        )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = 84 WHERE schema_name = %s AND version = 83",
+            (self._SCHEMA_NAME,),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 84:
+            raise SchemaError("Native reference role migration failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v78_to_v79(self, conn: sqlite3.Connection) -> None:
         """Freeze quota identity before external authority work in the native store."""
         conn.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT')
@@ -21374,6 +21403,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 79 and current_db_version == 78:
                         self._migrate_from_v78_to_v79(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 80 and current_db_version == 79:
+                        self._migrate_from_v79_to_v80(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21859,6 +21891,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 79 and current_db_version == 78:
                     self._migrate_from_v78_to_v79(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 80 and current_db_version == 79:
+                    self._migrate_from_v79_to_v80(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25720,7 +25755,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25760,6 +25795,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 83 and current_version < 83:
                     self._migrate_from_v82_to_v83_postgres(conn)
                     current_version = 83
+                if target_version >= 84 and current_version < 84:
+                    self._migrate_from_v83_to_v84_postgres(conn)
+                    current_version = 84
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26229,6 +26267,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v82_to_v83_postgres(conn)
                 self._runtime_schema_version = 83
                 current_version = 83
+            if target_version >= 84 and current_version < 84:
+                self._migrate_from_v83_to_v84_postgres(conn)
+                self._runtime_schema_version = 84
+                current_version = 84
 
             if current_version < target_version:
                 logger.warning(

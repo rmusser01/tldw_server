@@ -51,6 +51,7 @@ def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
         ).fetchone()["version"] == expected_version
         for table in NATIVE_TABLES:
             assert upgraded.backend.table_exists(table)
+        assert upgraded.execute_query("SELECT role FROM native_chat_asset_references").fetchall() == []
         workspace_columns = (
             {row["column_name"] for row in upgraded.execute_query(
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'workspaces'"
@@ -210,6 +211,7 @@ def test_colliding_native_lineage_preserves_receipts_or_rolls_back(
                 try:
                     assert dict(upgraded.execute_query("SELECT * FROM native_chat_operations").fetchone()) == receipt
                     assert dict(upgraded.execute_query("SELECT * FROM conversation_history_projections").fetchone()) == projection
+                    assert upgraded.execute_query("SELECT role FROM native_chat_asset_references").fetchall() == []
                     workspace = upgraded.execute_query("SELECT * FROM workspaces WHERE id = ?", ("workspace",)).fetchone()
                     assert workspace["native_chat_admission_closed"]
                     assert workspace["assistant_defaults_explicit_none"]
@@ -257,7 +259,12 @@ def test_quota_descriptor_upgrade_preserves_existing_intent_and_chat(
             try:
                 assert dict(upgraded.execute_query("SELECT * FROM native_chat_quota_intents").fetchone()) == intent | {"quota_owner_json": None}
                 assert upgraded.execute_query("SELECT content FROM messages WHERE id = ?", (message,)).fetchone()["content"] == "Existing turn"
-                assert upgraded.execute_query("SELECT version FROM db_schema_version WHERE schema_name = ?", (upgraded._SCHEMA_NAME,)).fetchone()["version"] == (83 if backend_name == "postgres" else 79)
+                assert upgraded.execute_query(
+                    "SELECT version FROM db_schema_version WHERE schema_name = ?", (upgraded._SCHEMA_NAME,)
+                ).fetchone()["version"] == (
+                    CharactersRAGDB._POSTGRES_SCHEMA_VERSION if backend_name == "postgres"
+                    else CharactersRAGDB._CURRENT_SCHEMA_VERSION
+                )
             finally:
                 upgraded.close_connection()
     finally:
