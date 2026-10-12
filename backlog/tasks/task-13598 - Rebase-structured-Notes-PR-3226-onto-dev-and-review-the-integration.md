@@ -12,7 +12,7 @@ labels:
 priority: high
 references:
 - https://github.com/rmusser01/tldw_server/pull/3226
-updated_date: 2026-10-12 21:21
+updated_date: 2026-10-12 21:46
 ---
 
 ## Description
@@ -23,11 +23,11 @@ Integrate the already reviewed local structured-document checks and reversible f
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The PR branch is rebased onto the recorded current dev base, resolves its conflicts and retains the intended structured-Notes changes without deleting unrelated upstream behavior or documentation.
-- [ ] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
-- [ ] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
-- [ ] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
-- [ ] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
+- [x] #1 The PR branch is rebased onto the recorded current dev base, resolves its conflicts and retains the intended structured-Notes changes without deleting unrelated upstream behavior or documentation.
+- [x] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
+- [x] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
+- [x] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
+- [x] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,28 +46,29 @@ ADR required: no new ADR for rebase/direct existing-owner integration; ADR path:
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Replayed the structured feature onto recorded dev 2a8ffa78, preserving current Notes save/receipt/provenance, Sync readiness/transactions, WYSIWYG lifecycle and API-types fingerprint owners. Allocated SQLite79/PostgreSQL83 with real upgrade/bootstrap proof. Complete language snapshots now compose into newer provenance capture/bootstrap, with legacy-null compatibility and exact structured source fences. Root reconciled source navigation with current G01/NS01 wait/flush behavior before revised tests; obsolete immediate-navigation RED is retained. ADR070–074 apply; no new boundary or ADR.
+Rebased the structured feature onto dev 2a8ffa78, preserving current Notes save/receipt/provenance, wait-and-flush navigation, Sync readiness/transactions, WYSIWYG and API-types owners. Allocated SQLite 79 / PostgreSQL 83 with real upgrade/bootstrap/lifecycle proof. ADR-070 through ADR-074 retain the approved boundaries; no new architecture, schema or transport was added during the review fixes.
 
-Fresh private source/config/dependency binding, targeted storage/API/provenance/recovery/native/worker/import/export checks, current typecheck, scoped Ruff and zero-finding Bandit are recorded in /private/tmp/structured-notes-pr-rebase-2026-10-12/s-rebase-report.md and s-evidence. Real owned PostgreSQL18.6 fixture passed79selected checks, including82→83 and current bootstrap/lifecycle; exact fixture cleanup succeeded. Existing current-dev ESLint/whole-file formatting debt is baseline-accounted rather than suppressed. Physical IME/spoken output and deferred C durable Notes sync remain unqualified. Root independent review/publication remain pending; task and ACs stay open.
+Independent full rebased-PR review found three Important issues and one Minor issue. Focused real export/import checks found a fourth Important issue: the immutable compound acknowledgment omitted persisted language. Existing-owner fixes handle storage refusal before publishing a save promise, retain authoritative provenance through actual export/import actions, regenerate canonical API contracts, conditionally project language from the durable acknowledgment payload, and assert disabled Format after a resource-limited Check. Ordinary portable JSON preserves marker-based overwrite behavior; structured/future records use the existing validated carrier and fail-closed optimistic overwrite. Exact source downloads and immutable replay after newer rows remain protected.
 
-Review round1 corrected local-storage refusal before publishing the current shared save reservation, preserving synchronous durable-write and wait/flush ownership. Actual authority-bound single-note export now carries the validated Knowledge head; portable exports reuse existing marker and independent provenance import carriers without altering structured source or source downloads. Canonical API-types package generation under checked-in route policy regenerated both committed artifacts and rich local types (2114paths/3267schemas); the required drift command and supported typecheck pass. Bounds E2E now asserts disabled Format. Additive red/green and actual-action import evidence, timeout attempts and their scoped disposition are in s-review-fix-report.md; scoped independent re-review remains pending.
+Fresh final controls passed 5 storage/single-inflight/unchecked-Format cases, 36 export/import cases and 28 acknowledgment/overwrite cases. Supported frontend typecheck, scoped ESLint (0 errors / 68 inherited warnings), amended Python Ruff/format and zero-finding Bandit passed. Canonical generation/drift uses the repository-equivalent route policy: 2,114 paths / 3,267 schemas, including Notes capabilities. The actual typecheck consumes index.d.ts and paths.d.ts; generated rich schema.d.ts was not a frontend check input. Prior real PostgreSQL and worker evidence remains separately source-bound; unchanged owners were not rerun.
 
-The actual active-Sync import control also exposed a missing language field in immutable compound ACKs. The existing response owner now conditionally projects content_language from its durable payload, retaining omission/null/known/future values without consulting a newer row. Real create/update/idempotent replay controls after newer source changes passed; the original RED failures remain recorded. Ordinary portable JSON stays marker-only and preserves the destination canonical head on overwrite; structured/future records reuse the validated independent carrier and refuse stale overwrite without changing source/language/head. Matched Studio baseline/current diagnostics passed original assertions/deadline after exact temporary instrumentation restoration; original uninstrumented/batch failures remain disclosed. No further Studio product change or qualification waiver. Root scoped re-review/publication remain pending.
+Independent scoped re-review of 5733e139 to f0fa621d3e4cd8be5b293a867520e539fed5add7 accepted I1/I2/I3/M1/I4 with 0 new Critical, Important or Minor source findings. Root fully read both reports and independently verified 12 source files, 5 generated artifacts, 187 receipts, exact package hashes, clean head, dev ancestry and diff checks. Source gate PASS is separate from test, merge and release qualification.
 
+Published the reviewed source head to existing draft PR https://github.com/rmusser01/tldw_server/pull/3226 with exact force-with-lease against original head 3cfe8fc8d622c501e1f5ad1dacda2242b71673dc. Updated its description with actual checks and limitations. GitHub confirmed dev base, exact head, MERGEABLE, draft and no auto-merge. Subsequent task-only bookkeeping preserves reviewed source/tests.
+
+All integration acceptance criteria are accounted for, but status remains In Progress under repository DoD: broader recovery attempts remain 184 pass / 14 fail and 9 pass / 5 fail; four controls passed unchanged in isolation, while the Studio uninstrumented timeout remains unqualified. Matched pre-fix/current diagnostics passed original assertions/deadlines with exact source restoration; they do not establish a load-only cause or a clean recovery-suite result. Bounds discovery predates the final title and is not frozen-head/hosted proof. Whole-file formatting debt, physical IME/spoken output, current-head human Change summary/CI/review gates and separately deferred Chatbook durable Notes sync remain open. No full suite or gate waiver. Reports, raw failed attempts, scoped confirmation and immutable manifests are retained under /private/tmp/structured-notes-pr-rebase-2026-10-12. Existing physical tasks TASK-13587 and TASK-13597 remain open.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Reviewed rebase and four Important source corrections published to draft PR3226 on dev2a8ffa78. Scoped re-review accepts all findings with no new source issue. Fresh 5/36/28 selections and scoped static/security checks passed; reliable uninstrumented recovery, whole-file formatting, physical qualification and merge gates remain open.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
