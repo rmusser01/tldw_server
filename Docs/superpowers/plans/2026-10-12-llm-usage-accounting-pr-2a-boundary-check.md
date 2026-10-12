@@ -21,6 +21,8 @@
 - **No check at the call in this PR.** Do not change `core/LLM_Calls/usage_accounting.py`, `perform_chat_api_call` or `perform_chat_api_call_async`.
 - **Embeddings never count** toward any LLM limit (the `_LLM_GENERATION_PREDICATE` from PR 1a).
 - **Test-first.** Each task's tests are written and seen failing before its code, except tests that guard behaviour which already holds; the plan says which.
+- **Every task was dry-run** by an independent reviewer in a scratch checkout of this branch, in order, and the test code in this plan is the code that ran there. If an edit does not match the file, or a test does not behave as a step says, stop and report it. Do not improvise.
+- **Import placement.** Where a step says where an import goes, put it there: ruff's isort rules decide, and the wrong place adds an `I001` finding. Never run `ruff --fix` on a whole file: several files have unrelated findings that a fix would also move.
 - **New test files go only where CI runs the directory whole:** `tldw_Server_API/tests/Usage` and `tldw_Server_API/tests/Media`. Elsewhere, add tests to existing files: `.github/workflows/ci.yml` lists many files one by one, and a new file there would not run.
 - **Backlog:** `tools/backlog-py` only, `--append-notes`, explicit ids, `git add -A backlog/tasks`.
 - **Commits** end with exactly `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. Never `git stash`. Never `--no-verify`.
@@ -347,12 +349,12 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ### Task 3: Local providers cost nothing by default
 
 **Files:**
-- Modify: `tldw_Server_API/app/core/Usage/pricing_catalog.py` (`DEFAULT_PRICING`, near lines 54-167; `get_rate_details`, near lines 252-275)
+- Modify: `tldw_Server_API/app/core/Usage/pricing_catalog.py` (`DEFAULT_PRICING`, near lines 54-167; `get_rate_details`, near lines 252-275; `list_provider_models`, near line 382)
 - Modify: `tldw_Server_API/Config_Files/model_pricing.json` (the end of the file)
 - Test: `tldw_Server_API/tests/Usage/test_pricing_local_providers.py`
 
 **Interfaces:**
-- Produces: `PricingCatalog.get_rate_details(provider, model)` resolves the provider's canonical name, then the exact model, then a substring match, then the provider's `default` entry, then the unknown-model rate.
+- Produces: `PricingCatalog.get_rate_details(provider, model)` resolves the provider's canonical name, then the exact model, then a substring match, then the provider's `default` entry, then the unknown-model rate. `list_provider_models(provider)` never lists `default`: a provider-wide price is not a model.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -427,7 +429,19 @@ def test_a_model_match_beats_the_provider_default(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("PRICING_OVERRIDES", json.dumps({"vllm": {"llama": {"prompt": 0.001, "completion": 0.002}}}))
     rates, estimated = PricingCatalog().get_rate_details("vllm", "llama-default-q4")
     assert (rates["prompt"], rates["completion"], estimated) == (0.001, 0.002, True)
+
+
+def test_the_provider_default_is_not_advertised_as_a_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider-wide price is not a model, so model validation for a local provider stays unarmed."""
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
+
+    monkeypatch.setattr(chat_service, "_configured_models_for_provider", lambda _provider: ())
+    assert "default" not in list_provider_models("vllm")
+    assert chat_service.is_model_known_for_provider("vllm", "llama3.1:8b") is None
 ```
+
+The last test guards a regression the dry run found. The chat endpoints merge `list_provider_models` into the set of known models, and with strict model selection (the default outside test mode) they refuse a model that is not in a non-empty set. If `default` were listed, every local model not named in `config.txt` would be refused with `model_not_available`. The test passes before this task; it fails if Step 4 is applied without the `list_provider_models` change in Step 3.
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
@@ -483,7 +497,24 @@ to:
         return _unknown_billable_rate(), True
 ```
 
-`canonical_provider_name` lowercases and maps aliases (`llamacpp` to `llama.cpp`), and returns any other name lowercased, so known providers are looked up as before.
+`canonical_provider_name` lowercases and maps aliases (`llamacpp` to `llama.cpp`), and returns any other name lowercased, so known providers are looked up as before. No provider in the catalog today is an alias of another, so no existing price changes; aliases such as `oai` are now priced as their provider.
+
+In `list_provider_models`, change:
+
+```python
+                for name, meta in models_map.items()
+                if not (isinstance(meta, dict) and meta.get("placeholder"))
+```
+
+to:
+
+```python
+                for name, meta in models_map.items()
+                # "default" is a provider-wide price, not a model (LLM usage accounting spec §6).
+                if name != "default" and not (isinstance(meta, dict) and meta.get("placeholder"))
+```
+
+This also stops `huggingface`, whose `default` entry already existed, from listing `default` as a model.
 
 - [ ] **Step 4: Ship the zero defaults**
 
@@ -821,7 +852,7 @@ def test_chat_completions_402_on_daily_llm_cost_quota(
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_quota_decision.py tldw_Server_API/tests/Chat/integration/test_chat_llm_tokens_quota_402.py`
-Expected: `test_llm_quota_decision.py` fails to collect (`ImportError: cannot import name 'LLMQuotaExceededError'`). In the chat file, the token test fails (the counter patch no longer reaches the check) and the cost test fails with 200 where 402 is expected.
+Expected: `test_llm_quota_decision.py` fails to collect (`ImportError: cannot import name 'LLMQuotaExceededError'`). In the chat file, all three tests fail with 502 where 402 is expected: the recording dispatch raises, and the endpoint reports that as a provider error.
 
 - [ ] **Step 3: The error**
 
@@ -1043,7 +1074,7 @@ with:
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 ```
 
-(if `chat.py` keeps its `API_Deps` imports in one block, put the line there instead) and replace:
+placed directly after the `personalization_deps` import block (the block that ends near line 299), before the `from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import` line. That is where ruff's isort puts it; left where the removed block was, it adds an `I001`. Then replace:
 
 ```python
             # Usage quotas (spec 2 §4): the user's monthly LLM token allowance.
@@ -1096,7 +1127,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Boundary checks for character chat, document generation and the study assistants
+### Task 5: Boundary checks for character chat, document generation, the study assistants and the Messages API
 
 **Files:**
 - Create: `tldw_Server_API/tests/helpers/llm_quota.py` (two test helpers shared by Tasks 5 to 7)
@@ -1104,7 +1135,8 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chat_documents.py` (`generate_document`, near line 363)
 - Modify: `tldw_Server_API/app/api/v1/endpoints/flashcards.py` (the route decorator near line 2461)
 - Modify: `tldw_Server_API/app/api/v1/endpoints/quizzes.py` (the route decorator near lines 780-783)
-- Test: one new test in each of `tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py`, `tests/Chat/integration/test_document_generation_endpoints.py`, `tests/Flashcards/test_flashcards_endpoint_integration.py`, `tests/Quizzes/test_quizzes_endpoint_integration.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/messages.py` (the decorators of `create_messages` and `create_messages_public`, near lines 2217 and 2246)
+- Test: one new test in each of `tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py`, `tests/Chat/integration/test_document_generation_endpoints.py`, `tests/Flashcards/test_flashcards_endpoint_integration.py`, `tests/Quizzes/test_quizzes_endpoint_integration.py`, `tests/Chat/integration/test_messages_endpoint.py`
 
 **Interfaces:**
 - Consumes: `enforce_llm_quota` and `require_llm_quota` from Task 4.
@@ -1186,20 +1218,156 @@ def test_complete_v2_refuses_an_over_quota_user_before_any_llm_call(
     assert calls == []
 ```
 
-Document generation, in `tests/Chat/integration/test_document_generation_endpoints.py`: copy `test_document_generate_bubbles_service_error`, with a stub service whose `generate_document` records that it ran. Call `refuse_llm_work(monkeypatch)` before posting `_make_payload()`, then a second request with `{**_make_payload(), "async_generation": True}`. Both get the 402, and the stub never ran.
+Document generation, in `tests/Chat/integration/test_document_generation_endpoints.py`, directly after `test_document_generate_bubbles_service_error`:
 
-Flashcards, in `tests/Flashcards/test_flashcards_endpoint_integration.py`: copy `test_flashcard_assistant_respond_persists_user_and_assistant_messages` up to the card creation. Replace `generate_study_assistant_reply` with a recorder, call `refuse_llm_work(monkeypatch)`, post `{"action": "explain"}`, assert the 402 and that the recorder never ran.
+```python
+def test_document_generate_refuses_an_over_quota_user_before_generation(authenticated_client, monkeypatch):
+    """An over-quota user gets the 402 for a sync and an async request, and the service never generates."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
 
-Quizzes, in `tests/Quizzes/test_quizzes_endpoint_integration.py`: the same, from `test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_messages`.
+    class RecordingStubService:
+        generate_calls = 0
+
+        def __init__(self, db):
+            self._db = db
+
+        def generate_document(self, *args, **kwargs):
+            RecordingStubService.generate_calls += 1
+            return {"success": True, "content": "unused", "metadata": {}}
+
+        def get_generated_documents(self, *args, **kwargs):
+            return []
+
+        def record_streamed_document(self, *args, **kwargs):
+            return None
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: RecordingStubService
+    RecordingStubService.generate_calls = 0
+    refuse_llm_work(monkeypatch)
+
+    for payload in (_make_payload(), {**_make_payload(), "async_generation": True}):
+        response = authenticated_client.post("/api/v1/chat/documents/generate", json=payload)
+        assert_llm_quota_402(response)
+        response.close()
+    assert RecordingStubService.generate_calls == 0
+```
+
+Flashcards, in `tests/Flashcards/test_flashcards_endpoint_integration.py`, directly after `test_flashcard_assistant_respond_persists_user_and_assistant_messages`:
+
+```python
+def test_flashcard_assistant_respond_refuses_an_over_quota_user(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    """An over-quota user gets the 402 and the study assistant never calls the LLM."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_reply(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"assistant_text": "unused", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        recording_generate_reply,
+    )
+    refuse_llm_work(monkeypatch)
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert_llm_quota_402(response)
+    assert calls == []
+```
+
+Quizzes, in `tests/Quizzes/test_quizzes_endpoint_integration.py`, directly after `test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_messages`:
+
+```python
+def test_quiz_attempt_question_assistant_respond_refuses_an_over_quota_user(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    """An over-quota user gets the 402 and the study assistant never calls the LLM."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_reply(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"assistant_text": "unused", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        recording_generate_reply,
+    )
+    refuse_llm_work(monkeypatch)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert_llm_quota_402(response)
+    assert calls == []
+```
+
+The Messages API, in `tests/Chat/integration/test_messages_endpoint.py`, after `test_messages_endpoint_streaming`. It covers both paths: `openai/...` goes through the shared call layer, and `llama.cpp/...` through the native path, which posts to the provider directly.
+
+```python
+@pytest.mark.integration
+@pytest.mark.parametrize("model", ["openai/gpt-4", "llama.cpp/test-model"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_refuses_an_over_quota_user_before_any_provider_call(client_user_only, monkeypatch, model, stream):
+    """An over-quota user gets the 402 on the adapter path and the native path, streaming or not."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls: list[str] = []
+
+    async def _adapter_call(**kwargs):
+        calls.append("adapter")
+        return _build_openai_response("unused")
+
+    async def _native_post(url, headers, payload, **_kwargs):
+        calls.append("native")
+        return _build_native_response()
+
+    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_post)
+    refuse_llm_work(monkeypatch)
+    payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10, "stream": stream}
+    response = client_user_only.post("/api/v1/messages", json=payload)
+    assert_llm_quota_402(response)
+    assert calls == []
+```
 
 - [ ] **Step 3: Run the tests and confirm they fail**
 
-Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider -k "quota or refuses" tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py tldw_Server_API/tests/Chat/integration/test_document_generation_endpoints.py tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py`
+Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider -k "quota or refuses" tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py tldw_Server_API/tests/Chat/integration/test_document_generation_endpoints.py tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py tldw_Server_API/tests/Chat/integration/test_messages_endpoint.py`
 Expected: each new test fails with a 200 (or the endpoint's normal result) where 402 is expected.
 
 - [ ] **Step 4: Add the checks**
 
-Each file gets `from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota` or `require_llm_quota`, placed with its other `API_Deps` imports where ruff's isort wants it.
+Each file gets `from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota` or `require_llm_quota`, at the place ruff's isort puts it:
+- `character_chat_sessions.py`: directly after the `llm_routing_deps` import block;
+- `chat_documents.py`: directly after the `chat_documents_deps` import;
+- `flashcards.py` and `quizzes.py`: directly after the `jobs_deps` import. `flashcards.py` already has an unrelated `I001` on `dev`; place the import by hand and do not run `ruff --fix` there;
+- `messages.py`: directly after the `from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user` line.
 
 Character chat. In `character_chat_completion`, insert directly before the line `        # Prepare rate limiter` (it occurs once in the file):
 
@@ -1236,7 +1404,15 @@ to:
 )
 ```
 
-Quizzes. In the decorator of `respond_quiz_attempt_question_assistant`, add `    dependencies=[Depends(require_llm_quota)],` after `    response_model=StudyAssistantRespondResponse,`. That line occurs in more than one decorator in the file; edit only the one directly above `async def respond_quiz_attempt_question_assistant(`.
+Quizzes. In the decorator of `respond_quiz_attempt_question_assistant`, add `    dependencies=[Depends(require_llm_quota)],` after `    response_model=StudyAssistantRespondResponse,` (that line occurs once in the file).
+
+The Messages API. The line `    dependencies=[Depends(check_rate_limit)],` occurs four times in `messages.py`. Change it only in the two decorators whose route is `"/messages"` and `"/v1/messages"` (`summary="Anthropic-compatible Messages API"`), the ones directly above `async def create_messages(` and `async def create_messages_public(`. Leave the two `count_tokens` decorators alone. In those two, change it to:
+
+```python
+    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
+```
+
+Both routes take `current_user: User = Depends(get_request_user)`, so the dependency adds no second authentication. The `count_tokens` routes are not changed: they count tokens and generate nothing. The dependency covers the native path too, which posts to Anthropic or llama.cpp directly and never reaches a provider adapter; a check at the call (PR 2b) would not see it.
 
 Neither study-assistant route takes a user parameter. Both authenticate through `get_chacha_db_for_user`, which depends on `get_request_user`, so the dependency adds no second authentication.
 
@@ -1248,7 +1424,7 @@ Run the Step 3 command. Expected: the new tests pass. Then run the four files wh
 TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py \
   tldw_Server_API/tests/Chat/integration/test_document_generation_endpoints.py \
   tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py \
-  tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py
+  tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py tldw_Server_API/tests/Chat/integration/test_messages_endpoint.py
 ```
 
 Then the suites around them with `-n 4`: `tldw_Server_API/tests/Character_Chat_NEW`, `tldw_Server_API/tests/Flashcards`, `tldw_Server_API/tests/Quizzes`. No new failures.
@@ -1259,11 +1435,12 @@ Then the suites around them with `-n 4`: `tldw_Server_API/tests/Character_Chat_N
 git add tldw_Server_API/tests/helpers/llm_quota.py \
   tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py tldw_Server_API/app/api/v1/endpoints/chat_documents.py \
   tldw_Server_API/app/api/v1/endpoints/flashcards.py tldw_Server_API/app/api/v1/endpoints/quizzes.py \
+  tldw_Server_API/app/api/v1/endpoints/messages.py tldw_Server_API/tests/Chat/integration/test_messages_endpoint.py \
   tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py \
   tldw_Server_API/tests/Chat/integration/test_document_generation_endpoints.py \
   tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py \
   tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py
-git commit -m "feat(usage): character chat, document generation and the study assistants refuse over-quota users with 402 (TASK-13437)
+git commit -m "feat(usage): character chat, document generation, the study assistants and the Messages API refuse over-quota users with 402 (TASK-13437)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
@@ -1284,27 +1461,270 @@ The evaluation endpoints do not authenticate with `get_request_user`: they use `
 
 - [ ] **Step 1: Write the failing tests**
 
-In the RAG files, each test goes in the file that owns its harness:
+In the RAG files, each test goes in the file that owns its harness.
 
-- **`/rag/search` with generation is refused.** Harness: `client_with_agentic_overrides` in `test_rag_agentic_api.py`. Replace `rag_unified.unified_rag_pipeline` with a recorder (the pattern in `tests/AuthNZ_SQLite/test_rag_media_permissions_sqlite.py`, near line 71). Call `refuse_llm_work(monkeypatch)`, post `{"query": "q", "enable_generation": True}`, `assert_llm_quota_402`, and the recorder never ran.
-- **`/rag/search` with generation off is not refused.** Same harness and recorder; post `{"query": "q", "enable_generation": False}`. The recorder ran once and the status is not 402.
-- **A profile that turns generation on is refused.** Post `{"query": "q", "rag_profile": "accuracy"}` with generation unset; the `accuracy` profile sets `enable_generation`. `assert_llm_quota_402`.
-- **`/rag/search/stream` is refused with a real 402.** Harness: `client_with_stream_overrides` in `test_rag_stream_parity.py`. Replace `rag_unified.generate_streaming_response` with a recorder, post `{"query": "q", "enable_generation": True}`, `assert_llm_quota_402`, recorder never ran.
-- **`/rag/batch` with generation is refused.** Harness: `client_with_overrides` in `test_rag_batch_checkpoint_api.py`, with the same patches as `test_rag_batch_creates_checkpoint` and a recorder for the pipeline. Post `{"queries": ["alpha"], "enable_generation": True}`; `assert_llm_quota_402`.
-- **`/rag/batch` returns spec 2's 402 for the RAG query quota, not a 500.** Same harness. Make `limits.rag_queries_per_day` 0: replace `quota_checks.user_quota` with a function that returns 0 for that key and `None` otherwise, and `quota_checks.ledger_used_today` with one that returns 0. Post `{"queries": ["alpha"]}`. Expect 402 with `detail["category"] == "rag_queries_day"`. Today this returns 500: the endpoint's `try` has no `except HTTPException`, so the 402 that spec 2 raises inside it is caught by `except Exception`.
-- **`/rag/batch/resume` with generation is refused for the checkpoint owner.** Harness: `client_with_overrides` in `test_rag_batch_resume_api.py`, as `test_rag_batch_resume_respects_query_indices` sets up a checkpoint, with `enable_generation` true in the checkpoint's saved request. `assert_llm_quota_402`, and the pipeline recorder never ran.
+`tests/RAG_NEW/integration/test_rag_agentic_api.py`, before `test_rag_agentic_search_smoke_api`. The third test is a guard: no profile the request schema accepts (`fast`, `balanced`, `accuracy`) turns generation on, so a profile alone is not refused.
 
-In `tests/Evaluations/test_evaluations_stage1_route_and_error_regressions.py`, using its `_build_eval_only_app(monkeypatch)`:
+```python
+def _recording_pipeline(monkeypatch) -> list[dict]:
+    """Replace the unified pipeline with a recorder that returns an empty result."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
 
-- **`/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality` are refused before the per-user rate limiter reserves anything.** Replace `eval_unified.get_user_rate_limiter_for_user` with a function that raises `AssertionError("the limiter ran")`. Call `refuse_llm_work(monkeypatch)`. Post a valid body to each: `/geval` takes `{"source_text": "source text long enough", "summary": "summary text long enough", "metrics": ["coherence"], "api_name": "openai", "model": "gpt-eval-test"}`; take the `/rag` and `/response-quality` bodies from `test_sync_evaluation_capacity_exhaustion_is_detached_503` in the same source file. `assert_llm_quota_402` for each.
-- **`/evaluations/batch` of type `geval` is refused; of type `propositions` it is not.** Post `{"evaluation_type": "geval", "items": [<the /geval body>]}`: `assert_llm_quota_402`. Post `{"evaluation_type": "propositions", "items": [...]}` with a valid propositions item: the status is not 402.
+    calls: list[dict] = []
+
+    async def _fake_pipeline(**kwargs):
+        calls.append(kwargs)
+        return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
+
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    return calls
+
+
+def test_rag_search_with_generation_refuses_an_over_quota_user(client_with_agentic_overrides, monkeypatch):
+    """A search that generates an answer is refused with the 402 before any retrieval."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    calls = _recording_pipeline(monkeypatch)
+    refuse_llm_work(monkeypatch)
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json={"query": "q", "enable_generation": True})
+    assert_llm_quota_402(resp)
+    assert calls == []
+
+
+def test_rag_search_without_generation_is_not_refused_by_the_llm_quota(client_with_agentic_overrides, monkeypatch):
+    """A search with generation off does no LLM work at the boundary, so an over-quota user still searches."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    calls = _recording_pipeline(monkeypatch)
+    refuse_llm_work(monkeypatch)
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json={"query": "q", "enable_generation": False})
+    assert resp.status_code != 402, resp.text
+    assert len(calls) == 1
+
+
+def test_rag_search_profile_without_explicit_generation_is_not_refused_by_the_llm_quota(
+    client_with_agentic_overrides, monkeypatch
+):
+    """The resolved request decides: no shipped profile turns generation on, so a profile alone is not refused."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    calls = _recording_pipeline(monkeypatch)
+    refuse_llm_work(monkeypatch)
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json={"query": "q", "rag_profile": "accuracy"})
+    assert resp.status_code != 402, resp.text
+    assert len(calls) == 1 and calls[0].get("enable_generation") is False
+```
+
+`tests/RAG_NEW/integration/test_rag_stream_parity.py`, at the end:
+
+```python
+def test_rag_search_stream_refuses_an_over_quota_user_with_a_real_402(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    """The quota check runs before the streaming response starts, so the client gets a real 402."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_streaming_response(context: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return context
+
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", recording_generate_streaming_response)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_stream_overrides.post("/api/v1/rag/search/stream", json={"query": "q", "enable_generation": True})
+
+    assert_llm_quota_402(resp)
+    assert calls == []
+```
+
+`tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py`, after `test_rag_batch_creates_checkpoint`. The second test is spec 2's own refusal, which returns 500 on `dev`:
+
+```python
+def test_rag_batch_with_generation_refuses_an_over_quota_user(client_with_overrides, monkeypatch, tmp_path):
+    """A batch that generates answers is refused with the 402 before any query runs."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    _set_checkpoint_dir(monkeypatch, tmp_path)
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (1, [7], [11], True),  # noqa: ARG005
+    )
+    calls: list[str] = []
+
+    async def recording_pipeline(query: str, **kwargs):  # noqa: ARG001
+        calls.append(query)
+        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+
+    monkeypatch.setattr(up, "unified_rag_pipeline", recording_pipeline)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_overrides.post("/api/v1/rag/batch", json={"queries": ["alpha"], "enable_generation": True})
+
+    assert_llm_quota_402(resp)
+    assert calls == []
+
+
+def test_rag_batch_returns_the_rag_query_quota_402_not_a_500(client_with_overrides, monkeypatch, tmp_path):
+    """Spec 2's daily RAG query refusal inside the batch handler reaches the client as a 402."""
+    _set_checkpoint_dir(monkeypatch, tmp_path)
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (1, [7], [11], True),  # noqa: ARG005
+    )
+
+    async def _rag_queries_blocked(_uid, key):
+        return 0 if key == "limits.rag_queries_per_day" else None
+
+    async def _nothing_used_today(_entity, _category):
+        return 0.0
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", _rag_queries_blocked)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.ledger_used_today", _nothing_used_today)
+
+    resp = client_with_overrides.post("/api/v1/rag/batch", json={"queries": ["alpha"]})
+
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["detail"]["category"] == "rag_queries_day"
+    assert int(resp.headers["Retry-After"]) >= 1
+```
+
+`tests/RAG_NEW/integration/test_rag_batch_resume_api.py`, before `test_rag_batch_resume_records_errors`:
+
+```python
+def test_rag_batch_resume_with_generation_refuses_an_over_quota_owner(client_with_overrides, monkeypatch, tmp_path):
+    """A resumed batch whose saved request generates answers is refused with the 402 before any query runs."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+
+    queries = ["alpha", "beta"]
+    checkpoint = manager.create(
+        "rag_batch",
+        total_items=len(queries),
+        config={"queries": queries, "max_concurrent": 2, "enable_generation": True},
+    )
+
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    calls: list[str] = []
+
+    async def recording_pipeline(query: str, **kwargs):  # noqa: ARG001
+        calls.append(query)
+        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+
+    monkeypatch.setattr(up, "unified_rag_pipeline", recording_pipeline)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_overrides.post(f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}")
+
+    assert_llm_quota_402(resp)
+    assert calls == []
+```
+
+`tests/Evaluations/test_evaluations_stage1_route_and_error_regressions.py`, before `test_batch_client_teardown_poison_isolated_before_next_credential_resolution`:
+
+```python
+_LLM_EVAL_BODIES = {
+    "geval": {
+        "source_text": "source text long enough",
+        "summary": "summary text long enough",
+        "metrics": ["coherence"],
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+    "rag": {
+        "query": "What is context precision?",
+        "retrieved_contexts": ["Precision measures retrieved relevance."],
+        "generated_response": "It measures retrieved relevance.",
+        "metrics": ["context_precision"],
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+    "response-quality": {
+        "prompt": "What is RAG?",
+        "response": "RAG retrieves context.",
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+}
+
+
+@pytest.mark.parametrize("route", ["geval", "rag", "response-quality"])
+def test_sync_evaluation_llm_quota_refuses_before_the_rate_limiter(monkeypatch, route):
+    """An over-quota user gets the 402 before the per-user rate limiter reserves anything."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    app = _build_eval_only_app(monkeypatch)
+
+    def _limiter_must_not_run(_uid):
+        raise AssertionError("the limiter ran")
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_must_not_run)
+    refuse_llm_work(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/evaluations/{route}", json=_LLM_EVAL_BODIES[route])
+
+    assert_llm_quota_402(response)
+
+
+def test_batch_evaluation_llm_quota_refuses_llm_types_and_admits_propositions(monkeypatch):
+    """A geval batch is refused with the 402; a propositions batch makes no LLM call and is not."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    app = _build_eval_only_app(monkeypatch)
+
+    class _AllowLimiter:
+        async def check_rate_limit(self, *_args, **_kwargs):
+            return True, {}
+
+    class _PropositionsService:
+        async def evaluate_propositions(self, **_kwargs):
+            return {"evaluation_id": "eval_props_1", "results": {"score": 1.0}}
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr(
+        eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _PropositionsService()
+    )
+    refuse_llm_work(monkeypatch)
+
+    with TestClient(app) as client:
+        refused = client.post(
+            "/api/v1/evaluations/batch",
+            json={"evaluation_type": "geval", "parallel_workers": 1, "items": [_LLM_EVAL_BODIES["geval"]]},
+        )
+        admitted = client.post(
+            "/api/v1/evaluations/batch",
+            json={
+                "evaluation_type": "propositions",
+                "parallel_workers": 1,
+                "items": [{"extracted": ["Claim A"], "reference": ["Claim A"], "method": "jaccard", "threshold": 0.5}],
+            },
+        )
+
+    assert_llm_quota_402(refused)
+    assert admitted.status_code != 402, admitted.text
+```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 RUN_EVALUATIONS=1 $PY -m pytest -q -p no:cacheprovider -k "quota" tldw_Server_API/tests/RAG_NEW/integration/test_rag_agentic_api.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py tldw_Server_API/tests/Evaluations/test_evaluations_stage1_route_and_error_regressions.py`
 
 Name every new test with `quota` in it, so `-k quota` selects them. `RUN_EVALUATIONS=1` is needed: the Evaluations tests are skipped without it.
-Expected: the refusal tests fail with the endpoints' normal results where 402 is expected. The spec 2 batch test fails with 500. The generation-off and propositions tests pass already; they guard that nothing else is refused.
+Expected: `10 failed, 1 passed`. The refusal tests fail with the endpoints' normal results where 402 is expected (the stream answers 200 with an error frame; the evaluations answer 500 or 400). The spec 2 batch test fails with `assert 500 == 402`. The generation-off, profile and propositions tests are guards; the generation-off one passes already.
 
 - [ ] **Step 3: RAG**
 
@@ -1314,7 +1734,7 @@ In `rag_unified.py`, add `enforce_llm_quota` to the existing import from `tldw_S
 
 ```python
         # Usage quotas (LLM usage accounting spec §4a): a request that generates an answer is checked.
-        # The resolved payload is used because a RAG profile can turn generation on.
+        # The resolved payload is what the pipeline receives; the agentic branch reads the same value.
         if bool(standard_bundle.resolved_request.payload.get("enable_generation", request.enable_generation)):
             await enforce_llm_quota(getattr(current_user, "id", None))
 ```
@@ -1400,7 +1820,8 @@ git add tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/app/
   tldw_Server_API/tests/Evaluations/test_evaluations_stage1_route_and_error_regressions.py
 git commit -m "feat(usage): RAG with generation and the in-request evaluations refuse over-quota users with 402 (TASK-13437)
 
-The RAG batch endpoint now lets HTTPException through, so spec 2's daily RAG query refusal there is a 402, not a 500.
+The RAG batch endpoint now lets HTTPException through, so spec 2's daily RAG query refusal there is a 402, not a 500,
+and the billing limit checker's 429 in the same handler is a 429.
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
@@ -1489,9 +1910,56 @@ def test_ebook_processing_without_analysis_is_not_refused(
     assert response.status_code != 402, response.text
 ```
 
-`client_with_single_user` is in `tldw_Server_API/tests/conftest.py`. `quota_service_stub` is defined in `tests/Media/test_media_usage_events.py`, near line 107: copy it into this file as a fixture. If `test_media_usage_events.py` builds the `process_epub` stub differently (its arguments or return value), follow it.
+`client_with_single_user` is in `tldw_Server_API/tests/conftest.py`. Add this fixture, copied from `tests/Media/test_media_usage_events.py`, and the test for the other six handlers, to the same file:
 
-Then cover the other six handlers with one parametrized test in the same file. It posts to `/api/v1/media/process-audios`, `/process-videos`, `/process-documents`, `/process-pdfs`, `/process-emails` and `/api/v1/media/add` with `perform_analysis=true` and `api_name=openai`, and the smallest valid input for each: a file of the right type, or for audio and video a URL (the check runs before any download). `/media/add` also needs its `media_type` field. Each case calls `refuse_llm_work(monkeypatch)` and `assert_llm_quota_402(response)`. Take the field names and the form validation each endpoint needs from its form dependency in `API_Deps/media_processing_deps.py` or `API_Deps/media_add_deps.py`.
+```python
+class _StubQuotaService:
+    async def check_quota(self, user_id, size_bytes, raise_on_exceed=False):
+        """Always allow in tests."""
+        return True, {
+            "current_usage_mb": 0,
+            "new_size_mb": float(size_bytes) / (1024 * 1024),
+            "quota_mb": 999999,
+            "available_mb": 999999,
+        }
+
+
+@pytest.fixture()
+def quota_service_stub(monkeypatch):
+    """Patch the storage quota service so no DB is touched (as tests/Media/test_media_usage_events.py does)."""
+    import tldw_Server_API.app.services.storage_quota_service as quota_mod
+
+    monkeypatch.setattr(quota_mod, "get_storage_quota_service", lambda: _StubQuotaService())
+    yield
+
+
+_ANALYSIS = {"perform_analysis": "true", "api_name": "openai"}
+
+_OTHER_HANDLERS = [
+    pytest.param("/api/v1/media/process-audios", _ANALYSIS, [("files", ("a.mp3", b"fake", "audio/mpeg"))], id="audios"),
+    pytest.param("/api/v1/media/process-videos", _ANALYSIS, [("files", ("v.mp4", b"fake", "video/mp4"))], id="videos"),
+    pytest.param("/api/v1/media/process-documents", _ANALYSIS, [("files", ("d.txt", b"fake", "text/plain"))], id="documents"),
+    pytest.param("/api/v1/media/process-pdfs", _ANALYSIS, [("files", ("d.pdf", b"%PDF-1.4 fake", "application/pdf"))], id="pdfs"),
+    pytest.param("/api/v1/media/process-emails", _ANALYSIS, [("files", ("m.eml", b"fake", "message/rfc822"))], id="emails"),
+    pytest.param("/api/v1/media/add", {**_ANALYSIS, "media_type": "document"}, [("files", ("d.txt", b"fake", "text/plain"))], id="add"),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("path", "data", "files"), _OTHER_HANDLERS)
+def test_other_media_handlers_refuse_analysis_for_an_over_quota_user(
+    client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch, path: str, data: dict, files: list
+) -> None:
+    """Each remaining handler answers the 402 before touching its input."""
+    client, _usage_logger = client_with_single_user
+    refuse_llm_work(monkeypatch)
+    response = client.post(path, data=data, files=files)
+    assert_llm_quota_402(response)
+```
+
+With the checks in place no processing stub is needed for the six: the 402 comes first. Without them, the fake inputs are processed and the handlers answer 200 or 207, which is the failing run.
+
+
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
@@ -1500,7 +1968,7 @@ Expected: collection fails with `ImportError: cannot import name 'media_analysis
 
 - [ ] **Step 3: The condition**
 
-Append to `media_processing_deps.py`:
+`media_processing_deps.py` ends with an `__all__` list. Insert this directly before it, and add `"media_analysis_requested"` to the list:
 
 ```python
 
@@ -1517,7 +1985,7 @@ def media_analysis_requested(form_data: Any) -> bool:
 
 - [ ] **Step 4: The seven checks**
 
-Each handler imports `from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested` (most already import from that module; add the name to the existing import) and `from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota`. Insert the same three lines:
+Each handler imports `media_analysis_requested` from `tldw_Server_API.app.api.v1.API_Deps.media_processing_deps` (add the name to the existing import from that module where there is one) and `from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota`, placed directly after the `from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota` line. That is where ruff's isort puts it in all seven files; next to the other `API_Deps` imports it adds an `I001`. Insert the same three lines:
 
 ```python
     if media_analysis_requested(form_data):
@@ -1583,6 +2051,8 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 from types import SimpleNamespace
 
 import pytest
+
+from fastapi.encoders import jsonable_encoder
 
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import UserProfileQuotas
 from tldw_Server_API.app.core.Usage import quota_checks
@@ -1663,7 +2133,9 @@ async def test_the_summary_reports_usage_and_set_limits(monkeypatch: pytest.Monk
         "cost_month_usd_used": 4.5,
         "cost_month_usd_limit": None,
     }
-    dumped = UserProfileQuotas(storage_used_mb=0.0, llm=summary).model_dump(exclude_none=True)
+    # Both profile endpoints use response_model_exclude_none=True, which FastAPI applies with
+    # jsonable_encoder: it drops None inside nested dicts, where model_dump(exclude_none=True) does not.
+    dumped = jsonable_encoder(UserProfileQuotas(storage_used_mb=0.0, llm=summary), exclude_none=True)
     assert dumped["llm"] == {
         "tokens_month_used": 1234,
         "cost_day_usd_used": 0.1235,
@@ -1796,10 +2268,16 @@ The schema gained a field, so the checked-in fingerprint changes:
 
 ```bash
 $PY Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json
-$PY Helper_Scripts/export_openapi_schema.py --help
 ```
 
-The first command must report a mismatch now. Use the option `--help` lists for writing the fingerprint to regenerate `apps/packages/api-types/openapi.fingerprint.json`, then run the `--check` command again: it must print `OpenAPI fingerprint matches the checked-in snapshot`. `git diff --stat apps/packages/api-types` must show only that file.
+The first command must now print `[openapi-export] FAIL — OpenAPI contract drift detected.` Regenerate:
+
+```bash
+$PY Helper_Scripts/export_openapi_schema.py --fingerprint apps/packages/api-types/openapi.fingerprint.json
+$PY Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json
+```
+
+The second must print `OpenAPI fingerprint matches the checked-in snapshot`. `git diff --stat apps/packages/api-types` must show only `openapi.fingerprint.json`. Each command imports the whole app and takes several minutes.
 
 - [ ] **Step 7: Run the tests and confirm they pass**
 
@@ -1836,8 +2314,9 @@ Read `Docs/Operations/Usage_Quotas.md` first and match its style. Write plainly:
   - `limits.llm_cost_per_day_usd`: LLM spend per UTC day in US dollars; `llm_usage_log` costs summed per user over the day; HTTP 402 `{"error":"limit_exceeded","category":"llm_cost_day",...}`.
   - `limits.llm_cost_per_month_usd`: the same per calendar month; category `llm_cost_month`.
 - **The section on what is counted** covers all three keys now. Keep its existing bullets and add:
-  - **Where a refusal happens.** These entry points refuse with a 402 before they start any LLM work, streaming requests included: `/chat/completions`; character chat replies; RAG search, batch, batch resume and streaming, when the request generates an answer; document generation from a chat; the flashcards and quizzes study assistants; `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality`; `/evaluations/batch` of type `geval`, `rag` or `response_quality`; the `/media/process-*` endpoints and `/media/add`, when analysis is on.
-  - **Not checked yet:** background jobs, workflow runs, WebSocket sessions, MCP tools, and endpoints not listed above. Their usage is recorded and counts toward the limits, and a later change refuses them at the call.
+  - **Where a refusal happens.** These entry points refuse with a 402 before they start any LLM work, streaming requests included: `/chat/completions`; the Anthropic-compatible Messages API (`/messages` and `/v1/messages`); character chat replies; RAG search, batch, batch resume and streaming, when the request generates an answer; document generation from a chat; the flashcards and quizzes study assistants; `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality`; `/evaluations/batch` of type `geval`, `rag` or `response_quality`; the `/media/process-*` endpoints and `/media/add`, when analysis is on.
+  - **Not checked yet** (a later change refuses them at the call): background jobs (`/media/ingest-jobs`, evaluation recipe runs, audio jobs), workflow runs, WebSocket sessions (audio, realtime), MCP tools, and these HTTP endpoints: `/media/ingest-web-content` with analysis, `/media/{id}/insights`, the writing and manuscript analysis endpoints, prompt improvement and Prompt Studio, reading, study suggestions, paper search, chunking, sharing, and `/translate`. Their usage is recorded and counts toward the limits. MCP tools are not recorded (they carry no user).
+  - **Not recorded today:** Messages API calls to Anthropic or llama.cpp take a native path that never reaches a provider adapter, so they write no usage row. The boundary check still refuses them. TASK-13610 covers recording them.
   - **How the cost keys compare.** A cost key refuses once today's or this month's spend has reached the limit. The token key refuses when this request's estimated tokens would take the month past it; outside `/chat/completions` the estimate is one token.
   - **An admitted request runs to completion,** so a user can pass a limit by one request's worth of usage. A media batch or an evaluation batch can be large.
   - **Local providers cost nothing by default:** llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite and mlx. To give one a price, edit its `default` entry in `Config_Files/model_pricing.json`. A custom OpenAI-compatible endpoint is priced at the unknown-model rate ($0.01 per 1K prompt tokens, $0.03 per 1K completion tokens) unless you give it a price. A virtual-key USD budget no longer counts local calls either.
@@ -1849,7 +2328,7 @@ Read `Docs/Operations/Usage_Quotas.md` first and match its style. Write plainly:
 
 - `Env_Vars.md`, the keys list near line 322: replace "`limits.llm_tokens_per_month` (enforced on `/chat/completions`)" with the key alone, and add `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd` in the same list format. Then run `bash Helper_Scripts/refresh_docs_published.sh` and check `git status --short Docs/Published`: only `Docs/Published/Env_Vars.md` may change. If anything else changes, do not commit it and do not revert it with git; report the names.
 - `Rate_Limits_Troubleshooting.md`, the row for `llm_tokens_month`: it now covers all three categories (`llm_tokens_month`, `llm_cost_day`, `llm_cost_month`). The source column names the entry points from Step 1 (or points to `Usage_Quotas.md` for the list), and the fix column says to raise or remove the user's `limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd` or `limits.llm_cost_per_month_usd`.
-- The spec: replace the Status line with `- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a in progress.` In §6, in the bullet that begins "**`compute_costs` resolves the provider's canonical name first,**", change "`compute_costs` resolves" to "The catalog lookup resolves". The plan put the resolution in `get_rate_details`, which `compute_costs` and the other pricing helpers all call.
+- The spec: replace the Status line with `- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a in progress.` In the §4a table, add a row after `/chat/completions`: `| The Anthropic-compatible Messages API (`/messages`, `/v1/messages`) | Always. Its native path for Anthropic and llama.cpp never reaches a provider adapter, so only this check gates it. |`. Replace the table's following bullet "**The plan lists every other HTTP endpoint that reaches an LLM.** ..." with one that names the endpoints left to §4b: the same list as the operator page's "Not checked yet" bullet. In §6, in the bullet that begins "**`compute_costs` resolves the provider's canonical name first,**", change "`compute_costs` resolves" to "The catalog lookup resolves". The plan put the resolution in `get_rate_details`, which `compute_costs` and the other pricing helpers all call.
 
 - [ ] **Step 3: The backlog**
 
@@ -1857,12 +2336,13 @@ Put the command in a small `sh` script in the scratch directory (the command gua
 
 ```bash
 cd /Users/macbook-dev/Documents/GitHub/tldw_server/.claude/worktrees/core-review-fixes || exit 1
-PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd . task edit TASK-13437 --append-notes "PR 2a: one LLM quota decision (llm_quota_refusal) and one 402 error (LLMQuotaExceededError, an HTTPException); limits.llm_cost_per_day_usd and limits.llm_cost_per_month_usd; boundary checks at /chat/completions, character chat, RAG with generation, document generation, the study assistants, the in-request evaluations and media analysis; local providers priced at zero in the catalog; startup warnings for LLM_USAGE_ENABLED off and retention under 31 days; the profile's quotas.llm block. RAG batch now returns spec 2's 402 instead of a 500. Next: PR 2b, the check at the call."
-PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd . task normalize --check backlog/tasks/task-13437*.md
+PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd . task edit TASK-13437 --append-notes "PR 2a: one LLM quota decision (llm_quota_refusal) and one 402 error (LLMQuotaExceededError, an HTTPException); limits.llm_cost_per_day_usd and limits.llm_cost_per_month_usd; boundary checks at /chat/completions, character chat, RAG with generation, document generation, the study assistants, the in-request evaluations and media analysis; local providers priced at zero in the catalog; startup warnings for LLM_USAGE_ENABLED off and retention under 31 days; the profile's quotas.llm block; the Messages API is checked at the boundary. RAG batch now returns spec 2's 402 instead of a 500. Next: PR 2b, the check at the call."
+PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd . task create "Record LLM usage for the Messages API native path" --id TASK-13610 --labels quotas,backend --description "The Anthropic-compatible Messages API (api/v1/endpoints/messages.py) sends requests for the providers in MESSAGES_NATIVE_PROVIDERS (anthropic, llama.cpp) straight to the provider over HTTP (_native_post_json, _prepare_native_stream_iterator). Those calls never reach a ChatProvider adapter, so the provider base class (ADR-067) records nothing for them and a check at the call (LLM usage accounting PR 2b) cannot see them. PR 2a gates the endpoint at the request boundary. Parent: TASK-13437." --ac "A native Messages API call writes one llm_usage_log row for the user, streaming and not" --ac "The row's tokens come from the provider's usage block when it sends one"
+PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd . task normalize --check backlog/tasks/task-13437*.md backlog/tasks/task-13610*.md
 echo "normalize exit=$?"
 ```
 
-Expected: `normalize exit=0`, and `git status --short backlog` shows only the TASK-13437 file.
+Expected: `normalize exit=0`, and `git status --short backlog` shows the modified TASK-13437 file and the new TASK-13610 file, nothing else. If another session has taken TASK-13610 by then, use the next free id with a gap of 20 above the highest in use, here and on the operator page.
 
 - [ ] **Step 4: Run the docs tests**
 
@@ -1896,7 +2376,7 @@ Expected: the fingerprint matches (Task 8 regenerated it). If `dev` moved the fi
 
 - [ ] **Step 2: Run the sweep**
 
-Every test file that references a changed symbol, plus the suites around the changed code, with `-n 4`. The two Jobs files with random parametrized ids are not involved here.
+Every test file that references a changed symbol, plus the suites around the changed code, with `-n 4`. The repo's command guard refuses `$(...)`, so write the commands below into a small `sh` script in the scratch directory, with the file list read by the script, and run the script.
 
 ```bash
 git grep -l -e quota_checks -e usage_quota_deps -e LLMQuotaExceededError -e llm_call_context -e pricing_catalog -e compute_costs \
@@ -1917,4 +2397,4 @@ Bandit `-ll` on the changed app files: 0 issues. Ruff per-rule counts on the cha
 
 - [ ] **Step 4: Open the PR against `dev`**
 
-The body covers: what is refused and where; the error type and why it is an `HTTPException`; local-provider pricing and its effect on reports and virtual-key budgets; the RAG batch fix; what is not checked until PR 2b; the review focus items and their tests; the sweep results with each failure's evidence; and the `## Change summary` waiver section. Queue it alone. After the merge, delete the branch.
+The body covers: what is refused and where; the error type and why it is an `HTTPException`; local-provider pricing and its effect on reports and virtual-key budgets; that `default` is now a reserved key in the pricing catalog, and `huggingface` no longer lists it as a model; the RAG batch fix (spec 2's 402 and the billing 429); that a character chat request on the offline simulation path is refused too; that the Messages API's native path is gated but not recorded (TASK-13610); what is not checked until PR 2b; the review focus items and their tests; the sweep results with each failure's evidence; and the `## Change summary` waiver section. Queue it alone. After the merge, delete the branch.
