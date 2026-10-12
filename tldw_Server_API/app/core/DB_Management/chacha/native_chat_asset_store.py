@@ -37,6 +37,10 @@ class NativeReclaimCandidate:
     storage_key: str | None
 
 
+class NativeQuotaReleasePendingError(ValueError):
+    """Removed bytes retain their accounting fence until original authority settles."""
+
+
 class NativeChatAssetStore:
     """Lock the operation before accepting an attempt's candidate identity."""
 
@@ -204,6 +208,86 @@ class NativeChatAssetStore:
         )
         return dict(row)
 
+    @staticmethod
+    def _quota_identity(owner: Any, quota_owner: Any) -> str:
+        """Freeze authenticated account, native scope and applicable pool attribution."""
+        import json
+        from dataclasses import asdict
+
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaOwner
+        if (not isinstance(quota_owner, NativeQuotaOwner)
+                or str(quota_owner.user_id) != owner.client_id
+                or quota_owner.owner_key != owner.owner_key
+                or quota_owner.scope_type != owner.scope.kind
+                or quota_owner.workspace_id != owner.scope.workspace_id):
+            raise ValueError('quota_intent_mismatch')
+        return json.dumps(asdict(quota_owner), sort_keys=True, separators=(',', ':'))
+
+    def record_quota_reservation_intent(
+        self, owner: Any, kind: str, operation_id: str, request_digest: str,
+        candidate_id: str, generation: int, quota_owner: Any, *, conn: Any,
+    ) -> int:
+        """Commit original identity before any external quota allocation."""
+        identity = self._quota_identity(owner, quota_owner)
+        self._require_live_attempt(owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn)
+        _, candidate = self._locked_candidate_for_operation(owner, kind, operation_id, request_digest, candidate_id, conn=conn)
+        if candidate['attempt_generation'] != generation or candidate['state'] != 'reserved':
+            raise ValueError('stale_candidate')
+        if conn.execute("SELECT 1 FROM native_chat_quota_intents WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'release'", (owner.client_id, candidate_id)).fetchone():
+            raise ValueError('candidate_release_started')
+        stamp = self._db._get_current_utc_timestamp_iso()
+        conn.execute(
+            "INSERT INTO native_chat_quota_intents (client_id,candidate_id,intent_kind,owner_key,size_bytes,state,created_at,updated_at,quota_owner_json) "
+            "VALUES (?,?,'reserve',?,?,'pending',?,?,?) ON CONFLICT (client_id,candidate_id,intent_kind) DO NOTHING",
+            (owner.client_id, candidate_id, owner.owner_key, candidate['expected_size_bytes'], stamp, stamp, identity),
+        )
+        row = conn.execute("SELECT owner_key,size_bytes,quota_owner_json FROM native_chat_quota_intents WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'", (owner.client_id, candidate_id)).fetchone()
+        if (row is None or row['owner_key'] != owner.owner_key or row['size_bytes'] != candidate['expected_size_bytes']
+                or row['quota_owner_json'] != identity):
+            raise ValueError('quota_intent_mismatch')
+        self._require_live_attempt(owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn)
+        return candidate['expected_size_bytes']
+
+    def confirm_quota_reservation(
+        self, owner: Any, kind: str, operation_id: str, request_digest: str,
+        candidate_id: str, generation: int, quota_owner: Any, reservation: Any, *, conn: Any,
+    ) -> None:
+        """Recheck the original live writer after the external response before allowing bytes."""
+        size = self.record_quota_reservation_intent(owner, kind, operation_id, request_digest, candidate_id, generation, quota_owner, conn=conn)
+        if reservation is None or reservation.candidate_key != candidate_id or reservation.owner != quota_owner or reservation.size_bytes != size or reservation.state != 'active':
+            raise ValueError('quota_reservation_unconfirmed')
+        conn.execute("UPDATE native_chat_quota_intents SET state = 'confirmed', updated_at = ? WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'", (self._db._get_current_utc_timestamp_iso(), owner.client_id, candidate_id))
+
+    def read_quota_release_intent(
+        self, owner: Any, kind: str, operation_id: str, request_digest: str, candidate_id: str, *, conn: Any,
+    ) -> tuple[Any, int, int]:
+        """Read only the immutable release identity produced by guarded byte removal."""
+        import json
+
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaOwner
+        _, candidate = self._locked_candidate_for_operation(owner, kind, operation_id, request_digest, candidate_id, conn=conn)
+        if candidate['state'] not in {'reclaiming', 'discarded'}:
+            raise ValueError('candidate_not_reclaiming')
+        self._require_unclaimed(owner, candidate_id, conn=conn)
+        row = conn.execute("SELECT owner_key,size_bytes,quota_owner_json FROM native_chat_quota_intents WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'release'", (owner.client_id, candidate_id)).fetchone()
+        if row is None or row['owner_key'] != owner.owner_key or row['size_bytes'] != candidate['expected_size_bytes'] or row['quota_owner_json'] is None:
+            raise ValueError('quota_intent_mismatch')
+        quota_owner = NativeQuotaOwner(**json.loads(row['quota_owner_json']))
+        if self._quota_identity(owner, quota_owner) != row['quota_owner_json']:
+            raise ValueError('quota_intent_mismatch')
+        return quota_owner, row['size_bytes'], candidate['attempt_generation']
+
+    def confirm_quota_release(
+        self, owner: Any, kind: str, operation_id: str, request_digest: str, candidate_id: str,
+        reservation: Any, *, conn: Any,
+    ) -> int:
+        """Confirm original released authority, keeping unknown outcomes pending."""
+        quota_owner, size, generation = self.read_quota_release_intent(owner, kind, operation_id, request_digest, candidate_id, conn=conn)
+        if reservation is None or reservation.candidate_key != candidate_id or reservation.owner != quota_owner or reservation.size_bytes != size or reservation.state != 'released':
+            raise NativeQuotaReleasePendingError('quota_release_unconfirmed')
+        conn.execute("UPDATE native_chat_quota_intents SET state = 'confirmed', updated_at = ? WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'release'", (self._db._get_current_utc_timestamp_iso(), owner.client_id, candidate_id))
+        return generation
+
     def record_release_after_removal(
         self,
         owner: Any,
@@ -223,7 +307,7 @@ class NativeChatAssetStore:
             raise ValueError("stale_reclamation")
         self._require_unclaimed(owner, candidate_id, conn=conn)
         reserve = conn.execute(
-            "SELECT owner_key,size_bytes FROM native_chat_quota_intents "
+            "SELECT owner_key,size_bytes,quota_owner_json FROM native_chat_quota_intents "
             "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'",
             (owner.client_id, candidate_id),
         ).fetchone()
@@ -234,12 +318,12 @@ class NativeChatAssetStore:
         stamp = self._db._get_current_utc_timestamp_iso()
         conn.execute(
             "INSERT INTO native_chat_quota_intents "
-            "(client_id,candidate_id,intent_kind,owner_key,size_bytes,state,created_at,updated_at) "
-            "VALUES (?,?,'release',?,?,'pending',?,?) ON CONFLICT (client_id,candidate_id,intent_kind) DO NOTHING",
-            (owner.client_id, candidate_id, owner.owner_key, row["expected_size_bytes"], stamp, stamp),
+            "(client_id,candidate_id,intent_kind,owner_key,size_bytes,state,created_at,updated_at,quota_owner_json) "
+            "VALUES (?,?,'release',?,?,'pending',?,?,?) ON CONFLICT (client_id,candidate_id,intent_kind) DO NOTHING",
+            (owner.client_id, candidate_id, owner.owner_key, row["expected_size_bytes"], stamp, stamp, reserve['quota_owner_json']),
         )
         release = conn.execute(
-            "SELECT owner_key,size_bytes FROM native_chat_quota_intents "
+            "SELECT owner_key,size_bytes,quota_owner_json FROM native_chat_quota_intents "
             "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'release'",
             (owner.client_id, candidate_id),
         ).fetchone()
@@ -247,6 +331,7 @@ class NativeChatAssetStore:
             release is None
             or release["owner_key"] != owner.owner_key
             or release["size_bytes"] != row["expected_size_bytes"]
+            or release['quota_owner_json'] != reserve['quota_owner_json']
         ):
             raise ValueError("quota_intent_mismatch")
 
@@ -379,7 +464,7 @@ class NativeChatAssetStore:
                 (owner.client_id, candidate_id),
             ).fetchone()
             if released is None or released["state"] != "confirmed":
-                raise ValueError("quota_release_unconfirmed")
+                raise NativeQuotaReleasePendingError("quota_release_unconfirmed")
             if released["owner_key"] != owner.owner_key or released["size_bytes"] != candidate["expected_size_bytes"]:
                 raise ValueError("quota_intent_mismatch")
         updated = conn.execute(

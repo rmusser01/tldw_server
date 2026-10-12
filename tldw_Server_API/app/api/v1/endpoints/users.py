@@ -91,6 +91,7 @@ from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services.storage_quota_service import (
     StorageQuotaService,
+    get_storage_service,
     quota_view,
     with_resolved_storage_quota,
 )
@@ -562,6 +563,8 @@ async def get_current_user_profile(
         principal,
         allow_missing_single_user=True,
     )
+    storage_service = await get_storage_service()
+    storage_status = await storage_service.user_quota_status(int(user_context['id']))
     return DeprecatedUserResponse(
         warning="deprecated_endpoint",
         successor=successor,
@@ -574,8 +577,8 @@ async def get_current_user_profile(
         is_verified=user_context.get("is_verified", False),
         created_at=user_context.get("created_at", datetime.utcnow()),
         last_login=user_context.get("last_login"),
-        storage_quota_mb=user_context.get("storage_quota_mb"),
-        storage_used_mb=user_context.get("storage_used_mb", 0.0),
+        storage_quota_mb=storage_status["quota_mb"],
+        storage_used_mb=storage_status["used_mb"],
     )
 
 
@@ -638,6 +641,8 @@ async def update_user_profile(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates provided")
 
         # Return updated user info
+        storage_service = await get_storage_service()
+        storage_status = await storage_service.user_quota_status(user_id)
         return DeprecatedUserResponse(
             warning="deprecated_endpoint",
             successor=successor,
@@ -650,8 +655,8 @@ async def update_user_profile(
             is_verified=user_context.get("is_verified", False),
             created_at=user_context.get("created_at", datetime.utcnow()),
             last_login=user_context.get("last_login"),
-            storage_quota_mb=user_context.get("storage_quota_mb"),
-            storage_used_mb=user_context.get("storage_used_mb", 0.0),
+            storage_quota_mb=storage_status["quota_mb"],
+            storage_used_mb=storage_status["used_mb"],
         )
 
     except HTTPException:
@@ -1048,8 +1053,9 @@ async def get_storage_quota(
                 principal,
                 allow_missing=is_single_user_principal(principal),
             )
-        quota = user_context.get("storage_quota_mb")
-        used = float(user_context.get("storage_used_mb", 0.0))
+        fallback = await storage_service.user_quota_status(int(user_context['id']))
+        quota = fallback['quota_mb']
+        used = fallback['used_mb']
         view = quota_view(used, quota)
         # Return from database values if calculation fails
         return StorageQuotaResponse(

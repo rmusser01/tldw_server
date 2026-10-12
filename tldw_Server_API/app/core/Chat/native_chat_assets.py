@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeQuotaReleasePendingError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Sync.v2.blob_store import (
     LocalSyncBlobStore,
@@ -30,12 +32,17 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import (
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+        NativeQuotaOwner,
+        NativeQuotaReservation,
+    )
+    from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 
 class NativeChatAssetIO:
     """Use only server-derived user storage and original durable candidate descriptors.
 
-    This private foundation does not confirm quota reservations or mark MIME-ready
+    This private foundation reconciles quota reservations but does not mark MIME-ready
     candidates. Public native capabilities stay disabled until those callers qualify.
     """
 
@@ -47,6 +54,53 @@ class NativeChatAssetIO:
         self._db = db
         self._owner_user_id = db.owner_user_id
         self._user_root = DatabasePaths.resolve_user_base_directory(user_id)
+
+    async def reserve_quota(
+        self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, request_digest: str,
+        generation: int, candidate_id: str, *, quota_owner: NativeQuotaOwner, quota_service: StorageQuotaService,
+    ) -> NativeQuotaReservation:
+        """Reconcile original authority outside chat transactions, then confirm the live writer."""
+        self._require_outermost(owner)
+        self._db.native_assets._quota_identity(owner, quota_owner)
+        reservation = await quota_service.resolve_native_reservation(quota_owner, candidate_id)
+        self._require_outermost(owner)
+        with self._db.transaction() as conn:
+            size = self._db.native_assets.record_quota_reservation_intent(
+                owner, kind, operation_id, request_digest, candidate_id, generation, quota_owner, conn=conn,
+            )
+        if reservation is None:
+            reservation = await quota_service.reserve_native_bytes(quota_owner, candidate_id, size)
+        self._require_outermost(owner)
+        with self._db.transaction() as conn:
+            self._db.native_assets.confirm_quota_reservation(
+                owner, kind, operation_id, request_digest, candidate_id, generation, quota_owner, reservation, conn=conn,
+            )
+        return reservation
+
+    async def reclaim_quota(
+        self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, request_digest: str,
+        candidate_id: str, *, quota_service: StorageQuotaService,
+    ) -> bool:
+        """Drain/remove bytes first; settle only the persisted original release intent."""
+        self._require_outermost(owner)
+        try:
+            return await asyncio.to_thread(self.reclaim, owner, kind, operation_id, request_digest, candidate_id)
+        except NativeQuotaReleasePendingError:
+            pass
+        self._require_outermost(owner)
+        with self._db.transaction() as conn:
+            quota_owner, _size, _generation = self._db.native_assets.read_quota_release_intent(
+                owner, kind, operation_id, request_digest, candidate_id, conn=conn,
+            )
+        released = await quota_service.release_native_bytes(quota_owner, candidate_id)
+        self._require_outermost(owner)
+        with self._db.transaction() as conn:
+            generation = self._db.native_assets.confirm_quota_release(
+                owner, kind, operation_id, request_digest, candidate_id, released, conn=conn,
+            )
+            return self._db.native_assets.finish_reclamation(
+                owner, kind, operation_id, request_digest, candidate_id, generation, conn=conn,
+            )
 
     def _require_outermost(self, owner: AuthorizedNativeOwner) -> None:
         if (

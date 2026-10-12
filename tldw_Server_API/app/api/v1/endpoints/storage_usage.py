@@ -81,6 +81,9 @@ async def get_storage_usage(
         usage=usage,
         quota_mb=quota_mb,
         quota_used_mb=quota_used_mb,
+        legacy_quota_used_mb=usage_data.get('legacy_quota_used_mb', quota_used_mb),
+        native_bytes=usage_data.get('native_bytes', 0),
+        native_mb=usage_data.get('native_mb', 0.0),
         available_mb=available_mb,
         usage_percentage=usage_pct,
         at_soft_limit=at_soft_limit,
@@ -120,6 +123,10 @@ async def get_usage_breakdown(
 
     return UsageBreakdownResponse(
         user_id=user.id,
+        quota_used_mb=quota_used_mb,
+        legacy_quota_used_mb=usage_data.get('legacy_quota_used_mb', quota_used_mb),
+        native_bytes=usage_data.get('native_bytes', 0),
+        native_mb=usage_data.get('native_mb', 0.0),
         by_category=by_category,
         by_folder=[
             FolderInfo(

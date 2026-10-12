@@ -56,6 +56,8 @@ async def set_user_quota(
         status_data = {
             "quota_mb": result.get("storage_quota_mb"),
             "used_mb": result.get("storage_used_mb", 0.0),
+            "legacy_used_mb": result["legacy_storage_used_mb"],
+            "native_used_mb": result["native_storage_used_mb"],
             "remaining_mb": result.get("available_mb"),
             "usage_pct": pct if pct is not None else 0.0,
             "at_soft_limit": pct is not None and pct >= request.soft_limit_pct,

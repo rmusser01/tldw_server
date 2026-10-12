@@ -99,4 +99,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-068](068-native-completion-capture-capability.md) | Proposed | Discover selected native completion persistence ownership through an opt-in on the original scoped H1 capture, retaining primary admission gates and legacy response compatibility. |
 | [ADR-069](069-frontend-api-contract-package.md) | Proposed | One neutral workspace package (`@tldw/api-types`) owns the frontend API contract artifacts (generation script, committed fingerprint and path union, gitignored rich schema); `ClientPath` is derived from the generated paths, and no second contract source may be introduced. |
 
+| [ADR-070](070-native-chat-retained-byte-quota-authority.md) | Proposed | Reserve native retained bytes in existing AuthNZ authority; keep legacy counters separate and report fresh aggregate usage once. |
+
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

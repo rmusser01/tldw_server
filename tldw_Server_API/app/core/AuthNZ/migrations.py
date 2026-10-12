@@ -6514,6 +6514,7 @@ def get_authnz_migrations() -> list[Migration]:
             "Copy users.storage_quota_mb into limits.storage_quota_mb overrides",
             migration_100_copy_storage_quotas_to_user_overrides,
         ),
+        Migration(101, "Add native retained chat quota reservations", migration_101_native_chat_quota_reservations),
     ]
 
 
@@ -6757,3 +6758,10 @@ def ensure_authnz_tables(db_path: Path) -> None:
 #
 # End of migrations.py
 #######################################################################################################################
+
+
+def migration_101_native_chat_quota_reservations(conn: sqlite3.Connection) -> None:
+    """Retain same-key native accounting separately from legacy storage counters."""
+    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import native_quota_schema_statements
+    for statement in native_quota_schema_statements(postgres=False):
+        conn.execute(statement)

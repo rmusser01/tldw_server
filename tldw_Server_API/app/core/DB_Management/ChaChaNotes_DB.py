@@ -797,8 +797,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 78  # Knowledge provenance and durable receipts after upstream Chat migrations
-    _POSTGRES_SCHEMA_VERSION = 82
+    _CURRENT_SCHEMA_VERSION = 79  # Frozen native quota authority descriptors after Knowledge receipts
+    _POSTGRES_SCHEMA_VERSION = 83
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -8815,6 +8815,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (75, "_migrate_from_v75_to_v76"),
             (76, "_migrate_from_v76_to_v77"),
             (77, "_migrate_from_v77_to_v78"),
+            (78, "_migrate_from_v78_to_v79"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17997,6 +17998,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v78_to_v79(self, conn: sqlite3.Connection) -> None:
+        """Freeze quota identity before external authority work in the native store."""
+        conn.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT')
+        conn.execute('UPDATE db_schema_version SET version = 79 WHERE schema_name = ? AND version = 78', (self._SCHEMA_NAME,))
+        if self._get_db_version(conn) != 79:
+            raise SchemaError('Native quota descriptor migration failed version verification.')
+
+    def _migrate_from_v82_to_v83_postgres(self, conn: Any) -> None:
+        """Retain the existing forced-owner RLS while adding frozen quota identity."""
+        self.backend.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT', connection=conn)
+        self.backend.execute('UPDATE db_schema_version SET version = 83 WHERE schema_name = %s AND version = 82', (self._SCHEMA_NAME,), connection=conn)
+        if self._get_schema_version_postgres(conn) != 83:
+            raise SchemaError('Native quota descriptor migration failed version verification.')
+
     def _migrate_from_v77_to_v78(self, conn: sqlite3.Connection) -> None:
         """Install owner-scoped local provenance receipts in the Notes transaction."""
         from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
@@ -21356,6 +21371,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 78 and current_db_version == 77:
                         self._migrate_from_v77_to_v78(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 79 and current_db_version == 78:
+                        self._migrate_from_v78_to_v79(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21838,6 +21856,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 78 and current_db_version == 77:
                     self._migrate_from_v77_to_v78(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 79 and current_db_version == 78:
+                    self._migrate_from_v78_to_v79(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25736,6 +25757,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 82 and current_version < 82:
                     self._migrate_from_v81_to_v82_postgres(conn)
                     current_version = 82
+                if target_version >= 83 and current_version < 83:
+                    self._migrate_from_v82_to_v83_postgres(conn)
+                    current_version = 83
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26201,6 +26225,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v81_to_v82_postgres(conn)
                 self._runtime_schema_version = 82
                 current_version = 82
+            if target_version >= 83 and current_version < 83:
+                self._migrate_from_v82_to_v83_postgres(conn)
+                self._runtime_schema_version = 83
+                current_version = 83
 
             if current_version < target_version:
                 logger.warning(

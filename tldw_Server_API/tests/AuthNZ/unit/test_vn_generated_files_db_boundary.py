@@ -77,14 +77,16 @@ async def test_vn_locks_and_replay_queries_are_db_owned_on_one_transaction() -> 
     assert pool.transactions == 1
     assert replay == {**by_ref, "_idempotent_replay": True}
     assert by_path == by_ref == {"id": 7, "user_id": 5, "tags": ["vn"], "is_deleted": False}
-    assert [query for query, _params in conn.calls[:4]] == [
+    assert [query for query, _params in conn.calls[:6]] == [
         "SELECT pg_advisory_xact_lock($1)",
         "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+        "SELECT id FROM organizations WHERE id = $1 FOR UPDATE",
         "SELECT id FROM storage_quotas WHERE org_id = $1 FOR UPDATE",
+        "SELECT id FROM teams WHERE id = $1 FOR UPDATE",
         "SELECT id FROM storage_quotas WHERE team_id = $1 FOR UPDATE",
     ]
-    assert [params for _query, params in conn.calls[1:4]] == [(5,), (51,), (52,)]
-    assert conn.calls[0] == conn.calls[4]
+    assert [params for _query, params in conn.calls[1:6]] == [(5,), (51,), (51,), (52,), (52,)]
+    assert conn.calls[0] == conn.calls[6]
     assert conn.calls[-2][1] == (5, "vn_assets", "vn_asset_item:42")
     assert conn.calls[-1][1] == (5, "vn_assets/live.png")
 

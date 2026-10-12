@@ -458,8 +458,16 @@ class UserProfileService:
             quotas["storage_quota_mb"] = live_quota
             if live_used is not None:
                 quotas["storage_used_mb"] = float(live_used)
+            quotas['legacy_storage_used_mb'] = storage_info.get('legacy_mb')
+            quotas['native_storage_used_mb'] = storage_info.get('native_mb')
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Live storage quotas unavailable for user {}: {}", user_id, exc)
+            # A scan failure may fall back to the stored legacy counter, never to an empty native ledger.
+            storage_service = await get_storage_service()
+            native = await storage_service.native_usage(user_id)
+            quotas['storage_used_mb'] = float(user.get('legacy_storage_used_mb', user.get('storage_used_mb', 0.0)) or 0.0) + native['bytes'] / 1048576
+            quotas['legacy_storage_used_mb'] = float(user.get('legacy_storage_used_mb', user.get('storage_used_mb', 0.0)) or 0.0)
+            quotas['native_storage_used_mb'] = native['bytes'] / 1048576
 
         try:
             from tldw_Server_API.app.core.Usage.audio_quota import (

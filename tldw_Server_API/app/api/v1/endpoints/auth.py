@@ -3977,6 +3977,8 @@ async def get_current_user_info(
             detail="Invalid credentials",
         )
 
+    from tldw_Server_API.app.services.storage_quota_service import get_storage_service
+    storage_status = await (await get_storage_service()).user_quota_status(user_id)
     return DeprecatedUserResponse(
         warning="deprecated_endpoint",
         successor=successor,
@@ -3990,7 +3992,7 @@ async def get_current_user_info(
         created_at=_current_user_value(current_user, "created_at", datetime.utcnow()),
         last_login=_current_user_value(current_user, "last_login"),
         storage_quota_mb=await resolved_storage_quota_mb(user_id),
-        storage_used_mb=_current_user_value(current_user, "storage_used_mb", 0.0),
+        storage_used_mb=storage_status["used_mb"],
     )
 
 
