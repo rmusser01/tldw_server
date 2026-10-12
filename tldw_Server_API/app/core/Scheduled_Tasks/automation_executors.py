@@ -147,13 +147,10 @@ def _definition_system_prompt(definition: DefinitionRow) -> str:
     return override or _GENERATION_ONLY_SYSTEM_PROMPT
 
 
-async def _execute_generation_only(
-    definition: DefinitionRow, payload: dict[str, Any]
-) -> str:
-    """Run one generation-only completion for a scheduled definition."""
+async def _run_generation(definition: DefinitionRow, user_prompt: str) -> str:
+    """One generation-only completion (shared by both executor families)."""
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
-    user_prompt = _definition_user_prompt(definition)
     target = resolve_execution_target(definition)
     call_kwargs: dict[str, Any] = {
         "messages": [{"role": "user", "content": user_prompt}],
@@ -170,6 +167,14 @@ async def _execute_generation_only(
     if not text:
         raise RuntimeError("automation executor received an empty completion")
     return text
+
+
+async def _execute_generation_only(
+    definition: DefinitionRow, payload: dict[str, Any]
+) -> str:
+    """Run one generation-only completion for a scheduled definition."""
+    user_prompt = _definition_user_prompt(definition)
+    return await _run_generation(definition, user_prompt)
 
 
 async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]) -> str:
@@ -204,24 +209,7 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
             f"agent_task message_ref {message_ref!r} is unresolvable "
             "(purged TTL, store unavailable, or wrong owner)"
         )
-    from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
-
-    target = resolve_execution_target(definition)
-    call_kwargs: dict[str, Any] = {
-        "messages": [{"role": "user", "content": raw_message}],
-        "system_message": _definition_system_prompt(definition),
-        "max_tokens": target["max_tokens"],
-    }
-    if target["provider"]:
-        call_kwargs["api_provider"] = target["provider"]
-    if target["model"]:
-        call_kwargs["model"] = target["model"]
-
-    response = await perform_chat_api_call_async(**call_kwargs)
-    text = (extract_openai_content(response) or "").strip()
-    if not text:
-        raise RuntimeError("automation executor received an empty completion")
-    return text
+    return await _run_generation(definition, raw_message)
 
 
 def register_automation_executors() -> None:
