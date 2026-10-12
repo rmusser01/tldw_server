@@ -27,7 +27,7 @@
 - **Backlog:** `tools/backlog-py` only, `--append-notes`, explicit ids, `git add -A backlog/tasks`.
 - **Commits** end with exactly `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. Never `git stash`. Never `--no-verify`.
 - **Python:** `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python` (written `$PY` below). Tests run with `TLDW_TEST_NO_DOCKER=1`; the Evaluations tests also need `RUN_EVALUATIONS=1`.
-- **Known failures on `dev` in this environment:** `tests/Services/test_router_groups_contract.py` (10 tests), `tests/Audio/test_nemo_streaming_error_sentinel.py` (no `pyaudio`). **Load flakes under `-n`:** `tests/Admin/test_admin_llm_provider_test_runtime.py`, `tests/LLM_Calls/test_mlx_provider.py`, `tests/Web_Scraping/test_phase4_safe_regex.py`, `tests/Workflows/test_workflows_extras.py::test_rag_search_workflow`. Re-run one alone, and at `origin/dev`, before reporting it.
+- **Known failures on `dev` in this environment:** `tests/Services/test_router_groups_contract.py` (10 tests), `tests/Audio/test_nemo_streaming_error_sentinel.py` (no `pyaudio`), `tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py::test_initialize_psycopg_connect_fallback_log_omits_raw_exception_and_uses_psycopg2`, and one flashrank test in `tests/RAG_NEW/unit/test_rag_profiles.py` (`TestSlidesSourceLocalRerankers`). **Load flakes under `-n`:** `tests/Admin/test_admin_llm_provider_test_runtime.py`, `tests/LLM_Calls/test_mlx_provider.py`, `tests/Web_Scraping/test_phase4_safe_regex.py`, `tests/Workflows/test_workflows_extras.py::test_rag_search_workflow`. Re-run one alone, and at `origin/dev`, before reporting it.
 
 ## Review Focus
 
@@ -1136,6 +1136,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/flashcards.py` (the route decorator near line 2461)
 - Modify: `tldw_Server_API/app/api/v1/endpoints/quizzes.py` (the route decorator near lines 780-783)
 - Modify: `tldw_Server_API/app/api/v1/endpoints/messages.py` (the decorators of `create_messages` and `create_messages_public`, near lines 2217 and 2246)
+- Modify: `tldw_Server_API/tests/Flashcards/test_study_assistant_adapter_contract.py` (the `study_route` fixture, near line 223)
 - Test: one new test in each of `tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py`, `tests/Chat/integration/test_document_generation_endpoints.py`, `tests/Flashcards/test_flashcards_endpoint_integration.py`, `tests/Quizzes/test_quizzes_endpoint_integration.py`, `tests/Chat/integration/test_messages_endpoint.py`
 
 **Interfaces:**
@@ -1416,6 +1417,15 @@ Both routes take `current_user: User = Depends(get_request_user)`, so the depend
 
 Neither study-assistant route takes a user parameter. Both authenticate through `get_chacha_db_for_user`, which depends on `get_request_user`, so the dependency adds no second authentication.
 
+One existing test file needs a change because of this. `tests/Flashcards/test_study_assistant_adapter_contract.py` builds its own app and replaces `get_chacha_db_for_user`, so `get_request_user` never ran there; with `require_llm_quota` it now runs for real and 26 tests get 401. In its `study_route` fixture, directly after `    app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db`, add:
+
+```python
+    # The study-assistant routes depend on require_llm_quota, which resolves the user itself.
+    app.dependency_overrides[flashcards.get_request_user] = lambda: SimpleNamespace(id=1)
+```
+
+With it the file passes (39 passed in the dry run).
+
 - [ ] **Step 5: Run the tests and confirm they pass**
 
 Run the Step 3 command. Expected: the new tests pass. Then run the four files whole and confirm no existing test changed result:
@@ -1436,6 +1446,7 @@ git add tldw_Server_API/tests/helpers/llm_quota.py \
   tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py tldw_Server_API/app/api/v1/endpoints/chat_documents.py \
   tldw_Server_API/app/api/v1/endpoints/flashcards.py tldw_Server_API/app/api/v1/endpoints/quizzes.py \
   tldw_Server_API/app/api/v1/endpoints/messages.py tldw_Server_API/tests/Chat/integration/test_messages_endpoint.py \
+  tldw_Server_API/tests/Flashcards/test_study_assistant_adapter_contract.py \
   tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py \
   tldw_Server_API/tests/Chat/integration/test_document_generation_endpoints.py \
   tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py \
@@ -1767,22 +1778,25 @@ and in the same function's handlers, directly before the line `    except Except
 
 Confirm with `git grep -c` that each anchor line occurs once in the file; if the `except Exception` line occurs more than once, edit only the one in `unified_batch_endpoint`, whose next line logs `Batch search error`.
 
-`resume_batch_endpoint`. Directly before these two lines (together they occur once):
+`resume_batch_endpoint`. Directly after these lines (together they occur once):
 
 ```python
-        batch_bundle = _build_batch_request_bundle(
-            request=resume_request,
+        resume_config = dict(checkpoint.config)
+        if owner_user_id is not None:
+            resume_config["user_id"] = str(owner_user_id)
+            resume_config["feedback_user_id"] = str(owner_user_id)
 ```
 
 insert:
 
 ```python
-        if resume_request.enable_generation:
-            # Usage quotas (LLM usage accounting spec §4a): the work runs for the checkpoint's owner.
+        if bool(resume_config.get("enable_generation")):
+            # Usage quotas (LLM usage accounting spec §4a): the saved request generates answers,
+            # and the work runs for the checkpoint's owner.
             await enforce_llm_quota(getattr(execution_user, "id", None))
 ```
 
-`execution_user` is the checkpoint owner when one is recorded, and otherwise the caller.
+It reads the saved config, not the rebuilt request: `tests/RAG_NEW/unit/test_rag_provider_credentials.py` replaces `_build_resume_batch_request` with a stub that returns `object()`, so reading `resume_request.enable_generation` would raise there. The rebuilt request takes the same value from this config, with the same default of off. The check comes after the early returns for a finished checkpoint and after `execution_user` is set: the checkpoint owner when one is recorded, and otherwise the caller.
 
 - [ ] **Step 4: Evaluations**
 
@@ -1809,7 +1823,7 @@ The four `try` blocks let `HTTPException` through: three have `except HTTPExcept
 
 - [ ] **Step 5: Run the tests and confirm they pass**
 
-Run the Step 2 command: all pass. Run the five files whole: no existing test changes result. Then the suites around the changed code, with `-n 4`: `tldw_Server_API/tests/RAG_NEW`, `tldw_Server_API/tests/Evaluations` (with `RUN_EVALUATIONS=1`, which the Evaluations suite needs). No new failures.
+Run the Step 2 command: all pass. Run the five files whole, and `tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`: no existing test changes result. Then the suites around the changed code, with `-n 4`: `tldw_Server_API/tests/RAG_NEW`, `tldw_Server_API/tests/Evaluations` (with `RUN_EVALUATIONS=1`, which the Evaluations suite needs). No new failures.
 
 - [ ] **Step 6: Commit**
 
