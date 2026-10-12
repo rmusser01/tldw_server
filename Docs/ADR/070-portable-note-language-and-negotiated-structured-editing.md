@@ -1,10 +1,10 @@
-# ADR-065: Portable note language and negotiated structured editing
+# ADR-070: Portable note language and negotiated structured editing
 
 **Status:** Accepted
 **Date:** 2026-10-06
 **Backfilled from:** not backfilled
 **Decision owner:** Structured document editing requester, approved design 2026-09-27
-**Related task:** TASK-13513
+**Related task:** TASK-13588
 **Related spec/plan:** Chatbook `Docs/superpowers/specs/2026-09-27-structured-document-editing-design.md`, `Docs/superpowers/plans/2026-09-27-structured-document-foundations.md`, and ADR-194
 **Extends:** ADR-031; its accepted version-1 payload remains unchanged.
 
@@ -87,7 +87,7 @@ through; only that absent-row path briefly serializes other Notes writes. SQLite
 already supplies its database write fence. The expected product version is a
 process-local admission condition and never changes v1 payloads or hashes.
 
-## Complete publication qualification (F3, TASK-13514)
+## Complete publication qualification (F3, TASK-13589)
 
 The allocated clear `notes.note` adapter/schema pair is `(2, 2)`. Its complete
 snapshot contains all four v1 fields and explicit `content_language`, either null
@@ -218,7 +218,7 @@ New Chatbook Notes archives use verified 4.0 and identity-based JSON carriers,
 including null-language Notes and Canvas when present; readers 1.0–3.0 remain
 available. No new transport, store, capability provider or import service.
 
-### Browser engine qualification (E3, TASK-13518, 2026-10-07)
+### Browser engine qualification (E3, TASK-13593, 2026-10-07)
 
 Accept exact runtime pins `jsonc-parser` 3.3.1 (MIT) and `yaml` 2.8.1 (ISC)
 for the pure shared document engine. Both distributions have no runtime
@@ -260,7 +260,7 @@ This narrows browser admission beyond the unchanged shared v1 fixture profile;
 source/save authority is unchanged. The late self-review correction was made
 after isolated package pinning but before final acceptance or a source commit.
 
-### Bounded worker ownership (E4 / TASK-13519, Ruling39)
+### Bounded worker ownership (E4 / TASK-13594, Ruling39)
 
 Browser checks and formatting use the same app-owned local worker lane with an
 active-editor lease, one executing snapshot and only its latest pending successor.
@@ -321,3 +321,7 @@ pool or alternate termination service is introduced. Python still reaps and clos
 its child before replacement. This interpretation corrects an immediate-physical-
 cleanup reading of the original cross-platform plan; I3/I5 retain host/platform
 qualification duties.
+
+## Renumbering provenance
+
+This accepted decision was first recorded as ADR-065 in the reviewed structured-document branch and is published as ADR-070 to keep the programme ADR block distinct from current dev allocations. Its decision, original approval and implementation evidence are unchanged; original reviewed commits retain the historical identifier.

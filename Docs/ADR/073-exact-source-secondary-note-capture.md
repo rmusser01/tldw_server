@@ -1,13 +1,13 @@
-# ADR-068: Exact source for secondary Notes capture
+# ADR-073: Exact source for secondary Notes capture
 
 **Status:** Accepted
 **Date:** 2026-10-11
-**Decision owner:** TASK-13520 controller, Ruling50
-**Related task:** TASK-13520
+**Decision owner:** TASK-13595 controller, Ruling50
+**Related task:** TASK-13595
 **Related spec:** Chatbook Docs/superpowers/specs/2026-09-27-structured-document-editing-design.md
 **Related plan:** Chatbook Docs/superpowers/plans/2026-09-27-structured-document-editing.md
 **Backfilled from:** N/A — controller decision recorded before implementation
-**Extends:** [ADR-065](065-portable-note-language-and-negotiated-structured-editing.md)
+**Extends:** [ADR-070](070-portable-note-language-and-negotiated-structured-editing.md)
 
 ## Decision
 
@@ -31,3 +31,7 @@ An authenticated ordinary API POST201/GET200 against task-owned SQLite preserved
 ## Consequences and qualification
 
 New captures lose persisted inline page attribution deliberately and visibly. Exact selected text and existing title/tag/error/authority behavior remain. Actual mounted route controls must verify raw JSON, YAML, JSONL, Markdown and text; the real create/read/export path must preserve the submitted source. The modal keeps canonical source when native textarea representation is lossy. Other capture, transfer, narration and existing Notes remain outside this correction.
+
+## Renumbering provenance
+
+This accepted decision was first recorded as ADR-068 in the reviewed structured-document branch and is published as ADR-073 to keep the programme ADR block distinct from current dev allocations. Its decision, original approval and implementation evidence are unchanged; original reviewed commits retain the historical identifier.

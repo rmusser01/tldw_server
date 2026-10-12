@@ -1,7 +1,7 @@
-# Browser document-engine qualification — E3 / TASK-13518
+# Browser document-engine qualification — E3 / TASK-13593
 
 Date: 2026-10-07. Immutable task base: `bf0965412cb65b6fbfee3b31e5e211dbd2872841`.
-Governing decision: [ADR-065](../../ADR/065-portable-note-language-and-negotiated-structured-editing.md).
+Governing decision: [ADR-070](../../ADR/070-portable-note-language-and-negotiated-structured-editing.md).
 Status: qualified for pure-engine adoption; worker/editor lifecycle remains E4/I3/I5.
 
 ## Candidate acceptance before package adoption
@@ -225,7 +225,7 @@ Only the two package declarations and their two lock entries were added; their
 installed license hashes equal the isolated candidate hashes above. Full exact
 commands, complete captured outputs and process exits are in Chatbook's plan
 workspace `task-9-report.md`; raw logs/probe scripts/graphs/artifacts are in
-`/private/tmp/tldw-task9-evidence`. Task 13518 remains In Progress for independent
+`/private/tmp/tldw-task9-evidence`. Task 13593 remains In Progress for independent
 controller review.
 
 Comparison record: reviewed Python source `ba744f9059d30e26b1a025561f9dead3696a030c`,
@@ -318,4 +318,4 @@ Full commands, outputs, exit JSON and source/artifact hashes live under
 `/private/tmp/tldw-task9-evidence/fix1`; the bounded task report has the evidence
 index. Shared fixture SHA remains unchanged. Pure-engine resource/lifecycle limits
 and deferred inherited tooling warning M1 remain as previously disclosed.
-ADR065 already governs this correction; no dependency or ownership boundary changed.
+ADR070 already governs this correction; no dependency or ownership boundary changed.

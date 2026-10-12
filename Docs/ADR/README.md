@@ -98,13 +98,13 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-066](066-explicit-web-capture-and-refresh-snapshots.md) | Accepted | Require explicit accepted public-web capture and fresh refresh snapshots through existing WebClipper and canonical Media versions, retaining prior evidence. |
 | [ADR-067](067-llm-calls-accounted-in-provider-base-class.md) | Accepted | LLM chat calls are accounted in `ChatProvider.__init_subclass__`: each provider's own `chat`, `achat`, `stream` and `astream` record one `llm_usage_log` row for the user the call is for. |
 
-| [ADR-065](065-portable-note-language-and-negotiated-structured-editing.md) | Accepted | Preserve canonical note language and negotiate complete clear/private snapshots before Sync publication. |
+| [ADR-070](070-portable-note-language-and-negotiated-structured-editing.md) | Accepted | Preserve canonical note language and negotiate complete clear/private snapshots before Sync publication. |
 
-| [ADR-066](066-local-monaco-asset-owner.md) | Accepted | Prepare fixed installed Monaco assets at build time and initialize one shared local loader before every consumer. |
-| [ADR-067](067-notes-temporary-language-mode.md) | Accepted | Keep proven old-server display language ephemeral without weakening canonical metadata/save intent. |
+| [ADR-071](071-local-monaco-asset-owner.md) | Accepted | Prepare fixed installed Monaco assets at build time and initialize one shared local loader before every consumer. |
+| [ADR-072](072-notes-temporary-language-mode.md) | Accepted | Keep proven old-server display language ephemeral without weakening canonical metadata/save intent. |
 
-| [ADR-068](068-exact-source-secondary-note-capture.md) | Accepted | Secondary capture saves literal source and visibly omits persisted page attribution. |
+| [ADR-073](073-exact-source-secondary-note-capture.md) | Accepted | Secondary capture saves literal source and visibly omits persisted page attribution. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
 
-- [ADR-069: Native Monaco BOM source adapter](069-native-monaco-bom-source-adapter.md) — factual native prefix, exact source and history qualification.
+- [ADR-074: Native Monaco BOM source adapter](074-native-monaco-bom-source-adapter.md) — factual native prefix, exact source and history qualification.

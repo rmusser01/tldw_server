@@ -1,18 +1,18 @@
 ---
-id: TASK-13515
+id: TASK-13590
 title: Preserve negotiated source language in Notes clients
 status: Done
 created_date: 2026-10-07 03:07
 dependencies:
-- TASK-13513
-- TASK-13514
+- TASK-13588
+- TASK-13589
 assignee:
 - '@codex'
 labels:
 - notes
 - structured-editing
 documentation:
-- Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md
+- Docs/ADR/070-portable-note-language-and-negotiated-structured-editing.md
 updated_date: 2026-10-07 06:50
 ---
 
@@ -35,7 +35,7 @@ Keep language intent and exact source safe when clients and servers support diff
 
 <!-- SECTION:PLAN:BEGIN -->
 ADR required: yes
-ADR path: backlog/decisions/194-structured-note-language-and-local-editor-validation.md (C); Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md (S), existing decisions
+ADR path: backlog/decisions/194-structured-note-language-and-local-editor-validation.md (C); Docs/ADR/070-portable-note-language-and-negotiated-structured-editing.md (S), existing decisions
 Reason: implement approved negotiated client contracts and private confidentiality/pending behavior without a new transport.
 1. Read task4 brief, repo-local tasks/instructions/lessons and governing ADRs; trace current clear/private builders, receivers, outbox acknowledgements and authenticated Notes client capability paths.
 2. Add failing real SQLite builder/receiver, compatibility/pending/restart and capability/profile controls before edits.
@@ -48,7 +48,7 @@ Browser ownership/cache correction: U/src/services/tldw/domains/collections.ts o
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented authenticated fresh Notes capability checks and complete nullable language publication in the existing browser client owner. Collections mixin is the single createNote implementation; account changes refuse mutation/cleanup and unsupported peers remain actionable pending. ADR065 extends the locked Notes contract without adding private transport.
+Implemented authenticated fresh Notes capability checks and complete nullable language publication in the existing browser client owner. Collections mixin is the single createNote implementation; account changes refuse mutation/cleanup and unsupported peers remain actionable pending. ADR070 extends the locked Notes contract without adding private transport.
 Verification: browser25 tests, server compatibility10 and whole frontend typecheck passed on final browser code; scoped ESLint introduced none against immutable base, inherited Prettier debt unchanged; diff check passed. Final client scoped fix2 review clean; server has no fix2 production delta. Bandit not applicable to TypeScript-only server changes; Chatbook touched Python had no introduced security findings.
 Limits: actual server private Notes transport unavailable; compatible encrypted builder/receiver fixtures do not claim actual private server publication. Source-safe UI and pending-reason presentation remain later integration work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -66,3 +66,7 @@ Browser Notes publication uses one authenticated owner with complete language se
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Renumbering provenance
+
+Originally TASK-13515 in the reviewed structured-document candidate. The publication task is TASK-13590 because current dev assigns the former ID to unrelated work. This changes tracking identity only; acceptance criteria, status, original creation date and implementation evidence are retained. Original reviewed commits and local evidence preserve the historical ID.

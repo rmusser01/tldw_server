@@ -1,13 +1,13 @@
-# ADR-069: Native Monaco BOM source adapter
+# ADR-074: Native Monaco BOM source adapter
 
 **Status:** Accepted
 **Date:** 2026-10-11
-**Decision owner:** TASK-13520 controller, Rulings51–52
-**Related task:** TASK-13520
+**Decision owner:** TASK-13595 controller, Rulings51–52
+**Related task:** TASK-13595
 **Related spec:** Chatbook Docs/superpowers/specs/2026-09-27-structured-document-editing-design.md
 **Related plan:** Chatbook Docs/superpowers/plans/2026-09-27-structured-document-editing.md
 **Backfilled from:** N/A — controller decision recorded before adapter adoption
-**Extends:** [ADR-065](065-portable-note-language-and-negotiated-structured-editing.md)
+**Extends:** [ADR-070](070-portable-note-language-and-negotiated-structured-editing.md)
 
 ## Decision
 
@@ -30,3 +30,7 @@ The reviewed candidate read exact BOM source but refused initial BOM formatting.
 ## Qualification and limits
 
 Retain the existing installed native guard as RED, then qualify initial model-owned and pasted in-buffer origins with exact first format/save, second no-op, native typing and A/B/C/D undo/redo, source/currentness/composition/read-only negatives, Unicode/logical-coordinate navigation, selection/viewport, and LF/CRLF controls. Unexpected representations or concrete failing native gates retain an honest specific source fence. Synthetic composition controls do not qualify physical IME. No new user option, dependency, service, storage or normalization rule is adopted.
+
+## Renumbering provenance
+
+This accepted decision was first recorded as ADR-069 in the reviewed structured-document branch and is published as ADR-074 to keep the programme ADR block distinct from current dev allocations. Its decision, original approval and implementation evidence are unchanged; original reviewed commits retain the historical identifier.

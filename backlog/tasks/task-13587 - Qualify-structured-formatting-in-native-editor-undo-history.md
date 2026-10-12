@@ -1,5 +1,5 @@
 ---
-id: TASK-13512
+id: TASK-13587
 title: Qualify structured formatting in native editor undo history
 status: In Progress
 assignee:
@@ -38,12 +38,12 @@ Reason: native history qualification implements the approved reversible-edit rul
 2. Add real native history tests and minimal guarded bridges.
 3. Temporarily wire the actual Notes page for fixed replacement qualification, record the trace, then remove temporary wiring.
 4. Run targeted bridge/browser checks, record limitations, review and commit.
-Monaco qualification approved by human option1 on 2026-10-07. ADR required: yes; existing governing ADR194(C)/ADR065(S), amended before any new runtime/asset contract if needed. Continue I1 using installed Monaco only for structured source modes with bundled/local assets in Next and extension, unchanged Markdown ownership. Read task-11-monaco-context.md and exact review constraints. Qualify actual temporary Notes-page integration/native keyboard history in all three engines plus source representation/currentness/composition/focus/caret/model isolation; no custom undo or source CDN. Remove temporary product wiring before explicit commits. Append dated candidate evidence/report and self-review, keep task In Progress for independent review. Do not rerun unchanged C bridge tests.
+Monaco qualification approved by human option1 on 2026-10-07. ADR required: yes; existing governing ADR194(C)/ADR070(S), amended before any new runtime/asset contract if needed. Continue I1 using installed Monaco only for structured source modes with bundled/local assets in Next and extension, unchanged Markdown ownership. Read task-11-monaco-context.md and exact review constraints. Qualify actual temporary Notes-page integration/native keyboard history in all three engines plus source representation/currentness/composition/focus/caret/model isolation; no custom undo or source CDN. Remove temporary product wiring before explicit commits. Append dated candidate evidence/report and self-review, keep task In Progress for independent review. Do not rerun unchanged C bridge tests.
 <!-- SECTION:PLAN:END -->
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Installed Monaco test-only candidate independently approved for exact LF/CRLF native history and guarded source editing: 36 all-browser controls plus 3 strengthened viewport controls, units2+2, frontend typecheck exit0 with12GB heap and actual MV3 local-assets/CSP smoke. Temporary product wiring/assets removed; Markdown ownership retained. BOM/mixed/lone-CR sources are refused read-only. Existing textarea remains unqualified. ADR194(C)/ADR065(S) apply. Overall I1 remains In Progress: I3 owns shared loader ordering, production packaging and refresh/currentness; I5 owns real OS IME/accessibility/narrow-layout release evidence. Missing attachment paths and unbaselined warning/heap limits are retained for final review. See durable editor-history report and scoped review/scope-resolution artifacts.
+Installed Monaco test-only candidate independently approved for exact LF/CRLF native history and guarded source editing: 36 all-browser controls plus 3 strengthened viewport controls, units2+2, frontend typecheck exit0 with12GB heap and actual MV3 local-assets/CSP smoke. Temporary product wiring/assets removed; Markdown ownership retained. BOM/mixed/lone-CR sources are refused read-only. Existing textarea remains unqualified. ADR194(C)/ADR070(S) apply. Overall I1 remains In Progress: I3 owns shared loader ordering, production packaging and refresh/currentness; I5 owns real OS IME/accessibility/narrow-layout release evidence. Missing attachment paths and unbaselined warning/heap limits are retained for final review. See durable editor-history report and scoped review/scope-resolution artifacts.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
@@ -59,3 +59,7 @@ Candidate qualification independently approved; overall I1 remains In Progress u
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Renumbering provenance
+
+Originally TASK-13512 in the reviewed structured-document candidate. The publication task is TASK-13587 because current dev assigns the former ID to unrelated work. This changes tracking identity only; acceptance criteria, status, original creation date and implementation evidence are retained. Original reviewed commits and local evidence preserve the historical ID.

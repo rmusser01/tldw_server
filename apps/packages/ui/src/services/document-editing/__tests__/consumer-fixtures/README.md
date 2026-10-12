@@ -23,5 +23,5 @@ actual destruction. Native terminate is asynchronous: do not assert immediate
 zero physical threads, and do not use a product sleep as cleanup. The qualified
 run observed all25 created targets eventually destroyed, including6 startup-
 retirement churn workers, while80ms UI ticks remained below83ms. The two-second
-request deadline initiates termination and retires logical authority. See ADR065
+request deadline initiates termination and retires logical authority. See ADR070
 and the task10 report for exact raw scripts, target timelines, hashes and limits.

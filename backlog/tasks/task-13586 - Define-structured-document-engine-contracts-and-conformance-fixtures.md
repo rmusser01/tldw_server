@@ -1,5 +1,5 @@
 ---
-id: TASK-13511
+id: TASK-13586
 title: Define structured document engine contracts and conformance fixtures
 status: Done
 created_date: 2026-10-07 02:14
@@ -58,3 +58,7 @@ E1 implementation and targeted verification complete; awaiting independent revie
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Renumbering provenance
+
+Originally TASK-13511 in the reviewed structured-document candidate. The publication task is TASK-13586 because current dev assigns the former ID to unrelated work. This changes tracking identity only; acceptance criteria, status, original creation date and implementation evidence are retained. Original reviewed commits and local evidence preserve the historical ID.

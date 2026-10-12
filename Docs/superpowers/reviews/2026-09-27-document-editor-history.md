@@ -225,7 +225,7 @@ commit; the reproduction patch, fixtures and evidence remain.
 ADR required: existing ADR applies, with an experiment-boundary extension.
 ADR paths: C `backlog/decisions/194-structured-note-language-and-local-editor-validation.md`
 (as referenced by the task's existing plan) and S
-`Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md`.
+`Docs/ADR/070-portable-note-language-and-negotiated-structured-editing.md`.
 The latter was extended before the candidate's runtime/asset contract. No new
 dependency, production runtime policy, storage normalization or save veto was added.
 

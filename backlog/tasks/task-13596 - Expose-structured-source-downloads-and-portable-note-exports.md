@@ -1,11 +1,11 @@
 ---
-id: TASK-13521
+id: TASK-13596
 title: Expose structured source downloads and portable note exports
 status: Done
 created_date: 2026-10-11 22:07
 dependencies:
-- TASK-13517
-- TASK-13520
+- TASK-13592
+- TASK-13595
 assignee:
 - '@codex'
 labels:
@@ -34,9 +34,9 @@ Make source downloads and portable notes distinct and preserve language through 
 
 <!-- SECTION:PLAN:BEGIN -->
 ADR required: no new ADR
-ADR path: Docs/ADR/065-portable-note-language-and-negotiated-structured-editing.md; 066-local-monaco-asset-owner.md; 067-notes-temporary-language-mode.md; 068-exact-source-secondary-note-capture.md; 069-native-monaco-bom-source-adapter.md (existing).
+ADR path: Docs/ADR/070-portable-note-language-and-negotiated-structured-editing.md; 071-local-monaco-asset-owner.md; 072-notes-temporary-language-mode.md; 073-exact-source-secondary-note-capture.md; 074-native-monaco-bom-source-adapter.md (existing).
 Reason: direct action wiring and guidance consume accepted portable/source/currentness/runtime boundaries; no new storage/schema/provider/transport contract.
-1. Read Task13521, task14 brief/context, final reviewed F6/I2/I3 contracts/reports and applicable AGENTS/ADR/lessons. Capture exact canonical source/mode/presence through the existing owner; effective temporary views must never be implicitly portable.
+1. Read Task13596, task14 brief/context, final reviewed F6/I2/I3 contracts/reports and applicable AGENTS/ADR/lessons. Capture exact canonical source/mode/presence through the existing owner; effective temporary views must never be implicitly portable.
 2. Add meaningful failing action tests for exact JSON source download bytes and known-mode extension versus the existing tldw.note.v1 envelope; test current source, unknown/absent/null mode and authority/refusal behavior through actual helpers.
 3. Wire distinct Source download and Export note labels/extensions through existing Notes header/export owners, preserving explicit Markdown conversion and download/export authority. Reuse existing archive/import validators with unsupported-version preflight before effects.
 4. Extend Docs/User_Guides/WebUI_Extension/Notes_Structured_Source.md (controller Ruling54), rather than create a duplicate guide under nonexistent Docs/User_Guide. Explain refusal/limits/undo, temporary old-peer choices, unchanged save behavior, empty recovery and valid YAML versus intended structure; no schema/block-lint claims.
@@ -47,9 +47,9 @@ Reason: direct action wiring and guidance consume accepted portable/source/curre
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented distinct Download source and Export note (.note.json) header actions through the existing canonical editor capture and F6 export helpers. Current source/canonical mode are read synchronously, old-peer temporary intent stays absent, and explicit null/future modes retain presence. Existing download guards and explicit conversions remain; the mobile overflow menu is bounded. Extended the existing Notes_Structured_Source guide per Ruling54, with no duplicate guide/schema/dependency/provider. Existing ADR065-069 govern; no new ADR is required.
+Implemented distinct Download source and Export note (.note.json) header actions through the existing canonical editor capture and F6 export helpers. Current source/canonical mode are read synchronously, old-peer temporary intent stays absent, and explicit null/future modes retain presence. Existing download guards and explicit conversions remain; the mobile overflow menu is bounded. Extended the existing Notes_Structured_Source guide per Ruling54, with no duplicate guide/schema/dependency/provider. Existing ADR070-074 govern; no new ADR is required.
 Verification: action/F6/owner 55 passed; real authenticated Chromium2 passed with ordinary/fenced source bytes, desktop/mobile portable downloads and shipped CSP; SQLite/API import pre-effect27 passed (203 unsuppressed warnings). Advertised8GiB typecheck passes after recorded default-heap OOM; strict new source and edited-region formatter checks pass; BASE146->current146 legacy lint, zero introduced findings. No Python production changes, so server Bandit is inapplicable. Owned Notes zero/processes absent. Full report/index: Chatbook programme task-14-report.md/task-14-evidence. Physical/other-browser/installed-extension/history-peer profiles remain unqualified. Self-review complete; keep In Progress and all AC/DoD unchecked for Root review.
-Independent Task14 review: Spec compliant / Approved, no Critical or Important findings. Root verified all543 durable artifact hashes and18 unit source hashes; additive formatter-label clarification preserves original records and verifies six actual base/head source pairs. Scope reconciliation: task-14-review-scope-resolution.md. Existing ADR194/065-069 apply; no new ADR. Non-pristine warnings, inherited native mypy barrier and stale writer description remain I5/final triage. Six inherited save scenarios, cross-application and physical/deployment release gates remain unfinished; this closes only the verified source/portable actions and guidance.
+Independent Task14 review: Spec compliant / Approved, no Critical or Important findings. Root verified all543 durable artifact hashes and18 unit source hashes; additive formatter-label clarification preserves original records and verifies six actual base/head source pairs. Scope reconciliation: task-14-review-scope-resolution.md. Existing ADR194/070-074 apply; no new ADR. Non-pristine warnings, inherited native mypy barrier and stale writer description remain I5/final triage. Six inherited save scenarios, cross-application and physical/deployment release gates remain unfinished; this closes only the verified source/portable actions and guidance.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
@@ -65,3 +65,7 @@ Distinct exact-source and portable-note actions use current canonical captures, 
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Renumbering provenance
+
+Originally TASK-13521 in the reviewed structured-document candidate. The publication task is TASK-13596 because current dev assigns the former ID to unrelated work. This changes tracking identity only; acceptance criteria, status, original creation date and implementation evidence are retained. Original reviewed commits and local evidence preserve the historical ID.

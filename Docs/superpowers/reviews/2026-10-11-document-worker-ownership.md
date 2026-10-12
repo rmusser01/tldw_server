@@ -13,7 +13,7 @@ editability, conflict and activation transition and apply through I1's captured-
 seam. Shared fixture SHA256 is unchanged:
 `fcf516e4c0bb8ff7a19748a4d5f7deb8a30ad0078ea0ce2af0e1e81af50fb0d7`.
 
-ADR065 records accepted Rulings39–42: fixed isolated Python counterpart; trusted browser
+ADR070 records accepted Rulings39–42: fixed isolated Python counterpart; trusted browser
 `() => Worker` factory; supported Next webpack qualification; and native asynchronous
 Worker.terminate semantics. WXT0.20.13 requires its native `?worker` constructor because
 its import.meta.url rewrite otherwise points at missing extension-root worker.ts.
@@ -56,5 +56,5 @@ cover all affected constructor callers; scoped ESLint/Prettier and whole-web typ
 exit0 with exact invocation/output/status records under task10 evidence/fix1. Original
 silent exits remain Cannot Verify; the old148-record index is unchanged. Seven Node
 localStorage notices and the ESLint pages notice remain visible, not proven inherited.
-No browser build/lifecycle/benchmark replay or engine rewrite. ADR065/R39–R42 and
+No browser build/lifecycle/benchmark replay or engine rewrite. ADR070/R39–R42 and
 all seven integration/platform/evidence dispositions remain; task In Progress.

@@ -1,13 +1,13 @@
-# ADR-066: Shared local Monaco assets and loader
+# ADR-071: Shared local Monaco assets and loader
 
 **Status:** Accepted
 **Date:** 2026-10-11
-**Decision owner:** TASK-13520 controller, Ruling47
-**Related task:** TASK-13520
+**Decision owner:** TASK-13595 controller, Ruling47
+**Related task:** TASK-13595
 **Related spec:** Chatbook Docs/superpowers/specs/2026-09-27-structured-document-editing-design.md
 **Related plan:** Chatbook Docs/superpowers/plans/2026-09-27-structured-document-editing.md
 **Backfilled from:** N/A — controller decision recorded before implementation
-**Extends:** [ADR-065](065-portable-note-language-and-negotiated-structured-editing.md)
+**Extends:** [ADR-070](070-portable-note-language-and-negotiated-structured-editing.md)
 
 ## Decision
 
@@ -28,6 +28,10 @@ The reviewed I1 candidate used test-only local installed-asset copies. Actual Pr
 
 ## Consequences and qualification
 
-The installed distribution is copied during existing preparation/build/development paths, while serving stays independent. All three consumers must be checked for initialization ordering. Actual default Next, production/standalone and installed extension loading remain TASK-13520/I5 evidence gates; the candidate smoke does not earn them. Missing assets must produce truthful unavailable editing with canonical source retained. Native worker termination remains asynchronous per ADR-065/Ruling42.
+The installed distribution is copied during existing preparation/build/development paths, while serving stays independent. All three consumers must be checked for initialization ordering. Actual default Next, production/standalone and installed extension loading remain TASK-13595/I5 evidence gates; the candidate smoke does not earn them. Missing assets must produce truthful unavailable editing with canonical source retained. Native worker termination remains asynchronous per ADR-070/Ruling42.
 
 The installed0.55 AMD entry replaces MonacoEnvironment during initialization. The shared lazy loader reapplies its fixed native factory after initialization, and both prior React consumers await this loader before mounting. Actual extension probes exposed the default blob factory’s importScripts failure despite packaged files; a pre-init assignment alone is insufficient. This keeps all consumers on the same approved owner and preserves their error fallbacks.
+
+## Renumbering provenance
+
+This accepted decision was first recorded as ADR-066 in the reviewed structured-document branch and is published as ADR-071 to keep the programme ADR block distinct from current dev allocations. Its decision, original approval and implementation evidence are unchanged; original reviewed commits retain the historical identifier.
