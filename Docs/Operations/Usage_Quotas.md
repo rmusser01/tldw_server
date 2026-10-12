@@ -82,7 +82,8 @@ What `limits.llm_tokens_per_month` counts:
 - That includes calls a request triggers without the user asking for them directly, such as query rewriting and classification.
 - Provider key validation and first-run chat verification are never counted.
 - Embedding tokens do not count toward it.
-- Calls made by background jobs, workflow runs and WebSocket sessions that set no user are not yet recorded; they are added in a later change. Jobs that already set the content scope, such as media ingest, are recorded now.
+- Recorded: calls made during a request, including those handed to an executor thread; jobs run by the Jobs workers; workflow runs; scheduled agent tasks; watchlist output enrichment; audio and realtime WebSocket sessions.
+- Not recorded: MCP tool calls, the in-process claims rebuild, and system jobs with no user, such as the scheduled quality evaluation.
 - The count depends on `LLM_USAGE_ENABLED` (default on). With it off, nothing is recorded and the limit never triggers.
 
 Two other `limits.*` entries in the catalog are not part of this scheme:
