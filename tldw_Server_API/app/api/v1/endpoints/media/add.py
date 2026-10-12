@@ -16,11 +16,13 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_h
 from tldw_Server_API.app.api.v1.API_Deps.content_org_deps import select_content_org
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -77,6 +79,10 @@ async def add_media(
     implemented in the core `persistence.add_media_orchestrate`
     helper.
     """
+
+    if media_analysis_requested(form_data):
+        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
+        await enforce_llm_quota(current_user.id)
 
     if is_research_discovery_handoff(form_data):
         try:
