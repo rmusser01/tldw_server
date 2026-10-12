@@ -7,7 +7,7 @@ labels:
 - ux
 - integration
 dependencies:
-- TASK-13585
+- TASK-13593
 ---
 
 ## Description
@@ -31,6 +31,7 @@ Stage1 complete; Stage2 In Progress. Causal audit RED1/2 then GREEN2/2 preserves
 Independent source review confirmed two additional incoming root gaps: Docker builder has package manifest without committed type exports (no runtime failure inferred because Next ignores build type errors), and mandatory backend fingerprint gate does not compare the new committed paths artifact. Close using existing exporter canonical path output/check shared by Node generation and required Python-only CI/Makefile; explicit committed Docker leaf copies. Causal regression checks precede fixes; broader acceptance remains open.
 Final frozen source: canonical generation/check2114 paths3276 schemas, actual CLI2114 routes49 fields with exact temporary snapshot restore, backend129/129, client305/305, parser10/10, Docker context5/5 and both normal client compilers exit0. Eight JS/TS lint0 against both parents; six Python Ruff0, three production files Bandit0 findings/errors. Both approved independent reviewers CLEAR. Schema/file/persistence boundaries remain doubles; no hosted CI/physical Docker/PG/current native build/package/AT/study inference. Stage3 normal owned hooks and merge recording pending.
 Normal37-file owned hooks actual exit0 without bypass. Three own stages complete; own plan retires privately. Final metadata hooks and normal incremental merge recording follow.
+TASK-13592 tracking collision correction: completed chat fixture dependency formerly TASK-13585 is now TASK-13593; upstream accounting retains TASK-13585.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
