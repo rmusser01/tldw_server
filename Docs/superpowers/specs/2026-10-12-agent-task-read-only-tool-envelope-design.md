@@ -25,35 +25,40 @@ terminates `approval_required`, now including runtime attempts.
    note.** The loop's iteration cap is a cost control, not a failure; the
    run produced output and the summary says it may be incomplete.
 
-## 3. Tool eligibility — declared tier + verified permission, fail closed everywhere
+## 3. Tool eligibility — the MCP catalogue is the single source of truth
 
-**The classification signal is the MCP registry's explicit module risk tier,
-not the tool's name.** `MCP_Unified/module_surface.py::MODULE_RISK_TIERS`
-curates every module: `read_only` (media, knowledge, rag, chats, prompts,
-prompts_catalog, cooking, skills, mcp_discovery), `write`, `local_files`,
-`local_process`, `external_network`. Name-token heuristics
-(`determine_permission_tier`) are NOT trusted for unattended execution — a
-read-ish name proves nothing about a tool's effects, and treating it as
-proof would be fail-open by construction.
+The envelope builds NO parallel permission or classification system. It
+derives one filtered set from the existing catalogue and hands it to the
+existing enforcement:
 
-**At the consumer gate:** a tool-requesting `agent_task` definition enters
-the envelope only when every tool in `input.tools` satisfies the full
-closed chain:
+**The eligible set (one derived filter):** from `Tools/ToolExecutor.list_tools`
+(the catalogue, which already carries per-user `canExecute`), keep the
+tools the owner can execute whose module maps to `MODULE_RISK_TIER ==
+"read_only"` in `MCP_Unified/module_surface.py`. The module-tier
+declaration is the registry's own curation — the envelope reads it, never
+re-classifies by name. A tool the owner cannot execute, from a non-
+read-only module, or absent from the catalogue is simply not in the set;
+a catalogue read failure yields an empty set (fail closed by construction
+— nothing is presented, nothing can execute).
 
-1. The MCP catalog resolves the name (via `Tools/ToolExecutor.list_tools`)
-   to a registered tool with `canExecute` for the owner.
-2. That tool's module maps to `MODULE_RISK_TIER == "read_only"`.
+**Enforcement is the existing machinery, reused as-is:**
 
-Any failure in the chain — non-`read_only` module, unresolvable name,
-permission miss, **or the catalog listing itself failing (MCP unavailable
-→ the intersection cannot be verified)** — terminates the run
-`approval_required`. No path executes on an unverified tool set.
+- Only eligible tools are presented to the model (`present_chat_tools`).
+- Execution runs through `execute_assistant_tool_calls` with the eligible
+  set as its `allow_catalog` — its EXISTING deny path ("not permitted by
+  chat tool allow-catalog") refuses anything the model attempts outside
+  the set, and it threads `allowed_tools` into the MCP context for
+  defence in depth. The envelope adds no second permission check.
+- Caps, timeouts, idempotency, and per-call permission enforcement are
+  the catalogue's and executor's, unchanged.
 
-**At runtime (belt and braces):** the gate's conclusion is never assumed.
-A model tool-call naming a tool outside the verified eligible set records
-the attempted name in the run summary and terminates the run
-`approval_required`. Unknown/unverifiable at runtime is
-`approval_required`, never execute-anyway.
+**The only new mapping:** an allow-catalog denial during a scheduled run
+(a model attempt outside the envelope) is surfaced as `approval_required`
+with the attempted tool name in the summary, rather than a generic tool
+error — the ADR-184 2A outcome. At the consumer gate, a tool-requesting
+agent_task definition whose requested names are not all in the eligible
+set (non-read-only module, no permission, unknown name, or catalogue
+unavailable) terminates `approval_required` before the loop starts.
 
 ## 4. The loop
 
