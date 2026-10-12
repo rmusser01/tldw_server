@@ -211,5 +211,10 @@
     "unsavedStateDiscardPromptRestoreState": "你有未保存的状态文档更改。要恢复此状态版本并丢弃本地草稿吗？",
     "unsavedStateDiscardPromptRouteTransition": "你有未保存的状态文档更改。要离开此页面并丢弃本地草稿吗？",
     "unsavedStateBeforeUnloadPrompt": "你有未保存的状态文档更改。要在不保存的情况下离开此页面吗？"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "将源文本保存到笔记",
+    "saveSource": "保存源文本",
+    "sourceOnlyHelper": "仅保存文本，不包含此处显示的页面网址。"
   }
 }

@@ -405,3 +405,9 @@ a mocked edit or a host-based shortcut is insufficient evidence. The mounted
 composition control also caught an ignored option typo: installed Monaco 0.55 uses
 `editContext`, not `experimentalEditContextEnabled`. Synthetic composition flag
 coverage still does not establish actual OS IME behavior.
+
+## Ignore-aware inventories are not package absence proof
+
+**Incident (TASK-13520, 2026-10-11):** `rg --files` hid JSON paths under inherited ignore rules. An initial extension runtime diagnosis incorrectly inferred that the default locale catalog was absent. Direct `ls`, tracked-file lookup and actual `.output/chrome-mv3` plus exported `build/chrome-mv3-dev` checks proved the unchanged 1311-key catalog existed. Raw Chromium inventory then showed the untouched extension enabled without manifest errors; an assumed always-live MV3 worker and a normal first-run tutorial were the actual earlier harness gates. No catalog or manifest repair was needed.
+
+**Evidence and rule:** Use ignore-aware search for discovery, then direct source/tracked/output checks before claiming absence. Inspect the actual browser inventory and normal UI lifecycle before inferring a package defect. A staged test helper that manufactures a locale catalog or manifest key does not qualify the untouched installed artifact. Similarly, a live test helper's name is insufficient: this task found it still set a readiness bypass even in its strict profile. Final actual runs explicitly removed both bypass flags before navigation and used normal health/auth flows.

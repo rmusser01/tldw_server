@@ -4223,8 +4223,8 @@ export default defineBackground({
       } else if (info.menuItemId === saveToClipperMenuId) {
         await launchWebClipperFromContextMenu(info, tab);
       } else if (info.menuItemId === saveToNotesMenuId) {
-        const selection = String(info.selectionText || "").trim();
-        if (!selection) {
+        const selection = String(info.selectionText || "");
+        if (!selection.trim()) {
           notify(
             browser.i18n.getMessage("contextSaveToNotes"),
             browser.i18n.getMessage("contextSaveToNotesNoSelection"),

@@ -825,5 +825,10 @@
     "resetPosition": "Reset position",
     "manage": "Manage Buddy & Persona",
     "detach": "Detach Buddy"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "Save source to Notes",
+    "saveSource": "Save source",
+    "sourceOnlyHelper": "Only the text is saved. The page URL shown here is not included."
   }
 }

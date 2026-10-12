@@ -78,7 +78,6 @@ import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/use
 import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import {
-  buildCapturedNoteContent,
   CAPTURED_NOTE_KEYWORD
 } from "@/services/notes-capture"
 import {
@@ -828,9 +827,9 @@ const SidepanelChatContent = ({
   }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, transferStudyPack, resetNoteModal, t])
 
   const handleNoteSave = React.useCallback(async () => {
-    const content = noteDraftContent.trim()
+    const content = noteDraftContent
     const title = (noteDraftTitle || noteSuggestedTitle).trim()
-    if (!content) {
+    if (!content.trim()) {
       setNoteError(t("sidepanel:notes.emptyContent", "Nothing to save"))
       return
     }
@@ -841,7 +840,7 @@ const SidepanelChatContent = ({
     setNoteError(null)
     setNoteSaving(true)
     try {
-      await tldwClient.createNote(buildCapturedNoteContent(content, noteSourceUrl), {
+      await tldwClient.createNote(content, {
         title,
         keywords: [CAPTURED_NOTE_KEYWORD]
       })
@@ -868,7 +867,6 @@ const SidepanelChatContent = ({
     noteDraftContent,
     noteDraftTitle,
     noteSuggestedTitle,
-    noteSourceUrl,
     notification,
     resetNoteModal,
     t
@@ -2032,8 +2030,8 @@ const SidepanelChatContent = ({
 
     if (bgMsg.type === "save-to-notes") {
       lastBgMsgRef.current = bgMsg
-      const selected = (bgMsg.text || bgMsg.payload?.selectionText || "").trim()
-      if (!selected) {
+      const selected = bgMsg.text || bgMsg.payload?.selectionText || ""
+      if (!selected.trim()) {
         notification.warning({
           message: t(
             "sidepanel:notification.noSelectionForNotes",
@@ -2762,8 +2760,8 @@ const SidepanelChatContent = ({
             onSave={handleNoteSave}
             onGenerateFlashcards={handleGenerateFlashcardsFromSelection}
             onCreateStudyPack={noteSourceMessageId ? handleCreateStudyPackFromSelection : undefined}
-            modalTitle={t("sidepanel:notes.saveToNotesTitle", "Save to Notes")}
-            saveText={t("common:save", "Save")}
+            modalTitle={t("sidepanel:notes.saveSourceToNotesTitle", "Save source to Notes")}
+            saveText={t("sidepanel:notes.saveSource", "Save source")}
             cancelText={t("common:cancel", "Cancel")}
             generateFlashcardsText={t(
               "sidepanel:notes.generateFlashcards",
@@ -2776,7 +2774,7 @@ const SidepanelChatContent = ({
             titleLabel={t("sidepanel:notes.titleLabel", "Title")}
             contentLabel={t("sidepanel:notes.contentLabel", "Content")}
             titleRequiredText={t("sidepanel:notes.titleRequired", "Title is required to create a note.")}
-            helperText={t("sidepanel:notes.helperText", "Review or edit the selected text, then Save or Cancel.")}
+            helperText={t("sidepanel:notes.sourceOnlyHelper", "Only the text is saved. The page URL shown here is not included.")}
             sourceLabel={t("sidepanel:notes.sourceLabel", "Source")}
           />
         </Suspense>

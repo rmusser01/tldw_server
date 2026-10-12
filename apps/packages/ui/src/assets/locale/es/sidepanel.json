@@ -211,5 +211,10 @@
     "unsavedStateDiscardPromptRestoreState": "Tienes cambios sin guardar en los documentos de estado. ¿Restaurar esta versión del estado y descartar los borradores locales?",
     "unsavedStateDiscardPromptRouteTransition": "Tienes cambios sin guardar en los documentos de estado. ¿Salir de esta página y descartar los borradores locales?",
     "unsavedStateBeforeUnloadPrompt": "Tienes cambios sin guardar en los documentos de estado. ¿Salir de esta página sin guardar?"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "Guardar fuente en Notas",
+    "saveSource": "Guardar fuente",
+    "sourceOnlyHelper": "Solo se guarda el texto. No se incluye la URL de la página mostrada aquí."
   }
 }

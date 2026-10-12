@@ -211,5 +211,10 @@
     "unsavedStateDiscardPromptRestoreState": "状態ドキュメントに未保存の変更があります。この状態バージョンを復元してローカル下書きを破棄しますか？",
     "unsavedStateDiscardPromptRouteTransition": "状態ドキュメントに未保存の変更があります。このページを離れてローカル下書きを破棄しますか？",
     "unsavedStateBeforeUnloadPrompt": "状態ドキュメントに未保存の変更があります。保存せずにこのページを離れますか？"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "ソースをノートに保存",
+    "saveSource": "ソースを保存",
+    "sourceOnlyHelper": "テキストのみ保存します。ここに表示されるページURLは含まれません。"
   }
 }

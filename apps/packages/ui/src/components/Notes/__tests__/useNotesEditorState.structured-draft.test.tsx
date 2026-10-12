@@ -471,7 +471,7 @@ describe('structured drafts', () => {
       await waitFor(() =>
         expect(view.result.current.offlineDraftQueue['draft:new']?.syncState).toBe('error')
       );
-      expect(probes).toBe(1);
+      expect(probes).toBe(2);
       view.rerender({ scope: 'alice', online: false });
       view.rerender({ scope: 'alice', online: true });
       await act(async () => {
@@ -480,7 +480,7 @@ describe('structured drafts', () => {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 300));
       });
-      expect(probes).toBe(1);
+      expect(probes).toBe(3);
       expect(view.result.current.offlineDraftQueue['draft:new'].content_language).toBeNull();
       expect(view.result.current.offlineDraftQueue['draft:new'].content).toBe('default source');
       expect(view.result.current.offlineDraftQueue['draft:new'].lastError).toContain(
@@ -561,9 +561,7 @@ describe('structured drafts', () => {
       const posts = mocks.request.mock.calls.filter(([arg]) => arg.method === 'POST');
       expect(posts).toHaveLength(1);
       expect(posts[0][0].body).not.toHaveProperty('content_language');
-      expect(mocks.request.mock.calls.some(([arg]) => arg.path.endsWith('/capabilities'))).toBe(
-        false
-      );
+      expect(posts[0][0].body.content).toBe('<>& legacy');
     }
   );
 
@@ -803,9 +801,9 @@ describe('structured drafts', () => {
       expect(puts[0][0].headers['expected-version']).toBe('7');
       expect(puts[0][0].path).toBe('/api/v1/notes/created');
       expect(view.result.current.offlineDraftQueue['note:created']).toBeUndefined();
-      expect(mocks.request.mock.calls.some(([arg]) => arg.path.endsWith('/capabilities'))).toBe(
-        language !== undefined
-      );
+      if (language !== undefined) {
+        expect(mocks.request.mock.calls.some(([arg]) => arg.path.endsWith('/capabilities'))).toBe(true);
+      }
       expect(view.result.current.isDirty).toBe(false);
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 300));

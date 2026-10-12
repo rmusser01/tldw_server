@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { prepareMonacoAssets } from "../../scripts/prepare-monaco-assets.mjs"
+
+prepareMonacoAssets()
+
 /**
  * Copy PDF.js worker to public folder
  *

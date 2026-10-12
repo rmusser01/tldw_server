@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  buildCapturedNoteContent,
   CAPTURED_NOTE_KEYWORD,
   withCapturedNoteKeyword
 } from "@/services/notes-capture"
@@ -23,16 +22,4 @@ describe("notes capture helpers", () => {
     ])
   })
 
-  it("persists the source URL in generic quick-save note content", () => {
-    expect(
-      buildCapturedNoteContent("Important excerpt", " https://example.com/story ")
-    ).toBe("Important excerpt\n\nSource: https://example.com/story")
-
-    expect(
-      buildCapturedNoteContent(
-        "Important excerpt\n\nSource: https://example.com/story",
-        "https://example.com/story"
-      )
-    ).toBe("Important excerpt\n\nSource: https://example.com/story")
-  })
 })

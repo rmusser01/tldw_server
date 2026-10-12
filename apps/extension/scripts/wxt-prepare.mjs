@@ -1,3 +1,7 @@
+import { prepareMonacoAssets } from "../../scripts/prepare-monaco-assets.mjs"
+
+prepareMonacoAssets()
+
 import { prepare } from "wxt"
 
 const skipPrepare = ["1", "true", "yes", "y", "on"].includes(

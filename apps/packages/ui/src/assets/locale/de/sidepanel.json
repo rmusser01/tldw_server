@@ -211,5 +211,10 @@
     "unsavedStateDiscardPromptRestoreState": "Sie haben ungespeicherte Änderungen an den Zustandsdokumenten. Diese Zustandsversion wiederherstellen und lokale Entwürfe verwerfen?",
     "unsavedStateDiscardPromptRouteTransition": "Sie haben ungespeicherte Änderungen an den Zustandsdokumenten. Diese Seite verlassen und lokale Entwürfe verwerfen?",
     "unsavedStateBeforeUnloadPrompt": "Sie haben ungespeicherte Änderungen an den Zustandsdokumenten. Diese Seite ohne Speichern verlassen?"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "Quelltext in Notizen speichern",
+    "saveSource": "Quelltext speichern",
+    "sourceOnlyHelper": "Nur der Text wird gespeichert. Die hier angezeigte Seiten-URL wird nicht gespeichert."
   }
 }

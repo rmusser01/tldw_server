@@ -988,5 +988,30 @@
       "fetchingFiles": "Fetching files ({{completed}}/{{total}})...",
       "generated": "Generated output for {{count}} files ({{tokenCount}} tokens)."
     }
+  },
+  "notesDocument": {
+    "language": "言語",
+    "default": "既定 (Markdown)",
+    "text": "プレーンテキスト",
+    "unknown": "未指定",
+    "future": "未対応: {{language}}",
+    "check": "文書をチェック",
+    "format": "文書を整形",
+    "problems": "問題",
+    "idle": "チェック利用不可",
+    "pending": "チェック待ち",
+    "checked": "チェック済み・問題なし",
+    "problemsFound": "チェック完了・問題を確認してください",
+    "incomplete": "チェック未完了・一部の問題を表示",
+    "unsupported": "このモードまたはソースはチェックできません",
+    "resourceLimited": "リソース上限に達しました・ソースを保持",
+    "failed": "チェック失敗・再試行してください",
+    "formatted": "整形済み",
+    "unchanged": "既に整形済み",
+    "blocked": "整形を適用できません・問題を確認するかソースにフォーカスして再試行",
+    "temporary": "このノートとセッション限定の表示モードです。このサーバーは言語情報を保存できません。",
+    "metadataUnavailable": "言語情報を利用できません。再接続してモードを選択してください。",
+    "sourceOnly": "ソースを完全に保持しています。この表現では本文を編集できません。タイトルと保存は利用できます。",
+    "rawSource": "正確なソース"
   }
 }

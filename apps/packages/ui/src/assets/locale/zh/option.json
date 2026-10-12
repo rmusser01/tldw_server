@@ -977,5 +977,30 @@
       "fetchingFiles": "Fetching files ({{completed}}/{{total}})...",
       "generated": "Generated output for {{count}} files ({{tokenCount}} tokens)."
     }
+  },
+  "notesDocument": {
+    "language": "语言",
+    "default": "默认 (Markdown)",
+    "text": "纯文本",
+    "unknown": "未指定",
+    "future": "不支持：{{language}}",
+    "check": "检查文档",
+    "format": "格式化文档",
+    "problems": "问题",
+    "idle": "无法检查",
+    "pending": "等待检查",
+    "checked": "已检查，没有问题",
+    "problemsFound": "检查完成，请查看问题",
+    "incomplete": "检查未完成，仅显示部分问题",
+    "unsupported": "无法检查此模式或源文本",
+    "resourceLimited": "达到资源限制，已保留源文本",
+    "failed": "检查失败，请重试",
+    "formatted": "已格式化",
+    "unchanged": "已经格式化",
+    "blocked": "未应用格式，请查看问题或聚焦源文本后重试",
+    "temporary": "此笔记和会话的临时显示模式；服务器无法保存语言元数据。",
+    "metadataUnavailable": "无法获取语言元数据；请重新连接后选择模式。",
+    "sourceOnly": "已完整保留源文本。此表示方式无法编辑正文；仍可编辑标题和保存。",
+    "rawSource": "原始源文本"
   }
 }
