@@ -1733,6 +1733,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     )
       return null;
     return {
+      ...knowledgeNoteHead(
+        { ...editRevisionRef.current.originalMetadata, content_language: canonicalLanguageRef.current },
+        contentRef.current,
+      ),
       id: selectedId,
       title,
       content: contentRef.current,
@@ -2152,6 +2156,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         return false
       }
+      // Durable recovery is a synchronous prerequisite, before reserving the
+      // shared save promise. A refusal must remain manually retryable.
+      if (!persistOfflineDraft({ syncState: 'queued' })) {
+        const failureMessage = 'Local draft storage failed. Stay here and retry Save.'
+        dispatchSave({
+          type: 'save-failed',
+          failure: {kind: 'validation', status: null, message: failureMessage},
+          queuedOffline: false,
+          hasNewerEdits: false,
+        })
+        setSaveRecoveryNotice({kind: 'error', message: failureMessage})
+        return false
+      }
+      setSaveRecoveryNotice(null)
       let settled = false
       let resolveActiveSave!: (saved: boolean) => void
       const activeSave = new Promise<boolean>((resolve) => {
@@ -2163,13 +2181,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setSaving(true)
       dispatchSave({ type: 'save-started' })
       setMonitoringNotice(null)
-      if (!persistOfflineDraft({ syncState: 'queued' })) {
-        savingInFlightRef.current = false
-        setSaving(false)
-        setSaveIndicator('error')
-        setSaveRecoveryNotice({ kind: 'error', message: 'Local draft storage failed. Stay here and retry Save.' })
-        return false
-      }
       const saveStartedAtMs = Date.now()
       const controller = new AbortController()
       activeSaveRef.current = controller

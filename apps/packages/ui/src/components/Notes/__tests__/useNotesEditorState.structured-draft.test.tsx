@@ -1,4 +1,6 @@
 import React from "react";
+import { Modal } from "antd";
+import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -304,6 +306,156 @@ describe("structured drafts", () => {
     } finally {
       storage.mockRestore();
     }
+  });
+  it.each(["manual", "navigation"])(
+    "settles storage refusal and permits repaired %s retry",
+    async (trigger) => {
+      let saved = {
+        id: "n",
+        title: "Saved",
+        content: "old",
+        content_language: "json",
+        version: 1,
+      };
+      mocks.request.mockImplementation(async ({ method, path, body }) => {
+        if (path.endsWith("/capabilities")) return { content_language: true };
+        if (method === "PUT") {
+          saved = { ...saved, ...body, version: 2 };
+          return saved;
+        }
+        return path.endsWith("/other")
+          ? { ...saved, id: "other", content: "target" }
+          : saved;
+      });
+      const view = renderEditor(true);
+      await act(async () => {
+        await view.result.current.loadDetail("n");
+      });
+      act(() => {
+        view.result.current.setContent("new exact <>&");
+        view.result.current.setIsDirty(true);
+      });
+      const originalSet = Object.getPrototypeOf(window.localStorage).setItem;
+      let writes = 0;
+      const storage = vi
+        .spyOn(Object.getPrototypeOf(window.localStorage), "setItem")
+        .mockImplementation(function (this: Storage, key, value) {
+          writes += 1;
+          // Navigation's prerequisite succeeds; the save's own durable prerequisite fails.
+          if (trigger === "manual" || writes > 1) throw new Error("quota");
+          return originalSet.call(this, key, value);
+        });
+      const modal = vi.spyOn(Modal, "confirm").mockImplementation((options) => {
+        options.onCancel?.();
+        return { destroy: vi.fn(), update: vi.fn() };
+      });
+      try {
+        await act(async () => {
+          const refused =
+            trigger === "manual"
+              ? await view.result.current.saveNote({
+                  showSuccessMessage: false,
+                })
+              : await view.result.current.handleSelectNote("other");
+          expect(refused).toBe(false);
+        });
+        expect(view.result.current.saveStatus).toBe("error-fatal");
+        expect(view.result.current.saving).toBe(false);
+        expect(view.result.current.content).toBe("new exact <>&");
+        expect(view.result.current.selectedId).toBe("n");
+        expect(
+          mocks.request.mock.calls.some(
+            ([x]) => x.method === "PUT" || x.path.endsWith("/other"),
+          ),
+        ).toBe(false);
+      } finally {
+        storage.mockRestore();
+        modal.mockRestore();
+      }
+      if (trigger === "manual")
+        await act(async () => {
+          expect(
+            await view.result.current.saveNote({ showSuccessMessage: false }),
+          ).toBe(true);
+        });
+      await act(async () => {
+        expect(await view.result.current.handleSelectNote("other")).toBe(true);
+      });
+      expect(saved.content).toBe("new exact <>&");
+      expect(view.result.current.selectedId).toBe("other");
+      expect(view.result.current.saveStatus).not.toBe("saving");
+      view.unmount();
+    },
+  );
+  it("reserves a single save before concurrent manual and navigation requests can await auth", async () => {
+    const currentUser = await tldwAuth.getCurrentUser();
+    const auth = deferred<typeof currentUser>();
+    const write = deferred<unknown>();
+    mocks.request.mockImplementation(async ({ method, path }) => {
+      if (path.endsWith("/capabilities")) return { content_language: true };
+      if (method === "PUT") return write.promise;
+      return {
+        id: path.endsWith("/other") ? "other" : "n",
+        title: "Saved",
+        content: "old",
+        content_language: "json",
+        version: 1,
+      };
+    });
+    const view = renderEditor(true);
+    await act(async () => {
+      await view.result.current.loadDetail("n");
+    });
+    act(() => {
+      view.result.current.setContent("exact newest");
+      view.result.current.setIsDirty(true);
+    });
+    vi.mocked(tldwAuth.getCurrentUser).mockReturnValueOnce(auth.promise);
+    let save!: Promise<boolean>,
+      navigation!: Promise<boolean>,
+      duplicate!: Promise<boolean>;
+    act(() => {
+      save = view.result.current.saveNote({ showSuccessMessage: false });
+      duplicate = view.result.current.saveNote({ showSuccessMessage: false });
+      navigation = view.result.current.handleSelectNote("other");
+    });
+    expect(await duplicate).toBe(false);
+    expect(view.result.current.saveStatus).toBe("saving");
+    expect(
+      mocks.request.mock.calls.some(
+        ([x]) => x.method === "PUT" || x.path.endsWith("/other"),
+      ),
+    ).toBe(false);
+    await act(async () => {
+      auth.resolve(currentUser);
+    });
+    await waitFor(() =>
+      expect(
+        mocks.request.mock.calls.filter(([x]) => x.method === "PUT"),
+      ).toHaveLength(1),
+    );
+    expect(view.result.current.selectedId).toBe("n");
+    expect(
+      JSON.parse(
+        localStorage.getItem(`${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:alice`)!,
+      )["note:n"].content,
+    ).toBe("exact newest");
+    await act(async () => {
+      write.resolve({
+        id: "n",
+        title: "Saved",
+        content: "exact newest",
+        content_language: "json",
+        version: 2,
+      });
+      expect(await save).toBe(true);
+      expect(await navigation).toBe(true);
+    });
+    expect(
+      mocks.request.mock.calls.filter(([x]) => x.method === "PUT"),
+    ).toHaveLength(1);
+    expect(view.result.current.selectedId).toBe("other");
+    view.unmount();
   });
   it("starts fresh offline notes in known default mode and resets to that mode", () => {
     const view = renderEditor();

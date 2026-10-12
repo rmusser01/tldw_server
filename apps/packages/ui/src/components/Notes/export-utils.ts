@@ -1,4 +1,8 @@
-import { retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
+import {
+  knowledgeNoteWriteFields,
+  retainKnowledgeNoteProvenance,
+  type KnowledgeNoteHead,
+} from "@/utils/knowledge-note-provenance";
 import DOMPurify from "dompurify"
 import { marked } from "marked"
 import { isValidNoteLanguage } from './notes-manager-utils';
@@ -61,14 +65,17 @@ export const buildPortableNote = (note: SingleNoteExportData): string => {
       format_version: PORTABLE_NOTE_FORMAT_VERSION,
       id: note.id ?? null,
       title: note.title,
-      content: note.content,
+      content: retainKnowledgeNoteProvenance(note.content, note),
       content_language: note.content_language,
+      ...(note.content_language !== null && note.content_language !== "markdown"
+        ? knowledgeNoteWriteFields(note.content, note, { create: true })
+        : {}),
       keywords: note.keywords,
       ...(note.created_at !== undefined ? { created_at: note.created_at } : {}),
       ...(note.updated_at !== undefined ? { updated_at: note.updated_at } : {}),
     },
     null,
-    2
+    2,
   );
 };
 

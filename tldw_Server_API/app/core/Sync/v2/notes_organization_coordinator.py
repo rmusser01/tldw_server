@@ -1139,6 +1139,8 @@ class NotesOrganizationCoordinator:
             "conversation_id": note_step.payload.get("conversation_id"),
             "message_id": note_step.payload.get("message_id"),
         }
+        if "content_language" in note_step.payload:
+            response["content_language"] = note_step.payload["content_language"]
         for key in ("created_at", "last_modified", "version", "client_id", "deleted"):
             if key in metadata:
                 response[key] = metadata[key]

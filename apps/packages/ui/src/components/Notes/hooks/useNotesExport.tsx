@@ -1,4 +1,4 @@
-import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
+import { knowledgeNoteHead, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import React from 'react'
 import type { MessageInstance } from 'antd/es/message/interface'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
@@ -58,6 +58,7 @@ const readReportedTotal = (res: any): number | null => {
 }
 
 const toExportNote = (n: any): NoteListItem => ({
+  ...knowledgeNoteHead(n),
   id: n?.id,
   title: n?.title,
   content: typeof n?.content === "string" ? retainKnowledgeNoteProvenance(n.content, n) : undefined,
@@ -542,6 +543,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
       const note = captureExport
         ? captureExport()
         : {
+            ...knowledgeNoteHead(originalMetadata, content),
             id: selectedId,
             title,
             content,
@@ -603,6 +605,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     },
     [
       captureExport,
+      originalMetadata,
       content,
       contentLanguage,
       editorKeywords,

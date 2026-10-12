@@ -162,3 +162,20 @@ it("fails safely on an unexpected parser exception", async () => {
   expect(JSON.stringify(result)).not.toContain("private_source_secret");
   vi.restoreAllMocks();
 });
+
+it.each(["json", "yaml"])(
+  "independently refuses unchecked %s format above byte/depth limits",
+  (language) => {
+    for (const text of [
+      '"' + "😀".repeat(262144) + '"',
+      "[".repeat(101) + "0" + "]".repeat(101),
+    ]) {
+      const request = requestFor(text, language);
+      const result = formatDocument(request);
+      expect(result.state).toBe("resource_limited");
+      expect(result.replacement).toBeNull();
+      expect(result.check.format_allowed).toBe(false);
+      expect(request.text).toBe(text);
+    }
+  },
+);

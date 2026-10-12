@@ -470,7 +470,7 @@ test('actual native read-only option rejects BOM format without mutating source'
   });
 });
 
-test('actual manual Check and Format share byte/depth bounds without changing native draft', async ({
+test('resource-limited Check disables Format and preserves a responsive native draft', async ({
   page,
   request,
 }, info) => {
@@ -510,10 +510,11 @@ test('actual manual Check and Format share byte/depth bounds without changing na
       await expect(page.getByTestId('notes-document-status')).toHaveText(
         'Check reached a resource limit; source kept'
       );
-      await page.getByRole('button', { name: 'Format document', exact: true }).click();
-      await expect(page.getByTestId('notes-document-status')).toHaveText(
-        'Check reached a resource limit; source kept'
-      );
+      await expect(
+        page.getByRole('button', { name: 'Format document', exact: true })
+      ).toBeDisabled();
+      await title.fill('I3 resource refusal remains responsive');
+      await expect(title).toHaveValue('I3 resource refusal remains responsive');
       expect(await source(page)).toBe(text);
       mark('check-format-source-kept');
     }
