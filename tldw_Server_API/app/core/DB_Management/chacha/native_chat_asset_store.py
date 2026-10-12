@@ -464,7 +464,7 @@ class NativeChatAssetStore:
     def read_committed_asset(
         self, owner: Any, conversation_id: str, asset_id: str, revision: str, *, conn: Any,
     ) -> dict[str, Any]:
-        """Detach an exact committed fork claim; this grants no bundle readiness."""
+        """Detach exact committed/restored fork bytes; this grants no bundle readiness."""
         self._db.native_forks._require_active_transaction(conn)
         if owner.client_id != self._db.client_id:
             raise ValueError("operation_owner_mismatch")
@@ -488,7 +488,13 @@ class NativeChatAssetStore:
         if operation is None:
             raise ValueError("operation_not_recorded")
         self._db.native_forks._check_identity(operation, owner, operation["request_digest"])
-        if operation["state"] != "committed" or operation["child_conversation_id"] != conversation_id:
+        if (
+            not (
+                operation["state"] == "committed"
+                or (operation["state"] == "gone" and operation["terminal_reason"] == "child_deleted")
+            )
+            or operation["child_conversation_id"] != conversation_id
+        ):
             raise ValueError("native_asset_operation_uncommitted")
         self._db.native_forks.lock_open_workspace(owner, conn=conn)
         lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
@@ -501,6 +507,7 @@ class NativeChatAssetStore:
         if child is None or any((
             child["scope_type"] != owner.scope.kind, child["workspace_id"] != owner.scope.workspace_id,
             bool(child["deleted"]), child["required_projection_version"] != "native-fork-v1",
+            operation["projection_version"] != child["required_projection_version"],
             child["native_creation_operation_kind"] != "native_fork_v1",
             child["native_creation_operation_id"] != initial["operation_id"],
         )):
