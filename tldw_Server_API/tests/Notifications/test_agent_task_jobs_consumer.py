@@ -409,7 +409,6 @@ async def test_queued_agent_job_is_blocked_before_registered_executor(
         run_slot_key=SLOT,
     )
     assert run is not None  # nosec B101
-    assert run is not None  # nosec B101
     assert run["status"] == "skipped"  # nosec B101
     assert run["error"] == "agent_execution_stack_unimplemented"  # nosec B101
     audits, _total = sdb.list_audit_events(
@@ -440,9 +439,37 @@ async def test_tool_requesting_config_terminates_approval_required(consumer_env)
     assert run["status"] == "approval_required"
     assert run["error"] == "tools_require_read_only_envelope"
     assert "read-only tool envelope" in (run["result_summary"] or "")
+    # ADR-184 2A invariants (review of #3042): a policy boundary is not a
+    # failure -- health must NOT degrade -- and the pass-back notification
+    # must carry the approval kind specifically (a kind-map typo would
+    # otherwise pass silently).
+    sdb_definitions = ScheduledTasksDatabase.for_user(user_id=user_id)
+    pinned = sdb_definitions.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert pinned is not None  # nosec B101
+    assert pinned.health == "ready"
+    notification = _latest_notification(user_id)
+    assert notification is not None  # nosec B101
+    assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_approval_required_slot_replays_on_redelivery(consumer_env) -> None:
+    user_id = 1015
+    definition = _create_definition(
+        user_id, input_config={"question": "q", "tools": ["fs_read"]}
+    )
+    first = await handle_agent_task_job(_job(definition, user_id))
+    assert first["status"] == "approval_required"
+
+    second = await handle_agent_task_job(_job(definition, user_id))
+
+    # Terminal replay, not a claim-busy error and not a second outcome.
+    assert second["status"] == "approval_required"
+    assert second["run_id"] == first["run_id"]
+    assert second.get("deduped") is True
+
+
 async def test_no_executor_fails_honestly(consumer_env) -> None:
     user_id = 1015
     definition = _create_definition(user_id)

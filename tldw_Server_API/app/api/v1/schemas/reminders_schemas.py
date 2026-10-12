@@ -97,7 +97,23 @@ class ReminderTaskDeleteResponse(BaseModel):
     deleted: bool
 
 
-NotificationKind = Literal["reminder_due", "reminder_failed", "job_completed", "job_failed", "companion_reflection"]
+NotificationKind = Literal[
+    "reminder_due",
+    "reminder_failed",
+    "job_completed",
+    "job_failed",
+    "companion_reflection",
+    # Scheduled-automation pass-back kinds (ADR-077 phase 1 / ADR-184 2A,
+    # emitted by Scheduled_Tasks/agent_task_jobs.py). The inbox read path
+    # validates against this closed Literal: a kind missing here makes
+    # GET /notifications 500 on the row -- the four phase-1 kinds were
+    # missing until review of #3042 caught it.
+    "automation_run_succeeded",
+    "automation_run_failed",
+    "automation_run_timed_out",
+    "automation_run_skipped",
+    "automation_run_approval_required",
+]
 
 
 class NotificationResponse(BaseModel):
