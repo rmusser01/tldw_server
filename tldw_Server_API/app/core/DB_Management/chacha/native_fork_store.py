@@ -60,6 +60,20 @@ class NativeForkStore:
         ).fetchone()
         return dict(result) if result else None
 
+    def _require_active_transaction(self, conn: Any) -> None:
+        """Require the actual owning transaction before atomic native installation."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            state = self._db._connection_state()
+            active = (
+                getattr(conn, "_db", None) is self._db
+                and getattr(conn, "_connection", None) is getattr(state, "conn", None)
+                and getattr(state, "tx_depth", 0) > 0
+            )
+        else:
+            active = conn is self._db.get_connection() and conn.in_transaction
+        if not active:
+            raise NativeForkStoreError("active_transaction_required")
+
     def lock_open_workspace(self, owner: Any, *, conn: Any) -> None:
         """After the operation lock, serialize native admission with workspace closure."""
         if owner.scope.kind == "global":
@@ -319,17 +333,7 @@ class NativeForkStore:
             project_native_fork_messages,
         )
 
-        if self._db.backend_type == BackendType.POSTGRESQL:
-            state = self._db._connection_state()
-            active = (
-                getattr(conn, "_db", None) is self._db
-                and getattr(conn, "_connection", None) is getattr(state, "conn", None)
-                and getattr(state, "tx_depth", 0) > 0
-            )
-        else:
-            active = conn is self._db.get_connection() and conn.in_transaction
-        if not active:
-            raise NativeForkStoreError("active_transaction_required")
+        self._require_active_transaction(conn)
         request = NativeForkRequestV1.model_validate(request.model_dump(mode="json"))
         if (
             request.owner_key != owner.owner_key

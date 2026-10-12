@@ -186,6 +186,15 @@ class NativeChatAssetStore:
         self._require_exclusive_paths(
             owner.client_id, candidate_id, row["storage_namespace_id"], row["upload_id"], conn=conn
         )
+        self._require_confirmed_quota(owner, row, conn=conn)
+        self._require_live_attempt(
+            owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn
+        )
+        return dict(row)
+
+    def _require_confirmed_quota(self, owner: Any, row: Any, *, conn: Any) -> None:
+        """Require the original confirmed reservation before writes or adoption."""
+        candidate_id = row["candidate_id"]
         quota = conn.execute(
             "SELECT owner_key,size_bytes,state FROM native_chat_quota_intents "
             "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'",
@@ -203,10 +212,6 @@ class NativeChatAssetStore:
             is not None
         ):
             raise ValueError("candidate_release_started")
-        self._require_live_attempt(
-            owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn
-        )
-        return dict(row)
 
     @staticmethod
     def _quota_identity(owner: Any, quota_owner: Any) -> str:
@@ -365,6 +370,94 @@ class NativeChatAssetStore:
             (storage_key, now.isoformat(), owner.client_id, candidate_id),
         )
         return NativeCandidate(candidate_id, generation, "prepared")
+
+    def adopt_fork_candidate(
+        self, owner: Any, operation_id: str, request_digest: str, generation: int,
+        candidate_id: str, conversation_id: str, *, now: datetime, conn: Any,
+    ) -> dict[str, Any]:
+        """Install one exact live child claim in the caller's native fork transaction.
+
+        Graph/reference/receipt failures must roll back this same transaction.
+        This private transition performs no byte or external quota work and grants no readiness.
+        """
+        from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+
+        self._db.native_forks._require_active_transaction(conn)
+        if not isinstance(conversation_id, str) or not 1 <= len(conversation_id) <= 256:
+            raise ValueError("invalid_native_child_identity")
+        kind = "native_fork_v1"
+        now = self._require_live_attempt(owner, kind, operation_id, request_digest, generation, now, conn=conn)
+        lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        child = conn.execute(
+            "SELECT client_id,scope_type,workspace_id,deleted,"
+            "required_projection_version,native_creation_operation_kind,native_creation_operation_id "
+            "FROM conversations WHERE id = ? AND client_id = ?" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (conversation_id, owner.client_id),
+        ).fetchone()
+        if child is None or any((
+            child["scope_type"] != owner.scope.kind, child["workspace_id"] != owner.scope.workspace_id,
+            bool(child["deleted"]),
+            child["required_projection_version"] != "native-fork-v1",
+            child["native_creation_operation_kind"] != kind,
+            child["native_creation_operation_id"] != operation_id,
+        )):
+            raise ValueError("native_child_adoption_conflict")
+        row = self._candidate_row(owner.client_id, candidate_id, conn=conn)
+        if row is None or any((
+            row["owner_key"] != owner.owner_key, row["operation_kind"] != kind,
+            row["operation_id"] != operation_id, row["attempt_generation"] != generation,
+        )):
+            raise ValueError("candidate_not_found")
+        if row["state"] not in {"prepared", "adopted"}:
+            raise ValueError("candidate_state_conflict")
+        if row["representation"] not in {
+            "embedded_image_v1", "generated_image_revision_v1", "document_original_v1", "document_text_v1",
+        } or row["expected_size_bytes"] < 1:
+            raise ValueError("native_asset_representation_unsupported")
+        canonical_key = LocalSyncBlobStore.namespace_storage_key(row["storage_namespace_id"], "sha256:" + row["expected_hash"])
+        if row["storage_key"] != canonical_key:
+            raise ValueError("candidate_storage_identity_conflict")
+        self._require_exclusive_paths(owner.client_id, candidate_id, row["storage_namespace_id"], row["upload_id"], conn=conn)
+        self._require_confirmed_quota(owner, row, conn=conn)
+        claims = conn.execute(
+            "SELECT * FROM native_chat_asset_claims WHERE client_id = ? AND candidate_id = ? "
+            "ORDER BY claim_id" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (owner.client_id, candidate_id),
+        ).fetchall()
+        expected = {
+            "client_id": owner.client_id, "owner_key": owner.owner_key, "conversation_id": conversation_id,
+            "candidate_id": candidate_id, "asset_revision": 1, "content_hash": row["expected_hash"],
+            "size_bytes": row["expected_size_bytes"], "mime_type": row["mime_type"],
+            "representation": row["representation"], "state": "live",
+        }
+        self._require_live_attempt(owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn)
+        if row["state"] == "adopted":
+            if len(claims) != 1 or any(claims[0][key] != value for key, value in expected.items()):
+                raise ValueError("candidate_claim_conflict")
+            return dict(claims[0])
+        if claims:
+            raise ValueError("candidate_claim_conflict")
+        claim_id, asset_id = self._db._generate_uuid(), self._db._generate_uuid()
+        stamp = now.isoformat()
+        conn.execute(
+            "INSERT INTO native_chat_asset_claims "
+            "(client_id,claim_id,owner_key,conversation_id,candidate_id,asset_id,asset_revision,"
+            "content_hash,size_bytes,mime_type,representation,state,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,1,?,?,?,?, 'live',?,?)",
+            (owner.client_id, claim_id, owner.owner_key, conversation_id, candidate_id, asset_id,
+             row["expected_hash"], row["expected_size_bytes"], row["mime_type"], row["representation"], stamp, stamp),
+        )
+        changed = conn.execute(
+            "UPDATE native_chat_asset_candidates SET state = 'adopted',updated_at = ? "
+            "WHERE client_id = ? AND candidate_id = ? AND state = 'prepared' AND attempt_generation = ?",
+            (stamp, owner.client_id, candidate_id, generation),
+        )
+        if changed.rowcount != 1:
+            raise ValueError("candidate_state_conflict")
+        return dict(conn.execute(
+            "SELECT * FROM native_chat_asset_claims WHERE client_id = ? AND claim_id = ?",
+            (owner.client_id, claim_id),
+        ).fetchone())
 
     def _locked_candidate_for_operation(
         self, owner: Any, kind: str, operation_id: str, request_digest: str,
