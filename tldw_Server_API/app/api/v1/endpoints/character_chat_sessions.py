@@ -52,6 +52,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.chat_import_transport import ChatImportRoute
 from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
@@ -6742,6 +6743,9 @@ async def character_chat_completion(
 
         if require_current_persona(db, owner_id=str(current_user.id), conversation=conversation) is not None:
             raise HTTPException(status_code=409, detail={"code": "persona_session_generation_unsupported"})
+
+        # Usage quotas (LLM usage accounting spec §4a): refuse before any LLM call or streaming response.
+        await enforce_llm_quota(current_user.id)
 
         # Prepare rate limiter
         rate_limiter = get_character_rate_limiter()
