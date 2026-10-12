@@ -433,6 +433,36 @@ class NativeForkStore:
                         raise NativeForkStoreError("workspace_native_unavailable")
         return self._result(row)
 
+    def claim_retention_attempt(
+        self,
+        owner: Any,
+        request: NativeAssetRetentionRequestV1,
+        *,
+        conn: Any,
+    ) -> NativeAttempt | NativeOperationResult:
+        """Grant preparation only after original-source admission; publish no assets."""
+        self._require_active_transaction(conn)
+        conn.execute("SAVEPOINT native_retention_attempt")
+        try:
+            result = self.reserve_retention_operation(owner, request, conn=conn)
+            if result.state == "preparing":
+                # Lock waits and source reads must not consume the new lease's lifetime.
+                now = datetime.now(timezone.utc)
+                result = self.claim_attempt(
+                    owner,
+                    "native_asset_retention_v1",
+                    request.operation_id,
+                    request.request_digest,
+                    now=now,
+                    conn=conn,
+                )
+            conn.execute("RELEASE SAVEPOINT native_retention_attempt")
+            return result
+        except BaseException:
+            conn.execute("ROLLBACK TO SAVEPOINT native_retention_attempt")
+            conn.execute("RELEASE SAVEPOINT native_retention_attempt")
+            raise
+
     def claim_attempt(
         self,
         owner: Any,
@@ -453,6 +483,8 @@ class NativeForkStore:
         self._check_identity(row, owner, request_digest)
         if row["state"] != "preparing":
             return self.resolve_operation(owner, kind, operation_id, request_digest, conn=conn)
+        if type(row["attempt_generation"]) is not int or row["attempt_generation"] < 0:
+            raise NativeForkStoreError("operation_generation_invalid")
         lease_text = row["lease_expires_at"]
         if lease_text is not None:
             try:

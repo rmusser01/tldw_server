@@ -957,3 +957,68 @@ def test_native_storage_keeps_captured_owner_after_client_reassignment(
         assert not (tmp_path / "chat_assets").exists()
     with db.transaction() as conn:
         assert conn.execute("SELECT 1 FROM native_chat_quota_intents WHERE intent_kind = 'release'").fetchone() is None
+
+
+def test_retention_lease_renews_only_after_actual_empty_candidate_cleanup(native_fork_db, tmp_path, monkeypatch):
+    """Reserved candidate has no bytes/charge; actual guarded cleanup still must settle it."""
+    from tldw_Server_API.tests.DB_Management.test_native_retention_receipts import KIND, OPERATION, payload, request
+
+    db = native_fork_db
+    cid = db.add_conversation({"character_id": None, "title": "Retention preparation"})
+    with db.transaction() as conn:
+        token = db.native_forks.read_retention_source_revision(owner(), cid, conn=conn)
+    original = request(payload(cid) | {"owner_key": owner().owner_key, "expected_asset_manifest_revision": token})
+    with db.transaction() as conn:
+        first = db.native_forks.claim_retention_attempt(owner(), original, conn=conn)
+        db.native_assets.reserve_candidate(
+            owner(),
+            KIND,
+            OPERATION,
+            original.request_digest,
+            first.generation,
+            "retention-candidate",
+            NAMESPACE,
+            "retention-upload",
+            "0" * 64,
+            3,
+            "image/png",
+            "embedded_image_v1",
+            now=datetime.now(timezone.utc),
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE native_chat_operations SET lease_expires_at = ? WHERE operation_id = ?",
+            ("2000-01-01T00:00:00+00:00", OPERATION),
+        )
+    with db.transaction() as conn:
+        assert db.native_forks.claim_retention_attempt(owner(), original, conn=conn).state == "reconciliation_required"
+    root = tmp_path / "retention-root"
+    root.mkdir()
+    adapter = _io(db, root, monkeypatch)
+    assert adapter.reclaim(owner(), KIND, OPERATION, original.request_digest, "retention-candidate")
+    assert (
+        db.execute_query(
+            "SELECT state FROM native_chat_asset_candidates WHERE candidate_id = 'retention-candidate'"
+        ).fetchone()["state"]
+        == "discarded"
+    )
+    with db.transaction() as conn:
+        second = db.native_forks.claim_retention_attempt(owner(), original, conn=conn)
+        assert second.generation == first.generation + 1
+        with pytest.raises(ValueError, match="stale_attempt"):
+            db.native_assets.reserve_candidate(
+                owner(),
+                KIND,
+                OPERATION,
+                original.request_digest,
+                first.generation,
+                "old-worker",
+                "b" * 32,
+                "old-upload",
+                "0" * 64,
+                3,
+                "image/png",
+                "embedded_image_v1",
+                now=datetime.now(timezone.utc),
+                conn=conn,
+            )
