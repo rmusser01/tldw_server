@@ -7,7 +7,7 @@ import {
   type UseNotesEditorStateDeps,
 } from "../hooks/useNotesEditorState";
 
-const mocks = vi.hoisted(() => ({ request: vi.fn() }));
+const mocks = vi.hoisted(() => ({ request: vi.fn(), activity: vi.fn() }));
 vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.request }));
 vi.mock("@/services/tldw/TldwAuth", () => ({
   tldwAuth: {
@@ -19,7 +19,7 @@ vi.mock("../hooks/useNotesGraphAuthorityScope", () => ({
 }));
 vi.mock("@/services/notes-tasks", () => ({
   listNoteTasks: vi.fn(async () => ({ tasks: [] })),
-  listTaskActivity: vi.fn(async () => ({ events: [] })),
+  listTaskActivity: mocks.activity,
   markTaskActivityRead: vi.fn(),
   setNoteTaskStatus: vi.fn(),
 }));
@@ -83,6 +83,7 @@ function editor() {
 describe("temporary language at the actual canonical owner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.activity.mockResolvedValue({ events: [] });
     localStorage.clear();
   });
   it("keeps temporary structured mode through ordinary old-peer save and same-note reload without publishing metadata", async () => {
@@ -206,4 +207,76 @@ describe("temporary language at the actual canonical owner", () => {
     expect(view.result.current.selectedId).toBe("created");
     expect(view.result.current.effectiveContentLanguage).toBe("json");
   });
+  it.each([
+    "source",
+    "mode",
+    "temporary-mode",
+    "selection",
+    "authority",
+    "current-markdown",
+  ])(
+    "qualifies only its exact internal Studio reload before another render (%s)",
+    async (transition) => {
+      const unsupported = transition === "temporary-mode";
+      let generated = false;
+      mocks.request.mockImplementation(async ({ path }) =>
+        path.endsWith("/capabilities")
+          ? { content_language: !unsupported }
+          : {
+              id: "a",
+              title: "Owned",
+              content: generated ? "Reloaded source" : "Saved source",
+              version: 1,
+              ...(unsupported ? {} : { content_language: "markdown" }),
+            },
+      );
+      const view = editor();
+      await act(async () => {
+        await view.result.current.loadDetail("a");
+      });
+      await waitFor(() =>
+        expect(view.result.current.languagePersistence).toBe(
+          unsupported ? "temporary" : "portable",
+        ),
+      );
+      if (unsupported)
+        act(() => view.result.current.selectContentLanguage("markdown"));
+      const admission = view.result.current.captureMarkdownWriter()!;
+      expect(admission).not.toBeNull();
+      let release!: (value: { events: [] }) => void;
+      const pending = new Promise<{ events: [] }>((resolve) => {
+        release = resolve;
+      });
+      mocks.activity.mockReturnValueOnce(pending);
+      generated = true;
+      let reloading!: ReturnType<typeof admission.reload>;
+      act(() => {
+        reloading = admission.reload("a");
+      });
+      await waitFor(() =>
+        expect(view.result.current.content).toBe("Reloaded source"),
+      );
+      const rendered = view.result.current;
+      await act(async () => {
+        if (transition === "source")
+          rendered.setContentDirty("New native source");
+        if (transition === "mode" || transition === "temporary-mode")
+          rendered.selectContentLanguage("yaml");
+        if (transition === "selection") rendered.resetEditor();
+        if (transition === "authority")
+          window.dispatchEvent(new Event("tldw:auth-principal-changed"));
+        expect(view.result.current).toBe(rendered);
+        release({ events: [] });
+        const completed = await reloading;
+        expect(view.result.current).toBe(rendered);
+        expect(completed?.isCurrent()).toBe(transition === "current-markdown");
+        expect(completed?.loaded).toBe(transition === "current-markdown");
+      });
+      if (transition === "source")
+        expect(view.result.current.content).toBe("New native source");
+      if (transition === "temporary-mode")
+        expect(view.result.current.effectiveContentLanguage).toBe("yaml");
+    },
+  );
+
 });

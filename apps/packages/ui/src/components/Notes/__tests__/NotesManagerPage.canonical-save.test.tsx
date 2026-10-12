@@ -34,7 +34,11 @@ const {
   canonicalBoundary: {
     storage: {} as Record<string, unknown>,
     getConfig: vi.fn(),
-    userId: 7
+    userId: 7,
+    editor: null as ReturnType<
+      typeof import("../hooks/useNotesEditorState").useNotesEditorState
+    > | null,
+    editorRenders: 0,
   }
 }))
 
@@ -66,6 +70,22 @@ vi.mock("react-router-dom", async (importOriginal) => ({
 vi.mock("~/components/Layouts/Layout", () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
+
+vi.mock("../hooks/useNotesEditorState", async (original) => {
+  const actual =
+    await original<typeof import("../hooks/useNotesEditorState")>();
+  return {
+    ...actual,
+    useNotesEditorState: (
+      deps: import("../hooks/useNotesEditorState").UseNotesEditorStateDeps,
+    ) => {
+      const owner = actual.useNotesEditorState(deps);
+      canonicalBoundary.editor = owner;
+      canonicalBoundary.editorRenders += 1;
+      return owner;
+    },
+  };
+});
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
@@ -1002,4 +1022,97 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     },
     10000,
   );
+  it.each([
+    "source",
+    "portable-mode",
+    "temporary-mode",
+    "selection",
+    "authority",
+    "current-markdown",
+  ])(
+    "retires a pending attachment before the next owner render (%s)",
+    async (transition) => {
+      localStorage.clear();
+      const original = mockBgRequest.getMockImplementation()!;
+      const pending = deferred<unknown>();
+      const noteId = transition === "temporary-mode" ? "12" : "11";
+      mockBgRequest.mockImplementation(async (request) => {
+        if (request.path === "/api/v1/notes/capabilities")
+          return { content_language: transition !== "temporary-mode" };
+        if (
+          request.path === `/api/v1/notes/${noteId}` &&
+          request.method === "GET"
+        ) {
+          const note = await original({ ...request, path: "/api/v1/notes/11" });
+          return transition === "temporary-mode"
+            ? note
+            : { ...note, content_language: "markdown" };
+        }
+        if (request.path.endsWith("/attachments")) return pending.promise;
+        return original(request);
+      });
+      renderSourceRoute(`/notes?source_ref_id=${noteId}`);
+      await waitFor(() =>
+        expect(canonicalBoundary.editor?.content).toBe("Saved body"),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("combobox", { name: "Language", exact: true }),
+        ).not.toBeDisabled(),
+      );
+      if (transition === "temporary-mode") {
+        await waitFor(() =>
+          expect(canonicalBoundary.editor?.languagePersistence).toBe(
+            "temporary",
+          ),
+        );
+        act(() => canonicalBoundary.editor!.selectContentLanguage("markdown"));
+      }
+      await waitFor(() =>
+        expect(canonicalBoundary.editor?.markdownAllowed).toBe(true),
+      );
+      fireEvent.click(screen.getByTestId("notes-input-mode-wysiwyg"));
+      fireEvent.change(screen.getByTestId("notes-attachment-input"), {
+        target: {
+          files: [new File(["harmless"], "source.txt", { type: "text/plain" })],
+        },
+      });
+      await waitFor(() =>
+        expect(
+          mockBgRequest.mock.calls.some(([r]) =>
+            r.path.endsWith("/attachments"),
+          ),
+        ).toBe(true),
+      );
+      const renderedOwner = canonicalBoundary.editor!;
+      const renders = canonicalBoundary.editorRenders;
+      await act(async () => {
+        if (transition === "source")
+          renderedOwner.setContentDirty("New native source");
+        if (transition === "portable-mode" || transition === "temporary-mode")
+          renderedOwner.selectContentLanguage("yaml");
+        if (transition === "selection") renderedOwner.resetEditor();
+        if (transition === "authority")
+          window.dispatchEvent(new Event("tldw:auth-principal-changed"));
+        expect(canonicalBoundary.editorRenders).toBe(renders);
+        pending.resolve({
+          url: "/owned/source",
+          file_name: "source.txt",
+          content_type: "text/plain",
+        });
+        for (let i = 0; i < 8; i += 1) await Promise.resolve();
+        expect(canonicalBoundary.editorRenders).toBe(renders);
+      });
+      expect(canonicalBoundary.editor!.content).toBe(
+        transition === "source"
+          ? "New native source"
+          : transition === "selection"
+            ? ""
+            : transition === "current-markdown"
+              ? "Saved body\n[source.txt](/owned/source)"
+              : "Saved body",
+      );
+    },
+  );
+
 })

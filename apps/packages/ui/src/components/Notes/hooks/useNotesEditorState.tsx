@@ -267,7 +267,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const pendingSelectionEpochRef = React.useRef<number | null>(null)
   const [languageAuthorityEpoch, setLanguageAuthorityEpoch] = React.useState(0)
   const canonicalLanguageAbsentRef = React.useRef(false)
-  const [temporaryLanguage, setTemporaryLanguage] = React.useState<{
+  const [temporaryLanguage, setTemporaryLanguageState] = React.useState<{
     authority: string | null | undefined;
     connectionEpoch: number;
     epoch: number;
@@ -286,55 +286,24 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   authorityScopeRef.current = authorityScope
   // Set below once the save machine exists; tells it an in-flight save was cut off.
   const settleCancelledSaveRef = React.useRef<() => void>(() => {})
-  React.useEffect(() => {
-    const cancelRequests = () => {
-      authorityEpochRef.current += 1
-      pendingSelectionEpochRef.current = null
-      setLanguageAuthorityEpoch(value => value + 1)
-      setTemporaryLanguage(null)
-      for (const controller of authorityRequestsRef.current) controller.abort()
-      authorityRequestsRef.current.clear()
-      activeSaveRef.current = null
-      activeSavePromiseRef.current = null
-      savingInFlightRef.current = false
-      setSaving(false)
-      settleCancelledSaveRef.current()
-    }
-    const configChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
-      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) cancelRequests()
-    }
-    window.addEventListener('tldw:config-updated', configChanged)
-    window.addEventListener('tldw:auth-principal-changed', cancelRequests)
-    return () => {
-      if (authorityScopeRef.current === authorityScope) persistLeftoverDraftRef.current()
-      cancelRequests()
-      window.removeEventListener('tldw:config-updated', configChanged)
-      window.removeEventListener('tldw:auth-principal-changed', cancelRequests)
-    }
-  }, [authorityScope, connectionEpoch])
 
   // ---- editor state ----
   const [selectedId, setSelectedId] = React.useState<string | number | null>(null)
   const selectedIdRef = React.useRef(selectedId)
   selectedIdRef.current = selectedId
   const [title, setTitle] = React.useState('')
-  const [content, setContent] = React.useState('')
-  const setEditorTitle = React.useCallback((value: React.SetStateAction<string>) => {
-    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
-      setTitle(value)
-    }
-  }, [])
-  const setEditorContent = React.useCallback((value: React.SetStateAction<string>) => {
-    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
-      setContent(value)
-    }
-  }, [])
-  const [contentLanguage, setContentLanguageState] = React.useState<string | null | undefined>(
-    null
+  const [content, setContentState] = React.useState("");
+  const [contentLanguage, setCanonicalLanguageState] = React.useState<
+    string | null | undefined
+  >(null
   );
+  const canonicalLanguageRef = React.useRef(contentLanguage);
+  canonicalLanguageRef.current = contentLanguage;
   const [implicitDefaultLanguage, setImplicitDefaultLanguage] = React.useState(true);
-  const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false);
+  const [loadingDetail, setLoadingDetailState] = useNotesAuthorityState(
+    authorityScope,
+    false,
+  );
   const languageOwnerEpoch = authorityEpochRef.current;
   const languageCapability = useQuery({
     queryKey: [
@@ -438,7 +407,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     (effectiveContentLanguage === null ||
       effectiveContentLanguage === "markdown");
   const [saving, setSaving] = React.useState(false)
-  const [saveRecoveryNotice, setSaveRecoveryNotice] = React.useState<{kind: 'error'; message: string} | null>(null)
+  const [saveRecoveryNotice, setSaveRecoveryNoticeState] = React.useState<SaveRecoveryNotice | null>(null)
   // ---- save state machine (NS-01, NS-03, NS-N2, NS-05, NS-06) ----
   // One source of truth for autosave, retries, conflicts, the offline hand-off
   // and the status pill. Async code reads the ref; renders read the state.
@@ -553,7 +522,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [backlinkMessageId, setBacklinkMessageId] = React.useState<string | null>(null)
   const [remoteVersionInfo, setRemoteVersionInfo] = React.useState<RemoteVersionInfo | null>(null)
   const [editorMode, setEditorMode] = React.useState<NotesEditorMode>('edit')
-  const [editorInputMode, setEditorInputMode] = React.useState<NotesInputMode>('markdown')
+  const [editorInputMode, setEditorInputModeState] = React.useState<NotesInputMode>('markdown')
   // The WYSIWYG contentEditable is uncontrolled (NE-01, #3102). `wysiwygHtml` is
   // the latest document, from external replacements and from the user's own
   // edits. The editor writes it into the DOM only when `wysiwygRevision` changes
@@ -602,7 +571,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [openingLinkedChat, setOpeningLinkedChat] = React.useState(false)
 
   // ---- offline draft state ----
-  const [offlineDraftQueue, setOfflineDraftQueue] = useNotesAuthorityState<Record<string, OfflineDraftEntry>>(authorityScope, {})
+  const [offlineDraftQueue, setOfflineDraftQueueState] = useNotesAuthorityState<
+    Record<string, OfflineDraftEntry>
+  >(authorityScope, {});
   const [offlineDraftQueueHydrated, setOfflineDraftQueueHydrated] = useNotesAuthorityState(authorityScope, false)
   const offlineDraftStorageKey = authorityScope ? `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:${authorityScope}` : null
   const offlineDraftQueueRef = React.useRef<Record<string, OfflineDraftEntry>>({})
@@ -648,6 +619,223 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     editRevisionRef.current.originalMetadata = next
     setOriginalMetadataState(next)
   }, [])
+  // Mutable admission uses this owner's canonical refs, including before React commits.
+  const editorDisabledRef = React.useRef(editorDisabled);
+  editorDisabledRef.current = editorDisabled;
+  const loadingDetailRef = React.useRef(loadingDetail);
+  const saveRecoveryNoticeRef = React.useRef(saveRecoveryNotice);
+  const editorInputModeRef = React.useRef(editorInputMode);
+  loadingDetailRef.current = loadingDetail;
+  saveRecoveryNoticeRef.current = saveRecoveryNotice;
+  editorInputModeRef.current = editorInputMode;
+  const renderedMutation = dirtyRevisionRef.current;
+  const renderedSession = noteSelectionEpochRef.current;
+  const recordEffectiveLanguage = React.useCallback(
+    (language: string | null | undefined) => {
+      if (languageRevisionRef.current.language !== language) {
+        languageRevisionRef.current = {
+          language,
+          revision: languageRevisionRef.current.revision + 1,
+        };
+      }
+    },
+    [],
+  );
+  const setContent = React.useCallback(
+    (update: React.SetStateAction<string>) => {
+      const next =
+        typeof update === "function" ? update(contentRef.current) : update;
+      if (next !== contentRef.current) {
+        dirtyRevisionRef.current += 1;
+      }
+      contentRef.current = next;
+      setContentState(next);
+    },
+    [],
+  );
+  const setEditorTitle = React.useCallback((value: React.SetStateAction<string>) => {
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) setTitle(value)
+  }, [])
+  const setEditorContent = React.useCallback((value: React.SetStateAction<string>) => {
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) setContent(value)
+  }, [setContent])
+  const setTemporaryLanguage = React.useCallback(
+    (update: React.SetStateAction<typeof temporaryLanguage>) => {
+      const next =
+        typeof update === "function"
+          ? update(temporaryLanguageRef.current)
+          : update;
+      if (next !== temporaryLanguageRef.current) dirtyRevisionRef.current += 1;
+      temporaryLanguageRef.current = next;
+      setTemporaryLanguageState(next);
+      recordEffectiveLanguage(
+        next ? next.language : canonicalLanguageRef.current,
+      );
+    },
+    [recordEffectiveLanguage],
+  );
+  const setContentLanguageState = React.useCallback(
+    (update: React.SetStateAction<string | null | undefined>) => {
+      const previous = canonicalLanguageRef.current;
+      const next = typeof update === "function" ? update(previous) : update;
+      if (next !== previous) {
+        dirtyRevisionRef.current += 1;
+      }
+      canonicalLanguageRef.current = next;
+      setCanonicalLanguageState(next);
+      recordEffectiveLanguage(
+        temporaryLanguageRef.current
+          ? temporaryLanguageRef.current.language
+          : next,
+      );
+    },
+    [recordEffectiveLanguage],
+  );
+  const setEditorInputMode = React.useCallback(
+    (update: React.SetStateAction<NotesInputMode>) => {
+      const next =
+        typeof update === "function"
+          ? update(editorInputModeRef.current)
+          : update;
+      if (next !== editorInputModeRef.current) dirtyRevisionRef.current += 1;
+      editorInputModeRef.current = next;
+      setEditorInputModeState(next);
+    },
+    [],
+  );
+  const setLoadingDetail = React.useCallback(
+    (update: React.SetStateAction<boolean>) => {
+      const next =
+        typeof update === "function"
+          ? update(loadingDetailRef.current)
+          : update;
+      loadingDetailRef.current = next;
+      setLoadingDetailState(next);
+    },
+    [setLoadingDetailState],
+  );
+  const setSaveRecoveryNotice = React.useCallback(
+    (update: React.SetStateAction<SaveRecoveryNotice | null>) => {
+      const next =
+        typeof update === "function"
+          ? update(saveRecoveryNoticeRef.current)
+          : update;
+      if (
+        (next?.kind === "conflict") !==
+        (saveRecoveryNoticeRef.current?.kind === "conflict")
+      )
+        dirtyRevisionRef.current += 1;
+      saveRecoveryNoticeRef.current = next;
+      setSaveRecoveryNoticeState(next);
+    },
+    [],
+  );
+  const setOfflineDraftQueue = React.useCallback(
+    (update: React.SetStateAction<Record<string, OfflineDraftEntry>>) => {
+      if (authorityScopeRef.current !== authorityScope) return;
+      const next =
+        typeof update === "function"
+          ? update(offlineDraftQueueRef.current)
+          : update;
+      offlineDraftQueueRef.current = next;
+      setOfflineDraftQueueState(next);
+    },
+    [authorityScope, setOfflineDraftQueueState],
+  );
+
+  React.useEffect(() => {
+    const cancelRequests = () => {
+      authorityEpochRef.current += 1;
+      pendingSelectionEpochRef.current = null;
+      activeSavePromiseRef.current = null;
+      settleCancelledSaveRef.current();
+      setLanguageAuthorityEpoch((value) => value + 1);
+      setTemporaryLanguage(null);
+      for (const controller of authorityRequestsRef.current) controller.abort();
+      authorityRequestsRef.current.clear();
+      activeSaveRef.current = null;
+      savingInFlightRef.current = false;
+      setSaving(false);
+    };
+    const configChanged = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          authorityChanged?: boolean;
+          refreshSessionInvalidated?: boolean;
+        }>
+      ).detail;
+      if (
+        detail?.authorityChanged !== false ||
+        detail.refreshSessionInvalidated
+      )
+        cancelRequests();
+    };
+    window.addEventListener("tldw:config-updated", configChanged);
+    window.addEventListener("tldw:auth-principal-changed", cancelRequests);
+    return () => {
+      cancelRequests();
+      window.removeEventListener("tldw:config-updated", configChanged);
+      window.removeEventListener("tldw:auth-principal-changed", cancelRequests);
+    };
+  }, [authorityScope, connectionEpoch, setTemporaryLanguage]);
+
+  const setContentLanguage = React.useCallback(
+    (language: string | null) => {
+      if (!isValidNoteLanguage(language))
+        throw new Error("Invalid note language");
+      setContentLanguageState(language);
+      if (
+        editRevisionRef.current.contentLanguage !== language ||
+        editRevisionRef.current.implicitDefaultLanguage
+      ) {
+        editRevisionRef.current = {
+          ...editRevisionRef.current,
+          contentLanguage: language,
+          implicitDefaultLanguage: false,
+          revision: editRevisionRef.current.revision + 1,
+        };
+      }
+      setImplicitDefaultLanguage(false);
+      setSaveIndicator("dirty");
+      if (language !== contentLanguage || implicitDefaultLanguage)
+        setIsDirty(true);
+    },
+    [
+      contentLanguage,
+      implicitDefaultLanguage,
+      setIsDirty,
+      setSaveIndicator,
+      setContentLanguageState,
+    ],
+  );
+  const selectContentLanguage = React.useCallback(
+    (language: string | null) => {
+      if (!isValidNoteLanguage(language))
+        throw new Error("Invalid note language");
+      if (temporaryEligible) {
+        setTemporaryLanguage({
+          authority: authorityScope,
+          connectionEpoch,
+          epoch: languageOwnerEpoch,
+          noteId: selectedId == null ? null : String(selectedId),
+          language,
+        });
+      } else if (languageCapability.data === "portable") {
+        setTemporaryLanguage(null);
+        setContentLanguage(language);
+      }
+    },
+    [
+      temporaryEligible,
+      authorityScope,
+      connectionEpoch,
+      languageOwnerEpoch,
+      selectedId,
+      languageCapability.data,
+      setContentLanguage,
+      setTemporaryLanguage,
+    ],
+  );
 
   // ---- AI assist undo ----
   const contentBeforeAssistRef = React.useRef<string | null>(null)
@@ -676,7 +864,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     clearAssistUndoState();
     setSaveRecoveryNotice(null)
     setEditProvenance((current) => (current.mode === 'manual' ? current : { mode: 'manual' }))
-  }, [clearAssistUndoState]);
+  }, [clearAssistUndoState, setSaveRecoveryNotice]);
 
   const markGeneratedEdit = React.useCallback((action: NotesAssistAction) => {
     setEditProvenance({
@@ -684,7 +872,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       action,
       at: Date.now()
     })
-  }, [])
+    },
+    [setSaveRecoveryNotice],
+  );
 
   const restoreFocusAfterOverlayClose = React.useCallback((target: HTMLElement | null) => {
     if (!target) return
@@ -878,6 +1068,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
       contentRef.current = nextContent
       setContent(nextContent)
+      if (editRevisionRef.current.content !== nextContent) {
+        editRevisionRef.current = {
+          ...editRevisionRef.current,
+          content: nextContent,
+          revision: editRevisionRef.current.revision + 1,
+        };
+      }
       setIsDirty(true)
       setMonitoringNotice(null)
       setTaskConflictNotice(null)
@@ -989,95 +1186,160 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     })
   }, [updateRecentNotes])
 
-  const loadDetail = React.useCallback(async (id: string | number, ownedRequest?: NotesOwnedRequestOptions, savedEditRevision?: number): Promise<boolean> => {    if (activeSaveRef.current && ownedRequest?.abortSignal !== activeSaveRef.current.signal) {
-      activeSaveRef.current.abort()
-      activeSaveRef.current = null
-      activeSavePromiseRef.current = null
-      savingInFlightRef.current = false
-      setSaving(false)
-      if (saveStateRef.current.status === 'saving') {
-        dispatchSave({ type: 'save-cancelled', hasPendingEdits: isDirtyRef.current })
+  const loadDetail = React.useCallback(
+    async (
+      id: string | number,
+      ownedRequest?: NotesOwnedRequestOptions,
+      savedEditRevision?: number,
+      accepted?: () => () => boolean,
+    ): Promise<boolean> => {
+      if (
+        activeSaveRef.current &&
+        ownedRequest?.abortSignal !== activeSaveRef.current.signal
+      ) {
+        activeSaveRef.current.abort();
+        activeSaveRef.current = null;
+        savingInFlightRef.current = false;
+        setSaving(false);
       }
-    }
-    const requestAuthorityScope = authorityScope
-    const requestEpoch = authorityEpochRef.current
-    const noteEpoch = ++noteSelectionEpochRef.current
-    const editRevision = savedEditRevision ?? editRevisionRef.current.revision
-    const isCurrent = () => !ownedRequest?.abortSignal.aborted && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === noteEpoch
-    if (requestAuthorityScope === null) return false
-    pendingSelectionEpochRef.current = String(selectedIdRef.current) !== String(id) ? noteEpoch : null
-    clearAssistUndoState()
-    setLoadingDetail(true)
-    try {
-      const d = await bgRequest<any>({ ...ownedRequest, path: noteResourcePath(id) as any, method: 'GET' as any })
-      if (!isCurrent() || editRevisionRef.current.revision !== editRevision) return false
-      const modePresent = d !== null && typeof d === 'object' && Object.hasOwn(d, 'content_language')
-      const temporaryNote = temporaryLanguageRef.current
-      const sameNote = String(selectedId) === String(id) ||
-        (temporaryNote?.noteId === String(id) && temporaryNote.authority === authorityScope &&
-          temporaryNote.connectionEpoch === connectionEpoch && temporaryNote.epoch === authorityEpochRef.current)
-      canonicalLanguageAbsentRef.current = !modePresent && (!sameNote || editRevisionRef.current.contentLanguage === undefined)
-      if (modePresent || !sameNote) setTemporaryLanguage(null)
-      const loadedTitle = String(d?.title || `Note ${id}`)
-      savedTitleRef.current = { noteId: String(id), title: String(d?.title || '') }
-      selectedIdRef.current = id
-      setSelectedId(id)
-      setImplicitDefaultLanguage(false);
-      setTitle(String(d?.title || ''))
-      setContent(String(d?.content || ''))
-      setContentLanguageState((previous) => d?.content_language !== undefined ? d.content_language : String(selectedId) === String(id) ? previous : undefined)
-      setEditorKeywords(extractKeywords(d))
-      assignSelectedVersion(toNoteVersion(d))
-      setSelectedLastSavedAt(toNoteLastModified(d))
-      const rawMeta = d && typeof d === "object" ? (d as any).metadata : null
-      const head = knowledgeNoteHead(d, String(d?.content || ''))
-      setOriginalMetadata({ ...(rawMeta && typeof rawMeta === 'object' ? rawMeta : {}), ...head, ...(head.knowledge_provenance || {}) })
-      const rawStudio = d && typeof d === 'object' ? (d as any).studio : null
-      setSelectedStudioSummary(
-        rawStudio && typeof rawStudio === 'object'
-          ? { ...(rawStudio as NoteStudioDocumentSummary) }
-          : null
-      )
-      const links = extractBacklink(d)
-      setBacklinkConversationId(links.conversation_id)
-      setBacklinkMessageId(links.message_id)
-      setDirtyFlag(false)
-      interruptedSaveRef.current = false
-      // A 2xx read of the server copy is an acknowledged state.
-      dispatchSave({
-        type: 'loaded',
-        acknowledged: isOnline && toNoteVersion(d) != null && Boolean(toNoteLastModified(d))
-      })
-      setEditProvenance({ mode: 'manual' })
-      setMonitoringNotice(null)
-      clearTaskState()
-      setRemoteVersionInfo(null)
-      setEditorCursorIndex(0)
-      replaceWysiwygHtml(d?.content_language === null || d?.content_language === 'markdown' ? markdownToWysiwygHtml(String(d?.content || '')) : '<p><br/></p>')
-      setWysiwygSessionDirty(false)
-      markdownBeforeWysiwygRef.current = String(d?.content || '')
-      rememberRecentNote(id, loadedTitle)
-      const queuedDraft = offlineDraftQueueRef.current[`note:${String(id)}`]
-      if (queuedDraft) {
-        applyOfflineDraftToEditor(
-          queuedDraft.content_language === undefined &&
-            queuedDraft.baseVersion != null &&
-            queuedDraft.baseVersion === toNoteVersion(d) &&
-            d?.content_language !== undefined
-            ? { ...queuedDraft, content_language: d.content_language }
-            : queuedDraft
+      const requestAuthorityScope = authorityScope;
+      const requestEpoch = authorityEpochRef.current;
+      const noteEpoch = ++noteSelectionEpochRef.current;
+      pendingSelectionEpochRef.current = noteEpoch;
+      const editRevision =
+        savedEditRevision ?? editRevisionRef.current.revision;
+      const mutation = dirtyRevisionRef.current;
+      const isCurrent = () =>
+        !ownedRequest?.abortSignal.aborted &&
+        authorityEpochRef.current === requestEpoch &&
+        authorityScopeRef.current === requestAuthorityScope &&
+        noteSelectionEpochRef.current === noteEpoch;
+      if (requestAuthorityScope === null) return false;
+      clearAssistUndoState();
+      setLoadingDetail(true);
+      try {
+        const d = await bgRequest<any>({
+          ...ownedRequest,
+          path: noteResourcePath(id) as any,
+          method: "GET" as any,
+        });
+        if (
+          !isCurrent() ||
+          dirtyRevisionRef.current !== mutation ||
+          editRevisionRef.current.revision !== editRevision
+        )
+          return false;
+        const modePresent =
+          d !== null &&
+          typeof d === "object" &&
+          Object.hasOwn(d, "content_language");
+        const temporaryNote = temporaryLanguageRef.current;
+        const sameNote =
+          String(selectedId) === String(id) ||
+          (temporaryNote?.noteId === String(id) &&
+            temporaryNote.authority === authorityScope &&
+            temporaryNote.connectionEpoch === connectionEpoch &&
+            temporaryNote.epoch === authorityEpochRef.current);
+        canonicalLanguageAbsentRef.current =
+          !modePresent &&
+          (!sameNote || editRevisionRef.current.contentLanguage === undefined);
+        if (modePresent || !sameNote) setTemporaryLanguage(null);
+        const loadedTitle = String(d?.title || `Note ${id}`);
+        savedTitleRef.current = { noteId: String(id), title: String(d?.title || "") };
+        selectedIdRef.current = id;
+        setSelectedId(id);
+        setImplicitDefaultLanguage(false);
+        setTitle(String(d?.title || ""));
+        setContent(String(d?.content || ""));
+        setContentLanguageState((previous) =>
+          d?.content_language !== undefined
+            ? d.content_language
+            : String(selectedId) === String(id)
+              ? previous
+              : undefined,
         );
+        setEditorKeywords(extractKeywords(d));
+        setSelectedVersion(toNoteVersion(d));
+        setSelectedLastSavedAt(toNoteLastModified(d));
+        const rawMeta = d && typeof d === "object" ? (d as any).metadata : null;
+        setOriginalMetadata(
+          rawMeta && typeof rawMeta === "object"
+            ? { ...(rawMeta as Record<string, any>) }
+            : null,
+        );
+        const rawStudio = d && typeof d === "object" ? (d as any).studio : null;
+        setSelectedStudioSummary(
+          rawStudio && typeof rawStudio === "object"
+            ? { ...(rawStudio as NoteStudioDocumentSummary) }
+            : null,
+        );
+        const links = extractBacklink(d);
+        setBacklinkConversationId(links.conversation_id);
+        setBacklinkMessageId(links.message_id);
+        setIsDirty(false);
+        setSaveIndicator(
+          isOnline && toNoteVersion(d) != null && toNoteLastModified(d)
+            ? "saved"
+            : "idle",
+        );
+        setSaveRecoveryNotice(null);
+        setEditProvenance({ mode: "manual" });
+        setMonitoringNotice(null);
+        clearTaskState();
+        setRemoteVersionInfo(null);
+        setEditorCursorIndex(0);
+        replaceWysiwygHtml(
+          d?.content_language === null || d?.content_language === "markdown"
+            ? markdownToWysiwygHtml(String(d?.content || ""))
+            : "<p><br/></p>",
+        );
+        setWysiwygSessionDirty(false);
+        markdownBeforeWysiwygRef.current = String(d?.content || "");
+        rememberRecentNote(id, loadedTitle);
+        const queuedDraft = offlineDraftQueueRef.current[`note:${String(id)}`];
+        if (queuedDraft) {
+          applyOfflineDraftToEditor(
+            queuedDraft.content_language === undefined &&
+              queuedDraft.baseVersion != null &&
+              queuedDraft.baseVersion === toNoteVersion(d) &&
+              d?.content_language !== undefined
+              ? { ...queuedDraft, content_language: d.content_language }
+              : queuedDraft,
+          );
+        }
+        const applied = accepted?.();
+        await refreshTaskStateForNote(id, ownedRequest);
+        return isCurrent() && (!applied || applied());
+      } catch {
+        if (isCurrent()) message.error("Failed to load note");
+        return false;
+      } finally {
+        if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null;
+        if (isCurrent()) setLoadingDetail(false);
       }
-      await refreshTaskStateForNote(id, ownedRequest)
-      return isCurrent()
-    } catch {
-      if (isCurrent()) message.error('Failed to load note')
-      return false
-    } finally {
-      if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
-      if (isCurrent()) setLoadingDetail(false)
-    }
-  }, [applyOfflineDraftToEditor, assignSelectedVersion, authorityScope, connectionEpoch, selectedId, clearAssistUndoState, clearTaskState, dispatchSave, isOnline, message, refreshTaskStateForNote, rememberRecentNote, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setLoadingDetail, setMonitoringNotice, setOriginalMetadata])
+    },
+    [
+      applyOfflineDraftToEditor,
+      authorityScope,
+      connectionEpoch,
+      selectedId,
+      clearAssistUndoState,
+      clearTaskState,
+      isOnline,
+      message,
+      refreshTaskStateForNote,
+      rememberRecentNote,
+      setEditorKeywords,
+      setIsDirty,
+      setLoadingDetail,
+      setSaveIndicator,
+      setMonitoringNotice,
+      setContent,
+      setContentLanguageState,
+      setSaveRecoveryNotice,
+      setTemporaryLanguage,
+    ],
+  );
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -1427,6 +1689,91 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     },
     [confirmDiscardIfDirty, isMobileViewport, loadDetail, setMobileSidebarOpen]
   )
+
+  const captureMarkdownWriter = () => {
+    // A stale event closure cannot start a writer after a synchronous mutation.
+    if (
+      dirtyRevisionRef.current !== renderedMutation ||
+      noteSelectionEpochRef.current !== renderedSession
+    )
+      return null;
+    const capture = (
+      session: number,
+      noteId: string | number | null,
+      ownLoading = false,
+    ) => {
+      const source = contentRef.current;
+      const mutation = dirtyRevisionRef.current;
+      const language = languageRevisionRef.current.language;
+      const languageRevision = languageRevisionRef.current.revision;
+      const inputMode = editorInputModeRef.current;
+      const scope = authorityScopeRef.current;
+      const epoch = authorityEpochRef.current;
+      const connection = connectionEpochRef.current;
+      const isCurrent = () =>
+        !editorDisabledRef.current &&
+        (ownLoading || !loadingDetailRef.current) &&
+        Boolean(scope) &&
+        authorityScopeRef.current === scope &&
+        authorityEpochRef.current === epoch &&
+        connectionEpochRef.current === connection &&
+        noteSelectionEpochRef.current === session &&
+        dirtyRevisionRef.current === mutation &&
+        contentRef.current === source &&
+        languageRevisionRef.current.language === language &&
+        languageRevisionRef.current.revision === languageRevision &&
+        (language === null || language === "markdown") &&
+        editorInputModeRef.current === inputMode &&
+        saveRecoveryNoticeRef.current?.kind !== "conflict" &&
+        offlineDraftQueueRef.current[`note:${String(noteId)}`]?.syncState !==
+          "conflict";
+      return { content: source, inputMode, isCurrent };
+    };
+    const initial = capture(renderedSession, selectedId);
+    if (!initial.isCurrent()) return null;
+    const epoch = authorityEpochRef.current;
+    const scope = authorityScopeRef.current;
+    const mutation = dirtyRevisionRef.current;
+    const languageRevision = languageRevisionRef.current.revision;
+    return {
+      ...initial,
+      reload: async (id: string | number, confirm = false) => {
+        if (!initial.isCurrent()) return null;
+        if (
+          confirm &&
+          (!(await confirmDiscardIfDirty()) || !initial.isCurrent())
+        )
+          return null;
+        const expectedSession = noteSelectionEpochRef.current + 1;
+        let applied: ReturnType<typeof capture> | null = null;
+        const loaded = await loadDetail(id, undefined, undefined, () => {
+          applied = capture(expectedSession, id, true);
+          return applied.isCurrent;
+        });
+        // Exactly this load's issued token, never a rendered delta or an interval.
+        const admission = applied ?? {
+          ...initial,
+          isCurrent: () =>
+            noteSelectionEpochRef.current === expectedSession &&
+            authorityEpochRef.current === epoch &&
+            authorityScopeRef.current === scope &&
+            dirtyRevisionRef.current === mutation &&
+            contentRef.current === initial.content &&
+            languageRevisionRef.current.revision === languageRevision &&
+            (languageRevisionRef.current.language === null ||
+              languageRevisionRef.current.language === "markdown") &&
+            !editorDisabledRef.current &&
+            saveRecoveryNoticeRef.current?.kind !== "conflict" &&
+            offlineDraftQueueRef.current[`note:${String(id)}`]?.syncState !==
+              "conflict",
+        };
+        return {
+          loaded,
+          isCurrent: () => !loadingDetailRef.current && admission.isCurrent(),
+        };
+      },
+    };
+  };
 
   // ---- version conflict ----
   const isVersionConflictError = React.useCallback((error: any) => {
@@ -2228,9 +2575,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setOfflineDraftQueue,
       setOriginalMetadata,
       showKeywordSyncWarning,
-      t
-    ]
-  )
+      t,
+      title,
+      setContentLanguageState,
+      setSaveRecoveryNotice,
+      setTemporaryLanguage,
+    ],
+  );
 
   // Keep ref in sync
   saveNoteRef.current = saveNote
@@ -2683,8 +3034,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setMonitoringNotice,
     message,
     t,
-    titleSuggestionLoading
-  ])
+    titleSuggestionLoading,
+    setSaveRecoveryNotice,
+  ]);
 
   // ---- assist actions ----
   const runAssistAction = React.useCallback(
@@ -3548,6 +3900,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     markGeneratedEdit,
     restoreFocusAfterOverlayClose,
     setContentDirty,
+    captureMarkdownWriter,
     resizeEditorTextarea,
     loadDetail,
     refreshTaskStateForNote,

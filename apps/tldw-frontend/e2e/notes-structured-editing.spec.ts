@@ -1,8 +1,9 @@
 /** Production Notes qualification; all API records belong to this synthetic run. */
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import type { OnMount } from '@monaco-editor/react';
 import { seedAuth, TEST_CONFIG } from './utils/helpers';
+import { withOwnedNote } from './utils/notes-owned';
 
 const source = (page: Page) =>
   page.evaluate(() => {
@@ -66,57 +67,37 @@ async function owned(
   language: string | null,
   run: (note: { id: string; title: string }) => Promise<void>
 ) {
-  const headers = { 'X-API-KEY': TEST_CONFIG.apiKey };
   const title = `I3 ${Date.now()} ${Math.random().toString(36).slice(2)}`;
-  const response = await request.post(`${TEST_CONFIG.serverUrl}/api/v1/notes/`, {
-    headers,
-    data: { title, content: text, content_language: language },
-  });
-  expect(response.ok()).toBeTruthy();
-  const note = await response.json();
-  appendFileSync(
-    '/private/tmp/i3-evidence/owned-notes.jsonl',
-    JSON.stringify({ id: note.id, title, createdAt: Date.now() }) + '\n'
-  );
-  try {
-    if (process.env.I3_COOKIE_AUTH === '1')
+  return withOwnedNote(
+    request,
+    test.info(),
+    { title, content: text, content_language: language },
+    async (note) => {
+      if (process.env.I3_COOKIE_AUTH === '1')
+        await page.addInitScript(() => {
+          localStorage.setItem('__tldw_first_run_complete', 'true');
+          localStorage.setItem('assistant_setup_dismissed', 'true');
+          localStorage.setItem('notes-tutorial-shown', JSON.stringify('1'));
+          localStorage.setItem('isMigrated', 'true');
+        });
+      else await seedAuth(page);
       await page.addInitScript(() => {
-        localStorage.setItem('__tldw_first_run_complete', 'true');
-        localStorage.setItem('assistant_setup_dismissed', 'true');
-        localStorage.setItem('notes-tutorial-shown', JSON.stringify('1'));
-        localStorage.setItem('isMigrated', 'true');
+        localStorage.removeItem('__tldw_test_bypass');
+        localStorage.removeItem('__tldw_allow_offline');
       });
-    else await seedAuth(page);
-    await page.addInitScript(() => {
-      localStorage.removeItem('__tldw_test_bypass');
-      localStorage.removeItem('__tldw_allow_offline');
-    });
-    await page.goto('/notes');
-    expect(
-      await page.evaluate(() => [
-        localStorage.getItem('__tldw_test_bypass'),
-        localStorage.getItem('__tldw_allow_offline'),
-      ])
-    ).toEqual([null, null]);
-    await page.getByRole('button', { name: `Open note ${title}`, exact: true }).click();
-    await run({ ...note, title });
-  } finally {
-    await page.close();
-    const response = await request.get(`${TEST_CONFIG.serverUrl}/api/v1/notes/${note.id}`, {
-      headers,
-    });
-    if (response.ok()) {
-      const current = await response.json();
+      await page.goto('/notes');
       expect(
-        (
-          await request.delete(`${TEST_CONFIG.serverUrl}/api/v1/notes/${note.id}`, {
-            headers: { ...headers, 'expected-version': String(current.version) },
-          })
-        ).ok()
-      ).toBeTruthy();
+        await page.evaluate(() => [
+          localStorage.getItem('__tldw_test_bypass'),
+          localStorage.getItem('__tldw_allow_offline'),
+        ])
+      ).toEqual([null, null]);
+      await page.getByRole('button', { name: `Open note ${title}`, exact: true }).click();
+      await run(note);
     }
-  }
+  );
 }
+
 for (const [profile, a, c] of [
   ['LF', '{"a":1}', '{\n  "a": 1\n}'],
   ['CRLF', '{\r\n"a":1\r\n}\r\n', '{\r\n  "a": 1\r\n}'],
@@ -474,13 +455,13 @@ test('actual native read-only option rejects BOM format without mutating source'
 test('actual manual Check and Format share byte/depth bounds without changing native draft', async ({
   page,
   request,
-}) => {
+}, info) => {
   test.setTimeout(60_000);
-  const mark = (step: string) =>
-    appendFileSync(
-      '/private/tmp/i3-evidence/bounds-steps.jsonl',
-      JSON.stringify({ step, time: Date.now() }) + '\n'
-    );
+  const steps: Array<{ step: string; time: number }> = [];
+  const mark = (step: string) => {
+    steps.push({ step, time: Date.now() });
+    writeFileSync(info.outputPath('bounds-steps.json'), JSON.stringify(steps));
+  };
   await owned(page, request, '{}', 'json', async () => {
     await expect.poll(() => source(page)).toBe('{}');
     const shortcuts = await keys(page);
@@ -648,4 +629,27 @@ test('pending actual Markdown attachment cannot rewrite a newly structured sourc
     );
     expect(await source(page)).toBe('body');
   });
+});
+
+test('owned Notes setup failure retires the actual allocated record', async ({ request }, info) => {
+  let id = '';
+  await expect(
+    withOwnedNote(
+      request,
+      info,
+      { title: `I3 cleanup ${Date.now()}`, content: '{}', content_language: 'json' },
+      async (note) => {
+        id = note.id;
+        throw Error('Owned setup failure');
+      }
+    )
+  ).rejects.toThrow('Owned setup failure');
+  expect(id).not.toBe('');
+  expect(
+    (
+      await request.get(`${TEST_CONFIG.serverUrl}/api/v1/notes/${id}`, {
+        headers: { 'X-API-KEY': TEST_CONFIG.apiKey },
+      })
+    ).status()
+  ).toBe(404);
 });
