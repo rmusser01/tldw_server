@@ -147,3 +147,21 @@ async def test_failed_realtime_auth_binds_no_user(monkeypatch: pytest.MonkeyPatc
 
     assert await authenticate_realtime_websocket(ws, route_kind="openai_compat") == (False, None)
     assert current_llm_user_id() is None
+
+
+@pytest.mark.asyncio
+async def test_auth_with_no_user_id_succeeds_and_binds_no_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Authentication that succeeds without a user id leaves no user bound."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+
+    async def _auth_without_user(*_args: object, **_kwargs: object) -> tuple[bool, None]:
+        """Succeed, naming no user."""
+        return True, None
+
+    monkeypatch.setattr(streaming_service, "_audio_ws_authenticate_impl", _auth_without_user)
+    ws = DummyWebSocket()
+
+    result = await streaming_service._audio_ws_authenticate(ws, None, endpoint_id="audio.test", ws_path="/test")
+
+    assert result == (True, None)
+    assert current_llm_user_id() is None

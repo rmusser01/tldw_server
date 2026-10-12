@@ -28,7 +28,7 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | `tldw_Server_API/app/services/web_scraping_service.py` | 21 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_from_sitemap` |
 | `tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py` | 96 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/Media/test_web_summary_service_prompt.py` | 23 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
-| `tldw_Server_API/tests/Usage/test_llm_state_private_pools.py` | 9 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
+| `tldw_Server_API/tests/Usage/test_llm_state_private_pools.py` | 11 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
 | `tldw_Server_API/tests/WebScraping/test_clustering_fallback.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.clear_extraction_caches` |
 | `tldw_Server_API/tests/WebScraping/test_clustering_fallback.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.extract_article_with_pipeline` |
 | `tldw_Server_API/tests/WebScraping/test_clustering_fallback.py` | 1 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.get_extraction_cache_stats` |
@@ -85,7 +85,7 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 
 | Path | Line | Import |
 | --- | ---: | --- |
-| `tldw_Server_API/app/api/v1/endpoints/research.py` | 45 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
+| `tldw_Server_API/app/api/v1/endpoints/research.py` | 46 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs` |
 | `tldw_Server_API/app/core/MCP_unified/modules/implementations/web_search_module.py` | 73 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch` |
 | `tldw_Server_API/app/core/RAG/rag_service/media_search.py` | 202 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch` |
 | `tldw_Server_API/app/core/RAG/rag_service/media_search.py` | 292 | `tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch` |

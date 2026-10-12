@@ -1,9 +1,11 @@
-"""Two thread pools created at their call site carry the LLM call state (LLM usage accounting spec §1)."""
+"""Thread pools created at their call site carry the LLM call state (LLM usage accounting spec §1)."""
 
 import json
 
 import pytest
 
+from tldw_Server_API.app.api.v1.endpoints import research
+from tldw_Server_API.app.api.v1.schemas.websearch_schemas import WebSearchRequest
 from tldw_Server_API.app.core.Claims_Extraction import ingestion_claims
 from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id, llm_call_context
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as extractor_lib
@@ -41,3 +43,21 @@ def test_the_article_extractor_pool_sees_the_submitters_user(monkeypatch: pytest
     with llm_call_context(user_id=7):
         assert extractor_lib.sync_recursive_scrape("https://example.com", 1, 1) == []
     assert seen == [7]
+
+
+async def test_the_web_search_pool_sees_the_submitters_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sub-query generation runs on the endpoint module's own pool; it sees the user set at the submit."""
+    seen: list[int | None] = []
+    phase1 = {"web_search_results_dict": {"results": [{"url": "https://example.com"}]}, "sub_query_dict": {}}
+
+    def _probe(*_args: object, **_kwargs: object) -> dict:
+        """Record the user and return a minimal phase-1 result."""
+        seen.append(current_llm_user_id())
+        return phase1
+
+    monkeypatch.setattr(research, "generate_and_search", _probe)
+    payload = WebSearchRequest(query="q", aggregate=False)
+    with llm_call_context(user_id=7):
+        result = await research.websearch_endpoint(payload, request=None, current_user=None, db=None)
+    assert seen == [7]
+    assert result == phase1

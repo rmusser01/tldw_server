@@ -42,7 +42,7 @@ async def test_each_job_runs_for_its_own_owner_and_none_leaks(tmp_path) -> None:
 
     await asyncio.wait_for(sdk.run(handler=handler, job_type="t"), timeout=5)
 
-    assert sorted(seen) == [("7", 7), ("9", 9), ("u", None)]
+    assert seen == [("7", 7), ("u", None), ("9", 9)]
     assert current_llm_user_id() is None
 
 
@@ -66,4 +66,4 @@ async def test_a_failing_handler_still_releases_the_user(tmp_path) -> None:
 
     await asyncio.wait_for(sdk.run(handler=handler, job_type="t"), timeout=5)
 
-    assert sorted(seen, key=lambda value: -1 if value is None else value) == [None, 7]
+    assert seen == [7, None]

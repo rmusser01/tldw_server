@@ -1,6 +1,7 @@
 """A workflow step sees its run's owner as the LLM usage user (spec §1)."""
 
 import asyncio
+import sqlite3
 import threading
 import uuid
 
@@ -80,6 +81,32 @@ async def test_a_run_with_a_non_numeric_owner_runs_with_no_user(tmp_path, monkey
     monkeypatch.setattr(engine_mod, "get_adapter", lambda _step_type: _adapter)
     await engine_mod.WorkflowEngine(db).start_run(run_id)
     assert seen == [None]
+
+
+async def test_a_database_error_on_the_accounting_read_does_not_fail_the_run(tmp_path, monkeypatch) -> None:
+    """A locked database on the owner read costs the run its user, not its execution."""
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = _create_run(db, "7")
+    seen: list[tuple[int | None, str]] = []
+    real_get_run = db.get_run
+    calls: list[str] = []
+
+    def _flaky_get_run(*args, **kwargs):
+        """Fail on the first call, as a locked database would; then behave."""
+        calls.append(run_id)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real_get_run(*args, **kwargs)
+
+    async def _adapter(_config, _context):
+        """Record what the step sees."""
+        seen.append((current_llm_user_id(), current_llm_call_context().operation))
+        return {"ok": True}
+
+    monkeypatch.setattr(db, "get_run", _flaky_get_run)
+    monkeypatch.setattr(engine_mod, "get_adapter", lambda _step_type: _adapter)
+    await engine_mod.WorkflowEngine(db).start_run(run_id)
+    assert seen == [(None, "workflow")]
 
 
 async def test_a_resumed_run_sees_the_run_owner(tmp_path, monkeypatch) -> None:

@@ -532,7 +532,7 @@ class WorkflowEngine:
         """The run's owner, for LLM usage accounting; None when the run cannot be read."""
         try:
             return getattr(self.db.get_run(run_id), "user_id", None)
-        except _WF_NONCRITICAL_EXCEPTIONS:
+        except Exception:  # noqa: BLE001 - the accounting read must never fail the run
             return None
 
     async def start_run(
