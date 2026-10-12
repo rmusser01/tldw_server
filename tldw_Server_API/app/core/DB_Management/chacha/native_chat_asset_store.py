@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextV1
+    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextUpdateV1, NativeAssetContextV1
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -730,6 +730,85 @@ class NativeChatAssetStore:
                 )
             )
         return NativeAssetContextV1(asset_manifest_revision=context.asset_manifest_revision, asset_manifest=tuple(entries))
+
+    def update_native_asset_context(
+        self,
+        owner: Any,
+        conversation_id: str,
+        request: NativeAssetContextUpdateV1,
+        *,
+        conn: Any,
+    ) -> NativeAssetContextV1:
+        """Remove one reviewed reference atomically; replacement authority is unqualified."""
+        import json
+
+        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextUpdateV1
+
+        self._db.native_forks._require_active_transaction(conn)
+        if not isinstance(request, NativeAssetContextUpdateV1):
+            raise ValueError("invalid_native_asset_context_request")
+        request = NativeAssetContextUpdateV1.model_validate(request.model_dump(mode="python"))
+        if request.action != "remove_from_context":
+            raise ValueError("native_asset_context_action_unsupported")
+        # Contain tail failures even when the caller catches them inside its larger transaction.
+        conn.execute("SAVEPOINT native_asset_context_remove")
+        try:
+            current = self.read_native_asset_context(owner, conversation_id, conn=conn)
+            target = next(
+                (entry for entry in current.asset_manifest if entry.reference_id == request.target_reference_id), None
+            )
+            if (
+                current.asset_manifest_revision != request.expected_asset_manifest_revision
+                or target is None
+                or target.reference_revision != request.expected_reference_revision
+                or target.revision != request.expected_asset_revision
+            ):
+                raise ValueError("stale_native_asset_context")
+            result = current
+            if target.context_enabled:
+                stamp = self._db._get_current_utc_timestamp_iso()
+                changed = conn.execute(
+                    "UPDATE native_chat_asset_references SET context_enabled = ?,revision = revision + 1,updated_at = ? "
+                    "WHERE client_id = ? AND conversation_id = ? AND reference_id = ? AND revision = ? AND context_enabled = ?",
+                    (
+                        False,
+                        stamp,
+                        owner.client_id,
+                        conversation_id,
+                        target.reference_id,
+                        int(target.reference_revision),
+                        True,
+                    ),
+                )
+                if changed.rowcount != 1:
+                    raise ValueError("stale_native_asset_context")
+                original = conn.execute(
+                    "SELECT native_bundle_json FROM conversations WHERE client_id = ? AND id = ?",
+                    (owner.client_id, conversation_id),
+                ).fetchone()["native_bundle_json"]
+                bundle = json.loads(original)
+                bundle["asset_manifest_revision"] = self._db._generate_uuid()
+                changed = conn.execute(
+                    "UPDATE conversations SET native_bundle_json = ? WHERE client_id = ? AND id = ? "
+                    "AND native_bundle_json = ? AND deleted = ?",
+                    (
+                        json.dumps(bundle, sort_keys=True, separators=(",", ":")),
+                        owner.client_id,
+                        conversation_id,
+                        original,
+                        False,
+                    ),
+                )
+                if changed.rowcount != 1:
+                    raise ValueError("stale_native_asset_context")
+                self._db.message_store._advance_history_version(conn, conversation_id)
+                result = self.read_native_asset_context(owner, conversation_id, conn=conn)
+            conn.execute("RELEASE SAVEPOINT native_asset_context_remove")
+            return result
+        except BaseException:
+            conn.execute("ROLLBACK TO SAVEPOINT native_asset_context_remove")
+            conn.execute("RELEASE SAVEPOINT native_asset_context_remove")
+            raise
 
     def _locked_candidate_for_operation(
         self, owner: Any, kind: str, operation_id: str, request_digest: str,
