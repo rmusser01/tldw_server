@@ -1775,6 +1775,31 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     };
   };
 
+  const captureExport = () => {
+    if (
+      editorDisabledRef.current ||
+      loadingDetailRef.current ||
+      !authorityScope ||
+      authorityScopeRef.current !== authorityScope ||
+      authorityEpochRef.current !== languageOwnerEpoch ||
+      connectionEpochRef.current !== connectionEpoch ||
+      noteSelectionEpochRef.current !== renderedSession
+    )
+      return null;
+    return {
+      id: selectedId,
+      title,
+      content: contentRef.current,
+      content_language:
+        selectedId == null &&
+        editRevisionRef.current.implicitDefaultLanguage &&
+        temporaryLanguageRef.current
+          ? undefined
+          : canonicalLanguageRef.current,
+      keywords: editorKeywords,
+    };
+  };
+
   // ---- version conflict ----
   const isVersionConflictError = React.useCallback((error: any) => {
     if (!isDefinitiveWriteRejection(error)) return false
@@ -3901,6 +3926,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     restoreFocusAfterOverlayClose,
     setContentDirty,
     captureMarkdownWriter,
+    captureExport,
     resizeEditorTextarea,
     loadDetail,
     refreshTaskStateForNote,

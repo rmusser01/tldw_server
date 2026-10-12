@@ -20,6 +20,7 @@ import {
   getDefaultStudioPaperSizeFromLocale,
   type SingleNoteCopyMode,
   type SingleNoteExportFormat,
+  type SingleNoteExportData,
 } from '../export-utils'
 import { translateMessage } from '@/i18n/translateMessage'
 import { formatFileSize } from '@/utils/format'
@@ -92,6 +93,7 @@ export interface UseNotesExportDeps {
   content: string
   contentLanguage?: string | null
   editorKeywords: string[]
+  captureExport?: () => SingleNoteExportData | null;
   selectedStudioState?: NoteStudioState | null
   studioPaperSize?: NotesStudioPaperSize
 }
@@ -115,6 +117,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     originalMetadata,
     contentLanguage,
     editorKeywords,
+    captureExport,
     selectedStudioState = null,
     studioPaperSize,
   } = deps
@@ -526,70 +529,88 @@ export function useNotesExport(deps: UseNotesExportDeps) {
 
   const exportSelected = React.useCallback(
     (
-      format: SingleNoteExportFormat = contentLanguage === null || contentLanguage === 'markdown'
-        ? 'md'
-        : 'json'
+      format: SingleNoteExportFormat = contentLanguage === null ||
+      contentLanguage === "markdown"
+        ? "md"
+        : "json",
     ) => {
-      if (format === 'print') {
+      if (format === "print") {
         printSelected();
         return;
       }
-      if (format === 'json' && !isValidNoteLanguage(contentLanguage)) {
-        message.error('Portable export requires known language metadata');
+      const note = captureExport
+        ? captureExport()
+        : {
+            id: selectedId,
+            title,
+            content,
+            keywords: editorKeywords,
+            content_language: contentLanguage,
+          };
+      if (!note) return;
+      if (format === "json" && !isValidNoteLanguage(note.content_language)) {
+        message.error("Portable export requires known language metadata");
         return;
       }
-      if (format === 'md' && contentLanguage !== null && contentLanguage !== 'markdown') {
-        message.error('Markdown export requires a Markdown note');
+      if (
+        format === "md" &&
+        note.content_language !== null &&
+        note.content_language !== "markdown"
+      ) {
+        message.error("Markdown export requires a Markdown note");
         return;
       }
-      const source = buildStructuredSource({
-        id: selectedId,
-        title,
-        content,
-        keywords: editorKeywords,
-        content_language: contentLanguage,
-      });
-      const name = (title || `note-${selectedId ?? 'new'}`).replace(/[^a-z0-9-_]+/gi, '-');
+      const source = buildStructuredSource(note);
+      const name = (note.title || `note-${note.id ?? "new"}`).replace(
+        /[^a-z0-9-_]+/gi,
+        "-",
+      );
       const fileContent =
-        format === 'source'
+        format === "source"
           ? source.text
-          : format === 'json'
-            ? buildPortableNote({
-                id: selectedId,
-                title,
-                content,
-                keywords: editorKeywords,
-                content_language: contentLanguage,
-              })
-            : buildSingleNoteMarkdown({
-                id: selectedId,
-                title,
-                content,
-                keywords: editorKeywords,
-              });
+          : format === "json"
+            ? buildPortableNote(note)
+            : buildSingleNoteMarkdown(note);
       const blob = new Blob([fileContent], {
         type:
-          format === 'json'
-            ? 'application/json;charset=utf-8'
-            : format === 'source'
-              ? 'text/plain;charset=utf-8'
-              : 'text/markdown;charset=utf-8',
+          format === "json"
+            ? "application/json;charset=utf-8"
+            : format === "source"
+              ? "text/plain;charset=utf-8"
+              : "text/markdown;charset=utf-8",
       });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download =
-        format === 'source' ? source.filename : `${name}.${format === 'json' ? 'json' : 'md'}`;
+        format === "source"
+          ? source.filename
+          : `${name}.${format === "json" ? "note.json" : "md"}`;
       a.click();
       URL.revokeObjectURL(url);
       const sizeDisplay = formatFileSize(blob.size);
       message.success(
-        translateMessage(t, 'option:notesSearch.exportNoteSuccess', 'Exported ({{size}})', {
-          size: sizeDisplay,
-        })
+        translateMessage(
+          t,
+          "option:notesSearch.exportNoteSuccess",
+          "Exported ({{size}})",
+          {
+            size: sizeDisplay,
+          },
+        ),
       );
     },
-    [content, contentLanguage, editorKeywords, message, printSelected, selectedId, t, title]
+    [
+      captureExport,
+      content,
+      contentLanguage,
+      editorKeywords,
+      message,
+      printSelected,
+      selectedId,
+      t,
+      title,
+    ],
   );
   const copySelected = React.useCallback(async (mode: SingleNoteCopyMode = 'content') => {
     const payload = buildSingleNoteCopyText(

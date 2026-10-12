@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useMobile } from '@/hooks/useMediaQuery'
 import { useTutorialStore } from '@/store/tutorials'
 import type { SaveIndicatorState } from './notes-manager-types'
+import type { SingleNoteExportFormat } from "./export-utils";
 import NotesSaveStatus from './NotesSaveStatus'
 import {
   Link2 as LinkIcon,
@@ -59,7 +60,7 @@ interface NotesEditorHeaderProps {
   onGenerateFlashcards: () => void
   onCreateStudyPack?: () => void
   onOpenNotesStudio?: () => void
-  onExport: (format: 'md' | 'json' | 'print') => void
+  onExport: (format: SingleNoteExportFormat) => void;
   onSave: () => void
   onSaveAndNew?: () => void
   onDelete: () => void
@@ -284,6 +285,22 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
       label: t('option:notesSearch.overflowGroupExport', { defaultValue: 'Export' }),
       children: [
         {
+          key: "export-source",
+          label: t("option:notesSearch.downloadSource", {
+            defaultValue: "Download source",
+          }),
+          icon: <FileDownIcon className="w-4 h-4" />,
+          disabled: !canExport,
+        },
+        {
+          key: "export-json",
+          label: t("option:notesSearch.exportPortableNote", {
+            defaultValue: "Export note (.note.json)",
+          }),
+          icon: <FileDownIcon className="w-4 h-4" />,
+          disabled: !canExport,
+        },
+        {
           key: 'copy-submenu',
           label: t('option:notesSearch.toolbarCopyTooltip', { defaultValue: 'Copy' }),
           icon: (<CopyIcon className="w-4 h-4" />),
@@ -313,12 +330,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
               key: 'export-md',
               label: t('option:notesSearch.exportSingleMd', {
                 defaultValue: 'Markdown (.md)'
-              })
-            },
-            {
-              key: 'export-json',
-              label: t('option:notesSearch.exportSingleJson', {
-                defaultValue: 'JSON (.json)'
               })
             },
             {
@@ -404,6 +415,9 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         break
       case 'copy-markdown':
         onCopy('markdown')
+        break;
+      case "export-source":
+        onExport("source");
         break
       case 'export-md':
         onExport('md')
@@ -655,6 +669,9 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           trigger={['click']}
           menu={{
             items: overflowMenuItems,
+            style: isMobileViewport
+              ? { maxHeight: "70dvh", overflowY: "auto" }
+              : undefined,
             onClick: handleOverflowMenuClick
           }}
         >

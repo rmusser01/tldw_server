@@ -52,6 +52,22 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
+}));
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: {
+      serverUrl: "https://notes.test",
+      authMode: "single-user",
+      apiKey: "synthetic",
+    },
+    loading: false,
+    authorityLoading: false,
+  }),
+}));
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => "synthetic-authority",
+  createNotesGraphAuthorityScope: () => "synthetic-authority",
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({

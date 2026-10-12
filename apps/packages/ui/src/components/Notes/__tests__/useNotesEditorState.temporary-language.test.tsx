@@ -7,6 +7,8 @@ import {
   type UseNotesEditorStateDeps,
 } from "../hooks/useNotesEditorState";
 
+import { buildPortableNote, buildStructuredSource } from "../export-utils";
+
 const mocks = vi.hoisted(() => ({ request: vi.fn(), activity: vi.fn() }));
 vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.request }));
 vi.mock("@/services/tldw/TldwAuth", () => ({
@@ -279,4 +281,116 @@ describe("temporary language at the actual canonical owner", () => {
     },
   );
 
+});
+
+describe("export capture at the actual canonical owner", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.activity.mockResolvedValue({ events: [] });
+    localStorage.clear();
+  });
+  it.each([null, "json", "future/😀", undefined])(
+    "reads current canonical source and mode before another render (%s)",
+    async (language) => {
+      mocks.request.mockImplementation(async ({ path }) =>
+        path.endsWith("/capabilities")
+          ? { content_language: true }
+          : {
+              id: "a",
+              title: "Data",
+              content: "old",
+              version: 1,
+              ...(language === undefined ? {} : { content_language: language }),
+            },
+      );
+      const view = editor();
+      await act(async () => {
+        await view.result.current.loadDetail("a");
+      });
+      const owner = view.result.current;
+      await act(async () => {
+        owner.setContentDirty('{"x":9007199254740993}\n');
+        expect(view.result.current).toBe(owner);
+        expect(owner.captureExport()).toMatchObject({
+          id: "a",
+          content: '{"x":9007199254740993}\n',
+          content_language: language,
+        });
+      });
+    },
+  );
+  it("never exports a temporary old-peer view as portable metadata", async () => {
+    mocks.request.mockImplementation(async ({ path }) =>
+      path.endsWith("/capabilities")
+        ? { content_language: false }
+        : {
+            id: "a",
+            title: "Old",
+            content: "old",
+            version: 1,
+          },
+    );
+    const view = editor();
+    await act(async () => {
+      await view.result.current.loadDetail("a");
+    });
+    await waitFor(() =>
+      expect(view.result.current.languagePersistence).toBe("temporary"),
+    );
+    const owner = view.result.current;
+    await act(async () => {
+      owner.selectContentLanguage("json");
+      owner.setContentDirty('{"x":9007199254740993}\n');
+      expect(view.result.current).toBe(owner);
+      expect(owner.captureExport()?.content_language).toBeUndefined();
+      expect(owner.captureExport()?.content).toBe('{"x":9007199254740993}\n');
+    });
+  });
+  it("keeps fresh old-peer temporary intent absent but preserves explicit null", async () => {
+    mocks.request.mockResolvedValue({ content_language: false });
+    const view = editor();
+    await waitFor(() =>
+      expect(view.result.current.languagePersistence).toBe("temporary"),
+    );
+    const owner = view.result.current;
+    await act(async () => {
+      owner.selectContentLanguage("json");
+      owner.setContentDirty('{"x":9007199254740993}\n');
+      expect(view.result.current).toBe(owner);
+      expect(owner.captureExport()?.content_language).toBeUndefined();
+      expect(buildStructuredSource(owner.captureExport()!).text).toBe(
+        '{"x":9007199254740993}\n',
+      );
+      expect(buildStructuredSource(owner.captureExport()!).filename).toMatch(
+        /\.txt$/,
+      );
+      expect(() => buildPortableNote(owner.captureExport()!)).toThrow(
+        "known language metadata",
+      );
+      owner.setContentLanguage(null);
+      expect(owner.captureExport()?.content_language).toBeNull();
+      expect(
+        JSON.parse(buildPortableNote(owner.captureExport()!)).content_language,
+      ).toBeNull();
+    });
+  });
+  it("retires a stale action on authority or selection change", async () => {
+    mocks.request.mockResolvedValue({
+      id: "a",
+      title: "A",
+      content: "a",
+      version: 1,
+      content_language: null,
+    });
+    const view = editor();
+    await act(async () => {
+      await view.result.current.loadDetail("a");
+    });
+    const owner = view.result.current;
+    act(() => view.result.current.resetEditor());
+    expect(owner.captureExport()).toBeNull();
+    const current = view.result.current;
+    view.rerender({ scope: "bob" });
+    expect(current.captureExport()).toBeNull();
+  });
 });
