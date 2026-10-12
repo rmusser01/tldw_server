@@ -797,8 +797,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 80  # Explicit native attachment reference roles
-    _POSTGRES_SCHEMA_VERSION = 84
+    _CURRENT_SCHEMA_VERSION = 81  # Server-issued conversation source incarnation
+    _POSTGRES_SCHEMA_VERSION = 85
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -8817,6 +8817,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (77, "_migrate_from_v77_to_v78"),
             (78, "_migrate_from_v78_to_v79"),
             (79, "_migrate_from_v79_to_v80"),
+            (80, "_migrate_from_v80_to_v81"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17999,6 +18000,60 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v80_to_v81(self, conn: sqlite3.Connection) -> None:
+        """Issue private row identity independently of copied IDs and journal retention."""
+        conn.execute("ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT")
+        conn.execute("UPDATE conversations SET source_incarnation_id = lower(hex(randomblob(16)))")
+        conn.execute(
+            """CREATE TRIGGER conversation_incarnation_input BEFORE INSERT ON conversations
+            WHEN NEW.source_incarnation_id IS NOT NULL BEGIN
+            SELECT RAISE(ABORT, 'conversation_incarnation_reserved'); END"""
+        )
+        conn.execute(
+            """CREATE TRIGGER conversation_incarnation_create AFTER INSERT ON conversations BEGIN
+            UPDATE conversations SET source_incarnation_id = lower(hex(randomblob(16))) WHERE id = NEW.id; END"""
+        )
+        conn.execute(
+            """CREATE TRIGGER conversation_incarnation_immutable BEFORE UPDATE OF source_incarnation_id ON conversations
+            WHEN OLD.source_incarnation_id IS NOT NULL AND NEW.source_incarnation_id IS NOT OLD.source_incarnation_id BEGIN
+            SELECT RAISE(ABORT, 'conversation_incarnation_immutable'); END"""
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 81 WHERE schema_name = ? AND version = 80", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 81:
+            raise SchemaError("Conversation incarnation migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v84_to_v85_postgres(self, conn: Any) -> None:
+        """Use server UUID issuance on all INSERT paths, preserving forced-owner RLS."""
+        self.backend.execute(
+            "ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT NOT NULL DEFAULT gen_random_uuid()::text",
+            connection=conn,
+        )
+        self.backend.execute(
+            """CREATE FUNCTION conversation_source_incarnation_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF TG_OP = 'INSERT' THEN
+                    NEW.source_incarnation_id := gen_random_uuid()::text;
+                ELSIF NEW.source_incarnation_id IS DISTINCT FROM OLD.source_incarnation_id THEN
+                    RAISE EXCEPTION 'conversation_incarnation_immutable';
+                END IF;
+                RETURN NEW;
+            END; $$""",
+            connection=conn,
+        )
+        self.backend.execute(
+            "CREATE TRIGGER conversation_incarnation_guard BEFORE INSERT OR UPDATE OF source_incarnation_id ON conversations FOR EACH ROW EXECUTE FUNCTION conversation_source_incarnation_guard()",
+            connection=conn,
+        )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = 85 WHERE schema_name = %s AND version = 84",
+            (self._SCHEMA_NAME,),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 85:
+            raise SchemaError("Conversation incarnation migration failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v79_to_v80(self, conn: sqlite3.Connection) -> None:
         """Preserve unknown legacy roles rather than infer them from representation."""
         conn.execute(
@@ -21406,6 +21461,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 80 and current_db_version == 79:
                         self._migrate_from_v79_to_v80(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 81 and current_db_version == 80:
+                        self._migrate_from_v80_to_v81(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21894,6 +21952,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 80 and current_db_version == 79:
                     self._migrate_from_v79_to_v80(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 81 and current_db_version == 80:
+                    self._migrate_from_v80_to_v81(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25755,7 +25816,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25798,6 +25859,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 84 and current_version < 84:
                     self._migrate_from_v83_to_v84_postgres(conn)
                     current_version = 84
+                if target_version >= 85 and current_version < 85:
+                    self._migrate_from_v84_to_v85_postgres(conn)
+                    current_version = 85
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26271,6 +26335,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v83_to_v84_postgres(conn)
                 self._runtime_schema_version = 84
                 current_version = 84
+            if target_version >= 85 and current_version < 85:
+                self._migrate_from_v84_to_v85_postgres(conn)
+                self._runtime_schema_version = 85
+                current_version = 85
 
             if current_version < target_version:
                 logger.warning(

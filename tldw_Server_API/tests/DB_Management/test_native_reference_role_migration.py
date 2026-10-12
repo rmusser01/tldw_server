@@ -146,11 +146,18 @@ def test_previous_schema_upgrade_preserves_all_records_and_leaves_roles_unknown(
     expected = before | {
         "native_chat_asset_references": [row | {"role": None} for row in before["native_chat_asset_references"]]
     }
+    incarnations = None
     try:
         for _ in range(2):
             upgraded = CharactersRAGDB(**kwargs)
             try:
-                assert snapshot(upgraded) == expected
+                current = snapshot(upgraded)
+                observed = {row["id"]: row.pop("source_incarnation_id") for row in current["conversations"]}
+                assert all(isinstance(value, str) and value for value in observed.values())
+                if incarnations is not None:
+                    assert observed == incarnations
+                incarnations = observed
+                assert current == expected
                 assert upgraded.execute_query("SELECT version FROM db_schema_version").fetchone()["version"] == (
                     CharactersRAGDB._POSTGRES_SCHEMA_VERSION
                     if backend_name == "postgres"

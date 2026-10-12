@@ -175,6 +175,78 @@ class NativeForkStore:
                 raise NativeForkStoreError("operation_receipt_invalid") from exc
         return NativeOperationResult(row["state"], row["child_conversation_id"], receipt)
 
+    def read_retention_source_revision(self, owner: Any, conversation_id: str, *, conn: Any) -> str:
+        """Capture an ordinary source precondition, never native manifest readiness."""
+        self._require_active_transaction(conn)
+        if owner.client_id != self._db.client_id:
+            raise NativeForkStoreError("operation_owner_mismatch")
+        if not isinstance(conversation_id, str) or not 1 <= len(conversation_id) <= 256:
+            raise NativeForkStoreError("invalid_native_asset_identity")
+        if owner.owner_key is None:
+            raise NativeForkStoreError("operation_owner_mismatch")
+        namespace = self._db.message_store._history_owner_key(owner.client_id, owner.owner_key)
+        self.lock_open_workspace(owner, conn=conn)
+        lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        query = (
+            "SELECT source_incarnation_id,scope_type,workspace_id,version,history_version,required_projection_version,"  # nosec B608 - fixed lock suffix; all values bound.
+            "native_bundle_json,native_creation_operation_kind,native_creation_operation_id "
+            "FROM conversations WHERE client_id = ? AND id = ? AND deleted = ?" + lock
+        )
+        params = (owner.client_id, conversation_id, False)
+        row = conn.execute(query, params).fetchone()
+        if row is None:
+            raise NativeForkStoreError("native_retention_source_unavailable")
+        before = dict(row)
+        if not isinstance(before["source_incarnation_id"], str) or not before["source_incarnation_id"]:
+            raise NativeForkStoreError("native_retention_source_unavailable")
+        if (
+            before["scope_type"] != owner.scope.kind
+            or before["workspace_id"] != owner.scope.workspace_id
+            or any(
+                before[field] is not None
+                for field in (
+                    "required_projection_version",
+                    "native_bundle_json",
+                    "native_creation_operation_kind",
+                    "native_creation_operation_id",
+                )
+            )
+        ):
+            raise NativeForkStoreError("native_retention_source_unsupported")
+        snapshot, _ = self._db.message_store._read_history_snapshot(
+            conversation_id,
+            owner_client_id=owner.client_id,
+            owner_key=namespace,
+            projection_id=None,
+            conn=conn,
+        )
+        after = conn.execute(query, params).fetchone()
+        if after is None or dict(after) != before:
+            raise NativeForkStoreError("stale_retention_source")
+        if (
+            conn.execute(
+                "SELECT 1 FROM native_chat_asset_claims WHERE client_id = ? AND conversation_id = ? "
+                "UNION ALL SELECT 1 FROM native_chat_asset_references WHERE client_id = ? AND conversation_id = ? LIMIT 1",
+                (owner.client_id, conversation_id, owner.client_id, conversation_id),
+            ).fetchone()
+            is not None
+        ):
+            raise NativeForkStoreError("native_retention_source_unsupported")
+        return self._db.message_store._history_digest(
+            [
+                "tldw-ordinary-retention-source",
+                1,
+                owner.client_id,
+                namespace,
+                [owner.scope.kind, owner.scope.workspace_id],
+                conversation_id,
+                before["source_incarnation_id"],
+                [snapshot.fences.conversation, snapshot.fences.history, snapshot.fences.settings],
+                snapshot.source_digest,
+                snapshot.storage_context_digest,
+            ]
+        )
+
     def reserve_operation(
         self,
         owner: Any,
