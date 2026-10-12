@@ -12,7 +12,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-12 10:40
+updated_date: 2026-10-12 11:04
 ---
 
 ## Description
@@ -50,6 +50,8 @@ Reason: direct release qualification and scoped defect fixes of the approved sou
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 I5 qualification and scoped fixes submitted for independent review; keep In Progress and AC/DoD unchecked. Web source deep-links await existing scoped recovery hydration; empty/newer drafts survive navigation/restart. Chatbook preserves omitted language, negotiates explicit language writes, and validates current provider generation/client and exact advancing source/mode ACK; diagnostics retain truthful pending/no-op status. Native YAML/JSONL history and real SQLite/API/portable/private-refusal/PostgreSQL paths qualified, with original REDs and fixture-contract corrections retained separately. Targeted tests only; current clean owner/new-file checks plus exact inherited Ruff/Bandit/mypy and edited-region formatter comparisons are recorded. Existing ADR194/065–069 apply; no new architecture/dependency/transport. Full per-AC1–15 evidence: Chatbook Docs/superpowers/reviews/2026-09-27-structured-document-release-evidence.md and programme task-15-report.md/task-15-evidence/manifest.json. Owned Notes zero, process groups/ports and exact PostgreSQL container absent. Physical OS IME/clipboard/TTY/screenreader/hardware, deployed historical incapable server, and unexercised installed-extension profiles remain incomplete; all-four-file Library mypy retains389 inherited errors after minimal comment barrier correction. Root owns final review and closure.
+
+Pre-review historical-peer follow-up: exact baseline d22529db9fcf8c0a8f8116531f6d4fe09ba4bfd6 ran as an owned loopback API; all2411 imported module files match baseline Git blobs. Current Chatbook service/client passed27 actual requests: real capability404, absent language projection, explicit null/known/future create/update no-write refusal, and exact ordinary omitted source writes with trailing spaces/newline and a&b <tag>. No product defect reproduced or production/test edit made. Owned Notes zero; exact process group and3196 absent. Additive evidence/report: task-15-old-peer-followup-report.md and task-15-old-peer-followup-evidence/manifest.json; tracked Chatbook review2026-09-27-structured-document-old-peer-followup.md. Original535 artifacts/report remain immutable. Initial and two earlier C helpers consulted default config before isolation; exact config/dictionary metadata proves pre-existing/no ordinary update during those probes, with no pre-probe content hash. Raw initial stderr stays private; final run binds task config/data before imports. Physical/platform gates remain incomplete; Root owns review/closure, all criteria remain unchecked.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
