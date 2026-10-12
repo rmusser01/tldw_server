@@ -141,14 +141,35 @@ async def ledger_used_this_month(entity_value: str, category: str) -> float:
     return float(result.get("total") or 0)
 
 
-async def llm_tokens_this_month(user_id: int) -> float:
-    """This calendar month's (UTC) ``llm_usage_log`` token total for the user."""
+def _utc_day_start() -> datetime:
+    """Midnight UTC today."""
+    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+async def _usage_repo() -> Any:
+    """The AuthNZ usage repository on the shared pool."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 
-    pool = await get_db_pool()
-    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    return await AuthnzUsageRepo(pool).sum_user_llm_tokens_since(user_id=user_id, since=month_start)
+    return AuthnzUsageRepo(await get_db_pool())
+
+
+async def llm_tokens_this_month(user_id: int) -> float:
+    """This calendar month's (UTC) ``llm_usage_log`` token total for the user."""
+    repo = await _usage_repo()
+    return await repo.sum_user_llm_tokens_since(user_id=user_id, since=_utc_day_start().replace(day=1))
+
+
+async def llm_cost_today(user_id: int) -> float:
+    """Today's (UTC) LLM spend in USD for the user."""
+    repo = await _usage_repo()
+    return await repo.sum_user_llm_cost_since(user_id=user_id, since=_utc_day_start())
+
+
+async def llm_cost_this_month(user_id: int) -> float:
+    """This calendar month's (UTC) LLM spend in USD for the user."""
+    repo = await _usage_repo()
+    return await repo.sum_user_llm_cost_since(user_id=user_id, since=_utc_day_start().replace(day=1))
 
 
 async def rag_queries_decision(user_id: Any, units: int) -> QuotaDecision:
