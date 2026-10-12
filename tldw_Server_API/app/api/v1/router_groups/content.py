@@ -798,6 +798,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     for tail_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.storage",
+            log_name="storage",
+            prefix=API_V1_PREFIX,
+            tags=("storage",),
+            route_key="storage",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.files",
             log_name="files",
             prefix=f"{API_V1_PREFIX}",

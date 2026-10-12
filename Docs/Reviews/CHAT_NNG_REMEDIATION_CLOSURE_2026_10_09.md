@@ -360,3 +360,16 @@ Supported Python3.12 connected444 passed/258 official/backend skips, followed by
 Latest dev19d213 remains included. No new browser/window or unowned19764 access. Public H2, MIME/adoption/readers/send/frozen character behavior, original D7/Sync and all master persona/surface/theme/scale/package/physical AT/study acceptance remain open. No new physical PostgreSQL or installed-extension runtime claim.
 
 TASK13589 normal41-file exact-owned hooks and supported3.12 compileall pass without bypass. Both reviewers clear the final bound-SQL leaf. AC1/3/4 are complete; Stage3/AC2 remain open for TASK13590. This incremental commit preserves the owned plan until that remaining gate closes.
+
+
+### TASK13590 — Full production storage reach and explicit key scopes (2026-10-11)
+
+The existing composed storage router now participates once in the full content catalog under the original API prefix and house policy. Genuine full-app authenticated404/catalog RED closes the minimal-only coverage gap. Independent review also exposed read-only owner deletion and write-only metadata disclosure; real causal RED confirms both. Eight user GETs reuse house read scope, seven mutations reuse house write scope, with existing owner/admin and documented JWT/single-user/admin bypass semantics preserved.
+
+Final supported3.12 seven-file connected run322 passed/192 warnings/no skips,64.03s. Real normal multi-user SQLite HTTP and keys prove L1/N2/total3/available7, admin/breakdown components, anonymous/foreign/nonadmin refusals, all fifteen user scope refusals, valid reads/deletion and retained N after ordinary deletion. Fixture lifecycle uses documented real audit shutdown; setup TypeError and worker-timeout diagnostics are excluded. Both independent final source reviewers CLEAR.
+
+Canonical full-app generation and fingerprint/path checks pass at2129 paths/3301 schemas, SHA3b8ce49f0c3f97a0fc22ebe66df5599f528d431148096c500ae36a64ae4d2691. Both normal client TypeScript configurations and supported compilation pass. Ruff baseline1/current1/introduced0; six-production-file Bandit0 findings/errors. New regression formatting retains exact AST. Same normal full private API19767 refreshed on3.12 reports components and combined-once usage; original9 conversations/28 rows remain deep-equal before/after with no baseline rewrite or browser opening. Latest fetched dev19d213 remains included.
+
+TASK13589 public route/contract gate is now qualified; normal exact-owned hooks and bounded completion recording follow. All master criteria and public H2/MIME/adoption/reader/send/frozen-character/original D7/Sync/persona/surface/theme/scale/package/physical PostgreSQL/AT/study gates remain open. No physical download or installed-extension acceptance is claimed.
+
+Bounded completion: all 18 exact-owned normal repository hooks passed without bypass. TASK-13589 and TASK-13590 acceptance criteria and definitions of done are complete. Only their two owned completed plans retire to private evidence; the tracked accounting-plan removal is part of this unit. Final metadata hooks and the incremental local commit follow. Master criteria and the explicitly listed broader acceptance gates remain open.
