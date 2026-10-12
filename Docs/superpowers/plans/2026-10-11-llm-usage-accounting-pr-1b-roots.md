@@ -1102,6 +1102,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `tldw_Server_API/app/core/Claims_Extraction/ingestion_claims.py` (the `_exec.submit(_call_provider)` near line 421)
 - Modify: `tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py` (the `executor.submit(run_async_scrape)` near line 1205)
+- Regenerate: `Docs/Design/web_scraping_refactor_import_inventory.json`, `Docs/Design/WebScraping_Refactor_Import_Inventory.md` (Step 5)
 - Test: `tldw_Server_API/tests/Usage/test_llm_state_private_pools.py`
 
 **Interfaces:**
@@ -1215,12 +1216,26 @@ TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests
 
 Expected: 10 passed.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Regenerate the web-scraping import inventory**
+
+The repo keeps a checked-in inventory of every import of the Web_Scraping modules, and a test compares it with the code. The new test file imports `Article_Extractor_Lib`, so the inventory changes. Without this step `tests/WebScraping/test_refactor_import_inventory.py::test_import_inventory_artifact_matches_current_import_surface` fails.
+
+```bash
+$PY Helper_Scripts/web_scraping_refactor_inventory.py --root . \
+  --json Docs/Design/web_scraping_refactor_import_inventory.json \
+  --markdown Docs/Design/WebScraping_Refactor_Import_Inventory.md
+TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py
+```
+
+Expected: the two inventory files change by about a dozen lines between them, and the test file gives 10 passed.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Claims_Extraction/ingestion_claims.py \
   tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py \
-  tldw_Server_API/tests/Usage/test_llm_state_private_pools.py
+  tldw_Server_API/tests/Usage/test_llm_state_private_pools.py \
+  Docs/Design/web_scraping_refactor_import_inventory.json Docs/Design/WebScraping_Refactor_Import_Inventory.md
 git commit -m "feat(usage): the claims and article-extractor thread pools carry the LLM call state (TASK-13437)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
