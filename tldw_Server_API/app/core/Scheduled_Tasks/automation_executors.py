@@ -169,6 +169,38 @@ async def _run_generation(definition: DefinitionRow, user_prompt: str) -> str:
     return text
 
 
+def _automation_tools_executor():
+    from tldw_Server_API.app.core.Tools.tool_executor import ToolExecutor
+    return ToolExecutor()
+
+
+async def derive_read_only_eligible_tools(owner_id: int) -> list[dict[str, Any]]:
+    """Catalogue entries the owner can execute from read_only-declared modules.
+
+    Fail closed: any catalogue failure yields an empty set — nothing is
+    presented, nothing can execute (spec §3).
+    """
+    try:
+        # NOTE: package is `MCP_unified` (lowercase u) — the task brief's
+        # `MCP_Unified` spelling raises ModuleNotFoundError, which the
+        # fail-closed except below would silently swallow (empty set even
+        # for a healthy catalogue).
+        from tldw_Server_API.app.core.MCP_unified.module_surface import MODULE_RISK_TIERS
+        listing = await _automation_tools_executor().list_tools(
+            user_id=str(owner_id), client_id="scheduled_automation"
+        )
+    except Exception:  # noqa: BLE001 — fail closed by construction
+        return []
+    eligible = []
+    for entry in listing.get("tools", []):
+        if not isinstance(entry, dict) or not entry.get("canExecute"):
+            continue
+        tier = MODULE_RISK_TIERS.get(str(entry.get("module")), ("", ""))
+        if tier[0] == "read_only":
+            eligible.append(entry)
+    return eligible
+
+
 async def _execute_generation_only(
     definition: DefinitionRow, payload: dict[str, Any]
 ) -> str:

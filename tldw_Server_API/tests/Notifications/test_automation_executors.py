@@ -406,3 +406,38 @@ async def test_agent_task_without_ref_fails_before_store(monkeypatch) -> None:
     with pytest.raises(LookupError, match="no message_ref"):
         await executors_module._execute_agent_task(definition, {})
     assert called["resolve"] is False
+
+
+# ---------------------------------------------------------------------------
+# Read-only eligible-set derivation (ADR-184 read-only tool envelope)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_eligible_set_filters_by_declared_tier_and_permission(monkeypatch) -> None:
+    catalogue = {"tools": [
+        {"name": "media_search", "module": "media", "canExecute": True},
+        {"name": "notes_write", "module": "notes", "canExecute": True},
+        {"name": "chats_get", "module": "chats", "canExecute": False},
+        {"name": "mystery_tool", "module": "not_a_module", "canExecute": True},
+    ]}
+
+    class _FakeToolsExecutor:
+        async def list_tools(self, *, user_id, client_id):
+            return catalogue
+
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+    monkeypatch.setattr(em, "_automation_tools_executor", lambda: _FakeToolsExecutor())
+    eligible = await em.derive_read_only_eligible_tools(7)
+    assert [t["name"] for t in eligible] == ["media_search"]
+
+@pytest.mark.asyncio
+async def test_eligible_set_fails_closed_on_catalogue_error(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    class _Broken:
+        async def list_tools(self, *, user_id, client_id):
+            raise RuntimeError("mcp down")
+
+    monkeypatch.setattr(em, "_automation_tools_executor", lambda: _Broken())
+    assert await em.derive_read_only_eligible_tools(7) == []
