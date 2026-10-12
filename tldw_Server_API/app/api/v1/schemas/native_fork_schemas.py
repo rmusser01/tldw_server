@@ -45,7 +45,10 @@ class NativeScopeV1(HistoryWireModel):
 
     @model_serializer
     def serialize_scope(self) -> dict[str, str | None]:
-        """Keep the global wire object closed (no null workspace member)."""
+        """Reject unchecked scope fields before emitting the closed wire object."""
+        NativeScopeV1.model_validate(
+            {"kind": self.kind} | ({"workspace_id": self.workspace_id} if self.workspace_id is not None else {})
+        )
         return {"kind": "global"} if self.kind == "global" else {"kind": "workspace", "workspace_id": self.workspace_id}
 
 

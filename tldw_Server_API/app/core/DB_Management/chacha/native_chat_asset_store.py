@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextUpdateV1, NativeAssetContextV1
+    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+        NativeAssetContextUpdateV1,
+        NativeAssetContextV1,
+        NativeAssetRetentionRequestV1,
+    )
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -140,6 +144,86 @@ class NativeChatAssetStore:
         if any(row[key] != value for key, value in expected.items()):
             raise ValueError("candidate_id_conflict")
         return NativeCandidate(candidate_id, generation, row["state"])
+
+    def reserve_retention_candidate(
+        self,
+        owner: Any,
+        request: NativeAssetRetentionRequestV1,
+        generation: int,
+        *,
+        reference_id: str,
+        candidate_id: str,
+        namespace_id: str,
+        upload_id: str,
+        size_bytes: int,
+        mime_type: str,
+        conn: Any,
+    ) -> NativeCandidate:
+        """Bind staging metadata to the original reviewed reference and live lease."""
+        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+            NativeAssetRetentionRequestV1,
+        )
+
+        self._db.native_forks._require_active_transaction(conn)
+        if not isinstance(request, NativeAssetRetentionRequestV1):
+            raise ValueError("invalid_retention_request")
+        request = NativeAssetRetentionRequestV1.model_validate(
+            request.model_dump(mode="json")
+        )
+        conn.execute("SAVEPOINT native_retention_candidate")
+        try:
+            result = self._db.native_forks.reserve_retention_operation(
+                owner, request, conn=conn
+            )
+            if result.state != "preparing":
+                raise ValueError("retention_not_preparing")
+            reference = next(
+                (
+                    item
+                    for item in request.asset_manifest
+                    if item.reference_id == reference_id
+                ),
+                None,
+            )
+            if (
+                reference is None
+                or reference.hash is None
+                or reference.fidelity_disposition != "retained"
+            ):
+                raise ValueError("retention_reference_unavailable")
+            candidate = self.reserve_candidate(
+                owner,
+                "native_asset_retention_v1",
+                request.operation_id,
+                request.request_digest,
+                generation,
+                candidate_id,
+                namespace_id,
+                upload_id,
+                reference.hash,
+                size_bytes,
+                mime_type,
+                reference.representation,
+                now=datetime.now(timezone.utc),
+                conn=conn,
+            )
+            if candidate.state not in {"reserved", "prepared"}:
+                raise ValueError("retention_candidate_not_preparing")
+            self._require_live_attempt(
+                owner,
+                "native_asset_retention_v1",
+                request.operation_id,
+                request.request_digest,
+                generation,
+                datetime.now(timezone.utc),
+                conn=conn,
+            )
+            conn.execute("RELEASE SAVEPOINT native_retention_candidate")
+            return candidate
+        except BaseException:
+            conn.execute("ROLLBACK TO SAVEPOINT native_retention_candidate")
+            conn.execute("RELEASE SAVEPOINT native_retention_candidate")
+            raise
 
     def _require_exclusive_paths(
         self,

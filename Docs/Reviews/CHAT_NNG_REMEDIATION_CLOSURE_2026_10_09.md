@@ -486,3 +486,9 @@ Lease isnotquota/bytes/claims/readiness; cleanupfixture uncharged/unwritten ands
 ### Latest dev integration — TASK13608 (2026-10-12)
 
 Incoming dev2a8ffa78 notification pass-back enum/consumer fix preserved; sole canonical fingerprint conflict regenerated from combined schema. Full2129paths/3301schemas contract and unchanged path union check pass, SHA256 bd7997199762d42481de4c4b32536f3c82f279d695c86ff44afa427b36771212. Ignored shared rich schema regenerated with installed Node26 tooling and includes all10 notification kinds. Notification consumer plus retention reservation/lease49pass24officialPGskip247warnings12.95s; actual3prodBandit0/errors0; Ruff4file7/7 exactbaseline findings. [Bounded integration record](CHAT_LATEST_DEV_13608_2026_10_12.md). No runtime/profile/browser changes; broadUX/H2/physicalPG gates remainopen.
+
+### Frozen-reference retention candidates — TASK13609 (2026-10-12)
+
+Typed candidate admission reuses frozen request/source/lease, derives hash/representation from exact retained reference and contains failures underlocal savepoint. Review additionally reproduced post-lock lease timing and unchecked-scope serialization normalization; final currentclock check and shared originalscope validation closeboth. Initialcausal15/15PG; reviewcausal4/4PG; strengthened unchangedlease clockpositive/expired +scope5/5PG; final9connected363pass236skip16warnings121.48s. Three-fileRuff0/HEADproduction0; actual2prodBandit0/errors0; scopedformat/compile/diffclear; bothfinalsourceCLEAR. Full2129/3301 canonicalfingerprint/pathchecksunchanged. [Bounded record](CHAT_RETENTION_CANDIDATES_13609_2026_10_12.md).
+
+Metadata admission isnotquota/bytes/claims/referencepublication/readiness. Timing testusesactualreservation withcontrolledclock, notphysicalPGlockwait. No runtime/profile/browser/sendchanges. Typeduploadproducer/Sync/nativebridge/originalhash/retentionpublication/UI andbroadNNG/H2gates remainopen.
