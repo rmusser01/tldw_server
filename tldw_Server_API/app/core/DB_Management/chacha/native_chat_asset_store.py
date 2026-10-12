@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 if TYPE_CHECKING:
+    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextV1
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -463,8 +465,6 @@ class NativeChatAssetStore:
         self, owner: Any, conversation_id: str, asset_id: str, revision: str, *, conn: Any,
     ) -> dict[str, Any]:
         """Detach an exact committed fork claim; this grants no bundle readiness."""
-        from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
-
         self._db.native_forks._require_active_transaction(conn)
         if owner.client_id != self._db.client_id:
             raise ValueError("operation_owner_mismatch")
@@ -510,32 +510,226 @@ class NativeChatAssetStore:
             "SELECT * FROM native_chat_asset_claims WHERE client_id = ? AND claim_id = ?" + lock,  # nosec B608 - fixed backend-only lock suffix.
             (owner.client_id, initial["claim_id"]),
         ).fetchone()
-        if candidate is None or claim is None or any((
-            candidate["state"] != "adopted", candidate["owner_key"] != owner.owner_key,
-            candidate["attempt_generation"] != operation["attempt_generation"],
-            candidate["operation_kind"] != "native_fork_v1", candidate["operation_id"] != initial["operation_id"],
-            claim["state"] != "live", claim["owner_key"] != owner.owner_key,
-            claim["conversation_id"] != conversation_id, claim["asset_id"] != asset_id,
-            str(claim["asset_revision"]) != revision, claim["candidate_id"] != candidate["candidate_id"],
-            claim["content_hash"] != candidate["expected_hash"], claim["size_bytes"] != candidate["expected_size_bytes"],
-            claim["mime_type"] != candidate["mime_type"], claim["representation"] != candidate["representation"],
-            claim["size_bytes"] < 1, claim["representation"] not in {
-                "embedded_image_v1", "generated_image_revision_v1", "document_original_v1", "document_text_v1",
-            },
-        )):
+        return self._committed_claim_descriptor(
+            owner, conversation_id, asset_id, revision, operation, candidate, claim, conn=conn,
+        )
+
+    def _committed_claim_descriptor(
+        self,
+        owner: Any,
+        conversation_id: str,
+        asset_id: str,
+        revision: str,
+        operation: Any,
+        candidate: Any,
+        claim: Any,
+        *,
+        conn: Any,
+    ) -> dict[str, Any]:
+        """Validate already-read provenance without acquiring an operation lock."""
+        from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+
+        if (
+            candidate is None
+            or claim is None
+            or any(
+                (
+                    candidate["state"] != "adopted",
+                    candidate["owner_key"] != owner.owner_key,
+                    candidate["attempt_generation"] != operation["attempt_generation"],
+                    candidate["operation_kind"] != "native_fork_v1",
+                    candidate["operation_id"] != operation["operation_id"],
+                    claim["state"] != "live",
+                    claim["owner_key"] != owner.owner_key,
+                    claim["conversation_id"] != conversation_id,
+                    claim["asset_id"] != asset_id,
+                    str(claim["asset_revision"]) != revision,
+                    claim["candidate_id"] != candidate["candidate_id"],
+                    claim["content_hash"] != candidate["expected_hash"],
+                    claim["size_bytes"] != candidate["expected_size_bytes"],
+                    claim["mime_type"] != candidate["mime_type"],
+                    claim["representation"] != candidate["representation"],
+                    claim["size_bytes"] < 1,
+                    claim["representation"]
+                    not in {
+                        "embedded_image_v1",
+                        "generated_image_revision_v1",
+                        "document_original_v1",
+                        "document_text_v1",
+                    },
+                )
+            )
+        ):
             raise ValueError("native_asset_claim_conflict")
         self._require_confirmed_quota(owner, candidate, conn=conn)
-        self._require_exclusive_paths(owner.client_id, candidate["candidate_id"], candidate["storage_namespace_id"], candidate["upload_id"], conn=conn)
-        key = LocalSyncBlobStore.namespace_storage_key(candidate["storage_namespace_id"], "sha256:" + candidate["expected_hash"])
+        self._require_exclusive_paths(
+            owner.client_id, candidate["candidate_id"], candidate["storage_namespace_id"], candidate["upload_id"], conn=conn
+        )
+        key = LocalSyncBlobStore.namespace_storage_key(
+            candidate["storage_namespace_id"], "sha256:" + candidate["expected_hash"]
+        )
         if candidate["storage_key"] != key:
             raise ValueError("candidate_storage_identity_conflict")
         return {
-            **{field: claim[field] for field in (
-                "claim_id", "client_id", "owner_key", "conversation_id", "candidate_id", "asset_id", "asset_revision",
-                "content_hash", "size_bytes", "mime_type", "representation",
-            )},
-            **{field: candidate[field] for field in ("storage_namespace_id", "upload_id", "storage_key", "attempt_generation")},
+            **{
+                field: claim[field]
+                for field in (
+                    "claim_id",
+                    "client_id",
+                    "owner_key",
+                    "conversation_id",
+                    "candidate_id",
+                    "asset_id",
+                    "asset_revision",
+                    "content_hash",
+                    "size_bytes",
+                    "mime_type",
+                    "representation",
+                )
+            },
+            **{
+                field: candidate[field]
+                for field in ("storage_namespace_id", "upload_id", "storage_key", "attempt_generation")
+            },
         }
+
+
+    def read_native_asset_context(self, owner: Any, conversation_id: str, *, conn: Any) -> NativeAssetContextV1:
+        """Read private fork-backed context metadata; never read bytes or publish readiness."""
+        import json
+
+        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+            NativeAssetContextV1,
+            NativeAssetManifestEntryV1,
+        )
+
+        self._db.native_forks._require_active_transaction(conn)
+        if owner.client_id != self._db.client_id:
+            raise ValueError("operation_owner_mismatch")
+        if not isinstance(conversation_id, str) or not 1 <= len(conversation_id) <= 256:
+            raise ValueError("invalid_native_asset_identity")
+        self._db.native_forks.lock_open_workspace(owner, conn=conn)
+        lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        child = conn.execute(
+            "SELECT scope_type,workspace_id,deleted,required_projection_version,"
+            "native_creation_operation_kind,native_creation_operation_id,native_bundle_json "
+            "FROM conversations WHERE client_id = ? AND id = ?" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (owner.client_id, conversation_id),
+        ).fetchone()
+        if child is None or any(
+            (
+                child["scope_type"] != owner.scope.kind,
+                child["workspace_id"] != owner.scope.workspace_id,
+                bool(child["deleted"]),
+                child["required_projection_version"] != "native-fork-v1",
+                child["native_creation_operation_kind"] != "native_fork_v1",
+            )
+        ):
+            raise ValueError("native_asset_context_unsupported")
+        try:
+            bundle = json.loads(child["native_bundle_json"])
+            if (
+                not isinstance(bundle, dict)
+                or type(bundle.get("version")) is not int
+                or bundle["version"] != 1
+                or bundle.get("state") != "ready"
+                or bundle.get("required_projection_version") != "native-fork-v1"
+                or type(bundle.get("settings_revision")) is not int
+                or bundle["settings_revision"] < 1
+            ):
+                raise ValueError("invalid_native_bundle")
+            context = NativeAssetContextV1(asset_manifest_revision=bundle["asset_manifest_revision"], asset_manifest=())
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError("native_asset_context_invalid") from exc
+        # Deletion/publication waits on this conversation; no operation lock is taken in reverse order.
+        operation = conn.execute(
+            "SELECT * FROM native_chat_operations WHERE client_id = ? AND operation_kind = 'native_fork_v1' "
+            "AND operation_id = ?",
+            (owner.client_id, child["native_creation_operation_id"]),
+        ).fetchone()
+        if operation is None:
+            raise ValueError("native_asset_operation_uncommitted")
+        self._db.native_forks._check_identity(operation, owner, operation["request_digest"])
+        if (
+            operation["state"] not in {"committed", "gone"}
+            or operation["child_conversation_id"] != conversation_id
+            or operation["projection_version"] != child["required_projection_version"]
+        ):
+            raise ValueError("native_asset_operation_uncommitted")
+        references = conn.execute(
+            "SELECT * FROM native_chat_asset_references WHERE client_id = ? AND conversation_id = ? "
+            "ORDER BY position,reference_id" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (owner.client_id, conversation_id),
+        ).fetchall()
+        positions = set()
+        for reference in references:
+            if (
+                reference["owner_key"] != owner.owner_key
+                or reference["role"] is None
+                or type(reference["position"]) is not int
+                or reference["position"] < 0
+                or reference["position"] in positions
+                or type(reference["revision"]) is not int
+                or reference["revision"] < 1
+                or reference["context_enabled"] not in (False, True, 0, 1)
+            ):
+                raise ValueError("native_asset_reference_invalid")
+            positions.add(reference["position"])
+        # Lock candidates before claims in deterministic order, matching existing reclamation.
+        initial_claims = conn.execute(
+            "SELECT * FROM native_chat_asset_claims WHERE client_id = ? AND conversation_id = ?",
+            (owner.client_id, conversation_id),
+        ).fetchall()
+        initial_by_id = {claim["claim_id"]: claim for claim in initial_claims}
+        if any(reference["claim_id"] not in initial_by_id for reference in references):
+            raise ValueError("native_asset_claim_conflict")
+        candidate_ids = {initial_by_id[reference["claim_id"]]["candidate_id"] for reference in references}
+        if None in candidate_ids:
+            raise ValueError("native_asset_claim_conflict")
+        candidates = {
+            candidate_id: self._candidate_row(owner.client_id, candidate_id, conn=conn)
+            for candidate_id in sorted(candidate_ids)
+        }
+        claims = conn.execute(
+            "SELECT * FROM native_chat_asset_claims WHERE client_id = ? AND conversation_id = ? "
+            "ORDER BY claim_id" + lock,  # nosec B608 - fixed backend-only lock suffix.
+            (owner.client_id, conversation_id),
+        ).fetchall()
+        by_id = {claim["claim_id"]: claim for claim in claims}
+        identities = Counter((claim["asset_id"], claim["asset_revision"]) for claim in claims)
+        entries = []
+        for reference in references:
+            claim = by_id.get(reference["claim_id"])
+            if claim is None or claim["candidate_id"] not in candidates:
+                raise ValueError("native_asset_claim_conflict")
+            if type(claim["asset_revision"]) is not int or claim["asset_revision"] < 1:
+                raise ValueError("native_asset_claim_conflict")
+            if identities[(claim["asset_id"], claim["asset_revision"])] != 1:
+                raise ValueError("native_asset_claim_ambiguous")
+            descriptor = self._committed_claim_descriptor(
+                owner,
+                conversation_id,
+                claim["asset_id"],
+                str(claim["asset_revision"]),
+                operation,
+                candidates[claim["candidate_id"]],
+                claim,
+                conn=conn,
+            )
+            entries.append(
+                NativeAssetManifestEntryV1(
+                    reference_id=reference["reference_id"],
+                    reference_revision=str(reference["revision"]),
+                    asset_id=descriptor["asset_id"],
+                    revision=str(descriptor["asset_revision"]),
+                    representation=descriptor["representation"],
+                    role=reference["role"],
+                    context_enabled=bool(reference["context_enabled"]),
+                    hash=descriptor["content_hash"],
+                    fidelity_disposition="retained",
+                )
+            )
+        return NativeAssetContextV1(asset_manifest_revision=context.asset_manifest_revision, asset_manifest=tuple(entries))
 
     def _locked_candidate_for_operation(
         self, owner: Any, kind: str, operation_id: str, request_digest: str,

@@ -777,3 +777,43 @@ def test_edited_empty_tool_placeholder_is_retained_as_literal_text(native_fork_d
     meta = db.get_message_metadata(result.receipt.message_map[mids[-1]])
     assert "content_placeholder_reason" not in meta["extra"]
     assert db.get_messages_for_conversation(result.receipt.child_id)[-1]["content"] == "[empty tool result]"
+
+
+def test_actual_empty_committed_fork_has_original_empty_context(native_fork_db):
+    from tldw_Server_API.tests.DB_Management.test_native_asset_context_read import read
+
+    db = native_fork_db
+    _, _, request, attempt = prepare(db, empty=True)
+    result = commit(db, request, attempt)
+    context = read(db, result.child_conversation_id, authorized=owner())
+    assert context.asset_manifest_revision == "1" and context.asset_manifest == ()
+
+
+def test_actual_deleted_then_restored_fork_reads_without_reviving_original_key(native_fork_db):
+    from tldw_Server_API.tests.DB_Management.test_native_asset_context_read import read
+
+    db = native_fork_db
+    _, _, request, attempt = prepare(db, empty=True)
+    result = commit(db, request, attempt)
+    cid = result.child_conversation_id
+    version = db.get_conversation_by_id(cid)["version"]
+    assert db.soft_delete_conversation(cid, version)
+    with pytest.raises(ValueError):
+        read(db, cid, authorized=owner())
+    assert db.restore_conversation(cid, version + 1)
+    before = dict(
+        db.execute_query(
+            "SELECT * FROM native_chat_operations WHERE operation_id = ?", (request.operation_id,)
+        ).fetchone()
+    )
+    assert before["state"] == "gone" and before["result_json"] is None
+    context = read(db, cid, authorized=owner())
+    assert context.asset_manifest == () and context.asset_manifest_revision == "1"
+    assert (
+        dict(
+            db.execute_query(
+                "SELECT * FROM native_chat_operations WHERE operation_id = ?", (request.operation_id,)
+            ).fetchone()
+        )
+        == before
+    )

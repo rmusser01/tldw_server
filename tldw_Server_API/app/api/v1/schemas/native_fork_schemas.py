@@ -310,6 +310,31 @@ NativeOperationResultV1 = Annotated[
 ]
 
 
+class NativeAssetContextV1(HistoryWireModel):
+    """Ordered exact owned references and their original opaque manifest fence."""
+
+    asset_manifest_revision: NativeRevision
+    asset_manifest: tuple[NativeAssetManifestEntryV1, ...]
+
+    _freeze_manifest = field_validator("asset_manifest", mode="before")(_wire_array)
+
+    @model_validator(mode="after")
+    def validate_reference_identity(self) -> NativeAssetContextV1:
+        """Shared bytes can have different roles, but never conflicting descriptors."""
+        references = set()
+        descriptors = {}
+        for asset in self.asset_manifest:
+            if asset.reference_id in references:
+                raise ValueError("duplicate_asset_reference")
+            references.add(asset.reference_id)
+            identity = (asset.asset_id, asset.revision)
+            descriptor = (asset.hash, asset.representation, asset.fidelity_disposition)
+            if identity in descriptors and descriptors[identity] != descriptor:
+                raise ValueError("context_asset_alias_mismatch")
+            descriptors[identity] = descriptor
+        return self
+
+
 class NativeAssetContextUpdateV1(HistoryWireModel):
     """CAS update for one retained asset's participation in prompt context."""
 
