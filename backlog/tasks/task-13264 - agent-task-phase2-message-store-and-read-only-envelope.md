@@ -56,8 +56,10 @@ full queued escalation is a later step with its own task.
 - [x] The consumer's `family_not_wired_for_execution:agent_task` skip is
       unreachable for agent_task (executor registered; dispatch sits
       behind the deployment certification gate by DESIGN — see notes)
-- [ ] Env/config documented: `AUTOMATION_MESSAGE_ENCRYPTION_KEY` (falls
-      back to `BYOK_ENCRYPTION_KEY`/secondary for rotation)
+- [x] Env/config documented: `AUTOMATION_MESSAGE_ENCRYPTION_KEY` (falls
+      back to `BYOK_ENCRYPTION_KEY`/secondary for rotation) — settings
+      Field description (`AuthNZ/settings.py`) plus the curated env
+      reference (`Docs/Published/Env_Vars.md`, "Scheduled Automations")
 
 ## Implementation Plan (the how)
 
@@ -95,5 +97,22 @@ full queued escalation is a later step with its own task.
   for the four phase-1 kinds in chatbook PR #2215).
 - Store-native re-encryption for BYOK-key rotation: follow-up (rotation
   note recorded in-code).
+- Read-only tool envelope (envelope branch, tasks 2–5): the consumer gate
+  routes fully read-only-eligible tool requests (membership check against
+  `derive_read_only_eligible_tools` from the MCP catalogue, fail-closed)
+  to the executor, which RE-derives the eligible set at execution time
+  (payload `_envelope_eligible` is an audit hint only) and runs
+  `run_read_only_envelope`: bounded rounds (default 5), tools presented
+  from the eligible set only, every assistant tool call checked against
+  that membership set — an out-of-set call short-circuits
+  `approval_required` (terminal, health-neutral via the documented error
+  prefix) and never reaches execution; exhausted rounds fall back to
+  generation-only with a truncation note. `input.agent_ref` resolves
+  through the agent registry seam (`_resolve_agent_registry`, patchable,
+  fail-closed): the entry's persona is the system prompt when it carries
+  one, else an agent-naming fallback over the generation-only base;
+  unknown/blocked refs raise `LookupError` (honest failed run) even when
+  a `system_prompt` override is authored. Tests:
+  `tldw_Server_API/tests/Notifications/test_automation_executors.py`.
 
 ADR required: covered by chatbook ADR-184 (accepted); no new server ADR.

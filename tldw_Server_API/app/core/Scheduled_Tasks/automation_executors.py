@@ -17,6 +17,12 @@ Model precedence (definition first, server last):
 3. omit both and let ``perform_chat_api_call_async`` resolve the server's
    configured default provider/model
 
+System-prompt precedence (``_definition_system_prompt``): an authored
+``input.system_prompt`` override, then the resolved ``input.agent_ref``
+entry's persona (unknown/blocked refs fail honestly via ``LookupError``;
+persona-less entries get an agent-naming fallback), then the
+generation-only base.
+
 Credentials resolve through the existing provider-config layer inside the
 chat entrypoint — this module adds no secret handling of its own.
 """
@@ -151,12 +157,94 @@ def _definition_user_prompt(definition: DefinitionRow) -> str:
     )
 
 
+#: Persona/prompt attributes an agent-registry entry may carry, in
+#: preference order. The real ``AgentRegistryEntry`` (agent_registry.py)
+#: carries none of these today — its closest text field, ``description``,
+#: is human marketing copy, not a run persona — so real entries take the
+#: agent-naming fallback below.
+_AGENT_PERSONA_ATTRS = ("system_prompt", "persona", "prompt")
+
+
+class _AgentRegistryLookup:
+    """Expose ``.get(ref)`` over the real ``AgentRegistry.get_entry``."""
+
+    def __init__(self, registry: Any) -> None:
+        self._registry = registry
+
+    def get(self, ref: str) -> Any:
+        try:
+            return self._registry.get_entry(ref)
+        except Exception:  # noqa: BLE001 — degrade to unknown, fail closed
+            return None
+
+
+def _resolve_agent_registry() -> Any:
+    """Return an object with ``.get(ref)`` -> entry-or-None, or ``None``.
+
+    Patch seam for tests. Default: lazily import and construct the real
+    ``AgentRegistry``; any failure returns ``None`` so agent_ref
+    resolution fails closed without tests ever needing the real registry.
+    """
+    try:
+        from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import (
+            AgentRegistry,
+        )
+
+        return _AgentRegistryLookup(AgentRegistry())
+    except Exception:  # noqa: BLE001 — registry unavailable -> fail closed
+        logger.warning(
+            "Agent registry unavailable; agent_ref resolution will fail closed"
+        )
+        return None
+
+
+def _agent_ref_system_prompt(agent_ref: str) -> str:
+    """Resolve one agent_ref to its system prompt (ADR-184 envelope, task 5).
+
+    Raises:
+        LookupError: the ref is unknown or blocked (registry unavailable
+            or agent not found) — an honest failed run, never a silent
+            persona-less fallback for an agent that does not exist.
+    """
+    registry = _resolve_agent_registry()
+    entry = registry.get(agent_ref) if registry is not None else None
+    if entry is None:
+        raise LookupError(
+            f"agent_ref {agent_ref!r} unknown or blocked "
+            "(registry unavailable or agent not found)"
+        )
+    for attr in _AGENT_PERSONA_ATTRS:
+        value = getattr(entry, attr, None)
+        if value is None or isinstance(value, bool):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    # AgentRegistryEntry carries no persona field: name the resolved agent
+    # over the generation-only base so the run still says whom it acts as.
+    return (
+        f"You are the scheduled agent '{agent_ref}'. "
+        + _GENERATION_ONLY_SYSTEM_PROMPT
+    )
+
+
 def _definition_system_prompt(definition: DefinitionRow) -> str:
-    """Return the system prompt, allowing a definition-level override."""
+    """Return the system prompt, allowing a definition-level override.
+
+    Precedence: an authored ``input.system_prompt`` override wins; a
+    non-empty ``input.agent_ref`` must still RESOLVE (unknown/blocked
+    refs raise ``LookupError`` even when an override exists), and the
+    entry's persona is the prompt when no override is authored; otherwise
+    the generation-only base.
+    """
     source: dict[str, Any] = (
         definition.input if isinstance(definition.input, dict) else {}
     )
     override = str(source.get(_EXECUTOR_SYSTEM_PROMPT_KEY) or "").strip()
+    agent_ref = str(source.get("agent_ref") or "").strip()
+    if agent_ref:
+        entry_prompt = _agent_ref_system_prompt(agent_ref)
+        return override or entry_prompt
     return override or _GENERATION_ONLY_SYSTEM_PROMPT
 
 

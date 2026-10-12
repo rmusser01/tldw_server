@@ -343,6 +343,8 @@ async def test_agent_task_resolves_message_from_store(monkeypatch) -> None:
         "for_user",
         classmethod(lambda cls, user_id: _FakeStore()),
     )
+    # agent_ref now resolves through the registry seam at prompt build.
+    _fake_agent_registry(monkeypatch)
 
     definition = _definition(
         {"agent_ref": "agent:triage", "message_redacted": True,
@@ -600,6 +602,33 @@ def _fake_message_store(monkeypatch) -> None:
     )
 
 
+class _FakeAgentRegistryEntry:
+    """Entry stand-in: carries a persona prompt when one is given."""
+
+    def __init__(self, system_prompt: str | None = None) -> None:
+        self.system_prompt = system_prompt
+
+
+class _FakeAgentRegistry:
+    """Registry stand-in matching the ``.get(ref)`` seam contract."""
+
+    def __init__(self, entries: dict[str, Any]) -> None:
+        self._entries = entries
+
+    def get(self, ref: str) -> Any:
+        return self._entries.get(ref)
+
+
+def _fake_agent_registry(
+    monkeypatch, entries: dict[str, Any] | None = None
+) -> None:
+    """Patch the registry seam: 'agent:triage' resolves (no persona by default)."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    resolved = entries if entries is not None else {"agent:triage": _FakeAgentRegistryEntry()}
+    monkeypatch.setattr(em, "_resolve_agent_registry", lambda: _FakeAgentRegistry(resolved))
+
+
 @pytest.mark.asyncio
 async def test_agent_task_with_tools_runs_envelope_with_rederived_set(monkeypatch) -> None:
     """Tools requested -> the eligible set is re-derived HERE, hint never read."""
@@ -677,6 +706,7 @@ async def test_agent_task_tools_with_empty_eligible_fails_closed_to_generation(
     import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
 
     _fake_message_store(monkeypatch)
+    _fake_agent_registry(monkeypatch)
 
     async def _empty_derive(owner_id: int):
         return []
@@ -710,6 +740,7 @@ async def test_agent_task_without_tools_skips_derivation_entirely(monkeypatch) -
     import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
 
     _fake_message_store(monkeypatch)
+    _fake_agent_registry(monkeypatch)
 
     async def _must_not_derive(owner_id: int):
         raise AssertionError("eligible-set derivation must not run without tools")
@@ -729,3 +760,82 @@ async def test_agent_task_without_tools_skips_derivation_entirely(monkeypatch) -
         {"agent_ref": "agent:triage", "message_ref": "ref-9"}, family="agent_task"
     )
     assert await em._execute_agent_task(definition, {}) == "gen only"
+
+
+# ---------------------------------------------------------------------------
+# agent_ref persona resolution (ADR-184 envelope, task 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_ref_resolves_system_prompt(monkeypatch) -> None:
+    """A resolvable agent_ref runs under the entry's persona as system prompt."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_message_store(monkeypatch)
+    _fake_agent_registry(
+        monkeypatch,
+        {"agent:triage": _FakeAgentRegistryEntry("You are triage.")},
+    )
+
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_call(**kwargs: Any) -> dict[str, Any]:
+        captured.append(kwargs)
+        return {"choices": [{"message": {"content": "triaged"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _fake_call,
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-9"}, family="agent_task"
+    )
+    assert await em._execute_agent_task(definition, {}) == "triaged"
+    assert captured[0]["system_message"] == "You are triage."
+
+
+@pytest.mark.asyncio
+async def test_unknown_agent_ref_fails_honestly(monkeypatch) -> None:
+    """Unknown/blocked agent_ref: LookupError naming the reason, LLM never called."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_message_store(monkeypatch)
+    _fake_agent_registry(monkeypatch, entries={})  # resolves nothing
+
+    called: list[dict[str, Any]] = []
+
+    async def _must_not_call(**kwargs: Any) -> dict[str, Any]:
+        called.append(kwargs)
+        raise AssertionError("the LLM must not be called for an unknown agent_ref")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _must_not_call,
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:ghost", "message_ref": "ref-9"}, family="agent_task"
+    )
+    with pytest.raises(LookupError, match="unknown or blocked"):
+        await em._execute_agent_task(definition, {})
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_agent_ref_entry_without_persona_names_the_agent(monkeypatch) -> None:
+    """Real AgentRegistryEntry carries no persona: the prompt names the agent.
+
+    The fallback keeps the generation-only base (bounded, unattended
+    semantics) prefixed with the resolved agent's identity.
+    """
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_agent_registry(monkeypatch)  # 'agent:triage' -> entry, no persona
+
+    prompt = em._definition_system_prompt(
+        _definition({"agent_ref": "agent:triage"}, family="agent_task")
+    )
+    assert prompt.startswith("You are the scheduled agent 'agent:triage'. ")
+    assert "scheduled automation" in prompt

@@ -653,6 +653,9 @@ Quick start (local dev):
 - `POINTS_MODEL_PATH`: HF model path when running locally (e.g., `tencent/POINTS-Reader`).
 - `POINTS_PROMPT`: Optional prompt override.
 
+## Scheduled Automations (ADR-184 message store)
+- `AUTOMATION_MESSAGE_ENCRYPTION_KEY`: Base64-encoded 32-byte key for the scheduled-automation encrypted message store (`agent_task` raw prompts; per-owner sqlite under `USER_DB_BASE_DIR`). Falls back to `BYOK_ENCRYPTION_KEY` when unset; `BYOK_SECONDARY_ENCRYPTION_KEY` is honored as a secondary for dual-read during key rotation (store-native re-encryption is a tracked follow-up — keep the retired key as secondary until it lands). No key resolvable: agent_task authoring refuses with `message_store_unavailable` (fail closed).
+
 ## Notes
 - Many subsystems also support file-based configuration under `Config_Files/` and module-specific YAML files (e.g., TTS provider config). Environment variables always take precedence when present.
 
