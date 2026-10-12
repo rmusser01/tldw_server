@@ -1,7 +1,7 @@
 ---
 id: TASK-13521
 title: Expose structured source downloads and portable note exports
-status: In Progress
+status: Done
 created_date: 2026-10-11 22:07
 dependencies:
 - TASK-13517
@@ -13,7 +13,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-12 09:05
+updated_date: 2026-10-12 09:33
 ---
 
 ## Description
@@ -24,10 +24,10 @@ Make source downloads and portable notes distinct and preserve language through 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Download source returns exact source with a matching known-mode extension; Export note returns a versioned portable envelope with source/language/metadata.
-- [ ] #2 Real action wiring uses the reviewed import/export builders and scoped authority without passing structured source through Markdown conversion.
-- [ ] #3 User guidance explains check/save separation, supported/refused constructs, limits and undo behavior; targeted action/static and source-byte controls are recorded.
-- [ ] #4 Relevant ADR assessment, scoped static/security evidence and completion documentation are recorded without hiding unfinished release gates.
+- [x] #1 Download source returns exact source with a matching known-mode extension; Export note returns a versioned portable envelope with source/language/metadata.
+- [x] #2 Real action wiring uses the reviewed import/export builders and scoped authority without passing structured source through Markdown conversion.
+- [x] #3 User guidance explains check/save separation, supported/refused constructs, limits and undo behavior; targeted action/static and source-byte controls are recorded.
+- [x] #4 Relevant ADR assessment, scoped static/security evidence and completion documentation are recorded without hiding unfinished release gates.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -49,19 +49,19 @@ Reason: direct action wiring and guidance consume accepted portable/source/curre
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented distinct Download source and Export note (.note.json) header actions through the existing canonical editor capture and F6 export helpers. Current source/canonical mode are read synchronously, old-peer temporary intent stays absent, and explicit null/future modes retain presence. Existing download guards and explicit conversions remain; the mobile overflow menu is bounded. Extended the existing Notes_Structured_Source guide per Ruling54, with no duplicate guide/schema/dependency/provider. Existing ADR065-069 govern; no new ADR is required.
 Verification: action/F6/owner 55 passed; real authenticated Chromium2 passed with ordinary/fenced source bytes, desktop/mobile portable downloads and shipped CSP; SQLite/API import pre-effect27 passed (203 unsuppressed warnings). Advertised8GiB typecheck passes after recorded default-heap OOM; strict new source and edited-region formatter checks pass; BASE146->current146 legacy lint, zero introduced findings. No Python production changes, so server Bandit is inapplicable. Owned Notes zero/processes absent. Full report/index: Chatbook programme task-14-report.md/task-14-evidence. Physical/other-browser/installed-extension/history-peer profiles remain unqualified. Self-review complete; keep In Progress and all AC/DoD unchecked for Root review.
+Independent Task14 review: Spec compliant / Approved, no Critical or Important findings. Root verified all543 durable artifact hashes and18 unit source hashes; additive formatter-label clarification preserves original records and verifies six actual base/head source pairs. Scope reconciliation: task-14-review-scope-resolution.md. Existing ADR194/065-069 apply; no new ADR. Non-pristine warnings, inherited native mypy barrier and stale writer description remain I5/final triage. Six inherited save scenarios, cross-application and physical/deployment release gates remain unfinished; this closes only the verified source/portable actions and guidance.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Distinct exact-source and portable-note actions use current canonical captures, preserve mode presence and pass authenticated desktop/mobile byte controls. Independent review approved; original warnings and unfinished cross-application/physical/deployment gates remain explicit.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
