@@ -44,6 +44,14 @@
       },
       {
         "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 9,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Usage/test_llm_state_private_pools.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
         "imported_name": "clear_extraction_caches",
         "line": 1,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
@@ -1017,7 +1025,7 @@
       {
         "import_kind": "from",
         "imported_name": "RateLimiter",
-        "line": 63,
+        "line": 64,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py",
         "target_name": "enhanced_web_scraping"

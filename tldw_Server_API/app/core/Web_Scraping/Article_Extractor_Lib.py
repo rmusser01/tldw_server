@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.http_client import fetch as http_fetch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     browser_transport_failure_result,
@@ -1202,7 +1203,8 @@ def sync_recursive_scrape(
         )
 
     with ThreadPoolExecutor(max_workers=_extractor_max_workers()) as executor:
-        future = executor.submit(run_async_scrape)
+        _llm_state = capture_llm_call_state()
+        future = executor.submit(lambda: run_with_llm_call_state(_llm_state, run_async_scrape))
         return future.result()
 
 async def recursive_scrape(
