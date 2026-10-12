@@ -492,4 +492,66 @@ describe("PlaygroundChat research use-in-chat message integration", () => {
     expect(unrelated.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument()
     expect(unrelated.queryByRole("link", { name: "Review in Research" })).not.toBeInTheDocument()
   })
+
+  it("refreshes cached row callbacks and review policy while message metadata stays identical", async () => {
+    const message = completionMessage("run_msg", "Battery recycling supply chain")
+    useMessageOptionState.value.messages = [message]
+    const originalAttach = vi.fn()
+    const originalFollowUp = vi.fn()
+    const currentAttach = vi.fn()
+    const currentFollowUp = vi.fn()
+    const view = renderChat({
+      onAttachResearchContext: originalAttach,
+      onPrepareResearchFollowUp: originalFollowUp
+    })
+    view.rerender(
+      <DemoModeProvider>
+        <PlaygroundChat
+          onAttachResearchContext={currentAttach}
+          onPrepareResearchFollowUp={currentFollowUp}
+        />
+      </DemoModeProvider>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Use in Chat" }))
+    await waitFor(() => expect(currentAttach).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole("button", { name: "Follow up" }))
+    expect(currentFollowUp).toHaveBeenCalledTimes(1)
+    expect(originalAttach).not.toHaveBeenCalled()
+    expect(originalFollowUp).not.toHaveBeenCalled()
+    queryState.linkedRuns = [
+      {
+        run_id: "run_msg",
+        query: "Battery recycling supply chain",
+        status: "waiting_human",
+        phase: "awaiting_plan_review",
+        control_state: "running",
+        latest_checkpoint_id: "cp_1",
+        updated_at: "2026-10-11T23:00:00+00:00"
+      }
+    ]
+    view.rerender(
+      <DemoModeProvider>
+        <PlaygroundChat
+          onAttachResearchContext={currentAttach}
+          onPrepareResearchFollowUp={currentFollowUp}
+        />
+      </DemoModeProvider>
+    )
+    const row = within(screen.getByTestId("playground-message-mock"))
+    expect(row.getByText("Plan review needed")).toBeInTheDocument()
+    expect(row.getByRole("link", { name: "Review in Research" })).toHaveAttribute(
+      "href",
+      "/research?run=run_msg"
+    )
+    expect(
+      row.queryByRole("button", { name: "Use in Chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      row.queryByRole("button", { name: "Follow up" })
+    ).not.toBeInTheDocument()
+    expect(useMessageOptionState.value.messages[0].metadataExtra).toBe(
+      message.metadataExtra
+    )
+  })
+
 })
