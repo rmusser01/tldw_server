@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_limits_for_user,
     increment_jobs_started,
 )
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 DOMAIN = "audio"
 
@@ -349,7 +350,8 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         # Fallback to segments
                         segs = updated_payload.get("segments") or []
                         text = " ".join((s.get("Text", "").strip() if isinstance(s, dict) else "") for s in segs).strip()
-                    analysis = await asyncio.to_thread(analyze, text, payload.get("api_name") or "openai")
+                    with llm_call_root(owner):
+                        analysis = await asyncio.to_thread(analyze, text, payload.get("api_name") or "openai")
                     updated_payload["analysis"] = analysis
                     next_type = "audio_store"
                 elif jtype == "audio_store":

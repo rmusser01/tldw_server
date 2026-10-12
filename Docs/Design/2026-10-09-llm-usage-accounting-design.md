@@ -1,7 +1,7 @@
 # LLM usage accounting: record and gate every LLM call at one point
 
 - **Date:** 2026-10-09 (revised 2026-10-10 after an independent review against the code; see [Review changes](#review-changes))
-- **Status:** Approved; PR 1a in progress
+- **Status:** Approved; PR 1a (#3222) and PR 1b merged; PR 2 and PR 3 not started
 - **Backlog:** TASK-13437 (gate LLM tokens/month at every LLM entry point) and TASK-13436 (evaluation cost caps per user, re-scoped below). Both are follow-ups of spec 2, TASK-13434.
 - **Builds on:** `Docs/Design/2026-10-02-usage-quota-posture-design.md` (spec 2) and ADR-064. Quotas are per-user `limits.*` values, resolved by `quota_resolver.user_quota`. Nothing is enforced unless `USAGE_QUOTAS_ENABLED` is on, `0` blocks, and errors fail open.
 
@@ -92,21 +92,26 @@ A new module, `core/Usage/llm_call_context.py`, answers "which user is this LLM 
 With no user, a call is not checked and not recorded.
 
 **Roots that need an explicit set point,** because the content scope doesn't reach them:
-- **Jobs workers on `WorkerSDK`:** both handler call sites (`Jobs/worker_sdk.py:719`, `:955`) run the handler inside `llm_call_context(user_id=as_quota_user_id(owner))`. The owner is the job row's `owner_user_id`, a string that can be empty. This covers scheduled automations, which run under a `WorkerSDK` worker.
-- **The workflow engine:** `start_run` sets the context from `run.user_id` (`Workflows/engine.py:530`, `:596`).
-  - It has to be set there because `_spawn` runs each run on a new thread with its own loop (`:2337-2347`), and `threading.Thread` doesn't copy context.
+- **Jobs workers on `WorkerSDK`:** both handler call sites (`Jobs/worker_sdk.py`) run each handler under `llm_call_root(owner)`. The owner is the job row's `owner_user_id`, a string that can be empty.
+  - Scheduled automations do not run under `WorkerSDK`. `services/agent_task_jobs_worker.py` has its own loop and sets the root itself. So does `services/audio_jobs_worker.py`.
+  - The `watchlists_enrich_output` Scheduler task sets the root from its payload's user.
+- **The workflow engine:** `start_run` and `continue_run` both set the root from `run.user_id` (`Workflows/engine.py`).
+  - It has to be set there because `_spawn` runs each run on a new thread with its own loop, and `threading.Thread` doesn't copy context.
   - `start_run` is also awaited directly for child runs (`Workflows/adapters/control/orchestration.py:74`).
 - **The chat request queue:** `QueuedRequest` captures the LLM call state when the request is enqueued, and the worker runs the processor with it (`Chat/request_queue.py:366`, `:672`). The queue's worker tasks otherwise carry the context of whoever started the queue. Without this, a queued `/chat/completions` (`CHAT_QUEUED_EXECUTION`, off by default) would lose its `prechecked` and `records_itself` flags and be counted twice.
-- **WebSockets:** no socket authentication sets the content scope. Each sets the context after it authenticates:
-  - the four audio routes, through their shared helper `_audio_ws_authenticate` (`Audio/streaming_service.py:382`);
-  - `voice_assistant.py`;
-  - `agent_client_protocol.py` (two routes);
-  - `acp_multiplex.py`;
-  - `prompt_studio/prompt_studio_websocket.py` (two routes; its user id is a string).
+- **WebSockets:** no socket authentication sets the content scope, so a socket that makes chat LLM calls binds its user after it authenticates.
+  - The four audio routes and the two realtime routes do, in their shared helper `_audio_ws_authenticate` (`Audio/streaming_service.py`). The realtime routes reach it through `Audio/Realtime/auth.py`.
+  - The voice assistant socket reaches an LLM only through a workflow run, which the workflow engine covers.
+  - The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows) make no chat LLM call and are left alone.
 
 **Places that lose context today, and their fix:**
 - **The bounded daemon pools.** `BoundedDaemonPool.start` (`Chat/bounded_daemon.py:121-150`) starts raw threads. It is the one entry point for the sync adapter pool, the stream pool and the cleanup pool. It carries the LLM call state into the thread: the resolved user and the context fields. It does not copy the whole context, because other context variables, such as the provider-error privacy scope, are not passed to these threads today, and copying everything would change that.
-- **`loop.run_in_executor`** doesn't copy context. The sites that lead to LLM calls carry the LLM call state the same way: `Evaluations/eval_runner.py:1398-1409` (G-Eval) and `Scheduler/base/registry.py:84-92,248-258`.
+- **`loop.run_in_executor`** doesn't copy context. The first draft named two sites. The survey found the pattern at many more: document insights, quiz generation, reading summaries, character-memory extraction, watchlist output summaries, the media processors, live meeting insights, Data Tables and G-Eval. Nearly all of them pass `None` as the executor, so one default executor that carries the LLM call state covers them. One request path does not: `/research/websearch` runs sub-query generation on a pool the endpoint module creates.
+  - It is installed on the server loop at startup and by `llm_call_root` on any other loop.
+  - The server runs on uvloop (`uvicorn[standard]`), whose loop does not expose its default executor, so the helper remembers the loops it has installed on.
+  - The Scheduler registry's `run_in_executor` path is used only by tests.
+  - Three pools the code creates itself carry the LLM call state at their submit: claims extraction (`Claims_Extraction/ingestion_claims.py`), the article extractor (`Web_Scraping/Article_Extractor_Lib.py`) and web search (`api/v1/endpoints/research.py`).
+  - Two other pools already copy the whole context and needed no change: the web-extraction pool (`Web_Scraping/orchestration/executor.py`) and the email-archive pool in `Ingestion_Media_Processing/persistence.py`.
 - `asyncio.to_thread` and `asyncio.create_task` already copy context. Async FastAPI dependencies run in the request's task, so an endpoint and its streaming response body see what authentication set.
 
 **Exempt calls:** `AuthNZ/byok_testing.py:563,649` and `Setup/first_chat_verifier.py` run inside `llm_call_context(exempt=True)`.
@@ -313,7 +318,7 @@ Four PRs, so recording can be checked before anything new is refused.
   - the `records_itself` and `exempt` markings;
   - the embeddings predicate in §6;
   - ADR-067, "LLM calls are accounted in the chat provider base class", if the number is free when the PR opens.
-- **PR 1b: the remaining roots in §1.** `WorkerSDK`, the workflow engine, the WebSocket sites and the two executor sites.
+- **PR 1b: the remaining roots in §1.** `WorkerSDK`, the job workers with their own loop, the workflow engine, the audio and realtime WebSockets, and the default executor that carries the LLM call state.
 - **PR 2: the check and the keys.** §4, the cost counters and startup warnings in §6, §7 and §9. Closes TASK-13437.
 - **PR 3: the evaluation cost-cap removals.** §8. It has no dependency on the other two beyond the cost quota existing. Closes TASK-13436.
 
@@ -337,3 +342,12 @@ An independent review against the code on 2026-10-10 found 3 blockers and 9 impo
 - **Other readers.** §6 lists them, and the two settings that can silently disable the quotas get a startup warning.
 - **The NULL trap.** The embeddings predicate uses `COALESCE`.
 - **The removal list** in §8 is complete, and is its own PR.
+
+Revision of 2026-10-11, while building PR 1b:
+
+- **Scheduled automations.** They do not run under `WorkerSDK`; the agent-task and audio jobs workers have their own loops and set the root themselves.
+- **Executor sites.** One default executor that carries the LLM call state replaces the two named sites, because the pattern is in many more places.
+- **uvloop.** The default executor cannot be read back from the loop, so the helper tracks the loops it has installed on.
+- **WebSockets.** Only the audio and realtime sockets make chat LLM calls; the rest are left alone.
+- **Private pools.** Three pools the code creates itself carry the LLM call state at their submit: claims extraction, the article extractor and web search.
+- **Still unrecorded.** MCP tool calls, the in-process claims rebuild threads, and system jobs with no user.

@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.Scheduler.base.registry import task
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Watchlists import briefing_delivery, output_enrichment_handler
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 
@@ -93,12 +94,13 @@ async def watchlists_enrich_output(payload: dict[str, Any]) -> dict[str, Any]:
     if summary_config is not None and not isinstance(summary_config, dict):
         raise ValueError("watchlists_enrich_output: summary_config must be a dict when provided")
 
-    await output_enrichment_handler.enrich_output(
-        output_id=output_id_int,
-        user_id=user_id_int,
-        grouping_config=grouping_config,
-        summary_config=summary_config,
-    )
+    with llm_call_root(user_id_int):
+        await output_enrichment_handler.enrich_output(
+            output_id=output_id_int,
+            user_id=user_id_int,
+            grouping_config=grouping_config,
+            summary_config=summary_config,
+        )
     return {"output_id": output_id_int, "status": "completed"}
 
 

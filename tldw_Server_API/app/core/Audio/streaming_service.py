@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
     get_metrics_registry,
 )
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Usage.llm_call_context import bind_llm_call_user
 
 _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -379,7 +380,7 @@ async def _stream_tts_to_websocket(
             raise asyncio.CancelledError
 
 
-async def _audio_ws_authenticate(
+async def _audio_ws_authenticate_impl(
     websocket: WebSocket,
     outer_stream: Optional[Any],
     *,
@@ -834,3 +835,28 @@ async def _audio_ws_authenticate(
         logger.debug(f"Invalid authentication message for single-user API key: {exc}")
         await _stream_error("Invalid authentication message")
         return False, None
+
+
+async def _audio_ws_authenticate(
+    websocket: WebSocket,
+    outer_stream: Optional[Any],
+    *,
+    endpoint_id: str,
+    ws_path: str,
+    allow_initial_auth_message: bool = True,
+) -> tuple[bool, Optional[int]]:
+    """Authenticate an audio WebSocket, and bind its user for LLM usage accounting.
+
+    The handler awaits this in its own task, so the bound user stays for the
+    session and for the tasks the handler starts afterwards.
+    """
+    authenticated, user_id = await _audio_ws_authenticate_impl(
+        websocket,
+        outer_stream,
+        endpoint_id=endpoint_id,
+        ws_path=ws_path,
+        allow_initial_auth_message=allow_initial_auth_message,
+    )
+    if authenticated:
+        bind_llm_call_user(user_id)
+    return authenticated, user_id

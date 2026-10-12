@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 try:
@@ -418,7 +419,8 @@ def extract_claims_for_chunks(
             start_time = time.time()
             _exec = _futures.ThreadPoolExecutor(max_workers=1)
             try:
-                fut = _exec.submit(_call_provider)
+                _llm_state = capture_llm_call_state()
+                fut = _exec.submit(lambda: run_with_llm_call_state(_llm_state, _call_provider))
                 try:
                     resp = fut.result(timeout=timeout_sec)
                 except _futures.TimeoutError:
