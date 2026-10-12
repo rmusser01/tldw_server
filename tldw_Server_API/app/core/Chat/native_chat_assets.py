@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import (
 )
 
 if TYPE_CHECKING:
+    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetRetentionRequestV1
     from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
     from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeCandidate
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -60,8 +61,16 @@ class NativeChatAssetIO:
         self._user_root = DatabasePaths.resolve_user_base_directory(user_id)
 
     async def reserve_quota(
-        self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, request_digest: str,
-        generation: int, candidate_id: str, *, quota_owner: NativeQuotaOwner, quota_service: StorageQuotaService,
+        self,
+        owner: AuthorizedNativeOwner,
+        kind: str,
+        operation_id: str,
+        request_digest: str,
+        generation: int,
+        candidate_id: str,
+        *,
+        quota_owner: NativeQuotaOwner,
+        quota_service: StorageQuotaService,
     ) -> NativeQuotaReservation:
         """Reconcile original authority outside chat transactions, then confirm the live writer."""
         self._require_outermost(owner)
@@ -69,16 +78,92 @@ class NativeChatAssetIO:
         reservation = await quota_service.resolve_native_reservation(quota_owner, candidate_id)
         self._require_outermost(owner)
         with self._db.transaction() as conn:
-            size = self._db.native_assets.record_quota_reservation_intent(
-                owner, kind, operation_id, request_digest, candidate_id, generation, quota_owner, conn=conn,
-            )
+            refresh = False
+            if reservation is None:
+                self._db.native_assets._require_live_attempt(
+                    owner,
+                    kind,
+                    operation_id,
+                    request_digest,
+                    generation,
+                    datetime.now(timezone.utc),
+                    conn=conn,
+                )
+                _, candidate = self._db.native_assets._locked_candidate_for_operation(
+                    owner,
+                    kind,
+                    operation_id,
+                    request_digest,
+                    candidate_id,
+                    conn=conn,
+                )
+                refresh = candidate["state"] == "prepared"
+            if not refresh:
+                if self._db.native_assets.reconcile_prepared_quota(
+                    owner,
+                    kind,
+                    operation_id,
+                    request_digest,
+                    candidate_id,
+                    generation,
+                    quota_owner,
+                    reservation,
+                    conn=conn,
+                ):
+                    return reservation
+                size = self._db.native_assets.record_quota_reservation_intent(
+                    owner,
+                    kind,
+                    operation_id,
+                    request_digest,
+                    candidate_id,
+                    generation,
+                    quota_owner,
+                    conn=conn,
+                )
+        if refresh:
+            reservation = await quota_service.resolve_native_reservation(quota_owner, candidate_id)
+            self._require_outermost(owner)
+            with self._db.transaction() as conn:
+                if not self._db.native_assets.reconcile_prepared_quota(
+                    owner,
+                    kind,
+                    operation_id,
+                    request_digest,
+                    candidate_id,
+                    generation,
+                    quota_owner,
+                    reservation,
+                    conn=conn,
+                ):
+                    raise ValueError("stale_candidate")
+            return reservation
         if reservation is None:
             reservation = await quota_service.reserve_native_bytes(quota_owner, candidate_id, size)
         self._require_outermost(owner)
         with self._db.transaction() as conn:
-            self._db.native_assets.confirm_quota_reservation(
-                owner, kind, operation_id, request_digest, candidate_id, generation, quota_owner, reservation, conn=conn,
-            )
+            if not self._db.native_assets.reconcile_prepared_quota(
+                owner,
+                kind,
+                operation_id,
+                request_digest,
+                candidate_id,
+                generation,
+                quota_owner,
+                reservation,
+                conn=conn,
+            ):
+                self._db.native_assets.confirm_quota_reservation(
+                    owner,
+                    kind,
+                    operation_id,
+                    request_digest,
+                    candidate_id,
+                    generation,
+                    quota_owner,
+                    reservation,
+                    conn=conn,
+                )
         return reservation
 
     async def reclaim_quota(
@@ -294,6 +379,72 @@ class NativeChatAssetIO:
         if limit < 1 or row["expected_size_bytes"] > limit:
             raise ValueError("native_asset_size_limit")
         return media_type, limit
+
+    async def prepare_retention_upload(
+        self,
+        owner: AuthorizedNativeOwner,
+        request: NativeAssetRetentionRequestV1,
+        generation: int,
+        *,
+        reference_id: str,
+        candidate_id: str,
+        namespace_id: str,
+        upload_id: str,
+        size_bytes: int,
+        mime_type: str,
+        upload: Any,
+        quota_owner: NativeQuotaOwner,
+        quota_service: StorageQuotaService,
+    ) -> NativeCandidate:
+        """Prepare one reviewed candidate without publishing claims or readiness."""
+        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetRetentionRequestV1
+
+        self._require_outermost(owner)
+        self._db.native_assets._quota_identity(owner, quota_owner)
+        if not isinstance(request, NativeAssetRetentionRequestV1):
+            raise ValueError("invalid_retention_request")
+        request = NativeAssetRetentionRequestV1.model_validate(request.model_dump(mode="json"))
+
+        def admit() -> NativeCandidate:
+            self._require_outermost(owner)
+            with self._db.transaction() as conn:
+                return self._db.native_assets.reserve_retention_candidate(
+                    owner,
+                    request,
+                    generation,
+                    reference_id=reference_id,
+                    candidate_id=candidate_id,
+                    namespace_id=namespace_id,
+                    upload_id=upload_id,
+                    size_bytes=size_bytes,
+                    mime_type=mime_type,
+                    conn=conn,
+                )
+
+        admit()
+        await self.reserve_quota(
+            owner,
+            request.operation_kind,
+            request.operation_id,
+            request.request_digest,
+            generation,
+            candidate_id,
+            quota_owner=quota_owner,
+            quota_service=quota_service,
+        )
+        candidate = admit()
+        if candidate.state == "prepared":
+            return candidate
+        await self.prepare_upload(
+            owner,
+            request.operation_kind,
+            request.operation_id,
+            request.request_digest,
+            generation,
+            candidate_id,
+            upload=upload,
+        )
+        return admit()
 
     async def prepare_upload(
         self, owner: AuthorizedNativeOwner, kind: str, operation_id: str, request_digest: str,

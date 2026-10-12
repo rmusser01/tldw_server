@@ -616,6 +616,7 @@ def _child_physical_publisher(
     db = CharactersRAGDB(**kwargs)
     DatabasePaths.resolve_user_base_directory = staticmethod(lambda user_id: Path(root))
     io = NativeChatAssetIO(db, user_id=1)
+    channel.send(("ready", None))
     original = blob_store._publish_native_file_at
 
     def paused(handle: Any, **kwargs: Any) -> None:
@@ -671,6 +672,8 @@ def test_cross_process_publication_drain_and_death_preserve_the_quota_fence(
     process.start()
     child.close()
     try:
+        assert parent.poll(120), "child failed to initialize"
+        assert parent.recv()[0] == "ready"
         assert parent.poll(15), "child failed to reach actual publication boundary"
         assert parent.recv()[0] == "paused"
         _expire(db)

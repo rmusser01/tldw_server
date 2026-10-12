@@ -339,6 +339,55 @@ class NativeChatAssetStore:
         self._require_live_attempt(owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn)
         return candidate['expected_size_bytes']
 
+    def reconcile_prepared_quota(
+        self,
+        owner: Any,
+        kind: str,
+        operation_id: str,
+        request_digest: str,
+        candidate_id: str,
+        generation: int,
+        quota_owner: Any,
+        reservation: Any,
+        *,
+        conn: Any,
+    ) -> bool:
+        """Accept prepared replay only under its original confirmed active authority."""
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaReservation
+
+        self._db.native_forks._require_active_transaction(conn)
+        identity = self._quota_identity(owner, quota_owner)
+        self._require_live_attempt(
+            owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn
+        )
+        _, candidate = self._locked_candidate_for_operation(
+            owner, kind, operation_id, request_digest, candidate_id, conn=conn
+        )
+        if candidate["state"] != "prepared":
+            return False
+        if candidate["attempt_generation"] != generation:
+            raise ValueError("stale_candidate")
+        self._require_confirmed_quota(owner, candidate, conn=conn)
+        intent = conn.execute(
+            "SELECT quota_owner_json FROM native_chat_quota_intents "
+            "WHERE client_id = ? AND candidate_id = ? AND intent_kind = 'reserve'",
+            (owner.client_id, candidate_id),
+        ).fetchone()
+        if intent is None or intent["quota_owner_json"] != identity:
+            raise ValueError("quota_intent_mismatch")
+        if (
+            not isinstance(reservation, NativeQuotaReservation)
+            or reservation.candidate_key != candidate_id
+            or reservation.owner != quota_owner
+            or reservation.size_bytes != candidate["expected_size_bytes"]
+            or reservation.state != "active"
+        ):
+            raise ValueError("quota_reservation_unconfirmed")
+        self._require_live_attempt(
+            owner, kind, operation_id, request_digest, generation, datetime.now(timezone.utc), conn=conn
+        )
+        return True
+
     def confirm_quota_reservation(
         self, owner: Any, kind: str, operation_id: str, request_digest: str,
         candidate_id: str, generation: int, quota_owner: Any, reservation: Any, *, conn: Any,
