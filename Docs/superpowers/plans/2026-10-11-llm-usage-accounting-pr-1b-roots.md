@@ -16,7 +16,9 @@
 - **Accounting never breaks the work it accounts for.** A root that cannot work out its user runs exactly as it does today, unrecorded.
 - **Carry only the LLM call state** across a thread hand-off: `capture_llm_call_state()` and `run_with_llm_call_state(...)` from PR 1a. Never `contextvars.copy_context()` for this.
 - **One helper for roots.** Every job, run and scheduled-task root uses `llm_call_root(owner)`. A task that serves one user for its whole life (a WebSocket handler) uses `bind_llm_call_user(user_id)`.
-- **An owner that is not a number is no user.** Job owners are strings and can be empty or absent. `coerce_llm_user_id` maps anything non-numeric to `None`, and a `None` user never overrides a user that is already set.
+- **An owner that is not a number is no user.** Job owners are strings and can be empty or absent. `as_quota_user_id` (`core/Usage/quota_checks.py`, the helper the spec names) maps anything non-numeric to `None`, and a `None` user never overrides a user that is already set. Do not add a second coercion helper.
+- **The server runs on uvloop** (it comes with `uvicorn[standard]`). A uvloop loop does not expose `_default_executor`, so app code never reads that attribute. Tests run on the stdlib loop unless they build a uvloop loop themselves.
+- **Every code block and test in this plan was dry-run** in a scratch checkout of this branch, and an independent reviewer applied all eight tasks there. If an edit does not match the file, or a test does not behave as a step says, stop and report it. Do not improvise.
 - **Every edit at a call site wraps one call.** No argument, return value or exception handling changes.
 - **Test-first.** Each task's tests are written and seen failing before its code.
 - **Backlog:** `tools/backlog-py` only, `--append-notes`, explicit ids, `git add -A backlog/tasks`.
@@ -40,7 +42,7 @@ Inputs the spec implies and a person would hit. Each has a test in the task name
 
 | File | Responsibility |
 |---|---|
-| `tldw_Server_API/app/core/Usage/llm_call_context.py` | Adds `coerce_llm_user_id` and `bind_llm_call_user`. |
+| `tldw_Server_API/app/core/Usage/llm_call_context.py` | Adds `bind_llm_call_user`. |
 | `tldw_Server_API/app/core/Usage/llm_roots.py` (new) | `llm_call_root`, and the default executor that carries the LLM call state. |
 | `tldw_Server_API/app/main.py` | Installs the executor on the server loop at startup. |
 | `tldw_Server_API/app/core/Jobs/worker_sdk.py` | Both handler calls run under `llm_call_root`. |
@@ -54,16 +56,15 @@ Inputs the spec implies and a person would hit. Each has a test in the task name
 ### Task 1: The root helper and an executor that carries the call state
 
 **Files:**
-- Modify: `tldw_Server_API/app/core/Usage/llm_call_context.py` (add two functions at the end)
+- Modify: `tldw_Server_API/app/core/Usage/llm_call_context.py` (add one function at the end)
 - Create: `tldw_Server_API/app/core/Usage/llm_roots.py`
 - Modify: `tldw_Server_API/app/main.py` (the `lifespan` function, directly after the `set_accounting_loop(asyncio.get_running_loop())` line PR 1a added)
 - Test: `tldw_Server_API/tests/Usage/test_llm_roots.py`; add one test to `tldw_Server_API/tests/Usage/test_llm_accounting_lifespan.py`
 
 **Interfaces:**
-- Consumes, from PR 1a: `llm_call_context`, `current_llm_user_id`, `current_llm_call_context`, `capture_llm_call_state`, `run_with_llm_call_state`, and the module variables `_CTX` in `llm_call_context.py`.
+- Consumes, from PR 1a: `llm_call_context`, `current_llm_user_id`, `current_llm_call_context`, `capture_llm_call_state`, `run_with_llm_call_state`, and the module variable `_CTX` in `llm_call_context.py`. From spec 2: `as_quota_user_id(value: Any) -> int | None` in `core/Usage/quota_checks.py`.
 - Produces:
-  - `coerce_llm_user_id(value: Any) -> int | None`
-  - `bind_llm_call_user(user_id: Any) -> None`
+  - `bind_llm_call_user(user_id: int | None) -> None`
   - `llm_call_root(user_id: Any, *, operation: str | None = None)` (context manager)
   - `ensure_llm_state_executor(loop: AbstractEventLoop | None = None) -> bool`
   - `LLMStateThreadPoolExecutor`
@@ -79,9 +80,9 @@ import asyncio
 
 import pytest
 
+from tldw_Server_API.app.core.Usage import llm_roots
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     bind_llm_call_user,
-    coerce_llm_user_id,
     current_llm_call_context,
     current_llm_user_id,
     llm_call_context,
@@ -98,15 +99,6 @@ pytestmark = pytest.mark.unit
 def _probe() -> tuple[int | None, str]:
     """What the current thread sees."""
     return current_llm_user_id(), current_llm_call_context().operation
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [("7", 7), (7, 7), ("", None), (None, None), ("u", None), ("7.5", None)],
-)
-def test_an_owner_that_is_not_a_number_is_no_user(value: object, expected: int | None) -> None:
-    """Job owners are strings; anything non-numeric is no user."""
-    assert coerce_llm_user_id(value) == expected
 
 
 async def test_a_root_sets_its_user_and_operation_and_restores_them() -> None:
@@ -130,19 +122,20 @@ async def test_a_root_with_no_usable_owner_keeps_the_user_already_set() -> None:
 async def test_binding_a_user_lasts_for_the_rest_of_the_task_only() -> None:
     """A bound user stays for the task that bound it and does not reach a sibling task."""
 
-    async def _session(user_id: object) -> int | None:
+    async def _session(user_id: int | None) -> int | None:
         """Bind, yield to the loop, then report."""
         bind_llm_call_user(user_id)
         await asyncio.sleep(0)
         return current_llm_user_id()
 
-    assert await asyncio.gather(_session(5), _session(None), _session("9")) == [5, None, 9]
+    assert await asyncio.gather(_session(5), _session(None), _session(9)) == [5, None, 9]
     assert current_llm_user_id() is None
 
 
 async def test_run_in_executor_drops_the_user_until_the_executor_is_installed() -> None:
     """The default executor loses the user; the installed one carries it, for this hand-off only."""
     loop = asyncio.get_running_loop()
+    # The first assertion needs a loop nothing has installed on: pytest-asyncio gives each test its own.
     with llm_call_context(user_id=7):
         assert await loop.run_in_executor(None, _probe) == (None, "llm_call")
     assert ensure_llm_state_executor() is True
@@ -155,12 +148,44 @@ async def test_installing_the_executor_is_idempotent_and_keeps_to_thread_working
     """A second install keeps the same executor, and asyncio.to_thread still carries the user."""
     loop = asyncio.get_running_loop()
     ensure_llm_state_executor()
-    first = loop._default_executor  # noqa: SLF001 - the only way to read the default executor
+    first = loop._default_executor  # noqa: SLF001 - the stdlib loop's only way to read the default executor
     assert isinstance(first, LLMStateThreadPoolExecutor)
     ensure_llm_state_executor(loop)
     assert loop._default_executor is first  # noqa: SLF001
     with llm_call_context(user_id=4):
         assert await asyncio.to_thread(_probe) == (4, "llm_call")
+
+
+def test_on_uvloop_the_executor_is_installed_once_and_carries_the_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The server runs on uvloop, whose loop does not expose its default executor to Python."""
+    uvloop = pytest.importorskip("uvloop")
+    created: list[LLMStateThreadPoolExecutor] = []
+
+    class _Counting(LLMStateThreadPoolExecutor):
+        """Counts how many executors get built."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    monkeypatch.setattr(llm_roots, "LLMStateThreadPoolExecutor", _Counting)
+
+    async def _main() -> tuple[int | None, str]:
+        """Enter three roots on one loop, then hand a call to the executor."""
+        for owner in ("1", "2", "3"):
+            with llm_call_root(owner):
+                pass
+        with llm_call_context(user_id=7):
+            return await asyncio.get_running_loop().run_in_executor(None, _probe)
+
+    loop = uvloop.new_event_loop()
+    try:
+        assert not hasattr(loop, "_default_executor")
+        assert loop.run_until_complete(_main()) == (7, "llm_call")
+        loop.run_until_complete(loop.shutdown_default_executor())
+    finally:
+        loop.close()
+    assert len(created) == 1
 
 
 def test_with_no_running_loop_nothing_is_installed() -> None:
@@ -193,33 +218,24 @@ def test_the_app_lifespan_installs_the_state_carrying_executor(monkeypatch: pyte
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_roots.py tldw_Server_API/tests/Usage/test_llm_accounting_lifespan.py`
-Expected: `test_llm_roots.py` fails to collect (`ImportError: cannot import name 'bind_llm_call_user'`), and the new lifespan test fails on its import.
+Expected: `test_llm_roots.py` fails to collect with an `ImportError` (`llm_roots` does not exist yet), and the new lifespan test fails on its import.
 
-- [ ] **Step 3: Add the two functions to `llm_call_context.py`**
+- [ ] **Step 3: Add `bind_llm_call_user` to `llm_call_context.py`**
 
 Append at the end of `tldw_Server_API/app/core/Usage/llm_call_context.py`:
 
 ```python
 
 
-def coerce_llm_user_id(value: Any) -> int | None:
-    """A numeric user id from a job owner, a run owner or a payload value; None for anything else."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def bind_llm_call_user(user_id: Any) -> None:
-    """Set the user for the rest of the current task.
+def bind_llm_call_user(user_id: int | None) -> None:
+    """Set the user for the rest of the current task; ``None`` binds nothing.
 
     For a task that serves one user for its whole life, such as a WebSocket
     handler. Everything else uses ``llm_call_context`` or ``llm_call_root``,
     which restore the previous user when they exit.
     """
-    resolved = coerce_llm_user_id(user_id)
-    if resolved is not None:
-        _CTX.set(replace(_CTX.get(), user_id=resolved))
+    if user_id is not None:
+        _CTX.set(replace(_CTX.get(), user_id=user_id))
 ```
 
 - [ ] **Step 4: Write `llm_roots.py`**
@@ -237,6 +253,7 @@ state itself.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -244,10 +261,15 @@ from typing import Any
 
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     capture_llm_call_state,
-    coerce_llm_user_id,
     llm_call_context,
     run_with_llm_call_state,
 )
+from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
+
+# Loops whose default executor carries the LLM call state. asyncio has no getter for the default
+# executor, and uvloop, which the server runs on, keeps it where Python cannot read it.
+# ponytail: a later set_default_executor on a listed loop goes unnoticed; nothing in the app calls it.
+_INSTALLED: weakref.WeakSet[asyncio.AbstractEventLoop] = weakref.WeakSet()
 
 
 class LLMStateThreadPoolExecutor(ThreadPoolExecutor):
@@ -264,11 +286,11 @@ def ensure_llm_state_executor(loop: asyncio.AbstractEventLoop | None = None) -> 
         target = loop or asyncio.get_running_loop()
     except RuntimeError:
         return False
-    # asyncio exposes no getter for the default executor.
-    if isinstance(getattr(target, "_default_executor", None), LLMStateThreadPoolExecutor):
+    if target in _INSTALLED:
         return True
     # Same sizing and thread names as the executor asyncio creates on first use.
     target.set_default_executor(LLMStateThreadPoolExecutor(thread_name_prefix="asyncio"))
+    _INSTALLED.add(target)
     return True
 
 
@@ -280,7 +302,7 @@ def llm_call_root(user_id: Any, *, operation: str | None = None) -> Iterator[Non
     already set.
     """
     overrides: dict[str, Any] = {}
-    resolved = coerce_llm_user_id(user_id)
+    resolved = as_quota_user_id(user_id)
     if resolved is not None:
         overrides["user_id"] = resolved
     if operation:
@@ -289,6 +311,11 @@ def llm_call_root(user_id: Any, *, operation: str | None = None) -> Iterator[Non
     with llm_call_context(**overrides):
         yield
 ```
+
+Three things here are deliberate:
+- `as_quota_user_id` is imported in this module and not in `llm_call_context.py`. That module sits under `providers/base.py`'s import chain and must stay free of the quota modules.
+- The `WeakSet` is how the helper knows it has already installed on a loop. Reading `loop._default_executor` would work on the stdlib loop only: on uvloop the attribute does not exist, the check would always be false, and every job and workflow run would replace the server loop's thread pool.
+- A replaced default executor needs no shutdown. Once nothing refers to it, its idle threads exit by themselves.
 
 - [ ] **Step 5: Install the executor at startup**
 
@@ -305,7 +332,7 @@ In `tldw_Server_API/app/main.py`, in `lifespan`, directly after the line `set_ac
 - [ ] **Step 6: Run the tests and confirm they pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_roots.py tldw_Server_API/tests/Usage/test_llm_accounting_lifespan.py`
-Expected: 15 passed (13 in `test_llm_roots.py`, counting the six parametrized cases, and 2 in the lifespan file).
+Expected: 10 passed (8 in `test_llm_roots.py` and 2 in the lifespan file). The uvloop test must run, not skip: `uvloop` is installed in this venv.
 
 - [ ] **Step 7: Commit**
 
@@ -408,7 +435,31 @@ async def test_a_failing_handler_still_releases_the_user(tmp_path) -> None:
 
 The job row's `payload` reaches the handler as a dict in this harness; a dry run of this file confirmed it.
 
-For `run_prepared`, add one test to `tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py`, reusing that file's `_run_once` helper and its `_job()` fixture: give the job `owner_user_id="7"`, have the handler record `current_llm_user_id()`, and assert it recorded `7`. Add a second case with the fixture's default job, which has no `owner_user_id` key, and assert it recorded `None` and raised nothing.
+For `run_prepared`, append this to `tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py`. It uses that file's `PreparedManager`, `_sdk`, `_run_once` and `_complete` helpers. The fixture's default job has no `owner_user_id` key, which is the second case:
+
+```python
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("owner", "expected"), [("7", 7), (None, None)], ids=["owned", "no-owner"])
+async def test_prepared_handler_sees_the_job_owner_as_the_llm_user(owner, expected):
+    """LLM usage accounting: a prepared job runs for its owner; a job with none runs with no user."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+
+    manager = PreparedManager()
+    if owner is not None:
+        manager.jobs[0]["owner_user_id"] = owner
+    sdk = _sdk(manager)
+    seen: list[int | None] = []
+
+    async def handler(_job_row, _context):
+        seen.append(current_llm_user_id())
+        return _complete()
+
+    await _run_once(sdk, handler)
+
+    assert seen == [expected]
+    assert len(manager.apply_calls) == 1
+    assert current_llm_user_id() is None
+```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
@@ -454,7 +505,7 @@ Each `with` sits inside the existing `try`, so the existing `except` clauses sti
 - [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py tldw_Server_API/tests/Jobs/test_worker_sdk.py`
-Expected: all pass, and no existing test in the two existing files changes result.
+Expected: 136 passed, and no existing test in the two existing files changes result.
 
 - [ ] **Step 5: Run the Jobs suite for regressions**
 
@@ -490,7 +541,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Test: `tldw_Server_API/tests/Workflows/test_engine_llm_user.py`
 
 **Interfaces:**
-- Consumes: `llm_call_root`, `coerce_llm_user_id`.
+- Consumes: `llm_call_root`.
 - Produces: every step of a run sees the run's owner as the user, with `operation == "workflow"`, whichever thread or loop runs it. `start_run` and `continue_run` keep their names, signatures and behaviour.
 
 `start_run` runs on a new thread with its own event loop when it goes through `WorkflowScheduler._spawn`, and in the caller's task when it is awaited directly. Both entries are wrapped, so both cases are covered.
@@ -586,7 +637,37 @@ async def test_a_run_with_a_non_numeric_owner_runs_with_no_user(tmp_path, monkey
 
 A dry run of these three tests against the Step 3 code passed as written: the stub adapter's `{"ok": True}` return is enough for the run to complete.
 
-Add a fourth test for `continue_run`: create a run owned by `"7"`, drive it to a resumable point the way an existing `continue_run` test in `tests/Workflows` does (`git grep -n "continue_run(" tldw_Server_API/tests/Workflows | head`), resume it, and assert the resumed step saw `(7, "workflow")`.
+Add a fourth test to the same file, for `continue_run`. It resumes a two-step run after its first step, and it passed in the same dry run:
+
+```python
+async def test_a_resumed_run_sees_the_run_owner(tmp_path, monkeypatch) -> None:
+    """continue_run is its own entry: the step it resumes into sees the owner too."""
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = f"run-{uuid.uuid4().hex}"
+    db.create_run(
+        run_id=run_id, tenant_id="default", user_id="7", inputs={}, workflow_id=None,
+        definition_version=1,
+        definition_snapshot={
+            "name": "probe", "version": 1,
+            "steps": [
+                {"id": "s1", "type": "provider_step", "config": {}},
+                {"id": "s2", "type": "provider_step", "config": {}},
+            ],
+        },
+    )
+    seen: list[tuple[int | None, str]] = []
+
+    async def _adapter(_config, _context):
+        """Record what the resumed step sees."""
+        seen.append((current_llm_user_id(), current_llm_call_context().operation))
+        return {"ok": True}
+
+    monkeypatch.setattr(engine_mod, "get_adapter", lambda _step_type: _adapter)
+    with llm_call_context(user_id=3):
+        await engine_mod.WorkflowEngine(db).continue_run(run_id, after_step_id="s1", last_outputs={})
+        assert current_llm_user_id() == 3
+    assert seen == [(7, "workflow")]
+```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
@@ -641,7 +722,7 @@ Directly above `_continue_run_impl`, add:
             )
 ```
 
-Before renaming, confirm nothing in the app calls either method by a name the rename would break: `git grep -n "_start_run_impl\|_continue_run_impl" -- tldw_Server_API` must print nothing. Confirm `Any` is already imported in `engine.py`; add it to the `typing` import if it is not.
+Neither `_start_run_impl` nor `_continue_run_impl` exists anywhere in the repo today, and `Any` is already imported in `engine.py`. The engine's own re-entries (`_spawn(self.start_run(...))`, `self.continue_run(...)`) go through the public names, so each sets the same owner again. Leave them as they are.
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
@@ -683,6 +764,8 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```python
 """Roots with their own loop give their work a user (LLM usage accounting spec §1)."""
 
+import asyncio
+
 import pytest
 
 from tldw_Server_API.app.core.Scheduler.handlers import watchlists as watchlists_handlers
@@ -704,20 +787,103 @@ async def test_watchlist_output_enrichment_runs_for_the_payload_user(monkeypatch
     assert result == {"output_id": 5, "status": "completed"}
     assert seen == [7]
     assert current_llm_user_id() is None
+
+
+async def test_the_agent_task_worker_runs_a_job_for_its_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One iteration of the agent-task worker loop: the handler sees the job's owner."""
+    from tldw_Server_API.app.core.Scheduled_Tasks import automation_executors
+    from tldw_Server_API.app.services import agent_task_jobs_worker as worker
+
+    stop = asyncio.Event()
+    seen: list[int | None] = []
+
+    class Manager:
+        """Hands out one job, then stops the loop when it completes."""
+
+        def acquire_next_job(self, **kwargs: object) -> dict:
+            return {"id": 77, "lease_id": "lease", "job_type": "agent_task_run", "owner_user_id": "7", "payload": {}}
+
+        def complete_job(self, *args: object, **kwargs: object) -> None:
+            stop.set()
+
+        def fail_job(self, *args: object, **kwargs: object) -> None:
+            stop.set()
+            raise AssertionError("the job must complete, not fail")
+
+    async def handler(job: dict, **kwargs: object) -> dict:
+        """Record the user the job runs as."""
+        seen.append(current_llm_user_id())
+        return {"status": "completed"}
+
+    monkeypatch.setattr(worker, "jobs_manager_from_env", Manager)
+    monkeypatch.setattr(worker, "handle_agent_task_job", handler)
+    monkeypatch.setattr(automation_executors, "register_automation_executors", lambda: None)
+    await asyncio.wait_for(worker.run_agent_task_jobs_worker(stop), timeout=5)
+    assert seen == [7]
+    assert current_llm_user_id() is None
+
+
+async def test_the_audio_jobs_worker_runs_analysis_for_the_job_owner(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """An audio_analyze job: the analysis call, on its thread, sees the job's owner."""
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_llm_user.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    async def _unlimited(user_id: int) -> dict:
+        return {"daily_minutes": None, "concurrent_streams": None, "concurrent_jobs": None, "max_file_size_mb": None}
+
+    async def _yes(user_id: int) -> tuple[bool, str]:
+        return True, ""
+
+    async def _noop(user_id: int) -> None:
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _unlimited)
+    monkeypatch.setattr(worker, "can_start_job", _yes)
+    monkeypatch.setattr(worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(worker, "finish_job", _noop)
+
+    seen: list[int | None] = []
+
+    def _analyze(text: str, api_name: str, *args: object, **kwargs: object) -> str:
+        """Record the user the analysis runs as."""
+        seen.append(current_llm_user_id())
+        return "analysis"
+
+    monkeypatch.setattr(summarization, "analyze", _analyze)
+
+    jm = JobManager()
+    jm.create_job(
+        domain="audio", queue="default", job_type="audio_analyze",
+        payload={"text": "hello worker", "perform_analysis": True}, owner_user_id="7",
+    )
+    stop = asyncio.Event()
+    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if task.done():
+                pytest.fail(f"audio worker crashed: {task.exception()!r}")
+            if seen:
+                break
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+    assert seen == [7]
 ```
 
-If `watchlists_enrich_output` is wrapped by the `@task` decorator into something that is not directly awaitable with a payload, call the underlying function the way an existing test of a Scheduler handler does (`git grep -n "watchlists_enrich_output\|watchlist_run(" tldw_Server_API/tests | head`).
-
-For the agent-task worker and the audio jobs worker, the roots sit inside long polling loops. Add one test for each to the file, driving one iteration the way an existing test of that worker does:
-- `git grep -ln "agent_task_jobs_worker\|handle_agent_task_job" tldw_Server_API/tests`: use a test that runs the worker loop for one job. Replace `handle_agent_task_job` in `tldw_Server_API.app.services.agent_task_jobs_worker` with an async stub that records `current_llm_user_id()` and returns `{"status": "completed"}`. Give the job `owner_user_id="7"`. Assert the stub saw `7`.
-- `git grep -ln "audio_jobs_worker" tldw_Server_API/tests`: use a test that runs an `audio_analyze` job. Replace `analyze` in `tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib` with a stub that records `current_llm_user_id()` and returns a string. Give the job `owner_user_id="7"`. Assert the stub saw `7`. The stub runs on a thread through `asyncio.to_thread`, which copies the context.
-
-If no existing test drives one of those loops for one job, say so in the report and cover that site with a test of the smallest function that contains the changed line. A mark with no test is not acceptable.
+Each test reuses an existing harness:
+- **Watchlists:** `tests/Watchlists/test_watchlists_scheduler_handler.py::test_watchlists_enrich_output_calls_core_handler`. The `@task` decorator returns an awaitable wrapper, so the handler is awaited directly.
+- **Agent-task worker:** `tests/Notifications/test_agent_task_jobs_consumer.py::test_worker_does_not_ack_or_fail_a_busy_execution_claim`. A stub manager hands out one job and stops the loop when it completes.
+- **Audio jobs worker:** `tests/AudioJobs/test_audio_worker_smoke.py::test_audio_worker_owner_at_limit_runs_the_job`. A real `JobManager` under `JOBS_DB_PATH`. The worker imports `analyze` inside the loop iteration, so patching the module attribute works. The stub runs on a thread through `asyncio.to_thread`, which copies the context.
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_roots_non_sdk.py`
-Expected: each new assertion fails with `None` where `7` is expected.
+Expected: 3 failed, each with `assert [None] == [7]`.
 
 - [ ] **Step 3: Wrap the three calls**
 
@@ -783,7 +949,16 @@ The enrichment's LLM calls go through `loop.run_in_executor(None, ...)` in `serv
 - [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_roots_non_sdk.py`
-Expected: all pass. Also run each existing test file you borrowed a harness from; none may change result.
+Expected: 3 passed. Then run it with the three harness files:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_roots_non_sdk.py \
+  tldw_Server_API/tests/Watchlists/test_watchlists_scheduler_handler.py \
+  tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py \
+  tldw_Server_API/tests/AudioJobs/test_audio_worker_smoke.py
+```
+
+Expected: 39 passed, 1 skipped. The skip is an opt-in heavy smoke test that is skipped on `dev` too.
 
 - [ ] **Step 5: Commit**
 
@@ -811,17 +986,56 @@ The helper is awaited inside the WebSocket handler's task, so a value it binds s
 
 - [ ] **Step 1: Write the failing tests**
 
-In `tldw_Server_API/tests/Audio/test_realtime_auth.py`, add two tests using the file's existing `DummyWebSocket` and its existing monkeypatches (`streaming_service.is_multi_user_mode`, `auth_settings.get_settings`, `ip_allowlist.resolve_client_ip`):
+Append these two tests to `tldw_Server_API/tests/Audio/test_realtime_auth.py`. They use names the file already has: `DummyWebSocket`, `_single_user_settings` and `streaming_service`.
 
-- One that runs the existing successful case, `await authenticate_realtime_websocket(ws, "native")` returning `(True, 1)`, inside its own task (`await asyncio.create_task(...)` around a small coroutine that authenticates and then returns `current_llm_user_id()`), and asserts the task saw `1`. Then assert `current_llm_user_id()` is `None` in the test's own task.
-- One for a case in that file where authentication fails, or succeeds with no user id. Assert `current_llm_user_id()` is `None` afterwards and that the returned tuple is what the existing test for that case expects.
+```python
+@pytest.mark.asyncio
+async def test_realtime_auth_binds_the_user_for_the_handler_task_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A task that authenticates sees the user for the rest of its life; the parent task does not."""
+    import asyncio
 
-Import `current_llm_user_id` from `tldw_Server_API.app.core.Usage.llm_call_context`.
+    from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+
+    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
+    ws.state.single_user_session_id = "validated-cookie-session"
+    ws.state.user_id = 1
+    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
+    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
+    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+
+    async def _handler() -> tuple[tuple[bool, int | None], int | None]:
+        """Authenticate, then report the user this task sees."""
+        result = await authenticate_realtime_websocket(ws, "native")
+        return result, current_llm_user_id()
+
+    assert await asyncio.create_task(_handler()) == ((True, 1), 1)
+    assert current_llm_user_id() is None
+
+
+@pytest.mark.asyncio
+async def test_failed_realtime_auth_binds_no_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The openai-compat route with no credentials is refused and no user is bound."""
+    from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+
+    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
+    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
+    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
+    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+
+    assert await authenticate_realtime_websocket(ws, route_kind="openai_compat") == (False, None)
+    assert current_llm_user_id() is None
+```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Audio/test_realtime_auth.py`
-Expected: the first new test fails with `None` where `1` is expected. The second may already pass; it guards the no-user case.
+Expected: 1 failed, 4 passed. The first new test fails with `assert ((True, 1), None) == ((True, 1), 1)`. The second passes before and after; it guards the no-user case.
 
 - [ ] **Step 3: Wrap the helper**
 
@@ -831,7 +1045,7 @@ In `tldw_Server_API/app/core/Audio/streaming_service.py`, add the import:
 from tldw_Server_API.app.core.Usage.llm_call_context import bind_llm_call_user
 ```
 
-Rename the existing `async def _audio_ws_authenticate(` to `async def _audio_ws_authenticate_impl(`, changing nothing else in it. Directly below it, add:
+Rename the existing `async def _audio_ws_authenticate(` to `async def _audio_ws_authenticate_impl(`, changing nothing else in it. It is the last definition in the file, so add the wrapper at the end of the file:
 
 ```python
 async def _audio_ws_authenticate(
@@ -898,17 +1112,58 @@ These pools are created at the call site, not through the loop's default executo
 
 - [ ] **Step 1: Write the failing tests**
 
-`tldw_Server_API/tests/Usage/test_llm_state_private_pools.py`: one test per site. Each calls the smallest function that contains the changed line, inside `llm_call_context(user_id=7)`, with the pool's target replaced by a probe that records `current_llm_user_id()`:
+`tldw_Server_API/tests/Usage/test_llm_state_private_pools.py`. Each test calls the smallest function that contains the changed line, with the pool's target replaced by a probe. The harnesses are those of `tests/Claims/test_ingestion_llm_json_fence_parsing.py` and `tests/WebScraping/test_extractor_env_overrides.py::test_extractor_max_workers_env`. Neither needs the network.
 
-- `ingestion_claims.py`: the function containing `_exec.submit(_call_provider)` calls a module-level `chat_api_call` override when one is set (`override = globals().get("chat_api_call")`, near line 323). Set `ingestion_claims.chat_api_call` with `monkeypatch.setattr(..., raising=False)` to a probe that records the user and returns a minimal completion. Call that function with the arguments an existing test passes (`git grep -n "ingestion_claims" tldw_Server_API/tests | head`). Assert the probe saw `7`.
-- `Article_Extractor_Lib.py`: replace the async function that `run_async_scrape` runs with a probe coroutine that records the user and returns an empty result, and call the enclosing sync function with the arguments an existing test passes. Assert the probe saw `7`. `run_async_scrape` starts its own event loop inside the pool thread; the state applied to that thread is what the new loop's task sees.
+```python
+"""Two thread pools created at their call site carry the LLM call state (LLM usage accounting spec §1)."""
 
-If a site cannot be reached without a network call, say so in the report and test the hand-off by extracting nothing: assert on the probe through the smallest reachable caller.
+import json
+
+import pytest
+
+from tldw_Server_API.app.core.Claims_Extraction import ingestion_claims
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id, llm_call_context
+from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as extractor_lib
+
+pytestmark = pytest.mark.unit
+
+
+def test_the_claims_extraction_pool_sees_the_submitters_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The provider call runs on a one-thread pool; it sees the user set where the pool was fed."""
+    seen: list[int | None] = []
+
+    def _probe(**kwargs: object) -> str:
+        """Record the user and return one claim."""
+        seen.append(current_llm_user_id())
+        return json.dumps({"claims": [{"text": "Claim A."}]})
+
+    monkeypatch.setattr(ingestion_claims, "chat_api_call", _probe, raising=False)
+    chunks = [{"text": "irrelevant", "metadata": {"chunk_index": 0}}]
+    with llm_call_context(user_id=7):
+        claims = ingestion_claims.extract_claims_for_chunks(chunks, extractor_mode="openai", max_per_chunk=5)
+    assert [c.get("claim_text") for c in claims] == ["Claim A."]
+    assert seen == [7]
+
+
+def test_the_article_extractor_pool_sees_the_submitters_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scrape runs on its own loop in a pool thread; the task on that loop sees the user."""
+    seen: list[int | None] = []
+
+    async def _probe(*_args: object, **_kwargs: object) -> list:
+        """Record the user and return no pages."""
+        seen.append(current_llm_user_id())
+        return []
+
+    monkeypatch.setattr(extractor_lib, "recursive_scrape", _probe)
+    with llm_call_context(user_id=7):
+        assert extractor_lib.sync_recursive_scrape("https://example.com", 1, 1) == []
+    assert seen == [7]
+```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_state_private_pools.py`
-Expected: both probes saw `None`.
+Expected: 2 failed, each with `assert [None] == [7]`.
 
 - [ ] **Step 3: Carry the state at both submits**
 
@@ -927,7 +1182,8 @@ from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_sta
 to:
 
 ```python
-                fut = _exec.submit(run_with_llm_call_state, capture_llm_call_state(), _call_provider)
+                _llm_state = capture_llm_call_state()
+                fut = _exec.submit(lambda: run_with_llm_call_state(_llm_state, _call_provider))
 ```
 
 `Article_Extractor_Lib.py`, change:
@@ -939,13 +1195,25 @@ to:
 to:
 
 ```python
-        future = executor.submit(run_with_llm_call_state, capture_llm_call_state(), run_async_scrape)
+        _llm_state = capture_llm_call_state()
+        future = executor.submit(lambda: run_with_llm_call_state(_llm_state, run_async_scrape))
 ```
+
+Both submits stay one-argument on purpose. Two existing tests replace the pool with a fake whose `submit(self, fn)` takes one callable: `tests/Claims/test_claims_cancellation_and_timeout.py:49` and `tests/WebScraping/test_extractor_env_overrides.py:58`. Passing the state as extra positional arguments breaks both, and the Claims one fails quietly, because the extractor swallows the `TypeError` as a provider failure. Capture the state outside the lambda, where the pool is fed. Inside the lambda the code is already on the pool thread.
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_state_private_pools.py`
-Expected: 2 passed. Also run the existing test files you borrowed arguments from.
+Expected: 2 passed. Then run it with the existing tests around both sites:
+
+```bash
+TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_state_private_pools.py \
+  tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py \
+  tldw_Server_API/tests/WebScraping/test_extractor_env_overrides.py \
+  tldw_Server_API/tests/Claims/test_ingestion_llm_json_fence_parsing.py
+```
+
+Expected: 10 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -971,12 +1239,115 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the end-to-end test**
 
-Model it on `tldw_Server_API/tests/Usage/test_llm_usage_recorded_end_to_end.py` from PR 1a: the same SQLite setup under `tmp_path`, the same fake `ChatProvider` subclass registered in a real `ChatProviderRegistry`, the same accounting-loop monkeypatch. Two cases:
+`tldw_Server_API/tests/Usage/test_llm_usage_recorded_through_executor.py`, modelled on PR 1a's `test_llm_usage_recorded_end_to_end.py`: a real SQLite AuthNZ pool, a fake provider and real rows.
 
-- **A request-style executor hand-off.** Inside `scoped_context(user_id=41)`, after `ensure_llm_state_executor()`, call the fake provider's `chat` through `await asyncio.get_running_loop().run_in_executor(None, provider.chat, request)`. Assert one row with `user_id == 41`.
-- **A job root.** With no scope, inside `llm_call_root("42")`, call `await chat_service.perform_chat_api_call_async(...)` as the PR 1a test does. Assert one row with `user_id == 42`.
+```python
+"""A call handed to an executor thread, and a call under a job root, each write one real llm_usage_log row (spec §1)."""
 
-Show each can fail: for the first, skip the `ensure_llm_state_executor()` call and record the failure (`assert 0 == 1`), then restore it.
+import asyncio
+import uuid
+from collections.abc import Iterable
+from typing import Any
+
+import pytest
+
+from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
+from tldw_Server_API.app.core.Usage import llm_accounting
+from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor, llm_call_root
+from tldw_Server_API.tests.provider_credential_test_helpers import resolved_request_fields_async
+from tldw_Server_API.tests.Usage.test_usage_tracker_sqlite import _ensure_llm_cache_columns, _ensure_llm_tables
+
+pytestmark = pytest.mark.integration
+
+
+class _ExecProvider(ChatProvider):
+    """A sync-only provider, like most production adapters."""
+
+    name = "exec-fake"
+
+    def capabilities(self) -> dict[str, Any]:
+        """Streaming is supported."""
+        return {"supports_streaming": True}
+
+    def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        """Return a completion with usage."""
+        return {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 30, "completion_tokens": 12, "total_tokens": 42},
+        }
+
+    def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        """Unused."""
+        return iter(())
+
+
+async def _fresh_pool(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """A real SQLite AuthNZ pool with the usage tables, bound to this test's loop."""
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.sqlite'}")
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    reset_settings()
+    await reset_db_pool()
+    await reset_session_manager()
+    pool = await get_db_pool()
+    await _ensure_llm_tables(pool)
+    await _ensure_llm_cache_columns(pool)
+    monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+    return pool
+
+
+async def _rows(pool) -> list[dict[str, Any]]:
+    rows = await pool.fetchall("SELECT user_id, operation FROM llm_usage_log WHERE provider = ?", "exec-fake")
+    return [dict(r) if not isinstance(r, dict) else r for r in rows]
+
+
+async def test_a_request_style_executor_hand_off_records_the_scope_user(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """The scope is set in the request task; the provider call runs on the default executor; one row for user 41."""
+    pool = await _fresh_pool(monkeypatch, tmp_path)
+    provider = _ExecProvider()
+    request = {"messages": [{"role": "user", "content": "hi"}], "model": "exec-model"}
+
+    with scoped_context(user_id=41):
+        ensure_llm_state_executor()
+        result = await asyncio.get_running_loop().run_in_executor(None, provider.chat, request)
+    assert result["choices"][0]["message"]["content"] == "ok"
+    await llm_accounting.drain_accounting()
+
+    rows = await _rows(pool)
+    assert len(rows) == 1
+    assert (rows[0]["user_id"], rows[0]["operation"]) == (41, "llm_call")
+
+
+async def test_a_job_root_records_the_job_owner(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """No scope; a job root for owner "42"; the shared-layer call writes one row for user 42."""
+    pool = await _fresh_pool(monkeypatch, tmp_path)
+    registry = ChatProviderRegistry(include_defaults=False)
+    registry.register_adapter("exec-fake", _ExecProvider)
+    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+
+    fields = await resolved_request_fields_async("exec-fake", api_key="k", app_config={}, model="exec-model")
+    with llm_call_root("42"):
+        result = await chat_service.perform_chat_api_call_async(
+            api_endpoint="exec-fake", **fields, messages_payload=[{"role": "user", "content": "hi"}],
+            model="exec-model", streaming=False,
+        )
+    assert result["choices"][0]["message"]["content"] == "ok"
+    await llm_accounting.drain_accounting()
+
+    rows = await _rows(pool)
+    assert len(rows) == 1
+    assert (rows[0]["user_id"], rows[0]["operation"]) == (42, "llm_call")
+```
+
+Both tests pass as soon as they are written, because Tasks 1 to 6 are already in. Show that the first can fail: remove its `ensure_llm_state_executor()` line, run it, confirm it fails with `assert 0 == 1` (no row was written), then restore the line.
 
 - [ ] **Step 2: Run the test and confirm it passes**
 
@@ -986,14 +1357,14 @@ Expected: 2 passed.
 - [ ] **Step 3: Correct the spec**
 
 In `Docs/Design/2026-10-09-llm-usage-accounting-design.md`:
-- Status line: `- **Status:** Approved; PR 1a merged (#3222), PR 1b in progress`. Use the real state of #3222 when you write it.
+- Status line: `- **Status:** Approved; PR 1a merged (#3222), PR 1b in progress`.
 - §1, "Roots that need an explicit set point": state what this PR does.
   - Jobs workers on `WorkerSDK` run each handler under `llm_call_root(owner)`.
   - Scheduled automations do not run under `WorkerSDK`: `services/agent_task_jobs_worker.py` has its own loop and sets the root itself. So does `services/audio_jobs_worker.py`.
   - The workflow engine wraps both `start_run` and `continue_run`.
   - The `watchlists_enrich_output` Scheduler task sets the root from its payload's user.
-  - The audio and realtime WebSockets bind the user in `_audio_ws_authenticate`. The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows, Parakeet) make no chat LLM call.
-- §1, "Places that lose context today": replace the `loop.run_in_executor` bullet. It named two sites. The survey found the pattern at many more: document insights, quiz generation, reading summaries, character-memory extraction, watchlist output summaries, the media processors, live meeting insights, Data Tables and G-Eval. They all pass `None` as the executor, so one default executor that carries the LLM call state covers them. It is installed on the server loop at startup and by `llm_call_root` on any other loop. The Scheduler registry's `run_in_executor` path is used only by tests.
+  - The audio and realtime WebSockets bind the user in `_audio_ws_authenticate`. The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows) make no chat LLM call.
+- §1, "Places that lose context today": replace the `loop.run_in_executor` bullet. It named two sites. The survey found the pattern at many more: document insights, quiz generation, reading summaries, character-memory extraction, watchlist output summaries, the media processors, live meeting insights, Data Tables and G-Eval. They all pass `None` as the executor, so one default executor that carries the LLM call state covers them. It is installed on the server loop at startup and by `llm_call_root` on any other loop. The server runs on uvloop (`uvicorn[standard]`), whose loop does not expose its default executor, so the helper remembers the loops it has installed on. The Scheduler registry's `run_in_executor` path is used only by tests.
 - Add to "Review changes" a dated entry for this revision.
 
 - [ ] **Step 4: Update the ADR and the operator page**
@@ -1058,7 +1429,7 @@ This branch starts on PR 1a's head. Rebase only after PR 1a (#3222) has merged, 
 Every test file that references a changed symbol, plus the suites around the changed code:
 
 ```bash
-git grep -l -e WorkerSDK -e worker_sdk -e start_run -e continue_run -e WorkflowScheduler -e _audio_ws_authenticate \
+git grep -l -e WorkerSDK -e worker_sdk -e WorkflowEngine -e WorkflowScheduler -e _audio_ws_authenticate \
   -e audio_jobs_worker -e agent_task_jobs_worker -e watchlists_enrich_output -e ingestion_claims \
   -e Article_Extractor_Lib -e llm_call_root -e run_in_executor -- 'tldw_Server_API/tests/**/test_*.py' > <scratchpad>/pr1b_tests.txt
 TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -n 4 -p no:cacheprovider --timeout=600 $(cat <scratchpad>/pr1b_tests.txt) \
@@ -1069,6 +1440,8 @@ TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -n 4 -p no:cacheprovider --timeout=600 $(
 ```
 
 Drop those two files from the contract list as well if `git grep` put them there, and run them serially afterwards. Their parametrized ids hold random UUIDs, so a parallel run that includes them aborts at collection (see Task 2 Step 5).
+
+`start_run` is left out of the pattern on purpose: the Sandbox runners have a `start_run` of their own, which would pull in about forty unrelated test files, and the whole `tests/Workflows` directory is in the run anyway.
 
 Every failure needs evidence before it is called pre-existing: it fails the same way at `origin/dev` in a detached worktree, or its execution path touches no changed file. A failure that passes alone is a load flake only if it also passes alone at `origin/dev`.
 
