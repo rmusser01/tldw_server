@@ -88,7 +88,7 @@ A new module, `core/Usage/llm_call_context.py`, answers "which user is this LLM 
 | `endpoint` | The row's `endpoint`. Default `internal`. |
 | `exempt` | Don't check and don't record. For provider key validation and setup verification. |
 | `records_itself` | The caller writes its own row, so don't record. |
-| `prechecked` | The caller already checked the quota, so don't check again. |
+| `prechecked` | The quota was already checked for this work, so don't check again. Set by the boundary check for the rest of the request's task (§4a), and by the shared call layer for its nested adapter call (§4b). |
 
 With no user, a call is not checked and not recorded.
 
@@ -136,9 +136,9 @@ Rules for the wrapping:
 
 What the wrapped methods do, when `current_llm_user_id()` is set and the context is not `exempt`:
 - **`chat` and `achat`:** check (§4b) unless `prechecked`; call the adapter; record (§3) unless `records_itself`.
-- **`stream` and `astream`:** return an iterator that checks before it yields the first item (unless `prechecked`) and records once when it ends (unless `records_itself`). "Ends" covers completion, a provider error, and the consumer closing it early.
+- **`stream` and `astream`:** check before the provider method runs (unless `prechecked`), then return an iterator that records once when it ends (unless `records_itself`). "Ends" covers completion, a provider error, and the consumer closing it early.
+  - The check cannot wait for the first item: three adapters send the request inside `stream()` (§4b).
   - The wrapped methods stay iterator-returning functions, so `for x in adapter.stream(...)` and `async for x in adapter.astream(...)` work as today.
-  - Because the check is lazy for direct stream callers, the shared call layer checks eagerly (§4b).
 
 ### 3. Recording
 
@@ -156,7 +156,7 @@ This keeps the claims budget guard working, which filters on the claims operatio
 
 ### 4. The check
 
-A refusal is made in two places, and both use one decision function. An endpoint that is about to do LLM work for a user checks at the request boundary (§4a), so the client gets a clean 402. Everything else is checked at the call (§4b), which stops the spend.
+A refusal is made in two places. An endpoint that is about to do LLM work for a user checks at the request boundary (§4a), before it starts. Everything else is checked at the call (§4b). Both use one decision function and raise one error.
 
 **The decision.** `llm_quota_refusal(user_id, requested_tokens)` in `core/Usage/quota_checks.py`:
 1. resolves the three keys with `user_quota(user_id, key)` (`None` means unlimited);
@@ -168,63 +168,85 @@ A refusal is made in two places, and both use one decision function. An endpoint
 
 Otherwise it returns nothing. Lookup and counter failures fail open, with a warning, as in spec 2.
 
+`/chat/completions` passes the prompt estimate it computes today. Every other caller passes 1, which refuses a user who is at or over the token limit and admits a user who is one token under it.
+
 A refusal carries the category, the current figure, the limit, the message and `retry_after`.
 - **Categories:** `llm_tokens_month`, `llm_cost_day` and `llm_cost_month`.
 - **Messages:** "Monthly LLM token limit reached", "Daily LLM cost limit reached" and "Monthly LLM cost limit reached".
 - **`retry_after`:** the next UTC midnight for the day cap, and the start of the next UTC month for the monthly caps.
 
-**The public response** is the one `/chat/completions` returns today, for all three categories: HTTP 402, a `Retry-After` header, and the body `{"detail": {"error": "limit_exceeded", "category": ..., "current": ..., "limit": ..., "message": ...}}`.
+**The error.** `LLMQuotaExceededError` is an `HTTPException` with status 402. Its `detail` is the body `/chat/completions` returns today, `{"error": "limit_exceeded", "category": ..., "current": ..., "limit": ..., "message": ...}`. It carries a `Retry-After` header, and the refusal's fields as attributes. A counter, `llm_quota_refusals_total{category}`, counts refusals.
+
+It is an `HTTPException`, and not a `ChatAPIError`, because of how the endpoints handle each:
+- **A `ChatAPIError` is reported as a provider failure.** RAG maps it to a 502 `provider_unavailable` (`RAG/rag_service/streaming_executor.py:114`). Document generation re-wraps it (`Chat/document_generator.py:721`) and the endpoint returns a 502. The study assistants return a 502. Summarization turns it into the text `"Error: Provider request failed for '<provider>'."`, which media processing stores as the summary. Sixteen endpoint handlers catch `ChatAPIError`, and each would need its own branch to return a 402.
+- **An `HTTPException` reaches the client unchanged.** About 580 endpoint handlers begin with `except HTTPException: raise`, and the handlers above are among them. Summarization does not catch it either.
+- **Core code already defines `HTTPException` subclasses.** `core/exceptions.py` has two.
+- **It is not both.** In those handlers the `ChatAPIError` clause comes before the `HTTPException` one, so a class that is both would be reported as a provider failure.
 
 #### 4a. At the request boundary
 
 An endpoint asks before it starts LLM work, and answers 402 before it does anything else. Spec 2 does the same for RAG queries (`API_Deps/usage_quota_deps.py`), and the new functions live beside it.
 
-- **`enforce_llm_quota(user_id, estimated_tokens=1)`** raises the public response when the decision refuses.
+- **`enforce_llm_quota(user_id, estimated_tokens=1)`** raises `LLMQuotaExceededError` when the decision refuses.
 - **`require_llm_quota`** is the dependency form, for endpoints that always call an LLM.
 - **An endpoint where LLM work is optional** calls `enforce_llm_quota` in its handler, once it knows the request asks for it.
 - **Streaming requests are refused with a real 402.** The check runs before the streaming response is created.
-- **An admitted request runs to completion,** even if it takes the user past a limit. The request is marked `prechecked`, so §4b does not refuse it part-way through.
+- **Nothing has been done yet.** A media batch is refused before it is downloaded and transcribed, and a RAG search before it retrieves.
+
+**An admitted request runs to completion,** even if it takes the user past a limit. After a passing check, the request's task is marked `prechecked`, so §4b does not refuse it part-way through.
+- **The mark is a plain `ContextVar.set`,** like `bind_llm_call_user`. A `with llm_call_context(...)` block would not work: it resets when the function that opened it returns, which is before the endpoint runs after a dependency, and before a streaming response body runs.
+- **It reaches** the endpoint body, a streaming response body, `BackgroundTasks`, `asyncio.to_thread`, the bounded pools, the default executor and the chat request queue. Work the request schedules with `BackgroundTasks` is admitted with the request.
+- **It does not reach** a task created before the mark, the next request on the same connection, or a job the request enqueues. A job runs under `llm_call_root(owner)` and is checked by §4b when it runs.
+- **Why it matters for `/chat/completions`.** Without the mark, §4b could refuse an admitted request inside the chat pipeline. The pipeline would treat that as a provider outage: it records a provider failure, marks the provider unhealthy for every user after three of them, and tries another provider (`chat_service.py`, `provider_manager.record_failure`).
 
 | Entry point | Checks |
 |---|---|
-| `/chat/completions` | Always. This is the existing check, extended to the two cost keys. It passes the prompt estimate `chat.py` computes today. |
-| Character chat reply (`character_chat_sessions.py`) | Always. |
-| RAG search, and its streaming form (`rag_unified.py`) | When the request asks for answer generation. |
+| `/chat/completions` | Always. This is the existing check, extended to the two cost keys. |
+| Character chat reply (`character_chat_sessions.py`) | Always, at the top of the handler. The provider call is made before the streaming response is built. |
+| RAG search, its batch and resume forms, and its streaming form (`rag_unified.py`) | When the effective request asks for answer generation. |
 | Document generation from a chat (`chat_documents.py`) | Always. |
-| Flashcards and quizzes study assistants | Always. |
-| Evaluation endpoints that run an LLM inside the request: `/geval`, `/rag`, `/response-quality` (`evaluations_unified.py`) | Always. |
-| Media processing and `/media/add` | When the request asks for analysis. |
+| Flashcards and quizzes study assistants | Always, as a dependency. |
+| `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality` | Always. |
+| `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
+| The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
 
-The plan lists every other HTTP endpoint that reaches an LLM. Each one is either added to this table or left to §4b, and the operator page names both groups.
+- **A RAG search with answer generation off is not checked here and not marked.** The pipeline's optional LLM stages (query rewriting, expansion, HyDE, LLM reranking, gap analysis, critique, suggestions) are governed by §4b. For a user over quota they degrade as they do for any provider failure, and the response's stage metadata says so. Until PR 2b they are unchecked, as today.
+- **An endpoint that enqueues a job has no boundary check:** `/media/ingest-jobs` and evaluation recipe runs. The job is checked by §4b when it runs.
+- **The plan lists every other HTTP endpoint that reaches an LLM.** Each is added to this table or left to §4b, and the operator page names both groups.
 
-**Why the error cannot simply travel up from the call.** The first draft said character chat and RAG pass a provider error's status code through. They do not, and neither does anything else. Each endpoint catches the error before it leaves and reports its own:
-- **RAG** maps every provider error that is not a 400, 401 or 403 to a 502 `provider_unavailable` (`RAG/rag_service/streaming_executor.py:96`). Its streaming form has already sent a 200.
-- **Character chat** keeps the status code, but its body comes from a fixed table and would read "The chat service provider is currently unavailable."
-- **Document generation** re-wraps the error into a plain `ChatAPIError` (`Chat/document_generator.py:721`), and the endpoint returns a 502.
-- **The evaluation endpoints** retry a failed call up to 10 times with waits of up to 120 seconds, then return a 502.
-- **Summarization** (`analyze`) turns a provider error into the text `"Error: Provider request failed for '<provider>'."`. For PDF, video, EPUB, email and XML, media processing stores that text as the summary and reports success.
-
-A check at the boundary runs before any of that code.
+**Why these entry points need a boundary check.** With the error raised only at the call, each would do worse than a 402 before any work:
+- **Streaming RAG** has already sent a 200 when the pipeline runs, so the client would get an error frame.
+- **Character chat** catches `HTTPException` in a broad tuple and returns a 502 "Chat provider error" (`character_chat_sessions.py:304-323`).
+- **`/evaluations/geval`** retries a failed call up to 10 times, with waits of up to 120 seconds (`Evaluations/ms_g_eval.py:477-483`).
+- **`/evaluations/rag` and `/evaluations/response-quality`** count the failure against a circuit breaker that all users share.
+- **Media processing** catches it for each item, after the item was downloaded and transcribed, and reports a failed item.
 
 #### 4b. At the call
 
-Background jobs, workflow runs, WebSocket sessions, MCP tools and any endpoint that is not in the table have no boundary check. For those the call itself is refused. It raises `LLMQuotaExceededError`, a `ChatAPIError` subclass with `status_code=402` that carries the refusal's fields.
+Background jobs, workflow runs, WebSocket sessions and any HTTP endpoint that is not in the table have no boundary check. For those the call itself is refused with `LLMQuotaExceededError`. MCP tool calls carry no user, so they are neither recorded nor checked (§1).
 
 | Where | Why |
 |---|---|
-| The top of `perform_chat_api_call` and `perform_chat_api_call_async` | Before any provider call, including a stream. The nested adapter call then runs as `prechecked`. |
-| The wrapped provider methods (§2) | Direct adapter callers. A stream raises at its first item. |
+| The top of `perform_chat_api_call` and `perform_chat_api_call_async` | To raise before the function's `try` block. Inside it, `privacy_safe_chat_error` rebuilds any exception as a generic provider error. When this check ran, the nested adapter call runs as `prechecked`; when it was skipped (§5), the nested call is not marked. |
+| The wrapped provider methods (§2) | Direct adapter callers. The check runs before the provider method does. |
 
 Rules:
 - **Nothing is checked** when there is no user, or the context is `exempt` or `prechecked`.
-- **The shared call layer raises before its `try` block.** Inside it, `privacy_safe_chat_error` rebuilds any exception as a generic provider error and the refusal's fields are lost.
-- **The caller reports it as it reports any provider failure.** A workflow step fails and the run records the error. A job fails as its handler decides. Summarization returns its error text.
+- **A stream is checked when `stream()` or `astream()` is called, before the provider method runs.** Three adapters send the request inside `stream()`, before any item is read: moonshot, zai and cohere. Where the call is made on the server loop's own thread and cannot wait (§5), a sync stream is checked at its first item, on the thread that reads it.
+- **What the caller sees.**
+  - An HTTP endpoint that lets `HTTPException` through, as most do, returns the 402.
+  - One that catches it in a broad tuple reports its own error.
+  - A workflow step fails, and the run records the error.
+  - A job fails as its handler decides. A media ingestion job reports the item as failed.
+  - A WebSocket session reports it as it reports any failed reply. PR 2b's plan names the frame for the operator page.
 - **It must not look like a provider outage to shared machinery:**
-  - the Evaluations circuit breaker (`Evaluations/circuit_breaker.py`) does not count it. The breaker is shared by all users per provider and opens after 3 to 5 failures, so one user's refusals would otherwise stop evaluations for everyone for 60 seconds;
-  - retry loops do not retry it. G-Eval's loop would otherwise block a refused job for minutes.
-- **With quotas off, it costs nothing.** When `USAGE_QUOTAS_ENABLED` is off, or the user's cached limits hold none of the three keys, the check returns at once: no hand-off to the accounting loop (§5) and no query.
-
-**Known limitation.** Media ingestion that runs as a background job, with analysis on, stores the provider-error text in place of the analysis when the call is refused. It does the same today for any provider failure. A follow-up task covers it.
+  - the Evaluations circuit breaker (`Evaluations/circuit_breaker.py`) does not count it. The breaker is shared by all users per provider and opens after 3 to 5 failures, so one user's refusals would otherwise stop evaluations for everyone for 30 to 60 seconds;
+  - retry loops do not retry it: G-Eval's, and the LLM extraction strategy's (`Web_Scraping/extraction/strategies/llm.py:164-198`).
+- **What it costs.**
+  - With quotas off, nothing: `usage_quotas_enabled()` is read in the calling thread and the check returns.
+  - With quotas on and no LLM limit for the user: nothing, once the user's limits are cached. `quota_resolver` gains a synchronous read of its cache for this. A cold or expired cache entry costs one hand-off to the accounting loop (§5) and the resolver's queries, once per user per minute.
+  - With a limit set: one hand-off and the counter queries, for each call. A sync caller waits at most 2 seconds for the answer, then fails open with a warning.
+- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). Seven code paths do this today by calling the sync `analyze` straight from a coroutine, which also blocks the server while the provider answers: `/translate`, web search aggregation, the article extractor, enhanced web scraping, two scraping services and a RAG custom metric. PR 2b moves each one off the loop with `asyncio.to_thread`. Any that cannot be moved is named on the operator page as unchecked.
 
 ### 5. Accounting runs on one event loop
 
@@ -236,9 +258,9 @@ The check and the recorder are async and use the AuthNZ pool, which is bound to 
 - **From a sync method on a thread that is not the accounting loop's thread:** hand off with `run_coroutine_threadsafe`.
   - The check waits with a short timeout and fails open when it expires.
   - The record is fire-and-forget, with a callback that logs a failure.
-- **From a sync method on the accounting loop's own thread** (a caller that blocks the loop): the check is skipped, because waiting would deadlock, and the record is scheduled with `loop.create_task`. This is a documented fail-open case.
+- **From a sync method on the accounting loop's own thread** (a caller that blocks the loop): the check is skipped, because waiting would deadlock, and the record is scheduled with `loop.create_task`. This is a fail-open case, and it is not rare: seven code paths call the sync `analyze` straight from a coroutine. PR 2b moves them off the loop (§4b).
 - **Streams** capture the loop when `stream()` is called. The iterator may run and close on a daemon thread.
-- **With no accounting loop captured** (unit tests without the application lifespan): use the running loop if there is one, otherwise skip.
+- **With no accounting loop captured** (unit tests without the application lifespan): the recorder uses the running loop if there is one, and otherwise skips. The check does the same from an async method, and is skipped from a sync one.
 
 This follows the hand-off pattern already used at `LLM_Calls/streaming.py:233` and `chat_service.py:548-556`.
 
@@ -247,18 +269,21 @@ This follows the hand-off pattern already used at `LLM_Calls/streaming.py:233` a
 Two counters back the cost keys, next to the existing token counter. All three exclude embeddings with one shared SQL predicate, `COALESCE(operation, '') <> 'embeddings'`. `operation` is nullable, so a plain `<>` would drop rows with no operation.
 
 - `sum_user_llm_tokens_since(user_id, since)`: the existing `AuthnzUsageRepo` method gains the predicate.
-- `sum_user_llm_cost_since(user_id, since)`: new; sums `total_cost_usd`.
+- `sum_user_llm_cost_since(user_id, since)`: new; sums `total_cost_usd`. One query can return both the day's and the month's sum.
 - One SQL string serves both backends, as the existing counter does. Only the bound timestamp differs.
 - The quota code reads them through `quota_checks` helpers: `llm_tokens_this_month` (existing), `llm_cost_today` and `llm_cost_this_month`.
 - The `(user_id, ts)` index that makes these sums cheap already exists on both backends.
 
 Costs come from the pricing catalog when the row is written (`Usage/pricing_catalog.py`, via `compute_costs`).
 
-**Local providers cost nothing. (Owner decision pending.)** No local provider is in the pricing catalog, so today every call to one is recorded at the catalog's unknown-model rate: $0.01 per 1K prompt tokens and $0.03 per 1K completion tokens. A cost limit would be used up by calls that cost nothing. From PR 2a, a call to a provider in `DEFAULT_LOCAL_PROVIDERS` (`LLM_Calls/adapter_registry.py`: llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite and mlx) is recorded at zero cost and not marked estimated.
-- **This changes what is stored,** so every reader of stored cost agrees: the new cost limits, admin usage reports, the Prometheus cost metric and virtual-key USD budgets. Virtual-key budgets have the same problem today.
+**Local providers cost nothing by default. (Owner decision pending.)** No local provider is in the pricing catalog, so today every call to one is costed at the catalog's unknown-model rate: $0.01 per 1K prompt tokens and $0.03 per 1K completion tokens. A cost limit would be used up by calls that cost nothing. From PR 2a:
+- **The catalog resolves a provider-wide `default` entry** when no model of that provider matches. The file already has one, `huggingface.default`, which nothing can reach today (`pricing_catalog.py:264-275`).
+- **Each local provider ships with a zero `default`:** llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite and mlx, the set in `DEFAULT_LOCAL_PROVIDERS` (`LLM_Calls/adapter_registry.py`). The entries are in the built-in defaults and in `Config_Files/model_pricing.json`.
+- **`compute_costs` resolves the provider's canonical name first,** so an alias such as `llamacpp` is priced the same. The writers pass different spellings today.
+- **It is data, so an operator can change it.** A local provider that points at a paid service can be priced, and a custom OpenAI-compatible endpoint that runs locally can be set to zero. That endpoint is not zero by default, because it may point at a paid service.
+- **This changes what is stored,** so every reader of stored cost agrees: the new cost limits, admin usage reports, the Prometheus cost metric and virtual-key USD budgets. Virtual-key budgets have the same problem today. An operator who used a virtual-key USD budget to bound local usage loses that bound; the operator page says so.
 - **Rows already written keep their cost.**
-- **A paid model that is missing from the catalog** is still recorded at the unknown-model rate. An operator prices it in `Config_Files/model_pricing.json`.
-- **A custom OpenAI-compatible endpoint is not treated as local,** because it may point at a paid service.
+- **A paid model that is missing from the catalog** is still costed at the unknown-model rate.
 
 #### Readers of `llm_usage_log`
 
@@ -347,11 +372,13 @@ Each test fails before its change. A fake `ChatProvider` subclass reports a fixe
    - `/chat/completions` returns the same 402 body as today, both streaming and not streaming;
    - a streaming RAG search and a streaming character chat reply return a 402, not a 200 with an error frame;
    - a RAG search with answer generation off, and media processing with analysis off, are not refused;
-   - a request that was admitted is not refused part-way through by §4b;
+   - the mark set by the boundary check is in effect inside a streaming response body and a `BackgroundTask`, and is not in effect for the next request on the same connection;
+   - a request that was admitted is not refused part-way through by §4b, and a job it enqueued is still refused when it runs;
+   - an endpoint that is not in the §4a table and re-raises `HTTPException` returns the 402 from §4b;
    - a workflow LLM step fails with `LLMQuotaExceededError`, and the run records it;
-   - a direct adapter call raises `LLMQuotaExceededError`, and a stream raises it at its first item;
-   - a refusal does not open the Evaluations circuit breaker and is not retried by G-Eval;
-   - with quotas off, a provider call makes no hand-off to the accounting loop and no query.
+   - a direct adapter call raises `LLMQuotaExceededError`, and a stream raises it from `stream()` before the provider method runs;
+   - a refusal does not open the Evaluations circuit breaker, is not retried by G-Eval, and does not mark a chat provider unhealthy;
+   - with quotas off, a provider call makes no hand-off to the accounting loop and no query; with quotas on and a cached user who has no LLM limit, it makes no hand-off.
 
    For the cost caps:
    - they refuse once the counted cost reaches the cap, with categories `llm_cost_day` and `llm_cost_month`;
@@ -378,14 +405,16 @@ Five PRs, so recording can be checked before anything new is refused.
   - the embeddings predicate in §6;
   - ADR-067, "LLM calls are accounted in the chat provider base class", if the number is free when the PR opens.
 - **PR 1b: the remaining roots in §1.** `WorkerSDK`, the job workers with their own loop, the workflow engine, the audio and realtime WebSockets, and the default executor that carries the LLM call state.
-- **PR 2a: the keys, the counters and the boundary check.** The decision and §4a, the cost counters, local-provider pricing and startup warnings in §6, §7 and §9. After it, the entry points in the §4a table refuse with a 402.
-- **PR 2b: the check at the call.** §4b and the hand-off rules for the check in §5. After it, background jobs, workflow runs and every other path are gated too. Closes TASK-13437.
+- **PR 2a: the keys, the counters and the boundary check.** The decision, the error and §4a; the cost counters, local-provider pricing and startup warnings in §6; §7 and §9. After it, the entry points in the §4a table refuse with a 402 and everything else behaves as today. The `prechecked` mark is set and nothing reads it yet.
+- **PR 2b: the check at the call.** §4b and the hand-off rules for the check in §5, with the seven sync calls moved off the loop. After it, background jobs, workflow runs and every other path are gated too. Closes TASK-13437.
+- **Why 2a first.** Each PR leaves the system coherent. After 2a alone, no path behaves worse than today. With 2b first, the entry points in the table would refuse part-way through a request until 2a landed.
 - **PR 3: the evaluation cost-cap removals.** §8. It has no dependency on the other two beyond the cost quota existing. Closes TASK-13436.
 
 ## Risks
 
-- **An admitted request can pass a limit.** The boundary check admits a request when the user is under the limit, and the request then runs to completion. A user can exceed a limit by one request's worth of usage.
-- **Fail-open cases.** A sync adapter call made on the event loop's own thread is recorded but not checked. A timed-out check lets the call through. Both are logged.
+- **An admitted request can pass a limit.** The boundary check admits a request when the user is under the limit, and the request then runs to completion. Some requests fan out into many calls: a media batch with chunked analysis, an evaluation batch, a RAG request with every optional stage on. The overshoot is bounded by one request, not one call. An operator who needs a hard ceiling sets the limit with that headroom.
+- **Each checked call costs a query.** With a limit set, §4b reads the counters for every call that was not admitted at a boundary. A job that makes hundreds of calls makes hundreds of small indexed reads.
+- **Fail-open cases.** A sync adapter call made on the event loop's own thread is recorded but not checked; PR 2b moves the known ones off the loop. A timed-out check lets the call through. Both are logged.
 - **Lost rows on abandoned streams.** The stream recorder runs when the iterator closes. A process kill mid-stream loses the row, as today.
 - **Wider attribution than before.** Calls that recorded nothing now write rows. On an install with quotas on and token limits set, users reach their limits sooner. The hosted billing plan and admin reports also see more usage. The operator page says so.
 - **Metaprogramming in the base class.** `__init_subclass__` wrapping is less obvious than an explicit call. It is confined to one function in `providers/base.py`, with the re-entrancy guard and the tests in §Testing 3 and 9.
@@ -413,10 +442,15 @@ Revision of 2026-10-11, while building PR 1b:
 - **Private pools.** Three pools the code creates itself carry the LLM call state at their submit: claims extraction, the article extractor and web search.
 - **Still unrecorded.** MCP tool calls, the in-process claims rebuild threads, and system jobs with no user.
 
-Revision of 2026-10-12, before planning PR 2. A survey of the code found two statements in §4 and §6 that do not hold:
+Revision of 2026-10-12, before planning PR 2. A survey of the code, and then an independent review of this revision, found that §4 and §6 did not hold:
 
-- **What the client sees.** §4 said character chat and RAG pass a provider error's status code through, so a refusal raised at the call would reach the client as a 402. It would not: every traced entry point catches the error first and reports its own, most of them as a 502 "provider unavailable". §4 now has two parts. §4a checks at the request boundary, as spec 2 does for RAG queries, and returns the 402. §4b keeps the check at the call as the backstop for paths with no boundary.
-- **Shared machinery.** A refusal raised at the call must not open the Evaluations circuit breaker or be retried by G-Eval, and the shared call layer must raise it before its `try` block.
-- **Local providers.** They are not in the pricing catalog, so their calls were costed at the unknown-model rate. §6 records them at zero. This is the owner's decision to make.
+- **What the client sees.** §4 said character chat and RAG pass a provider error's status code through, so a refusal raised at the call would reach the client as a 402. It would not: endpoints report a `ChatAPIError` as a provider failure, mostly a 502. Two changes follow.
+  - The error is an `HTTPException`, which most endpoints pass through unchanged.
+  - §4 has two parts. §4a checks at the request boundary, as spec 2 does for RAG queries. §4b keeps the check at the call for paths with no boundary.
+- **The `prechecked` mark** is set for the rest of the request's task. A `with` block would be reset before a streaming response body runs.
+- **Streams are checked before the provider method runs.** Three adapters send the request inside `stream()`.
+- **Shared machinery.** A refusal must not open the Evaluations circuit breaker, be retried, or mark a chat provider unhealthy. The shared call layer raises it before its `try` block.
+- **Sync calls on the server loop** cannot be checked. Seven code paths make them; PR 2b moves them off the loop.
+- **Local providers.** They are not in the pricing catalog, so their calls were costed at the unknown-model rate. §6 gives each a zero default price in the catalog. This is the owner's decision to make.
 - **Reporting.** The profile response model needs an `llm` field, and unset limits are absent, not `null`.
 - **Delivery.** PR 2 is split into PR 2a (the boundary check, keys and counters) and PR 2b (the check at the call).
