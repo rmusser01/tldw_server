@@ -52,13 +52,18 @@ a catalogue read failure yields an empty set (fail closed by construction
 - Caps, timeouts, idempotency, and per-call permission enforcement are
   the catalogue's and executor's, unchanged.
 
-**The only new mapping:** an allow-catalog denial during a scheduled run
-(a model attempt outside the envelope) is surfaced as `approval_required`
-with the attempted tool name in the summary, rather than a generic tool
-error — the ADR-184 2A outcome. At the consumer gate, a tool-requesting
-agent_task definition whose requested names are not all in the eligible
-set (non-read-only module, no permission, unknown name, or catalogue
-unavailable) terminates `approval_required` before the loop starts.
+**Out-of-envelope attempts are classified by membership, not message
+parsing:** the loop itself knows the eligible set, so a model tool-call
+naming a tool outside it terminates the run `approval_required` with the
+attempted tool name in the summary — no reliance on matching the
+allow-catalog deny string. The allow-catalog deny (and the MCP-side
+`allowed_tools` context) remain defense in depth. An MCP-side
+approval-required response (a tool that demands interactive approval the
+scheduled context cannot provide) also maps to `approval_required`; its
+detection is refined during implementation rather than string-matched in
+the spec. The consumer gate check runs PER DISPATCH (not at authoring):
+the eligible set is derived fresh each fire, so permission or catalogue
+changes between authoring and firing take effect on the next run.
 
 ## 4. The loop
 
@@ -87,6 +92,24 @@ unchanged):
    chat-call boilerplate (code-review ask from #3042) so the
    generation-only and tool paths share one base.
 
+**Explicit v1 decisions:**
+
+- **Message format**: the loop assembles OpenAI-style messages
+  (`role: "tool"` + `tool_call_id`); the provider adapters translate
+  (Anthropic's adapter converts tool messages to `tool_result` blocks
+  in both directions — verified in `anthropic_adapter.py`).
+- **`input.tools` is the envelope contract**: the agent-registry entry's
+  own tool list does NOT union in v1 — a definition that under-lists its
+  agent's tools simply runs with fewer; agent-driven tool selection is a
+  later refinement.
+- **Presented-set honesty**: if the eligible set is non-empty but
+  `present_chat_tools` presents none (provider/rollout gating), the run
+  proceeds generation-only and the summary says so — never a silent
+  degradation. The summary always records the tools actually presented.
+- **Budget arithmetic**: rounds × (LLM latency + tool batch) run inside
+  the consumer execution timeout; a loop that outlives it times out
+  honestly (`timed_out`), and the summary records completed rounds.
+
 ## 5. Outcomes
 
 | Event | Status | Summary |
@@ -96,6 +119,7 @@ unchanged):
 | Model/provider error | `failed` | precise reason |
 | Unauthorized / side-effecting tool attempt (runtime) | `approval_required` | attempted tool name (actionable pass-back) |
 | Unknown/blocked `agent_ref`; unresolvable message ref | `failed` | precise reason (existing taxonomy) |
+| Eligible tools exist but none presentable (provider/rollout gating) | `succeeded` | answer + "tools not presented" note |
 
 Health mapping unchanged (`approval_required` never degrades health).
 
