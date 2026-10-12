@@ -441,3 +441,140 @@ async def test_eligible_set_fails_closed_on_catalogue_error(monkeypatch) -> None
 
     monkeypatch.setattr(em, "_automation_tools_executor", lambda: _Broken())
     assert await em.derive_read_only_eligible_tools(7) == []
+
+
+# ---------------------------------------------------------------------------
+# Bounded read-only tool loop (ADR-184 read-only tool envelope, task 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_envelope_runs_tool_round_then_answers(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+    calls = []
+
+    async def _fake_llm(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {"choices": [{"message": {"content": "", "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "media_search", "arguments": "{\"q\": \"x\"}"}}]}}]}
+        return {"choices": [{"message": {"content": "final answer"}}]}
+
+    monkeypatch.setattr(em, "_envelope_llm_call", _fake_llm)
+
+    async def _fake_exec(**kwargs):
+        from tldw_Server_API.app.core.Chat.tool_auto_exec import ToolExecutionBatchResult
+        # use the real batch builder via a minimal stub: return one success record
+        rec = em._stub_tool_success("c1", "media_search", "result text")
+        return em._batch_from_records([rec])
+
+    monkeypatch.setattr(em, "_envelope_execute_calls", _fake_exec)
+    result = await em.run_read_only_envelope(_definition({}, family="agent_task"), "do it",
+        [{"name": "media_search", "module": "media"}])
+    assert result.status == "succeeded" and result.text == "final answer"
+    assert calls[1]["messages"][-1]["role"] == "tool"
+
+
+@pytest.mark.asyncio
+async def test_envelope_bounds_exhausted_succeeds_with_note(monkeypatch) -> None:
+    """Tool rounds that never converge fall back to generation, note says truncat*."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    async def _always_tool_calls(**kwargs):
+        return {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "media_search", "arguments": "{}"}}]}}]}
+
+    monkeypatch.setattr(em, "_envelope_llm_call", _always_tool_calls)
+
+    async def _fake_exec(**kwargs):
+        rec = em._stub_tool_success("c1", "media_search", "loop result")
+        return em._batch_from_records([rec])
+
+    monkeypatch.setattr(em, "_envelope_execute_calls", _fake_exec)
+
+    async def _fake_generation(**kwargs):
+        return {"choices": [{"message": {"content": "fallback answer"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _fake_generation,
+    )
+
+    result = await em.run_read_only_envelope(
+        _definition({}, family="agent_task"), "do it",
+        [{"name": "media_search", "module": "media"}],
+        max_rounds=3,
+    )
+    assert result.status == "succeeded"
+    assert result.text == "fallback answer"
+    assert "truncat" in (result.note or "")
+
+
+@pytest.mark.asyncio
+async def test_envelope_out_of_set_call_is_approval_required(monkeypatch) -> None:
+    """A tool call outside the eligible set is classified, never executed."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    async def _rogue_tool_call(**kwargs):
+        return {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "notes_write", "arguments": "{}"}}]}}]}
+
+    monkeypatch.setattr(em, "_envelope_llm_call", _rogue_tool_call)
+
+    executed: list[dict] = []
+
+    async def _must_not_execute(**kwargs):
+        executed.append(kwargs)
+        raise AssertionError("out-of-set tool call must never reach execution")
+
+    monkeypatch.setattr(em, "_envelope_execute_calls", _must_not_execute)
+
+    result = await em.run_read_only_envelope(
+        _definition({}, family="agent_task"), "do it",
+        [{"name": "media_search", "module": "media"}])
+    assert result.status == "approval_required"
+    assert "notes_write" in (result.note or "")
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_envelope_presented_empty_note(monkeypatch) -> None:
+    """Eligible tools the presentation layer drops: plain generation + note."""
+    from tldw_Server_API.app.core.Chat.run_first_presentation import (
+        ChatRunFirstPresentation,
+    )
+
+    def _presents_nothing(**kwargs):
+        return ChatRunFirstPresentation(
+            llm_tools=[],
+            effective_tool_names=[],
+            prompt_fragment=None,
+            presentation_variant="test",
+            eligible=False,
+            ineligible_reason="no_effective_tools",
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.present_chat_tools",
+        _presents_nothing,
+    )
+
+    async def _fake_generation(**kwargs):
+        return {"choices": [{"message": {"content": "plain answer"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _fake_generation,
+    )
+
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    result = await em.run_read_only_envelope(
+        _definition({}, family="agent_task"), "do it",
+        [{"name": "media_search", "module": "media"}])
+    assert result.status == "succeeded"
+    assert result.text == "plain answer"
+    assert "not presented" in (result.note or "")

@@ -22,7 +22,8 @@ chat entrypoint — this module adds no secret handling of its own.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -32,6 +33,12 @@ from tldw_Server_API.app.core.DB_Management.Automation_Message_Store_DB import (
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import register_executor
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Chat.tool_auto_exec import (
+        ToolExecutionBatchResult,
+        ToolExecutionRecord,
+    )
 
 #: Fixed, generation-only system prompt (phase 1: no tool use, bounded output).
 _GENERATION_ONLY_SYSTEM_PROMPT = (
@@ -199,6 +206,134 @@ async def derive_read_only_eligible_tools(owner_id: int) -> list[dict[str, Any]]
         if tier[0] == "read_only":
             eligible.append(entry)
     return eligible
+
+
+# ---------------------------------------------------------------------------
+# Read-only tool envelope: the bounded tool-calling loop (ADR-184)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class EnvelopeResult:
+    """Outcome of one bounded read-only envelope run.
+
+    ``status`` is one of ``{"succeeded", "approval_required", "failed"}``.
+    ``note`` carries truncation / not-presented context, and names the
+    attempted tool for membership violations.
+    """
+
+    status: str
+    text: str
+    note: str | None = None
+
+
+async def _envelope_llm_call(**kwargs: Any) -> Any:
+    """LLM-call seam for the envelope loop (tests monkeypatch this)."""
+    from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+
+    return await perform_chat_api_call_async(**kwargs)
+
+
+async def _envelope_execute_calls(**kwargs: Any) -> Any:
+    """Tool-execution seam for the envelope loop (tests monkeypatch this)."""
+    from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
+
+    return await execute_assistant_tool_calls(**kwargs)
+
+
+def _stub_tool_success(
+    tool_call_id: str, tool_name: str, output: str
+) -> ToolExecutionRecord:
+    """Test helper: one successful execution record (real dataclass shape)."""
+    from tldw_Server_API.app.core.Chat.tool_auto_exec import ToolExecutionRecord
+
+    return ToolExecutionRecord(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        ok=True,
+        content=output,
+        result=output,
+    )
+
+
+def _batch_from_records(
+    records: list[ToolExecutionRecord],
+) -> ToolExecutionBatchResult:
+    """Test helper: wrap records in a real ToolExecutionBatchResult."""
+    from tldw_Server_API.app.core.Chat.tool_auto_exec import ToolExecutionBatchResult
+
+    checked = list(records)
+    return ToolExecutionBatchResult(
+        requested_calls=len(checked),
+        processed_calls=len(checked),
+        execution_attempts=sum(1 for record in checked if not record.skipped),
+        executed_calls=sum(1 for record in checked if record.ok),
+        truncated=False,
+        results=checked,
+    )
+
+
+async def run_read_only_envelope(
+    definition: DefinitionRow,
+    raw_message: str,
+    eligible: list[dict[str, Any]],
+    *,
+    max_rounds: int = 5,
+) -> EnvelopeResult:
+    """Run the bounded read-only tool-calling loop for one raw message.
+
+    Tools are presented from ``eligible`` only; every assistant tool call
+    is checked against that membership set (name comparison, never
+    deny-string parsing). An out-of-set call short-circuits as
+    ``approval_required`` with the attempted tool named in ``note`` — it
+    never reaches execution. Exhausted rounds fall back to a plain
+    generation-only completion with a truncation note.
+    """
+    from tldw_Server_API.app.core.Chat.chat_service import present_chat_tools
+
+    eligible_names = {t["name"] for t in eligible}
+    presented = present_chat_tools(
+        tools=[{"type": "function", "function": {"name": t["name"],
+                "description": t.get("description", ""), "parameters": t.get("inputSchema", {})}}
+               for t in eligible],
+        allow_catalog=sorted(eligible_names), rollout_mode=None,
+        provider_key="", provider_allowlist=None, streaming=False,
+        presentation_variant=None,
+    )
+    if not presented.llm_tools:
+        text = await _run_generation(definition, raw_message)
+        return EnvelopeResult("succeeded", text, "tools eligible but not presented")
+    messages = [{"role": "user", "content": raw_message}]
+    for round_index in range(max_rounds):
+        response = await _envelope_llm_call(
+            messages=messages, tools=presented.llm_tools,
+            system_message=_definition_system_prompt(definition),
+            max_tokens=resolve_execution_target(definition)["max_tokens"])
+        message = (response.get("choices") or [{}])[0].get("message", {})
+        tool_calls = message.get("tool_calls") or []
+        content = (message.get("content") or "").strip()
+        if not tool_calls:
+            return EnvelopeResult("succeeded", content or "(empty)", None)
+        for call in tool_calls:
+            name = ((call.get("function") or {}).get("name") or "")
+            if name not in eligible_names:  # membership, never deny-string parsing
+                return EnvelopeResult("approval_required", content or "",
+                                      f"attempted non-envelope tool: {name}")
+        batch = await _envelope_execute_calls(
+            tool_calls=tool_calls, user_id=str(definition.owner_id),
+            client_id="scheduled_automation", max_tool_calls=8, timeout_ms=30000,
+            allow_catalog=sorted(eligible_names), attach_idempotency=True,
+            idempotency_seed=f"automation:{definition.id}:{round_index}")
+        messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+        # NOTE: the real batch/record fields are `.results` / `.content` —
+        # the task brief's `.records` / `.output` spellings do not exist on
+        # ToolExecutionBatchResult / ToolExecutionRecord.
+        for record in batch.results:
+            messages.append({"role": "tool", "tool_call_id": record.tool_call_id,
+                             "content": record.content or ""})
+    text = await _run_generation(definition, raw_message)
+    return EnvelopeResult("succeeded", text,
+                          f"tool rounds truncated after {max_rounds}")
 
 
 async def _execute_generation_only(
