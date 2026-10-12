@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_d
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Workflows.adapters import get_adapter
 from tldw_Server_API.app.core.Workflows.capabilities import get_step_capability
 from tldw_Server_API.app.core.Workflows.failures import build_failure_envelope
@@ -527,7 +528,25 @@ class WorkflowEngine:
                 return
             await asyncio.sleep(0.2)
 
+    def _llm_user_for_run(self, run_id: str) -> Any:
+        """The run's owner, for LLM usage accounting; None when the run cannot be read."""
+        try:
+            return getattr(self.db.get_run(run_id), "user_id", None)
+        except _WF_NONCRITICAL_EXCEPTIONS:
+            return None
+
     async def start_run(
+        self,
+        run_id: str,
+        mode: RunMode = RunMode.ASYNC,
+        *,
+        scheduler_for_notify: WorkflowScheduler | None = None,
+    ) -> None:
+        """Execute a run, with its owner as the user for LLM usage accounting."""
+        with llm_call_root(self._llm_user_for_run(run_id), operation="workflow"):
+            await self._start_run_impl(run_id, mode, scheduler_for_notify=scheduler_for_notify)
+
+    async def _start_run_impl(
         self,
         run_id: str,
         mode: RunMode = RunMode.ASYNC,
@@ -1105,6 +1124,20 @@ class WorkflowEngine:
         return True
 
     async def continue_run(
+        self,
+        run_id: str,
+        after_step_id: str,
+        last_outputs: dict | None = None,
+        next_step_id: str | None = None,
+        retry_resume: bool = False,
+    ) -> None:
+        """Resume a run, with its owner as the user for LLM usage accounting."""
+        with llm_call_root(self._llm_user_for_run(run_id), operation="workflow"):
+            await self._continue_run_impl(
+                run_id, after_step_id, last_outputs=last_outputs, next_step_id=next_step_id, retry_resume=retry_resume
+            )
+
+    async def _continue_run_impl(
         self,
         run_id: str,
         after_step_id: str,
