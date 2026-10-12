@@ -1,7 +1,7 @@
 # LLM usage accounting: record and gate every LLM call at one point
 
 - **Date:** 2026-10-09 (revised 2026-10-10 after an independent review against the code; see [Review changes](#review-changes))
-- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged. §4, §6 and §9 were revised on 2026-10-12 for PR 2, and that revision awaits the owner's approval; see [Review changes](#review-changes).
+- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged. §4, §6 and §9 were revised on 2026-10-12 for PR 2 and approved by the owner the same day; see [Review changes](#review-changes).
 - **Backlog:** TASK-13437 (gate LLM tokens/month at every LLM entry point) and TASK-13436 (evaluation cost caps per user, re-scoped below). Both are follow-ups of spec 2, TASK-13434.
 - **Builds on:** `Docs/Design/2026-10-02-usage-quota-posture-design.md` (spec 2) and ADR-064. Quotas are per-user `limits.*` values, resolved by `quota_resolver.user_quota`. Nothing is enforced unless `USAGE_QUOTAS_ENABLED` is on, `0` blocks, and errors fail open.
 
@@ -10,6 +10,11 @@
 1. **A general LLM cost quota replaces the evaluation-only cost caps.** The new keys are `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd`. They cover every LLM path, evaluations included. The dead evaluation cost caps are deleted.
 2. **Embeddings do not count against the LLM quotas.** One document ingest must not use up a chat budget. If an embeddings quota is needed later, it gets its own key.
 3. **BYOK calls are gated too, for now.** This matches `/chat/completions` today. Most providers don't mark BYOK credentials on the request, so exempting them needs new plumbing. That is a follow-up.
+
+## Owner decisions (2026-10-12)
+
+4. **The revised §4 is approved:** one `HTTPException` 402, checked at the request boundary for the main entry points and at the call everywhere else, delivered as PR 2a then PR 2b.
+5. **Local providers cost nothing by default.** The pricing catalog gives each one a zero default price that an operator can change (§6). Every reader of stored cost, not only the new limits, stops counting local calls.
 
 ## Problem
 
@@ -276,7 +281,7 @@ Two counters back the cost keys, next to the existing token counter. All three e
 
 Costs come from the pricing catalog when the row is written (`Usage/pricing_catalog.py`, via `compute_costs`).
 
-**Local providers cost nothing by default. (Owner decision pending.)** No local provider is in the pricing catalog, so today every call to one is costed at the catalog's unknown-model rate: $0.01 per 1K prompt tokens and $0.03 per 1K completion tokens. A cost limit would be used up by calls that cost nothing. From PR 2a:
+**Local providers cost nothing by default (owner decision 5).** No local provider is in the pricing catalog, so today every call to one is costed at the catalog's unknown-model rate: $0.01 per 1K prompt tokens and $0.03 per 1K completion tokens. A cost limit would be used up by calls that cost nothing. From PR 2a:
 - **The catalog resolves a provider-wide `default` entry** when no model of that provider matches. The file already has one, `huggingface.default`, which nothing can reach today (`pricing_catalog.py:264-275`).
 - **Each local provider ships with a zero `default`:** llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite and mlx, the set in `DEFAULT_LOCAL_PROVIDERS` (`LLM_Calls/adapter_registry.py`). The entries are in the built-in defaults and in `Config_Files/model_pricing.json`.
 - **`compute_costs` resolves the provider's canonical name first,** so an alias such as `llamacpp` is priced the same. The writers pass different spellings today.
@@ -451,6 +456,6 @@ Revision of 2026-10-12, before planning PR 2. A survey of the code, and then an 
 - **Streams are checked before the provider method runs.** Three adapters send the request inside `stream()`.
 - **Shared machinery.** A refusal must not open the Evaluations circuit breaker, be retried, or mark a chat provider unhealthy. The shared call layer raises it before its `try` block.
 - **Sync calls on the server loop** cannot be checked. Seven code paths make them; PR 2b moves them off the loop.
-- **Local providers.** They are not in the pricing catalog, so their calls were costed at the unknown-model rate. §6 gives each a zero default price in the catalog. This is the owner's decision to make.
+- **Local providers.** They are not in the pricing catalog, so their calls were costed at the unknown-model rate. §6 gives each a zero default price in the catalog. The owner approved this and the revision on 2026-10-12.
 - **Reporting.** The profile response model needs an `llm` field, and unset limits are absent, not `null`.
 - **Delivery.** PR 2 is split into PR 2a (the boundary check, keys and counters) and PR 2b (the check at the call).
