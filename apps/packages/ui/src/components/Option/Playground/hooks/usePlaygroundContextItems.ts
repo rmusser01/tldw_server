@@ -189,12 +189,12 @@ export function usePlaygroundContextItems(
       const isPersona = rolePlayState.identity.kind === "persona";
       const label = isPersona
         ? toText(
-            t("playground:composer.context.personaContext", "Persona context"),
+            t("playground:composer.context.personaSetup", "Persona setup"),
           )
         : toText(
             t(
-              "playground:composer.context.characterContext",
-              "Character context",
+              "playground:composer.context.characterSetup",
+              "Character setup",
             ),
           );
       const valueByStatus: Record<
@@ -203,14 +203,14 @@ export function usePlaygroundContextItems(
       > = {
         included: toText(
           t(
-            "playground:composer.rolePlayCompatibility.selectedUnverified",
-            "Selected — not verified",
+            "playground:composer.rolePlayCompatibility.selected",
+            "Selected",
           ),
         ),
         blended: toText(
           t(
-            "playground:composer.rolePlayCompatibility.selectedWithSourcesUnverified",
-            "Selected with sources — not verified",
+            "playground:composer.rolePlayCompatibility.selectedWithSources",
+            "Selected with sources",
           ),
         ),
         excluded: toText(

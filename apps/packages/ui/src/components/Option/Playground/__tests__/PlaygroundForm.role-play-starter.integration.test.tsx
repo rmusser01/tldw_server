@@ -7208,7 +7208,7 @@ it("UAT355: a plain composer ignores an untracked cross-tab Character mirror", a
       .not.toContain("Foreign Robot")
     expect
       .soft(screen.getByTestId("composer-context-items").textContent)
-      .not.toContain("Character context")
+      .not.toContain("Character setup")
     expect
       .soft(screen.queryByText("Add expression images for Foreign Robot."))
       .toBeNull()
@@ -7287,7 +7287,7 @@ it.each(["tracked_character", "overlay", "fresh_character"])(
         "Owned Character"
       )
       expect(screen.getByTestId("composer-context-items")).toHaveTextContent(
-        "Character context"
+        "Character setup"
       )
       if (mode === "fresh_character") {
         expect(

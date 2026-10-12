@@ -640,7 +640,7 @@ describe("Casual task-based customization", () => {
           },
           {
             id: "rolePlayCompatibility",
-            label: "Character context",
+            label: "Character setup",
             value: "Excluded in this mode",
             tone: "warning"
           },

@@ -4414,5 +4414,44 @@
   },
   "shortcuts_openKeyboardHelp": {
     "message": "Open keyboard shortcuts (?)"
+  },
+  "composer_rolePlayCompatibility_selected": {
+    "message": "Selected"
+  },
+  "composer_rolePlayCompatibility_selectedWithSources": {
+    "message": "Selected with sources"
+  },
+  "composer_context_characterSetup": {
+    "message": "Character setup"
+  },
+  "composer_context_personaSetup": {
+    "message": "Persona setup"
+  },
+  "historySelection_sendRefusedMessage": {
+    "message": "Your original input is kept here; copy it and review the conversation before trying again. It will not be sent again automatically."
+  },
+  "historySelection_sendConflictTitle": {
+    "message": "Updated in another window or tab"
+  },
+  "historySelection_sendConflictMessage": {
+    "message": "Your message was not added. Load the latest messages to continue, or branch from the point shown here. Your input is kept."
+  },
+  "historySelection_freshnessConflictMessage": {
+    "message": "This conversation changed. Your draft and the messages shown here are kept. Load the latest messages to continue, or branch from this point."
+  },
+  "historySelection_loadLatest": {
+    "message": "Load latest messages"
+  },
+  "historySelection_branchHere": {
+    "message": "Branch here"
+  },
+  "historySelection_cancelBranch": {
+    "message": "Cancel branch"
+  },
+  "historySelection_downloadRecoveredImage": {
+    "message": "Download retained image"
+  },
+  "historySelection_branchPending": {
+    "message": "Your next message will branch from this point. The existing conversation is kept."
   }
 }

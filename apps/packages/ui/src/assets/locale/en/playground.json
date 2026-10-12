@@ -700,7 +700,13 @@
     "sceneInactive": "No scene draft",
     "clearScene": "Clear scene",
     "resetScene": "Reset scene",
+    "rolePlayCompatibility": {
+      "selected": "Selected",
+      "selectedWithSources": "Selected with sources"
+    },
     "context": {
+      "characterSetup": "Character setup",
+      "personaSetup": "Persona setup",
       "character": "Character",
       "persona": "Persona",
       "assistant": "Assistant",

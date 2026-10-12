@@ -277,7 +277,7 @@ describe("usePlaygroundContextItems role-play state", () => {
     ).toBeUndefined();
   });
 
-  it("shows selected unverified character context when the current request can use character flow", () => {
+  it("shows selected character setup without a save or prompt-use claim", () => {
     const { result } = renderHook(() =>
       usePlaygroundContextItems(
         createDeps({
@@ -303,12 +303,40 @@ describe("usePlaygroundContextItems role-play state", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "rolePlayCompatibility",
-          label: "Character context",
-          value: "Selected — not verified",
+          label: "Character setup",
+          value: "Selected",
           tone: "neutral",
         }),
       ]),
     );
+  });
+
+  it("keeps selected character sources and their review action visible", () => {
+    const openKnowledgePanel = vi.fn();
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          openKnowledgePanel,
+          rolePlayCompatibility: {
+            status: "blended",
+            reasonCode: "rag_sources",
+            messageKey: "playground:composer.rolePlayCompatibility.rag_sources",
+          },
+          rolePlayState: {
+            ...baseRolePlayState,
+            identity: { kind: "character", id: "selected-mira", name: "Mira" },
+          },
+        }),
+      ),
+    );
+    const chip = result.current.find((item) => item.id === "rolePlayCompatibility");
+    expect(chip).toEqual(expect.objectContaining({
+      label: "Character setup",
+      value: "Selected with sources",
+      tone: "warning",
+    }));
+    act(() => { chip?.onClick?.(); });
+    expect(openKnowledgePanel).toHaveBeenCalledWith("search");
   });
 
   it("shows a warning and cleanup action when custom prompt may override character behavior", () => {
@@ -340,7 +368,7 @@ describe("usePlaygroundContextItems role-play state", () => {
     );
     expect(chip).toEqual(
       expect.objectContaining({
-        label: "Character context",
+        label: "Character setup",
         value: "Prompt override risk",
         tone: "warning",
       }),
@@ -382,7 +410,7 @@ describe("usePlaygroundContextItems role-play state", () => {
     );
     expect(chip).toEqual(
       expect.objectContaining({
-        label: "Character context",
+        label: "Character setup",
         value: "Excluded in this mode",
         tone: "warning",
       }),
@@ -421,8 +449,8 @@ describe("usePlaygroundContextItems role-play state", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "rolePlayCompatibility",
-          label: "Persona context",
-          value: "Selected — not verified",
+          label: "Persona setup",
+          value: "Selected",
         }),
       ]),
     );
