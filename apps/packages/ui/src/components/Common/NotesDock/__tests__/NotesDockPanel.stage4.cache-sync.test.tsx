@@ -164,32 +164,73 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
     })
     invalidateSpy.mockRestore()
   })
-  it('opens mixed source through the real archive owner and keeps title-only save exact', async () => {
-    const source = ' <>&\r\n雪\n '
-    const writes: Record<string,unknown>[] = []
-    mockBgRequest.mockImplementation(async request => {
-      if (request.path.startsWith('/api/v1/notes/?page=1')) return {items:[{id:202,title:'Mixed source',content:source}],pagination:{total_items:1}}
-      if (request.method === 'PUT') {writes.push(request.body);return {...request.body,id:202,version:2}}
-      if (request.path === '/api/v1/notes/202') return {id:202,title:'Mixed source',content:source,content_language:null,version:1}
-      return {}
-    })
-    render(<NotesDockPanel />)
-    fireEvent.click(await screen.findByRole('button',{name:/Mixed source/}))
-    const body = await screen.findByRole('textbox',{name:'Note content'})
-    expect(body.textContent).toBe(source);expect(body).toHaveAttribute('aria-readonly','true')
-    fireEvent.change(screen.getByPlaceholderText('Note title...'),{target:{value:'Title only'}})
-    fireEvent.click(screen.getByRole('button',{name:'Update'}))
-    await waitFor(()=>expect(writes).toHaveLength(1))
-    expect(writes[0].content).toBe(source);expect(writes[0]).not.toHaveProperty('content_language')
-  })
-  it.each(['json','yaml','text','future'])('opens %s from the archive in the canonical source editor', async language => {
-    mockBgRequest.mockImplementation(async request => request.path.startsWith('/api/v1/notes/?page=1')
-      ? {items:[{id:202,title:'Structured source',content:'{}'}],pagination:{total_items:1}}
-      : request.path === '/api/v1/notes/202' ? {id:202,title:'Structured source',content:'{}',content_language:language,version:1} : {})
-    render(<NotesDockPanel />)
-    fireEvent.click(await screen.findByRole('button',{name:/Structured source/}))
-    await waitFor(()=>expect(mockNavigate).toHaveBeenCalledWith('/notes?source_ref_id=202'))
-    expect(useNotesDockStore.getState().notes.some(note=>note.id===202)).toBe(false)
-  })
-
+  it("opens mixed source through the real archive owner and keeps title-only save exact", async () => {
+    const source = " <>&\r\n雪\n ";
+    const writes: Record<string, unknown>[] = [];
+    mockBgRequest.mockImplementation(async (request) => {
+      if (request.path.startsWith("/api/v1/notes/?page=1"))
+        return {
+          items: [{ id: 202, title: "Mixed source", content: source }],
+          pagination: { total_items: 1 },
+        };
+      if (request.method === "PUT") {
+        writes.push(request.body);
+        return { ...request.body, id: 202, version: 2 };
+      }
+      if (request.path === "/api/v1/notes/202")
+        return {
+          id: 202,
+          title: "Mixed source",
+          content: source,
+          content_language: null,
+          version: 1,
+        };
+      return {};
+    });
+    render(<NotesDockPanel />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Mixed source/ }),
+    );
+    const body = await screen.findByRole("textbox", { name: "Note content" });
+    expect(body.textContent).toBe(source);
+    expect(body).toHaveAttribute("aria-readonly", "true");
+    fireEvent.change(screen.getByPlaceholderText("Note title..."), {
+      target: { value: "Title only" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].content).toBe(source);
+    expect(writes[0]).not.toHaveProperty("content_language");
+  });
+  it.each(["json", "yaml", "text", "future"])(
+    "opens %s from the archive in the canonical source editor",
+    async (language) => {
+      mockBgRequest.mockImplementation(async (request) =>
+        request.path.startsWith("/api/v1/notes/?page=1")
+          ? {
+              items: [{ id: 202, title: "Structured source", content: "{}" }],
+              pagination: { total_items: 1 },
+            }
+          : request.path === "/api/v1/notes/202"
+            ? {
+                id: 202,
+                title: "Structured source",
+                content: "{}",
+                content_language: language,
+                version: 1,
+              }
+            : {},
+      );
+      render(<NotesDockPanel />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: /Structured source/ }),
+      );
+      await waitFor(() =>
+        expect(mockNavigate).toHaveBeenCalledWith("/notes?source_ref_id=202"),
+      );
+      expect(
+        useNotesDockStore.getState().notes.some((note) => note.id === 202),
+      ).toBe(false);
+    },
+  );
 })

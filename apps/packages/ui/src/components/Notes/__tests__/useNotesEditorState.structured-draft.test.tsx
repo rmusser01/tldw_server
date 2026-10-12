@@ -561,7 +561,7 @@ describe('structured drafts', () => {
       const posts = mocks.request.mock.calls.filter(([arg]) => arg.method === 'POST');
       expect(posts).toHaveLength(1);
       expect(posts[0][0].body).not.toHaveProperty('content_language');
-      expect(posts[0][0].body.content).toBe('<>& legacy');
+      expect(posts[0][0].body.content).toBe("<>& legacy");
     }
   );
 
@@ -802,7 +802,11 @@ describe('structured drafts', () => {
       expect(puts[0][0].path).toBe('/api/v1/notes/created');
       expect(view.result.current.offlineDraftQueue['note:created']).toBeUndefined();
       if (language !== undefined) {
-        expect(mocks.request.mock.calls.some(([arg]) => arg.path.endsWith('/capabilities'))).toBe(true);
+        expect(
+          mocks.request.mock.calls.some(([arg]) =>
+            arg.path.endsWith("/capabilities"),
+          ),
+        ).toBe(true);
       }
       expect(view.result.current.isDirty).toBe(false);
       await act(async () => {

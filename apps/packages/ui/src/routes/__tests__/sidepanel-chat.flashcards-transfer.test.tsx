@@ -13,7 +13,19 @@ const mocks = vi.hoisted(() => {
   const tabs = new Proxy({ tabs: [{ id: "local-tab-99", label: "Local tab" }], activeTabId: "local-tab-99", snapshotsById: {} }, {
     get: (target, key) => key in target ? Reflect.get(target, key) : noop
   })
-  return { noop, message, tabs, background: null as null | { type: string; text: string; payload: Record<string, unknown> }, initialize: vi.fn(), navigate: vi.fn(), createNote: vi.fn(async () => ({id:"owned-capture"})) }
+  return {
+    noop,
+    message,
+    tabs,
+    background: null as null | {
+      type: string;
+      text: string;
+      payload: Record<string, unknown>;
+    },
+    initialize: vi.fn(),
+    navigate: vi.fn(),
+    createNote: vi.fn(async () => ({ id: "owned-capture" })),
+  };
 })
 vi.mock("@/hooks/useBackgroundMessage", () => ({ default: () => mocks.background }))
 // This suite exercises the capture/transfer lease inside an already-open chat.
@@ -26,7 +38,13 @@ vi.mock("@/hooks/useSmartScroll", () => ({ useSmartScroll: () => ({ containerRef
 vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({ useChatShortcuts: () => {}, useSidebarShortcuts: () => {}, useChatModeShortcuts: () => {}, useWebSearchShortcuts: () => {} }))
 vi.mock("@/hooks/useConnectionState", () => ({ useConnectionActions: () => ({ checkOnce: mocks.noop }) }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => {} }))
-vi.mock("@/hooks/useAntdNotification", () => ({ useAntdNotification: () => ({ warning: mocks.noop, error: mocks.noop, success:mocks.noop }) }))
+vi.mock("@/hooks/useAntdNotification", () => ({
+  useAntdNotification: () => ({
+    warning: mocks.noop,
+    error: mocks.noop,
+    success: mocks.noop,
+  }),
+}));
 vi.mock("@/hooks/useCharacterGreeting", () => ({ useCharacterGreeting: () => {} }))
 vi.mock("@/hooks/useTTS", () => ({ useTTS: () => ({ cancel: mocks.noop }) }))
 vi.mock("@/hooks/useSelectedCharacter", () => ({ useSelectedCharacter: () => [null] }))
@@ -47,14 +65,44 @@ vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({ SidepanelH
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({ ConnectionBanner: () => null }))
 vi.mock("@/components/Common/CommandPaletteHost", () => ({ CommandPaletteHost: () => null }))
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
-vi.mock("@/components/Sidepanel/Notes/NoteQuickSaveModal", () => ({ default: (props: {
-  onSave: () => void; onGenerateFlashcards: () => void; onCreateStudyPack?: () => void; onCancel: () => void; onContentChange: (value: string) => void; content: string; error?: string
-}) => <section><textarea aria-label="Captured draft" value={props.content} onChange={event => props.onContentChange(event.target.value)} /><button onClick={props.onSave}>Save source</button><button onClick={props.onGenerateFlashcards}>Generate flashcards</button>{props.onCreateStudyPack && <button onClick={props.onCreateStudyPack}>Create study pack</button>}<button onClick={props.onCancel}>Cancel capture</button>{props.error && <p role="alert">{props.error}</p>}</section> }))
+vi.mock("@/components/Sidepanel/Notes/NoteQuickSaveModal", () => ({
+  default: (props: {
+    onSave: () => void;
+    onGenerateFlashcards: () => void;
+    onCreateStudyPack?: () => void;
+    onCancel: () => void;
+    onContentChange: (value: string) => void;
+    content: string;
+    error?: string;
+  }) => (
+    <section>
+      <textarea
+        aria-label="Captured draft"
+        value={props.content}
+        onChange={(event) => props.onContentChange(event.target.value)}
+      />
+      <button onClick={props.onSave}>Save source</button>
+      <button onClick={props.onGenerateFlashcards}>Generate flashcards</button>
+      {props.onCreateStudyPack && (
+        <button onClick={props.onCreateStudyPack}>Create study pack</button>
+      )}
+      <button onClick={props.onCancel}>Cancel capture</button>
+      {props.error && <p role="alert">{props.error}</p>}
+    </section>
+  ),
+}));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, fallback?: string) => fallback || key }) }))
 vi.mock("@plasmohq/storage", async () => import("../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
 vi.mock("@/utils/browser-runtime", () => ({ isExtensionRuntime: () => false }))
-vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {createNote:mocks.createNote, initialize: mocks.initialize, ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null") } }))
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    createNote: mocks.createNote,
+    initialize: mocks.initialize,
+    ensureConfigForRequest: async () =>
+      JSON.parse(window.localStorage.getItem("tldwConfig") || "null"),
+  },
+}));
 vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) } }))
 vi.mock("wxt/browser", () => ({ browser: { runtime: {} } }))
 
@@ -219,12 +267,32 @@ describe("actual sidepanel Chat private Flashcards producer", () => {
       expect(await consumeFlashcardsGenerateHandoff(token, flashcardsHandoffAuthority(snapshot))).toMatchObject({ text: "New source", sourceId: "new-message" })
     } finally { snapshot.release() }
   })
-  it.each([' {"a":1}\r\n', 'a: |+\n  text\n\n', '{"a":1}\n{"b":2}\n', ' # Heading\n\n', ' <>& 雪\n '])('saves exact captured source with no hidden page URL or language reset', async source => {
-    mocks.background = {type:'save-to-notes',text:source,payload:{pageTitle:'Captured source',pageUrl:'https://example.invalid/source'}}
-    render(<SidepanelChat />)
-    await screen.findByRole('button',{name:'Save source'})
-    fireEvent.click(screen.getByRole('button',{name:'Save source'}))
-    await waitFor(()=>expect(mocks.createNote).toHaveBeenCalledWith(source,{title:'Captured source',keywords:['captured']}))
-  })
-
+  it.each([
+    ' {"a":1}\r\n',
+    "a: |+\n  text\n\n",
+    '{"a":1}\n{"b":2}\n',
+    " # Heading\n\n",
+    " <>& 雪\n ",
+  ])(
+    "saves exact captured source with no hidden page URL or language reset",
+    async (source) => {
+      mocks.background = {
+        type: "save-to-notes",
+        text: source,
+        payload: {
+          pageTitle: "Captured source",
+          pageUrl: "https://example.invalid/source",
+        },
+      };
+      render(<SidepanelChat />);
+      await screen.findByRole("button", { name: "Save source" });
+      fireEvent.click(screen.getByRole("button", { name: "Save source" }));
+      await waitFor(() =>
+        expect(mocks.createNote).toHaveBeenCalledWith(source, {
+          title: "Captured source",
+          keywords: ["captured"],
+        }),
+      );
+    },
+  );
 })

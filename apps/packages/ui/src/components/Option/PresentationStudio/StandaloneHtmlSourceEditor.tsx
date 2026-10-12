@@ -1,4 +1,4 @@
-import { loadLocalMonaco } from "@/services/monaco-loader"
+import { loadLocalMonaco } from "@/services/monaco-loader";
 import React from "react"
 import type { OnMount } from "@monaco-editor/react"
 
@@ -9,9 +9,9 @@ import {
 } from "./standalone-html-source"
 
 const MonacoEditor = React.lazy(async () => {
-  if (typeof window !== "undefined") await loadLocalMonaco()
-  return import("@monaco-editor/react")
-})
+  if (typeof window !== "undefined") await loadLocalMonaco();
+  return import("@monaco-editor/react");
+});
 
 type StandaloneHtmlSourceEditorProps = {
   value: string

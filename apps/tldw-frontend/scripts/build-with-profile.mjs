@@ -1,6 +1,6 @@
-import { prepareMonacoAssets } from "../../scripts/prepare-monaco-assets.mjs"
+import { prepareMonacoAssets } from '../../scripts/prepare-monaco-assets.mjs';
 
-prepareMonacoAssets()
+prepareMonacoAssets();
 
 import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"

@@ -21,7 +21,7 @@ describe("sidepanel-chat note quick save mounting", () => {
   it("keeps capture source free of hidden Markdown attribution", () => {
     const source = readFileSync(sourcePath, "utf8")
 
-    expect(source).not.toContain("buildCapturedNoteContent")
+    expect(source).not.toContain("buildCapturedNoteContent");
     expect(source).toContain("CAPTURED_NOTE_KEYWORD")
     expect(source).toContain("keywords: [CAPTURED_NOTE_KEYWORD]")
     expect(source).not.toContain("source_url: noteSourceUrl")

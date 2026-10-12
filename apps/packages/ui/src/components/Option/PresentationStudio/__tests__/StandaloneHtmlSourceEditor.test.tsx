@@ -1,4 +1,6 @@
-vi.mock('@/services/monaco-loader', () => ({loadLocalMonaco:vi.fn(async () => undefined)}))
+vi.mock("@/services/monaco-loader", () => ({
+  loadLocalMonaco: vi.fn(async () => undefined),
+}));
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -784,6 +786,6 @@ describe("StandaloneHtmlSourceEditor with pinned real Monaco 0.55.1", () => {
       standaloneRoot.remove()
       controlRoot.remove()
     },
-    20_000
-  )
+    20_000,
+  );
 })

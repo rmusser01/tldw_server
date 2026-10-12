@@ -767,79 +767,239 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     ).not.toHaveTextContent("Version 1")
   })
 
-  it.each(['yaml','text','temporary-yaml','markdown'])('handles a pending Markdown attachment under effective %s mode',async(mode)=>{
-    localStorage.clear();
-    const base=mockBgRequest.getMockImplementation()!;
-    const upload=deferred<unknown>();
-    const noteId=mode==='temporary-yaml' ? '12':'11';
-    mockBgRequest.mockImplementation(async(request)=>{
-      if(request.path==='/api/v1/notes/capabilities') return {content_language:mode!=='temporary-yaml'};
-      if(request.path===`/api/v1/notes/${noteId}` && request.method==='GET') {
-        const note=await base({...request,path:'/api/v1/notes/11'});
-        return mode==='temporary-yaml' ? note : {...note,content_language:'markdown'};
+  it.each(["yaml", "text", "temporary-yaml", "markdown"])(
+    "handles a pending Markdown attachment under effective %s mode",
+    async (mode) => {
+      localStorage.clear();
+      const base = mockBgRequest.getMockImplementation()!;
+      const upload = deferred<unknown>();
+      const noteId = mode === "temporary-yaml" ? "12" : "11";
+      mockBgRequest.mockImplementation(async (request) => {
+        if (request.path === "/api/v1/notes/capabilities")
+          return { content_language: mode !== "temporary-yaml" };
+        if (
+          request.path === `/api/v1/notes/${noteId}` &&
+          request.method === "GET"
+        ) {
+          const note = await base({ ...request, path: "/api/v1/notes/11" });
+          return mode === "temporary-yaml"
+            ? note
+            : { ...note, content_language: "markdown" };
+        }
+        if (request.path === `/api/v1/notes/${noteId}/attachments`)
+          return upload.promise;
+        if (
+          request.path === `/api/v1/notes/${noteId}` &&
+          request.method === "PUT"
+        )
+          return {
+            id: noteId,
+            version: 2,
+            last_modified: "2026-01-01T00:00:00Z",
+            ...(Object.hasOwn(request.body, "content_language")
+              ? { content_language: request.body.content_language }
+              : {}),
+          };
+        return base(request);
+      });
+      renderSourceRoute(`/notes?source_ref_id=${noteId}`);
+      await waitFor(() =>
+        expect(
+          screen.getByPlaceholderText(
+            "Write your note here... (Markdown supported)",
+          ),
+        ).toHaveValue("Saved body"),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("combobox", { name: "Language", exact: true }),
+        ).not.toBeDisabled(),
+      );
+      if (mode === "temporary-yaml") {
+        fireEvent.mouseDown(
+          screen.getByRole("combobox", { name: "Language", exact: true }),
+        );
+        fireEvent.click(
+          await screen.findByText("MARKDOWN", {
+            selector: ".ant-select-item-option-content",
+          }),
+        );
       }
-      if(request.path===`/api/v1/notes/${noteId}/attachments`) return upload.promise;
-      if(request.path===`/api/v1/notes/${noteId}` && request.method==='PUT') return {id:noteId,version:2,last_modified:'2026-01-01T00:00:00Z',...(Object.hasOwn(request.body,'content_language') ? {content_language:request.body.content_language}:{})};
-      return base(request);
-    });
-    renderSourceRoute(`/notes?source_ref_id=${noteId}`);
-    await waitFor(()=>expect(screen.getByPlaceholderText('Write your note here... (Markdown supported)')).toHaveValue('Saved body'));
-    await waitFor(()=>expect(screen.getByRole('combobox',{name:'Language',exact:true})).not.toBeDisabled());
-    if(mode==='temporary-yaml') {
-      fireEvent.mouseDown(screen.getByRole('combobox',{name:'Language',exact:true}));
-      fireEvent.click(await screen.findByText('MARKDOWN',{selector:'.ant-select-item-option-content'}));
-    }
-    fireEvent.click(screen.getByTestId('notes-input-mode-wysiwyg'));
-    fireEvent.change(screen.getByTestId('notes-attachment-input'),{target:{files:[new File(['harmless'],'source.txt',{type:'text/plain'})]}});
-    await waitFor(()=>expect(mockBgRequest.mock.calls.some(([r])=>r.path===`/api/v1/notes/${noteId}/attachments`)).toBe(true));
-    // Temporary choice exercises the effective view independently of canonical absence.
-    if(mode!=='markdown') {fireEvent.mouseDown(screen.getByRole('combobox',{name:'Language',exact:true}));
-    fireEvent.click(await screen.findByText(mode==='text' ? 'Plain text':'YAML',{selector:'.ant-select-item-option-content'}));}
-    await act(async()=>upload.resolve({url:'/api/v1/notes/11/attachments/source',file_name:'source.txt',content_type:'text/plain'}));
-    fireEvent.click(screen.getByTestId('notes-save-button'));
-    const writes=()=>mockBgRequest.mock.calls.filter(([r])=>r.path===`/api/v1/notes/${noteId}` && r.method==='PUT');
-    await waitFor(()=>expect(writes().length).toBeGreaterThan(0));
-    expect(writes().at(-1)![0].body.content).toBe(mode==='markdown' ? 'Saved body\n[source.txt](/api/v1/notes/11/attachments/source)':'Saved body');
-    if(mode==='temporary-yaml') expect(writes().at(-1)![0].body).not.toHaveProperty('content_language');
-  });
+      fireEvent.click(screen.getByTestId("notes-input-mode-wysiwyg"));
+      fireEvent.change(screen.getByTestId("notes-attachment-input"), {
+        target: {
+          files: [new File(["harmless"], "source.txt", { type: "text/plain" })],
+        },
+      });
+      await waitFor(() =>
+        expect(
+          mockBgRequest.mock.calls.some(
+            ([r]) => r.path === `/api/v1/notes/${noteId}/attachments`,
+          ),
+        ).toBe(true),
+      );
+      // Temporary choice exercises the effective view independently of canonical absence.
+      if (mode !== "markdown") {
+        fireEvent.mouseDown(
+          screen.getByRole("combobox", { name: "Language", exact: true }),
+        );
+        fireEvent.click(
+          await screen.findByText(mode === "text" ? "Plain text" : "YAML", {
+            selector: ".ant-select-item-option-content",
+          }),
+        );
+      }
+      await act(async () =>
+        upload.resolve({
+          url: "/api/v1/notes/11/attachments/source",
+          file_name: "source.txt",
+          content_type: "text/plain",
+        }),
+      );
+      fireEvent.click(screen.getByTestId("notes-save-button"));
+      const writes = () =>
+        mockBgRequest.mock.calls.filter(
+          ([r]) => r.path === `/api/v1/notes/${noteId}` && r.method === "PUT",
+        );
+      await waitFor(() => expect(writes().length).toBeGreaterThan(0));
+      expect(writes().at(-1)![0].body.content).toBe(
+        mode === "markdown"
+          ? "Saved body\n[source.txt](/api/v1/notes/11/attachments/source)"
+          : "Saved body",
+      );
+      if (mode === "temporary-yaml")
+        expect(writes().at(-1)![0].body).not.toHaveProperty("content_language");
+    },
+  );
 
-  it.each(['language-change','markdown-current','markdown-reload-failed'])('admits a deferred Studio regeneration only for its current Markdown owner (%s)',async(scenario)=>{
-    localStorage.clear();
-    const base=mockBgRequest.getMockImplementation()!,pending=deferred<unknown>();
-    const studio={note_id:'11',template_type:'lined',handwriting_mode:'off',render_version:1,payload_json:{sections:[]},created_at:'2026-01-01',last_modified:'2026-01-01'};
-    let generated=false;
-    mockBgRequest.mockImplementation(async(request)=>{
-      if(request.path==='/api/v1/notes/capabilities') return {content_language:true};
-      if(request.path==='/api/v1/notes/11' && request.method==='GET') {
-        if(generated && scenario==='markdown-reload-failed') throw Error('Owned read unavailable');
-        return {...await base(request),content:generated ? 'generated body':'Saved body',content_language:'markdown',studio};
+  it.each(["language-change", "markdown-current", "markdown-reload-failed"])(
+    "admits a deferred Studio regeneration only for its current Markdown owner (%s)",
+    async (scenario) => {
+      localStorage.clear();
+      const base = mockBgRequest.getMockImplementation()!,
+        pending = deferred<unknown>();
+      const studio = {
+        note_id: "11",
+        template_type: "lined",
+        handwriting_mode: "off",
+        render_version: 1,
+        payload_json: { sections: [] },
+        created_at: "2026-01-01",
+        last_modified: "2026-01-01",
+      };
+      let generated = false;
+      mockBgRequest.mockImplementation(async (request) => {
+        if (request.path === "/api/v1/notes/capabilities")
+          return { content_language: true };
+        if (request.path === "/api/v1/notes/11" && request.method === "GET") {
+          if (generated && scenario === "markdown-reload-failed")
+            throw Error("Owned read unavailable");
+          return {
+            ...(await base(request)),
+            content: generated ? "generated body" : "Saved body",
+            content_language: "markdown",
+            studio,
+          };
+        }
+        if (request.path === "/api/v1/notes/11/studio")
+          return {
+            note: { id: "11", content: "Saved body" },
+            studio_document: studio,
+            is_stale: true,
+            stale_reason: "source_changed",
+          };
+        if (request.path === "/api/v1/notes/11/studio/regenerate")
+          return pending.promise;
+        if (request.path === "/api/v1/notes/11" && request.method === "PUT")
+          return {
+            ...(await base(request)),
+            content_language: request.body.content_language,
+          };
+        return base(request);
+      });
+      renderSourceRoute("/notes?source_ref_id=11");
+      await waitFor(() =>
+        expect(
+          mockBgRequest.mock.calls.some(
+            ([r]) => r.path === "/api/v1/notes/11/studio",
+          ),
+        ).toBe(true),
+      );
+      fireEvent.click(
+        (
+          await screen.findAllByRole("button", {
+            name: "Continue editing plain note",
+            exact: true,
+          })
+        )[0],
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Preview", exact: true }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "Regenerate Studio view from current Markdown",
+          exact: true,
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          mockBgRequest.mock.calls.some(([r]) =>
+            r.path.endsWith("/studio/regenerate"),
+          ),
+        ).toBe(true),
+      );
+      if (scenario === "language-change") {
+        fireEvent.click(
+          screen.getAllByRole("button", {
+            name: "Continue editing plain note",
+            exact: true,
+          })[0],
+        );
+        await waitFor(() =>
+          expect(
+            screen.getByRole("combobox", { name: "Language", exact: true }),
+          ).not.toBeDisabled(),
+        );
+        fireEvent.mouseDown(
+          screen.getByRole("combobox", { name: "Language", exact: true }),
+        );
+        fireEvent.click(
+          await screen.findByText("YAML", {
+            selector: ".ant-select-item-option-content",
+          }),
+        );
       }
-      if(request.path==='/api/v1/notes/11/studio') return {note:{id:'11',content:'Saved body'},studio_document:studio,is_stale:true,stale_reason:'source_changed'};
-      if(request.path==='/api/v1/notes/11/studio/regenerate') return pending.promise;
-      if(request.path==='/api/v1/notes/11' && request.method==='PUT') return {...await base(request),content_language:request.body.content_language};
-      return base(request);
-    });
-    renderSourceRoute('/notes?source_ref_id=11');
-    await waitFor(()=>expect(mockBgRequest.mock.calls.some(([r])=>r.path==='/api/v1/notes/11/studio')).toBe(true));
-    fireEvent.click((await screen.findAllByRole('button',{name:'Continue editing plain note',exact:true}))[0]);
-    fireEvent.click(screen.getByRole('button',{name:'Preview',exact:true}));
-    fireEvent.click(await screen.findByRole('button',{name:'Regenerate Studio view from current Markdown',exact:true}));
-    await waitFor(()=>expect(mockBgRequest.mock.calls.some(([r])=>r.path.endsWith('/studio/regenerate'))).toBe(true));
-    if(scenario==='language-change') {
-      fireEvent.click(screen.getAllByRole('button',{name:'Continue editing plain note',exact:true})[0]);
-      await waitFor(()=>expect(screen.getByRole('combobox',{name:'Language',exact:true})).not.toBeDisabled());
-      fireEvent.mouseDown(screen.getByRole('combobox',{name:'Language',exact:true}));
-      fireEvent.click(await screen.findByText('YAML',{selector:'.ant-select-item-option-content'}));
-    }
-    generated=true;
-    await act(async()=>pending.resolve({note:{id:'11',title:'Generated title',content:'generated body'},studio_document:studio,is_stale:false,stale_reason:null}));
-    if(scenario!=='language-change') await waitFor(()=>{
-      const heading=screen.queryByTestId('notes-studio-heading');
-      const textarea=screen.queryByPlaceholderText('Write your note here... (Markdown supported)') as HTMLTextAreaElement|null;
-      expect(heading?.textContent==='Generated title' || textarea?.value==='generated body').toBe(true);
-    });
-    fireEvent.click(screen.getByTestId('notes-save-button'));
-    await waitFor(()=>expect(updateCalls().length).toBeGreaterThan(0));
-    expect(updateCalls().at(-1)![0].body.content).toBe(scenario==='language-change' ? 'Saved body':'generated body');
-  },10000);
+      generated = true;
+      await act(async () =>
+        pending.resolve({
+          note: {
+            id: "11",
+            title: "Generated title",
+            content: "generated body",
+          },
+          studio_document: studio,
+          is_stale: false,
+          stale_reason: null,
+        }),
+      );
+      if (scenario !== "language-change")
+        await waitFor(() => {
+          const heading = screen.queryByTestId("notes-studio-heading");
+          const textarea = screen.queryByPlaceholderText(
+            "Write your note here... (Markdown supported)",
+          ) as HTMLTextAreaElement | null;
+          expect(
+            heading?.textContent === "Generated title" ||
+              textarea?.value === "generated body",
+          ).toBe(true);
+        });
+      fireEvent.click(screen.getByTestId("notes-save-button"));
+      await waitFor(() => expect(updateCalls().length).toBeGreaterThan(0));
+      expect(updateCalls().at(-1)![0].body.content).toBe(
+        scenario === "language-change" ? "Saved body" : "generated body",
+      );
+    },
+    10000,
+  );
 })

@@ -1,4 +1,6 @@
-vi.mock('@/services/monaco-loader', () => ({loadLocalMonaco:vi.fn(async () => undefined)}))
+vi.mock("@/services/monaco-loader", () => ({
+  loadLocalMonaco: vi.fn(async () => undefined),
+}));
 import React from "react"
 import { render } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"

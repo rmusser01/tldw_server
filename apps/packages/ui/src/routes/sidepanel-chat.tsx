@@ -827,7 +827,7 @@ const SidepanelChatContent = ({
   }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, transferStudyPack, resetNoteModal, t])
 
   const handleNoteSave = React.useCallback(async () => {
-    const content = noteDraftContent
+    const content = noteDraftContent;
     const title = (noteDraftTitle || noteSuggestedTitle).trim()
     if (!content.trim()) {
       setNoteError(t("sidepanel:notes.emptyContent", "Nothing to save"))
@@ -2030,7 +2030,7 @@ const SidepanelChatContent = ({
 
     if (bgMsg.type === "save-to-notes") {
       lastBgMsgRef.current = bgMsg
-      const selected = bgMsg.text || bgMsg.payload?.selectionText || ""
+      const selected = bgMsg.text || bgMsg.payload?.selectionText || "";
       if (!selected.trim()) {
         notification.warning({
           message: t(
@@ -2760,7 +2760,10 @@ const SidepanelChatContent = ({
             onSave={handleNoteSave}
             onGenerateFlashcards={handleGenerateFlashcardsFromSelection}
             onCreateStudyPack={noteSourceMessageId ? handleCreateStudyPackFromSelection : undefined}
-            modalTitle={t("sidepanel:notes.saveSourceToNotesTitle", "Save source to Notes")}
+            modalTitle={t(
+              "sidepanel:notes.saveSourceToNotesTitle",
+              "Save source to Notes",
+            )}
             saveText={t("sidepanel:notes.saveSource", "Save source")}
             cancelText={t("common:cancel", "Cancel")}
             generateFlashcardsText={t(
@@ -2774,7 +2777,10 @@ const SidepanelChatContent = ({
             titleLabel={t("sidepanel:notes.titleLabel", "Title")}
             contentLabel={t("sidepanel:notes.contentLabel", "Content")}
             titleRequiredText={t("sidepanel:notes.titleRequired", "Title is required to create a note.")}
-            helperText={t("sidepanel:notes.sourceOnlyHelper", "Only the text is saved. The page URL shown here is not included.")}
+            helperText={t(
+              "sidepanel:notes.sourceOnlyHelper",
+              "Only the text is saved. The page URL shown here is not included.",
+            )}
             sourceLabel={t("sidepanel:notes.sourceLabel", "Source")}
           />
         </Suspense>

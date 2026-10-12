@@ -1,4 +1,4 @@
-import { loadLocalMonaco } from "@/services/monaco-loader"
+import { loadLocalMonaco } from "@/services/monaco-loader";
 import React, {
   Component,
   Suspense,
@@ -14,9 +14,9 @@ import type { Monaco, OnMount } from "@monaco-editor/react"
 import { LoadingState } from "@/components/ui/feedback/LoadingState"
 
 const Monaco = React.lazy(async () => {
-  if (typeof window !== "undefined") await loadLocalMonaco()
-  return import("@monaco-editor/react")
-})
+  if (typeof window !== "undefined") await loadLocalMonaco();
+  return import("@monaco-editor/react");
+});
 
 const MonacoLoading = ({ height }: { height: number | string }) => (
   <LoadingState
