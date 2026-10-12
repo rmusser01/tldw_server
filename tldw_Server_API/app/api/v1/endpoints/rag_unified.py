@@ -818,6 +818,9 @@ async def rag_ablate(
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
+    if request.with_answer:
+        # Usage quotas (LLM usage accounting spec §4a): answer generation is checked before any work.
+        await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         credential_runtime = _build_credential_runtime(request_raw, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
@@ -2375,6 +2378,9 @@ async def advanced_search_endpoint(
     """
     Advanced search with common features enabled.
     """
+    if with_answer:
+        # Usage quotas (LLM usage accounting spec §4a): answer generation is checked before any work.
+        await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         credential_runtime = _build_credential_runtime(request, current_user)
     except _RAG_PROVIDER_FAILURES as exc:

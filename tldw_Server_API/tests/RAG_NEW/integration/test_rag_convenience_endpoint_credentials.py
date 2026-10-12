@@ -11,6 +11,7 @@ from loguru import logger
 from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_endpoint
+import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as unified_pipeline
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     ByokResolutionStatus,
@@ -19,7 +20,9 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
+from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
 
 pytestmark = pytest.mark.integration
 
@@ -182,3 +185,71 @@ async def test_convenience_endpoint_maps_typed_provider_failure_and_closes(
     assert exc_info.value.status_code == 503  # nosec B101
     assert exc_info.value.detail["error_code"] == "invalid_provider_credentials"  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_advanced_search_with_answer_refuses_an_over_quota_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = _CountingRuntime()
+    ran: list[bool] = []
+    _install_endpoint_fakes(monkeypatch, runtime)
+
+    async def recorder(*_args: Any, **_kwargs: Any) -> Any:
+        ran.append(True)
+        return UnifiedSearchResult(documents=[], query="q")
+
+    monkeypatch.setattr(rag_endpoint, "advanced_search", recorder)
+    refuse_llm_work(monkeypatch)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await rag_endpoint.advanced_search_endpoint(
+            request=_request("/api/v1/rag/advanced"),
+            query="q",
+            current_user=_user(),
+            media_db=_db("media.db"),
+            chacha_db=_db("notes.db"),
+        )
+
+    assert ran == []  # nosec B101
+    assert runtime.close_calls == 0  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_advanced_search_without_answer_is_not_refused_by_the_llm_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _CountingRuntime()
+    ran: list[bool] = []
+    _install_endpoint_fakes(monkeypatch, runtime)
+
+    async def recorder(*_args: Any, **_kwargs: Any) -> Any:
+        ran.append(True)
+        return UnifiedSearchResult(documents=[], query="q")
+
+    monkeypatch.setattr(rag_endpoint, "advanced_search", recorder)
+    refuse_llm_work(monkeypatch)
+
+    await rag_endpoint.advanced_search_endpoint(
+        request=_request("/api/v1/rag/advanced"),
+        query="q",
+        with_answer=False,
+        current_user=_user(),
+        media_db=_db("media.db"),
+        chacha_db=_db("notes.db"),
+    )
+
+    assert ran == [True]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_simple_search_does_not_generate_an_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    async def recorder(**kwargs: Any) -> UnifiedSearchResult:
+        seen.update(kwargs)
+        return UnifiedSearchResult(documents=[], query="q")
+
+    monkeypatch.setattr(unified_pipeline, "unified_rag_pipeline", recorder)
+
+    await unified_pipeline.simple_search("q")
+
+    assert seen["enable_generation"] is False  # nosec B101
