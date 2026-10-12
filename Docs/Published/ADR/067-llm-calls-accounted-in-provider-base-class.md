@@ -45,5 +45,6 @@ Only `/chat/completions`, the router, the claims engine and embeddings recorded 
 
 ## Follow-up
 
-- PR 1b of the spec: the remaining roots (`WorkerSDK`, the workflow engine, WebSockets, two executor sites).
+- PR 1b of the spec added the remaining roots: `WorkerSDK`, the job workers with their own loop, the workflow engine, the audio and realtime WebSockets, and a default executor that carries the LLM call state.
+- TASK-13585: record MCP tool calls and the in-process claims rebuild.
 - PR 2: the quota check and the cost keys. No call is refused by this ADR's change.

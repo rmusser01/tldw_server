@@ -95,17 +95,14 @@ With no user, a call is not checked and not recorded.
 - **Jobs workers on `WorkerSDK`:** both handler call sites (`Jobs/worker_sdk.py:719`, `:955`) run each handler under `llm_call_root(owner)`. The owner is the job row's `owner_user_id`, a string that can be empty.
   - Scheduled automations do not run under `WorkerSDK`. `services/agent_task_jobs_worker.py` has its own loop and sets the root itself. So does `services/audio_jobs_worker.py`.
   - The `watchlists_enrich_output` Scheduler task sets the root from its payload's user.
-- **The workflow engine:** `start_run` and `continue_run` both set the root from `run.user_id` (`Workflows/engine.py:530`, `:596`).
+- **The workflow engine:** `start_run` and `continue_run` both set the root from `run.user_id` (`Workflows/engine.py`).
   - It has to be set there because `_spawn` runs each run on a new thread with its own loop (`:2337-2347`), and `threading.Thread` doesn't copy context.
   - `start_run` is also awaited directly for child runs (`Workflows/adapters/control/orchestration.py:74`).
 - **The chat request queue:** `QueuedRequest` captures the LLM call state when the request is enqueued, and the worker runs the processor with it (`Chat/request_queue.py:366`, `:672`). The queue's worker tasks otherwise carry the context of whoever started the queue. Without this, a queued `/chat/completions` (`CHAT_QUEUED_EXECUTION`, off by default) would lose its `prechecked` and `records_itself` flags and be counted twice.
-- **WebSockets:** no socket authentication sets the content scope. Each sets the context after it authenticates:
-  - the four audio routes, through their shared helper `_audio_ws_authenticate` (`Audio/streaming_service.py:382`);
-  - `voice_assistant.py`;
-  - `agent_client_protocol.py` (two routes);
-  - `acp_multiplex.py`;
-  - `prompt_studio/prompt_studio_websocket.py` (two routes; its user id is a string).
-  - PR 1b: the audio and realtime WebSockets bind the user in `_audio_ws_authenticate`. The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows) make no chat LLM call, so they are left alone.
+- **WebSockets:** no socket authentication sets the content scope, so a socket that makes chat LLM calls binds its user after it authenticates.
+  - The four audio routes and the two realtime routes do, in their shared helper `_audio_ws_authenticate` (`Audio/streaming_service.py`). The realtime routes reach it through `Audio/Realtime/auth.py`.
+  - The voice assistant socket reaches an LLM only through a workflow run, which the workflow engine covers.
+  - The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows) make no chat LLM call and are left alone.
 
 **Places that lose context today, and their fix:**
 - **The bounded daemon pools.** `BoundedDaemonPool.start` (`Chat/bounded_daemon.py:121-150`) starts raw threads. It is the one entry point for the sync adapter pool, the stream pool and the cleanup pool. It carries the LLM call state into the thread: the resolved user and the context fields. It does not copy the whole context, because other context variables, such as the provider-error privacy scope, are not passed to these threads today, and copying everything would change that.
@@ -319,7 +316,7 @@ Four PRs, so recording can be checked before anything new is refused.
   - the `records_itself` and `exempt` markings;
   - the embeddings predicate in §6;
   - ADR-067, "LLM calls are accounted in the chat provider base class", if the number is free when the PR opens.
-- **PR 1b: the remaining roots in §1.** `WorkerSDK`, the workflow engine, the WebSocket sites and the two executor sites.
+- **PR 1b: the remaining roots in §1.** `WorkerSDK`, the job workers with their own loop, the workflow engine, the audio and realtime WebSockets, and the default executor that carries the LLM call state.
 - **PR 2: the check and the keys.** §4, the cost counters and startup warnings in §6, §7 and §9. Closes TASK-13437.
 - **PR 3: the evaluation cost-cap removals.** §8. It has no dependency on the other two beyond the cost quota existing. Closes TASK-13436.
 
