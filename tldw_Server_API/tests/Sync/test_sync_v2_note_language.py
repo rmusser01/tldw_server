@@ -205,6 +205,34 @@ def test_private_transport_is_not_advertised_or_accepted(service):
     assert not service.store.list_envelopes_after("dataset-1", 0, limit=100)
 
 
+def test_private_http_refuses_without_append_and_clear_snapshot_succeeds(service, chacha_db):
+    from tldw_Server_API.tests.Sync.test_sync_v2_endpoints import _note_envelope_json
+
+    client = _client_for_service(service)
+    private = _note_envelope_json()
+    private.update(
+        payload=None,
+        payload_ciphertext="opaque-private-payload",
+        encryption_metadata={"policy": "client_private_v1"},
+    )
+    response = client.post(
+        "/api/v1/sync/push",
+        json={"dataset_id": "dataset-1", "device_id": "device-1", "base_server_cursor": 0, "envelopes": [private]},
+    )
+    assert response.status_code == 422, response.text
+    assert "not accepted" in response.text
+    assert not service.store.list_envelopes_after("dataset-1", 0, limit=100)
+    assert chacha_db.get_note_by_id(private["object_id"]) is None
+    clear = _note_envelope_json()
+    response = client.post(
+        "/api/v1/sync/push",
+        json={"dataset_id": "dataset-1", "device_id": "device-1", "base_server_cursor": 0, "envelopes": [clear]},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["accepted"]
+    assert chacha_db.get_note_by_id(clear["object_id"])["content"] == clear["payload"]["content"]
+
+
 @pytest.mark.parametrize("interleave", [False, True])
 def test_old_http_pull_reports_upgrade_without_advancing_cursor(service, monkeypatch, interleave):
     service.register_device(user_id="user-1", device_id="old", display_name="Old", client_type="chatbook")

@@ -8,7 +8,6 @@ import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import OptionNotes from "@/routes/option-notes"
 import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
-import { Modal } from "antd"
 
 const {
   mockBgRequest,
@@ -232,7 +231,11 @@ const updateCalls = () =>
 
 const seedBaseNotesMock = () => {
   mockBgRequest.mockImplementation(
-    async (request: { path?: string; method?: string }) => {
+    async (request: {
+      path?: string;
+      method?: string;
+      body?: Record<string, unknown>;
+    }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
 
@@ -243,8 +246,12 @@ const seedBaseNotesMock = () => {
         }
       }
 
+      if (path === "/api/v1/notes/capabilities")
+        return { content_language: true };
+
       if (path === "/api/v1/notes/" && method === "POST") {
         return {
+          ...request.body,
           id: 11,
           version: 1,
           last_modified: "2026-02-18T11:00:00.000Z"
@@ -264,6 +271,7 @@ const seedBaseNotesMock = () => {
 
       if (path === "/api/v1/notes/11" && method === "PUT") {
         return {
+          ...request.body,
           id: 11,
           version: 2,
           last_modified: "2026-02-18T11:05:00.000Z"
@@ -311,8 +319,12 @@ const beginCreate = async () => {
   const original = mockBgRequest.getMockImplementation()!
   const create = deferred<unknown>()
   mockBgRequest.mockImplementation((request) =>
-    request.method === "POST" ? create.promise : original(request)
-  )
+    request.method === "POST"
+      ? createCalls().length === 1
+        ? create.promise
+        : Promise.reject(new Error("Separate queued retry unavailable"))
+      : original(request),
+  );
   const view = renderPage()
   await act(async () => {})
   fireEvent.change(
@@ -348,6 +360,7 @@ const acknowledgeCreate = async (
 ) => {
   await act(async () =>
     create.resolve({
+      ...createCalls()[0][0].body,
       id: 11,
       version: 1,
       last_modified: "2026-09-15T12:00:00Z"
@@ -422,44 +435,127 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     expect(createCalls()).toHaveLength(0)
   })
 
-  it("preserves the current dirty Note when opening another source is cancelled", async () => {
-    renderSourceRoute("/notes?source_ref_id=11")
-    const input = await screen.findByPlaceholderText("Write your note here... (Markdown supported)")
-    await waitFor(() => expect(input).toHaveValue("Saved body"))
-    fireEvent.change(input, { target: { value: "Keep my unsaved edit" } })
-    const original = mockBgRequest.getMockImplementation()!
-    mockBgRequest.mockImplementation(request => request.method === "PUT"
-      ? Promise.reject(new Error("Save unavailable")) : original(request))
-    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(options => {
-      options.onCancel?.()
-      return { destroy: vi.fn(), update: vi.fn() }
-    })
-    fireEvent.click(screen.getByRole("link", { name: "Open source twelve" }))
-    await waitFor(() => expect(confirm).toHaveBeenCalled())
-    confirm.mockRestore()
-    expect(input).toHaveValue("Keep my unsaved edit")
-    expect(mockBgRequest.mock.calls.map(([request]) => request.path)).not.toContain("/api/v1/notes/12")
-  })
+  it("preserves the current dirty Note when source navigation cannot retain recovery", async () => {
+    renderSourceRoute("/notes?source_ref_id=11");
+    const input = await screen.findByPlaceholderText(
+      "Write your note here... (Markdown supported)",
+    );
+    await waitFor(() => expect(input).toHaveValue("Saved body"));
+    fireEvent.change(input, { target: { value: "Keep my unsaved edit" } });
+    const storage = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("Quota exceeded");
+      });
+    try {
+      fireEvent.click(screen.getByRole("link", { name: "Open source twelve" }));
+      await waitFor(() =>
+        expect(canonicalBoundary.editor?.saveRecoveryNotice?.message).toContain(
+          "Local draft storage failed",
+        ),
+      );
+      expect(input).toHaveValue("Keep my unsaved edit");
+      expect(canonicalBoundary.editor?.selectedId).toBe("11");
+      expect(
+        mockBgRequest.mock.calls.map(([request]) => request.path),
+      ).not.toContain("/api/v1/notes/12");
+    } finally {
+      storage.mockRestore();
+    }
+  });
 
-  it("preserves newer typing while the source navigation waits for its confirmation save", async () => {
-    renderSourceRoute("/notes?source_ref_id=11")
-    const input = await screen.findByPlaceholderText("Write your note here... (Markdown supported)")
-    await waitFor(() => expect(input).toHaveValue("Saved body"))
-    fireEvent.change(input, { target: { value: "Saved at click time" } })
-    const original = mockBgRequest.getMockImplementation()!
-    const pendingSave = deferred<unknown>()
-    mockBgRequest.mockImplementation(request => request.path === "/api/v1/notes/11" && request.method === "PUT" ? pendingSave.promise
-      : request.path === "/api/v1/notes/12" ? Promise.resolve({ id: 12, content: "Requested source body", version: 1 }) : original(request))
-    fireEvent.click(screen.getByRole("link", { name: "Open source twelve" }))
-    await waitFor(() => expect(updateCalls()).toHaveLength(1))
-    fireEvent.change(input, { target: { value: "New typing not included in the save" } })
-    expect(updateCalls()[0][0].body.content).toBe("Saved at click time")
-    await act(async () => pendingSave.resolve({ id: 11, version: 2, last_modified: "2026-09-15T12:00:00Z" }))
-    expect(input).toHaveValue("New typing not included in the save")
-    expect(mockBgRequest.mock.calls.map(([request]) => request.path)).not.toContain("/api/v1/notes/12")
-  })
+  it.each([
+    ['a&b <tag> 😀 \n{"n":900719925474099312345,"s":"\\u0001"}  ', null],
+    ["", "json"],
+    [
+      "---\n# comment\nroot: &r\n  block: |\n    a&b <tag> 😀  \ncopy: *r\n",
+      "yaml",
+    ],
+    ['{"n":900719925474099312345}\n{"control":"\\u0001"}\n', "jsonl"],
+    ["future source  ", " Future Mode "],
+  ])(
+    "retains newer typing through source navigation and restart while an older save is pending (%s, %s)",
+    async (source, language) => {
+      const view = renderSourceRoute("/notes?source_ref_id=11");
+      const input = await screen.findByPlaceholderText(
+        "Write your note here... (Markdown supported)",
+      );
+      await waitFor(() => expect(input).toHaveValue("Saved body"));
+      fireEvent.change(input, { target: { value: "Saved at click time" } });
+      const original = mockBgRequest.getMockImplementation()!;
+      const pendingSave = deferred<unknown>();
+      mockBgRequest.mockImplementation((request) =>
+        request.path === "/api/v1/notes/11" && request.method === "PUT"
+          ? pendingSave.promise
+          : request.path === "/api/v1/notes/12"
+            ? Promise.resolve({
+                id: 12,
+                content: "Requested source body",
+                version: 1,
+              })
+            : original(request),
+      );
+      fireEvent.click(screen.getByTestId("notes-save-button"));
+      await waitFor(() => expect(updateCalls()).toHaveLength(1));
+      fireEvent.change(input, { target: { value: source } });
+      act(() => canonicalBoundary.editor!.setContentLanguage(language));
+      fireEvent.click(screen.getByRole("link", { name: "Open source twelve" }));
+      await waitFor(() =>
+        expect(
+          screen.getByPlaceholderText(
+            "Write your note here... (Markdown supported)",
+          ),
+        ).toHaveValue("Requested source body"),
+      );
+      const recovery = canonicalBoundary.editor!.offlineDraftQueue["note:11"];
+      expect(recovery).toMatchObject({
+        content: source,
+        content_language: language,
+        baseVersion: 1,
+      });
+      expect(recovery.revision).toBeGreaterThan(0);
+      expect(updateCalls()[0][0].body.content).toBe("Saved at click time");
+      await act(async () =>
+        pendingSave.resolve({
+          id: 11,
+          content: "Saved at click time",
+          version: 2,
+          last_modified: "2026-09-15T12:00:00Z",
+        }),
+      );
+      expect(
+        canonicalBoundary.editor!.offlineDraftQueue["note:11"],
+      ).toMatchObject({
+        content: source,
+        content_language: language,
+        revision: recovery.revision,
+        baseVersion: 1,
+      });
+      view.unmount();
+      renderSourceRoute("/notes?source_ref_id=11");
+      await waitFor(() =>
+        expect(canonicalBoundary.editor?.selectedId).toBe("11"),
+      );
+      await waitFor(() =>
+        expect(canonicalBoundary.editor!.content).toBe(recovery.content),
+      );
+      expect(canonicalBoundary.editor!.contentLanguage).toBe(language);
+      expect(
+        canonicalBoundary.editor!.offlineDraftQueue["note:11"],
+      ).toMatchObject({
+        content: source,
+        content_language: language,
+        revision: recovery.revision,
+        baseVersion: 1,
+      });
+      expect(screen.getByTestId("notes-save-status")).not.toHaveAttribute(
+        "data-state",
+        "saved",
+      );
+    },
+  );
 
-  it("opens the requested source after its confirmation successfully saves a new draft", async () => {
+  it("opens the requested source after retaining a new draft for queued publication", async () => {
     const original = mockBgRequest.getMockImplementation()!
     mockBgRequest.mockImplementation(request => request.path === "/api/v1/notes/12"
       ? Promise.resolve({ id: 12, content: "Requested source body", version: 1 }) : original(request))

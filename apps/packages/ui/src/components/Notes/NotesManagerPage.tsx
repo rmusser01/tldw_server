@@ -2442,7 +2442,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   openSourceNoteRef.current = ed.openSourceNote
 
   React.useEffect(() => {
-    if (sourceNoteId == null || !isOnline || !notesGraphAuthorityScope) return
+    if (
+      sourceNoteId == null ||
+      !isOnline ||
+      !notesGraphAuthorityScope ||
+      !ed.offlineDraftQueueHydrated
+    )
+      return;
     const controller = new AbortController()
     const id = sourceNoteId.trim()
     setSourceResult(null)
@@ -2451,7 +2457,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       if (!controller.signal.aborted) setSourceResult({ id: sourceNoteId, scope: notesGraphAuthorityScope, status })
     })()
     return () => controller.abort()
-  }, [sourceNoteId, isOnline, notesGraphAuthorityScope, sourceRetry])
+  }, [
+    sourceNoteId,
+    isOnline,
+    notesGraphAuthorityScope,
+    sourceRetry,
+    ed.offlineDraftQueueHydrated,
+  ]);
 
   const sourceUnavailable = sourceResult?.id === sourceNoteId && sourceResult.scope === notesGraphAuthorityScope && sourceResult.status === 'unavailable' && ed.selectedId == null
 

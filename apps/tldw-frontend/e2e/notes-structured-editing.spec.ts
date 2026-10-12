@@ -98,9 +98,16 @@ async function owned(
   );
 }
 
-for (const [profile, a, c] of [
-  ['LF', '{"a":1}', '{\n  "a": 1\n}'],
-  ['CRLF', '{\r\n"a":1\r\n}\r\n', '{\r\n  "a": 1\r\n}'],
+for (const [profile, a, c, language] of [
+  ['LF', '{"a":1}', '{\n  "a": 1\n}', 'json'],
+  ['CRLF', '{\r\n"a":1\r\n}\r\n', '{\r\n  "a": 1\r\n}', 'json'],
+  [
+    'JSONL',
+    '{"n":900719925474099312345,"s":"a&b <tag> 😀\\u0001"}',
+    '{"n":900719925474099312345,"s":"a&b <tag> 😀\\u0001"}',
+    'jsonl',
+  ],
+  ['YAML', '---\nroot:\n    child: a&b <tag> 😀', '---\nroot:\n  child: a&b <tag> 😀 ', 'yaml'],
 ])
   test(`actual native ${profile} A/B/C/D undo and redo`, async ({
     page,
@@ -118,7 +125,7 @@ for (const [profile, a, c] of [
     page.on('console', (message) => {
       if (message.text().startsWith('i3-csp:')) violations.push(message.text());
     });
-    await owned(page, request, a, 'json', async () => {
+    await owned(page, request, a, language, async (note) => {
       await expect.poll(() => source(page)).toBe(a);
       await expect(
         page.getByRole('button', { name: 'Format document', exact: true })
@@ -150,6 +157,17 @@ for (const [profile, a, c] of [
         await expect.poll(() => source(page)).toBe(expected);
         trace[name] = true;
       }
+      await page.getByTestId('notes-save-button').click();
+      await expect
+        .poll(async () => {
+          const saved = await request.get(`${TEST_CONFIG.serverUrl}/api/v1/notes/${note.id}`, {
+            headers: { 'X-API-KEY': TEST_CONFIG.apiKey },
+          });
+          const row = await saved.json();
+          return [row.content, row.content_language];
+        })
+        .toEqual([a, language]);
+      trace.savedAfterHistory = true;
       expect(violations).toEqual([]);
       expect(workers.length).toBeGreaterThan(0);
       const evidence = info.outputPath('native-history.json');
