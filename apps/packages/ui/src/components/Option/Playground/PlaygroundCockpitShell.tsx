@@ -399,6 +399,8 @@ export const PlaygroundCockpitShell = ({
               : !showLeftRail && !showRightRail
                 ? "w-full"
                 : ""
+          } ${showLeftRestore ? "lg:pl-8" : ""} ${
+            showRightRestore ? "lg:pr-9" : ""
           }`}
         >
           {children}

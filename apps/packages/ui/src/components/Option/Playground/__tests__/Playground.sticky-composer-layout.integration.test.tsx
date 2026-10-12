@@ -234,12 +234,18 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => true,
 }));
 
-vi.mock("@/services/chat-settings", () => ({
-  syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
-    chatSettingsState.syncChatSettingsForServerChat(params),
-  applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
-    chatSettingsState.applyChatSettingsPatch(params),
-}));
+vi.mock("@/services/chat-settings", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/services/chat-settings")
+  >("@/services/chat-settings");
+  return {
+    ...actual,
+    syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
+      chatSettingsState.syncChatSettingsForServerChat(params),
+    applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
+      chatSettingsState.applyChatSettingsPatch(params),
+  };
+});
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: researchClientMocks,

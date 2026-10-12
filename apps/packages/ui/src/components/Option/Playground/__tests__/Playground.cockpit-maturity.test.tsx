@@ -110,7 +110,7 @@ describe("Playground mature cockpit surfaces", () => {
     expect(within(inventory).getByText("Mature cockpit study")).toBeInTheDocument()
     expect(within(inventory).getByText("Run research-run-1")).toBeInTheDocument()
     expect(within(inventory).getByText("brief.pdf")).toBeInTheDocument()
-    expect(screen.getByText("2 active sources")).toBeInTheDocument()
+    expect(screen.getByText("2 selected sources")).toBeInTheDocument()
 
     fireEvent.click(
       within(inventory).getByRole("button", {
