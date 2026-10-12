@@ -209,12 +209,14 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | `/chat/completions` | Always. This is the existing check, extended to the two cost keys. |
 | The Anthropic-compatible Messages API (`/messages`, `/v1/messages`) | Always. Its native path for Anthropic and llama.cpp never reaches a provider adapter, so only this check gates it. |
 | Character chat reply (`character_chat_sessions.py`) | Always, at the top of the handler. The provider call is made before the streaming response is built. |
-| RAG search, its batch and resume forms, and its streaming form (`rag_unified.py`) | When the effective request asks for answer generation. |
+| RAG search, its batch and resume forms, its streaming form, advanced search and ablation (`rag_unified.py`) | When the effective request asks for answer generation. Advanced search generates by default; ablation does with answers on. |
 | Document generation from a chat (`chat_documents.py`) | Always. |
 | Flashcards and quizzes study assistants | Always, as a dependency. |
 | `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality` | Always. |
 | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
 | The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
+
+Simple search (`/rag/simple`) no longer generates an answer it then discarded, so it makes no LLM call and needs no check.
 
 - **A RAG search with answer generation off is not checked here and not marked.** The pipeline's optional LLM stages (query rewriting, expansion, HyDE, LLM reranking, gap analysis, critique, suggestions) are governed by §4b. For a user over quota they degrade as they do for any provider failure, and the response's stage metadata says so. Until PR 2b they are unchecked, as today.
 - **An endpoint that enqueues a job has no boundary check:** `/media/ingest-jobs` and evaluation recipe runs. The job is checked by §4b when it runs.
