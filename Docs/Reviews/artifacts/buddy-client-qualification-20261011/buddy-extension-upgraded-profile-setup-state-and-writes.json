@@ -1,0 +1,250 @@
+{
+  "buddy": {
+    "id": "fixture-buddy",
+    "name": "Fixture Buddy",
+    "version": 9,
+    "optional_persona_id": null,
+    "optional_persona_available": false,
+    "display_mode": "dynamic",
+    "manifest": {
+      "manifest_version": 1,
+      "renderer_type": "sprite_frames",
+      "states": {
+        "idle": {
+          "animation_id": "idle-loop"
+        },
+        "listening": {
+          "animation_id": "idle-loop"
+        },
+        "thinking": {
+          "animation_id": "idle-loop"
+        },
+        "speaking": {
+          "animation_id": "speaking-loop"
+        },
+        "tool_running": {
+          "animation_id": "tool-loop"
+        },
+        "error": {
+          "animation_id": "error-loop"
+        }
+      },
+      "animations": {
+        "idle-loop": {
+          "frames": [
+            {
+              "asset_id": "visual-pack-e2e-frame-idle",
+              "duration_ms": 250
+            }
+          ],
+          "loop": true
+        },
+        "speaking-loop": {
+          "frames": [
+            {
+              "asset_id": "visual-pack-e2e-frame-speaking",
+              "duration_ms": 250
+            }
+          ],
+          "loop": true
+        },
+        "tool-loop": {
+          "frames": [
+            {
+              "asset_id": "visual-pack-e2e-frame-tool",
+              "duration_ms": 250
+            }
+          ],
+          "loop": true
+        },
+        "error-loop": {
+          "frames": [
+            {
+              "asset_id": "visual-pack-e2e-frame-error",
+              "duration_ms": 250
+            }
+          ],
+          "loop": false
+        }
+      },
+      "fallbacks": {
+        "speaking": [
+          "idle"
+        ],
+        "tool_running": [
+          "idle"
+        ],
+        "error": [
+          "idle"
+        ]
+      },
+      "authored_triggers": [
+        {
+          "id": "mcp-runtime-override",
+          "source": "mcp_runtime",
+          "match": "persona_visuals.trigger_state",
+          "state": "speaking",
+          "duration_ms": 5000,
+          "priority": 10
+        }
+      ]
+    },
+    "assets": [
+      {
+        "id": "visual-pack-e2e-frame-idle",
+        "pack_id": "visual-pack-e2e",
+        "persona_id": "qualification",
+        "asset_role": "frame",
+        "storage_key": "persona-visuals/qualification/visual-pack-e2e-frame-idle.png",
+        "original_filename": "visual-pack-e2e-frame-idle.png",
+        "mime_type": "image/png",
+        "byte_size": 96,
+        "checksum_sha256": "visual-pack-e2e-frame-idle-checksum",
+        "width": 1,
+        "height": 1,
+        "provenance": "e2e_fixture",
+        "created_at": "2026-05-08T00:00:00.000Z",
+        "last_modified": "2026-05-08T00:00:00.000Z",
+        "version": 1,
+        "content_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+      },
+      {
+        "id": "visual-pack-e2e-frame-speaking",
+        "pack_id": "visual-pack-e2e",
+        "persona_id": "qualification",
+        "asset_role": "frame",
+        "storage_key": "persona-visuals/qualification/visual-pack-e2e-frame-speaking.png",
+        "original_filename": "visual-pack-e2e-frame-speaking.png",
+        "mime_type": "image/png",
+        "byte_size": 96,
+        "checksum_sha256": "visual-pack-e2e-frame-speaking-checksum",
+        "width": 1,
+        "height": 1,
+        "provenance": "e2e_fixture",
+        "created_at": "2026-05-08T00:00:00.000Z",
+        "last_modified": "2026-05-08T00:00:00.000Z",
+        "version": 1,
+        "content_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+      },
+      {
+        "id": "visual-pack-e2e-frame-tool",
+        "pack_id": "visual-pack-e2e",
+        "persona_id": "qualification",
+        "asset_role": "frame",
+        "storage_key": "persona-visuals/qualification/visual-pack-e2e-frame-tool.png",
+        "original_filename": "visual-pack-e2e-frame-tool.png",
+        "mime_type": "image/png",
+        "byte_size": 96,
+        "checksum_sha256": "visual-pack-e2e-frame-tool-checksum",
+        "width": 1,
+        "height": 1,
+        "provenance": "e2e_fixture",
+        "created_at": "2026-05-08T00:00:00.000Z",
+        "last_modified": "2026-05-08T00:00:00.000Z",
+        "version": 1,
+        "content_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+      },
+      {
+        "id": "visual-pack-e2e-frame-error",
+        "pack_id": "visual-pack-e2e",
+        "persona_id": "qualification",
+        "asset_role": "frame",
+        "storage_key": "persona-visuals/qualification/visual-pack-e2e-frame-error.png",
+        "original_filename": "visual-pack-e2e-frame-error.png",
+        "mime_type": "image/png",
+        "byte_size": 96,
+        "checksum_sha256": "visual-pack-e2e-frame-error-checksum",
+        "width": 1,
+        "height": 1,
+        "provenance": "e2e_fixture",
+        "created_at": "2026-05-08T00:00:00.000Z",
+        "last_modified": "2026-05-08T00:00:00.000Z",
+        "version": 1,
+        "content_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+      }
+    ],
+    "attribution": {}
+  },
+  "workspace": {
+    "id": "buddy-qualification-workspace",
+    "name": "Qualification workspace",
+    "version": 5,
+    "deleted": false,
+    "archived": false,
+    "config": {},
+    "assistant_defaults": {
+      "assistant_kind": "persona",
+      "assistant_id": "research_assistant",
+      "persona_memory_mode": "read_only",
+      "voice": null,
+      "style": null,
+      "tool_policy_profile_id": null
+    }
+  },
+  "attachment": {
+    "client_slot": "default",
+    "version": 5,
+    "attachment": {
+      "buddy_id": "fixture-buddy",
+      "scope_type": "workspace",
+      "scope_id": "buddy-qualification-workspace"
+    },
+    "target": {
+      "title": "Qualification workspace",
+      "workspace_id": "buddy-qualification-workspace"
+    }
+  },
+  "writes": [
+    {
+      "method": "PUT",
+      "path": "/api/v1/buddies/attachment",
+      "body": {
+        "expected_version": 3,
+        "buddy_id": "fixture-buddy",
+        "scope_type": "conversation",
+        "scope_id": "buddy-qualification-conversation"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/buddies/fixture-buddy",
+      "body": {
+        "expected_version": 7,
+        "display_mode": "static"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/workspaces/buddy-qualification-workspace",
+      "body": {
+        "version": 4,
+        "assistant_defaults": {
+          "assistant_kind": "persona",
+          "assistant_id": "research_assistant",
+          "persona_memory_mode": "read_only",
+          "voice": null,
+          "style": null,
+          "tool_policy_profile_id": null
+        }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/buddies/attachment",
+      "body": {
+        "expected_version": 4,
+        "buddy_id": "fixture-buddy",
+        "scope_type": "workspace",
+        "scope_id": "buddy-qualification-workspace"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/buddies/fixture-buddy",
+      "body": {
+        "expected_version": 8,
+        "display_mode": "dynamic"
+      }
+    }
+  ]
+}
