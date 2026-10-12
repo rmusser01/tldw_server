@@ -320,3 +320,51 @@ async def llm_quota_refusal(user_id: Any, requested_tokens: int = 1) -> LLMQuota
     if refusal is not None:
         _count_refusal(refusal.category)
     return refusal
+
+
+_LLM_QUOTA_SETTINGS_WARNED = False
+
+
+def warn_if_llm_quotas_defeated() -> list[str]:
+    """Log, once per process, a setting that silently disables the LLM quotas while quotas are on (spec §6).
+
+    Returns the problems it logged, for tests. Never raises.
+    """
+    global _LLM_QUOTA_SETTINGS_WARNED
+    problems: list[str] = []
+    try:
+        from tldw_Server_API.app.core.config import usage_quotas_enabled
+
+        if _LLM_QUOTA_SETTINGS_WARNED or not usage_quotas_enabled():
+            return problems
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+        from tldw_Server_API.app.core.Usage.usage_tracker import _enabled as llm_usage_recording_enabled
+
+        if not llm_usage_recording_enabled():
+            problems.append(
+                "LLM_USAGE_ENABLED is off, so no LLM usage is recorded and the LLM quotas never refuse anything."
+            )
+        retention = int(getattr(get_settings(), "LLM_USAGE_LOG_RETENTION_DAYS", 180))
+        if retention < 31:
+            problems.append(
+                f"LLM_USAGE_LOG_RETENTION_DAYS is {retention}, so the monthly LLM quotas count less than a month. "
+                "Set it to 31 or more."
+            )
+        _LLM_QUOTA_SETTINGS_WARNED = True
+        for problem in problems:
+            logger.warning("Usage quotas are on, but {}", problem)
+    except Exception:  # noqa: BLE001 - a startup diagnostic must never stop the server
+        logger.opt(exception=True).debug("LLM quota settings check failed")
+    return problems
+
+
+async def llm_quota_summary(user_id: int) -> dict[str, Any]:
+    """The user's LLM usage this month and today, and their LLM limits, for the profile (spec §9)."""
+    return {
+        "tokens_month_used": int(await llm_tokens_this_month(user_id)),
+        "tokens_month_limit": await user_quota(user_id, LLM_TOKENS_PER_MONTH_KEY),
+        "cost_day_usd_used": round(await llm_cost_today(user_id), 4),
+        "cost_day_usd_limit": await user_quota(user_id, LLM_COST_PER_DAY_KEY),
+        "cost_month_usd_used": round(await llm_cost_this_month(user_id), 4),
+        "cost_month_usd_limit": await user_quota(user_id, LLM_COST_PER_MONTH_KEY),
+    }
