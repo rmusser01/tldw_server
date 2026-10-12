@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeForkCommittedV1, NativeForkRequestV1
+from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+    NativeAssetRetentionCommittedV1,
+    NativeAssetRetentionRequestV1,
+    NativeForkCommittedV1,
+    NativeForkRequestV1,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 if TYPE_CHECKING:
@@ -24,11 +29,11 @@ class NativeForkStoreError(ValueError):
 
 @dataclass(frozen=True)
 class NativeOperationResult:
-    """Durable outcome; committed forks carry an immutable validated receipt."""
+    """Durable outcome; committed operations carry an immutable validated receipt."""
 
     state: str
     child_conversation_id: str | None = None
-    receipt: NativeForkCommittedV1 | None = None
+    receipt: NativeForkCommittedV1 | NativeAssetRetentionCommittedV1 | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +142,37 @@ class NativeForkStore:
                     raise ValueError("receipt_binding_mismatch")
             except (ValueError, TypeError) as exc:
                 raise NativeForkStoreError("operation_receipt_invalid") from exc
+        elif row["state"] == "committed" and row["operation_kind"] == "native_asset_retention_v1":
+            from tldw_Server_API.app.core.Chat.native_fork_projection import native_asset_retention_request_digest
+
+            try:
+                request = NativeAssetRetentionRequestV1.model_validate_json(row["canonical_request_json"])
+                receipt = NativeAssetRetentionCommittedV1.model_validate_json(row["result_json"])
+                if (
+                    native_asset_retention_request_digest(request) != row["request_digest"]
+                    or request.request_digest != row["request_digest"]
+                    or request.operation_id != row["operation_id"]
+                    or request.owner_key != row["owner_key"]
+                    or request.scope.kind != row["scope_type"]
+                    or request.scope.workspace_id != row["workspace_id"]
+                    or request.source_conversation_id != row["source_conversation_id"]
+                    or request.source_conversation_id != row["child_conversation_id"]
+                    or receipt.operation_id != row["operation_id"]
+                    or receipt.owner_key != row["owner_key"]
+                    or receipt.projection_version != row["projection_version"]
+                    or set(receipt.asset_map) != {asset.reference_id for asset in request.asset_manifest}
+                ):
+                    raise ValueError("receipt_binding_mismatch")
+                descriptors = {}
+                for asset in request.asset_manifest:
+                    retained = receipt.asset_map[asset.reference_id]
+                    identity = (retained.asset_id, retained.revision)
+                    descriptor = (asset.hash, asset.representation, asset.fidelity_disposition)
+                    if identity in descriptors and descriptors[identity] != descriptor:
+                        raise ValueError("receipt_asset_alias_mismatch")
+                    descriptors[identity] = descriptor
+            except (ValueError, TypeError) as exc:
+                raise NativeForkStoreError("operation_receipt_invalid") from exc
         return NativeOperationResult(row["state"], row["child_conversation_id"], receipt)
 
     def reserve_operation(
@@ -208,6 +244,9 @@ class NativeForkStore:
         if row is None:
             return NativeOperationResult("not_recorded")
         self._check_identity(row, owner, request_digest)
+        if row["state"] == "committed" and kind == "native_asset_retention_v1":
+            # Refuse a substituted retention target before lifecycle mutation.
+            self._result(row)
         child_id = row["child_conversation_id"]
         if row["state"] == "committed" and not child_id:
             raise NativeForkStoreError("operation_receipt_incomplete")

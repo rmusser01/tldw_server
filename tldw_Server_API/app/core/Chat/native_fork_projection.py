@@ -17,6 +17,7 @@ from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
     NativeAssetManifestEntryV1,
+    NativeAssetRetentionRequestV1,
     NativeForkBindingTemplateV1,
     NativeForkCaptureRequestV1,
     NativeForkCaptureV1,
@@ -134,6 +135,35 @@ def native_fork_request_digest(request: NativeForkRequestV1) -> str:
         native_fork_request_tuple(request), ensure_ascii=False, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def native_asset_retention_request_digest(request: NativeAssetRetentionRequestV1) -> str:
+    """Hash the exact original retention identity and ordered frozen references."""
+    return _digest(
+        [
+            "tldw-native-asset-retention",
+            1,
+            request.operation_id,
+            request.owner_key,
+            [request.scope.kind, request.scope.workspace_id],
+            request.source_conversation_id,
+            request.expected_asset_manifest_revision,
+            [
+                [
+                    asset.reference_id,
+                    asset.reference_revision,
+                    asset.asset_id,
+                    asset.revision,
+                    asset.representation,
+                    asset.role,
+                    asset.context_enabled,
+                    asset.hash,
+                    asset.fidelity_disposition,
+                ]
+                for asset in request.asset_manifest
+            ],
+        ]
+    )
 
 
 def _unsupported(reason: str) -> None:
@@ -454,7 +484,9 @@ def _project_messages(
             generation = validate_generation_metadata(generation)
         except GenerationMetadataError:
             _unsupported("metadata")
-        if any(not isinstance(value, str) for key, value in extra.items() if key not in {"rag_context", "image_details"}):
+        if any(
+            not isinstance(value, str) for key, value in extra.items() if key not in {"rag_context", "image_details"}
+        ):
             _unsupported("metadata")
         extra.update(generation)
         role = extra.get("sender_role")

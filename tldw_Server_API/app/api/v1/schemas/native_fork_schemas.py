@@ -253,6 +253,14 @@ class NativeAssetRetentionRequestV1(HistoryWireModel):
 
     _freeze_manifest = field_validator("asset_manifest", mode="before")(_wire_array)
 
+    @model_validator(mode="after")
+    def validate_reference_identity(self) -> NativeAssetRetentionRequestV1:
+        """One original reference has exactly one immutable result-map identity."""
+        references = [asset.reference_id for asset in self.asset_manifest]
+        if len(references) != len(set(references)):
+            raise ValueError("duplicate_asset_reference")
+        return self
+
 
 class NativeRetainedAssetV1(HistoryWireModel):
     """Allocated destination asset identity and revision."""
