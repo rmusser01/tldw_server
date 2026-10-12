@@ -247,6 +247,75 @@ class NativeForkStore:
             ]
         )
 
+    def reserve_retention_operation(
+        self,
+        owner: Any,
+        request: NativeAssetRetentionRequestV1,
+        *,
+        conn: Any,
+    ) -> NativeOperationResult:
+        """Reserve frozen metadata; lookup recovery precedes source re-admission."""
+        from tldw_Server_API.app.core.Chat.native_fork_projection import native_asset_retention_request_digest
+
+        self._require_active_transaction(conn)
+        if not isinstance(request, NativeAssetRetentionRequestV1):
+            raise NativeForkStoreError("invalid_retention_request")
+        request = NativeAssetRetentionRequestV1.model_validate(request.model_dump(mode="json"))
+        if owner.client_id != self._db.client_id or request.owner_key != owner.owner_key or request.scope != owner.scope:
+            raise NativeForkStoreError("operation_owner_mismatch")
+        if native_asset_retention_request_digest(request) != request.request_digest:
+            raise NativeForkStoreError("operation_id_conflict")
+        canonical = json.dumps(
+            request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+        )
+        kind = "native_asset_retention_v1"
+        conn.execute("SAVEPOINT native_retention_reservation")
+        try:
+            row = self._row(owner, kind, request.operation_id, conn=conn)
+            if row is None:
+                now = self._db._get_current_utc_timestamp_iso()
+                conn.execute(
+                    "INSERT INTO native_chat_operations "
+                    "(client_id,operation_kind,operation_id,owner_key,scope_type,workspace_id,request_digest,"
+                    "canonical_request_json,projection_version,state,source_conversation_id,created_at,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,'native-fork-v1','preparing',?,?,?) "
+                    "ON CONFLICT (client_id,operation_kind,operation_id) DO NOTHING",
+                    (
+                        owner.client_id,
+                        kind,
+                        request.operation_id,
+                        owner.owner_key,
+                        owner.scope.kind,
+                        owner.scope.workspace_id,
+                        request.request_digest,
+                        canonical,
+                        request.source_conversation_id,
+                        now,
+                        now,
+                    ),
+                )
+                row = self._row(owner, kind, request.operation_id, conn=conn)
+            if row is None:
+                raise NativeForkStoreError("operation_reservation_missing")
+            self._check_identity(row, owner, request.request_digest, canonical)
+            result = self.resolve_operation(owner, kind, request.operation_id, request.request_digest, conn=conn)
+            if result.state == "preparing":
+                if (
+                    row["canonical_request_json"] != canonical
+                    or row["source_conversation_id"] != request.source_conversation_id
+                    or row["projection_version"] != "native-fork-v1"
+                ):
+                    raise NativeForkStoreError("retention_source_binding_mismatch")
+                current = self.read_retention_source_revision(owner, request.source_conversation_id, conn=conn)
+                if current != request.expected_asset_manifest_revision:
+                    raise NativeForkStoreError("stale_retention_source")
+            conn.execute("RELEASE SAVEPOINT native_retention_reservation")
+            return result
+        except BaseException:
+            conn.execute("ROLLBACK TO SAVEPOINT native_retention_reservation")
+            conn.execute("RELEASE SAVEPOINT native_retention_reservation")
+            raise
+
     def reserve_operation(
         self,
         owner: Any,
