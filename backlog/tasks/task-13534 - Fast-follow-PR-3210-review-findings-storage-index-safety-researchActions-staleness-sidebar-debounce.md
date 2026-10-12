@@ -1,6 +1,6 @@
 id: TASK-13534
 title: Fast-follow PR #3210 review findings (storage index safety, researchActions staleness, sidebar debounce)
-status: In Progress
+status: Done
 labels:
 - frontend
 - review-followup
@@ -24,19 +24,25 @@ NOTE: created manually (backlog CLI absent on this machine; see TASK-13511's rec
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Migration failure in ModelDb is never cached as an empty index; covered by a storage-failure regression test
-- [ ] #2 researchActions cache invalidates when the builder closure changes
-- [ ] #3 MediaReviewFilterSidebar keyword search is debounced with stale-input dropping
-- [ ] #4 Copilot stub comments match actual behavior; chunk-load failures log; orchestrator fetch strategy is compile-time required
-- [ ] #5 Touched test suites green
+- [x] #1 Migration failure in ModelDb is never cached as an empty index; covered by a storage-failure regression test
+- [x] #2 researchActions cache invalidates when the builder closure changes
+- [x] #3 MediaReviewFilterSidebar keyword search is debounced with stale-input dropping
+- [x] #4 Copilot stub comments match actual behavior; chunk-load failures log; orchestrator fetch strategy is compile-time required
+- [x] #5 Touched test suites green
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All three Important review findings and the four Minor quick-hits implemented and verified (models.storage 6/6 incl. failure-injection regression, PlaygroundChat 10/10, Review search 21/21, orchestrator 4/4, copilot stub guard 3/3). Merged via PR #3216 (merge commit 2a935383a) after the human change summary.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip (N/A: TypeScript only)
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip (N/A: TypeScript only)
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
