@@ -56,7 +56,7 @@ export const useCharacterGreetingStart = (options: Options) => {
     const revision = options.form.getRevision()
     const values = { ...options.form.getValues() }
     const seed = option.seed ? structuredClone(option.seed) : undefined
-    const inputKeys = ["selectedModel", "toolChoice", "temporaryChat", "webSearch", "selectedSystemPrompt", "uploadedFiles",
+    const inputKeys = ["selectedModel", "selectedModelRevision", "toolChoice", "temporaryChat", "webSearch", "selectedSystemPrompt", "uploadedFiles",
       "contextFiles", "documentContext", "selectedKnowledge", "ragMediaIds", "ragPinnedResults", "replyTarget",
       "messageSteeringMode", "messageSteeringForceNarrate", "messageSteeringRevision"] as const
     const inputs = options.readContext()

@@ -3,6 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest"
 import { useSimpleForm } from "../useSimpleForm"
 import { useCharacterGreetingStart } from "../useCharacterGreetingStart"
 import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { useMcpToolsStore } from "@/store/mcp-tools"
 import { createDefaultActorSettings } from "@/types/actor"
 const getActorSceneForChat = vi.hoisted(() => vi.fn<typeof import("@/services/actor-settings").getActorSceneForChat>())
 vi.mock("@/services/actor-settings", () => ({ getActorSceneForChat }))
@@ -92,5 +94,61 @@ it("shows scene-specific recovery for a stable failed scene-read outcome and kee
       "Scene settings could not be loaded"
     )
   })
+  expect(hook.result.current.form.getValues().message).toBe("UNSENT\nexact  ")
+})
+
+
+it.each([["scene", "same"], ["retention", "same"], ["scene", "aba"], ["retention", "aba"]] as const)("model intent retires a held %s greeting after %s selection without changing its final model", async (boundary, intent) => {
+  const model = "greeting-command-model"
+  useStoreMessageOption.getState().setSelectedModel(model, { storageHandled: true })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  getActorSceneForChat.mockImplementation(async ({ target }) => {
+    if (boundary === "scene") await gate
+    return { target: target!, originalRecord: null, settings: createDefaultActorSettings(), origin: "default", profileUnavailable: false }
+  })
+  const hook = renderStart(vi.fn(async () => { if (boundary === "retention") await gate; return true }))
+  let pending!: Promise<void>
+  await act(async () => {
+    pending = hook.result.current.start(option, () => true)
+    await waitFor(() => expect(boundary === "scene" ? getActorSceneForChat : hook.retain).toHaveBeenCalledOnce())
+  })
+  const source = useStoreMessageOption.getState()
+  const settings = useStoreChatModelSettings.getState()
+  const tools = useMcpToolsStore.getState()
+  act(() => {
+    if (intent === "aba") useStoreMessageOption.getState().setSelectedModel("another-greeting-model", { storageHandled: true })
+    useStoreMessageOption.getState().setSelectedModel(model, { storageHandled: true })
+  })
+  expect(useStoreMessageOption.getState().selectedModelRevision).toBe(source.selectedModelRevision + (intent === "aba" ? 2 : 1))
+  expect(useStoreMessageOption.getState().selectedModel).toBe(source.selectedModel)
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source.chatDraftAddress)
+  expect(useStoreMessageOption.getState().chatDraftRevision).toBe(source.chatDraftRevision)
+  expect(useStoreChatModelSettings.getState()).toBe(settings)
+  expect(useMcpToolsStore.getState()).toBe(tools)
+  await act(async () => { release(); await expect(pending).rejects.toThrow() })
+  expect(hook.submit).not.toHaveBeenCalled()
+  expect(hook.result.current.form.getValues().message).toBe("UNSENT\nexact  ")
+})
+
+it.each(["scene", "retention"] as const)("unchanged held %s greeting forwards the original scene, account and seed", async boundary => {
+  useStoreMessageOption.getState().setSelectedModel("greeting-command-model", { storageHandled: true })
+  const original = { ...createDefaultActorSettings(), notes: "Original held greeting scene" }
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  getActorSceneForChat.mockImplementation(async ({ target }) => {
+    if (boundary === "scene") await gate
+    return { target: target!, originalRecord: { value: structuredClone(original), updatedAt: 1 }, settings: structuredClone(original), origin: "scene", profileUnavailable: false }
+  })
+  const hook = renderStart(vi.fn(async () => { if (boundary === "retention") await gate; return true }))
+  let pending!: Promise<void>
+  await act(async () => {
+    pending = hook.result.current.start(option, () => true)
+    await waitFor(() => expect(boundary === "scene" ? getActorSceneForChat : hook.retain).toHaveBeenCalledOnce())
+  })
+  await act(async () => { release(); await pending })
+  expect(hook.submit).toHaveBeenCalledOnce()
+  expect(hook.submit).toHaveBeenCalledWith(expect.objectContaining({ message: "", image: "", greetingSeed: option.seed,
+    actorSceneSend: expect.objectContaining({ requestScope, scene: expect.objectContaining({ settings: original }) }) }))
   expect(hook.result.current.form.getValues().message).toBe("UNSENT\nexact  ")
 })
