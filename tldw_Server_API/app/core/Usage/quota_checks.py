@@ -31,6 +31,21 @@ class QuotaDecision:
 
 UNLIMITED = QuotaDecision(allowed=True, limit=None, used=0.0)
 
+LLM_TOKENS_PER_MONTH_KEY = "limits.llm_tokens_per_month"
+LLM_COST_PER_DAY_KEY = "limits.llm_cost_per_day_usd"
+LLM_COST_PER_MONTH_KEY = "limits.llm_cost_per_month_usd"
+
+
+@dataclass(frozen=True)
+class LLMQuotaRefusal:
+    """Why LLM work for a user is refused (LLM usage accounting spec §4)."""
+
+    category: str
+    current: float
+    limit: int | float
+    message: str
+    retry_after: int
+
 
 def as_quota_user_id(value: Any) -> int | None:
     """The numeric user id quotas are keyed by, or None (treated as unlimited)."""
@@ -238,3 +253,70 @@ async def workflows_runs_consume(user_id: Any, run_id: str) -> QuotaDecision:
     )
     used = max(0, int(limit) - int(remaining))
     return QuotaDecision(allowed=allowed, limit=limit, used=used)
+
+
+def _count_refusal(category: str) -> None:
+    """Count one refusal in ``llm_quota_refusals_total``; metrics never decide a request."""
+    try:
+        from tldw_Server_API.app.core.Metrics import increment_counter
+
+        increment_counter("llm_quota_refusals_total", 1, labels={"category": category})
+    except Exception:  # noqa: BLE001 - a metrics failure must not change the decision
+        logger.debug("LLM quota refusal metric failed")
+
+
+async def _cost_refusal(
+    uid: int | None,
+    key: str,
+    counter: Callable[[int], Awaitable[float]],
+    category: str,
+    message: str,
+    retry_after: Callable[[], int],
+) -> LLMQuotaRefusal | None:
+    """Refuse when the spend so far has reached the cap. An unset cap, or a failed counter, admits."""
+    limit = await user_quota(uid, key)
+    if limit is None or uid is None:
+        return None
+    try:
+        used = float(await counter(uid))
+    except Exception:  # noqa: BLE001 - a counter failure must not block requests (spec 2 §2)
+        logger.opt(exception=True).warning(
+            "Usage quota counter failed for key={} user_id={}; treating as unlimited", key, uid
+        )
+        return None
+    if used < float(limit):
+        return None
+    return LLMQuotaRefusal(category, round(used, 4), limit, message, retry_after())
+
+
+async def llm_quota_refusal(user_id: Any, requested_tokens: int = 1) -> LLMQuotaRefusal | None:
+    """The first LLM quota the user is over, or None (LLM usage accounting spec §4).
+
+    Tokens refuse when this month's tokens plus ``requested_tokens`` would pass
+    the limit; with 1 requested, that is when the user is at or over it. Cost
+    refuses when today's or this month's spend has reached its limit. Quotas
+    off, unset limits and counter failures admit.
+    """
+    uid = as_quota_user_id(user_id)
+    tokens = await check_usage(
+        uid, LLM_TOKENS_PER_MONTH_KEY, max(1, int(requested_tokens)), lambda: llm_tokens_this_month(uid)
+    )
+    refusal: LLMQuotaRefusal | None = None
+    if not tokens.allowed:
+        refusal = LLMQuotaRefusal(
+            "llm_tokens_month", int(tokens.used), tokens.limit, "Monthly LLM token limit reached",
+            seconds_until_utc_month_start(),
+        )
+    if refusal is None:
+        refusal = await _cost_refusal(
+            uid, LLM_COST_PER_DAY_KEY, llm_cost_today, "llm_cost_day", "Daily LLM cost limit reached",
+            seconds_until_utc_midnight,
+        )
+    if refusal is None:
+        refusal = await _cost_refusal(
+            uid, LLM_COST_PER_MONTH_KEY, llm_cost_this_month, "llm_cost_month", "Monthly LLM cost limit reached",
+            seconds_until_utc_month_start,
+        )
+    if refusal is not None:
+        _count_refusal(refusal.category)
+    return refusal

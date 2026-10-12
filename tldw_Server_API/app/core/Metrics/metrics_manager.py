@@ -448,6 +448,14 @@ class MetricsRegistry:
                 labels=["provider", "model"]
             )
         )
+        self.register_metric(
+            MetricDefinition(
+                name="llm_quota_refusals_total",
+                type=MetricType.COUNTER,
+                description="LLM work refused because a user was over an LLM quota",
+                labels=["category"],
+            )
+        )
         # Detailed LLM usage variants for dashboards
         self.register_metric(
             MetricDefinition(
