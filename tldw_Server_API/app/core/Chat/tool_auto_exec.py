@@ -16,7 +16,11 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Tools.tool_executor import ToolExecutionError, ToolExecutor
+from tldw_Server_API.app.core.Tools.tool_executor import (
+    ToolApprovalRequiredError,
+    ToolExecutionError,
+    ToolExecutor,
+)
 
 
 _TOOL_AUTOEXEC_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -46,6 +50,11 @@ class ToolExecutionRecord:
     skipped: bool = False
     timed_out: bool = False
     idempotency_key: str | None = None
+    #: Typed flag (never inferred from ``content``): the executor refused
+    #: this call with a structured MCP approval demand — an interactive
+    #: approval the calling context may be unable to provide (scheduled
+    #: read-only envelope terminates approval_required on it).
+    approval_required: bool = False
 
     def to_tool_message(self) -> dict[str, Any]:
         """Return a DB-ready role=tool message payload."""
@@ -339,6 +348,7 @@ async def execute_assistant_tool_calls(
                         error=err,
                     ),
                     idempotency_key=idem_key,
+                    approval_required=isinstance(te, ToolApprovalRequiredError),
                 )
             )
         except _TOOL_AUTOEXEC_NONCRITICAL_EXCEPTIONS as e:

@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import Definition
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     APPROVAL_REQUIRED_ERROR_PREFIX,
     _phase1_tools_requested,
+    _requested_tool_names,
     register_executor,
 )
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
@@ -278,8 +279,10 @@ def _automation_tools_executor():
 async def derive_read_only_eligible_tools(owner_id: int) -> list[dict[str, Any]]:
     """Catalogue entries the owner can execute from read_only-declared modules.
 
-    Fail closed: any catalogue failure yields an empty set — nothing is
-    presented, nothing can execute (spec §3).
+    Fail closed: any catalogue failure — a request error OR a malformed
+    non-raising body (non-dict listing, junk ``tools`` payload) — yields an
+    empty set: nothing is presented, nothing can execute (spec §3). The
+    filter loop therefore lives INSIDE the try.
     """
     try:
         # NOTE: package is `MCP_unified` (lowercase u) — the task brief's
@@ -290,16 +293,16 @@ async def derive_read_only_eligible_tools(owner_id: int) -> list[dict[str, Any]]
         listing = await _automation_tools_executor().list_tools(
             user_id=str(owner_id), client_id="scheduled_automation"
         )
+        eligible = []
+        for entry in listing.get("tools", []):
+            if not isinstance(entry, dict) or not entry.get("canExecute"):
+                continue
+            tier = MODULE_RISK_TIERS.get(str(entry.get("module")), ("", ""))
+            if tier[0] == "read_only":
+                eligible.append(entry)
+        return eligible
     except Exception:  # noqa: BLE001 — fail closed by construction
         return []
-    eligible = []
-    for entry in listing.get("tools", []):
-        if not isinstance(entry, dict) or not entry.get("canExecute"):
-            continue
-        tier = MODULE_RISK_TIERS.get(str(entry.get("module")), ("", ""))
-        if tier[0] == "read_only":
-            eligible.append(entry)
-    return eligible
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +353,22 @@ def _stub_tool_success(
     )
 
 
+def _stub_tool_approval_required(
+    tool_call_id: str, tool_name: str
+) -> ToolExecutionRecord:
+    """Test helper: one approval-demand execution record (F1 shape)."""
+    from tldw_Server_API.app.core.Chat.tool_auto_exec import ToolExecutionRecord
+
+    return ToolExecutionRecord(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        ok=False,
+        content='{"ok": false, "error": "approval required"}',
+        result=None,
+        approval_required=True,
+    )
+
+
 def _batch_from_records(
     records: list[ToolExecutionRecord],
 ) -> ToolExecutionBatchResult:
@@ -376,20 +395,33 @@ async def run_read_only_envelope(
 ) -> EnvelopeResult:
     """Run the bounded read-only tool-calling loop for one raw message.
 
-    Tools are presented from ``eligible`` only; every assistant tool call
-    is checked against that membership set (name comparison, never
-    deny-string parsing). An out-of-set call short-circuits as
-    ``approval_required`` with the attempted tool named in ``note`` — it
-    never reaches execution. Exhausted rounds fall back to a plain
-    generation-only completion with a truncation note.
+    Least privilege (final review F3): the presented set is the
+    definition's REQUESTED tool names intersected with ``eligible`` —
+    computed here, at presentation time, so a definition that requests
+    nothing, or whose requested tools lost eligibility since the consumer
+    gate routed it, presents only what it is still authorized for. Every
+    assistant tool call is checked against that same membership set (name
+    comparison, never deny-string parsing); an out-of-set call
+    short-circuits as ``approval_required`` with the attempted tool named
+    in ``note`` — it never reaches execution. An execution record flagged
+    ``approval_required`` (an MCP-side interactive-approval demand the
+    unattended context cannot satisfy) terminates the run
+    ``approval_required`` BEFORE the results are fed back to the model.
+    Exhausted rounds fall back to a plain generation-only completion with
+    a truncation note.
     """
     from tldw_Server_API.app.core.Chat.chat_service import present_chat_tools
 
-    eligible_names = {t["name"] for t in eligible}
+    requested_names = _requested_tool_names(definition)
+    presentable = [
+        entry for entry in eligible
+        if str(entry.get("name") or "") in requested_names
+    ]
+    eligible_names = {str(entry.get("name") or "") for entry in presentable}
     presented = present_chat_tools(
         tools=[{"type": "function", "function": {"name": t["name"],
                 "description": t.get("description", ""), "parameters": t.get("inputSchema", {})}}
-               for t in eligible],
+               for t in presentable],
         allow_catalog=sorted(eligible_names), rollout_mode=None,
         provider_key="", provider_allowlist=None, streaming=False,
         presentation_variant=None,
@@ -418,6 +450,19 @@ async def run_read_only_envelope(
             client_id="scheduled_automation", max_tool_calls=8, timeout_ms=30000,
             allow_catalog=sorted(eligible_names), attach_idempotency=True,
             idempotency_seed=f"automation:{definition.id}:{round_index}")
+        # MCP-side approval demand (final review F1): terminate BEFORE the
+        # tool results are fed back to the model — an unattended run must
+        # not continue (and eventually "succeed") on a tool that demanded
+        # interactive approval. Typed flag on the record, never content
+        # string-sniffing.
+        for record in batch.results:
+            if getattr(record, "approval_required", False):
+                return EnvelopeResult(
+                    "approval_required",
+                    content or "",
+                    f"tool {record.tool_name or record.tool_call_id} "
+                    "requires interactive approval",
+                )
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         # NOTE: the real batch/record fields are `.results` / `.content` —
         # the task brief's `.records` / `.output` spellings do not exist on
@@ -456,11 +501,15 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
     executes).
 
     Outcome contract: this executor returns text. An envelope
-    ``approval_required`` classification (out-of-set tool call) is raised
-    as ``RuntimeError(APPROVAL_REQUIRED_ERROR_PREFIX + note)`` — the
+    ``approval_required`` classification (out-of-set tool call, or an
+    MCP-side approval demand) is raised as
+    ``RuntimeError(APPROVAL_REQUIRED_ERROR_PREFIX + note)`` — the
     consumer's executor-exception handler recognizes that exact prefix
     and finishes the run ``approval_required`` (terminal, health-neutral)
-    instead of ``failed``.
+    instead of ``failed``. A ``succeeded`` envelope result carrying a
+    ``note`` (truncation / not-presented) returns the text WITH the note
+    appended as a trailing ``[automation note: ...]`` line so it reaches
+    the run summary and notification (user-visible by design).
     """
     source = definition.input if isinstance(definition.input, dict) else {}
     message_ref = str(source.get("message_ref") or "").strip()
@@ -488,6 +537,14 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
                 raise RuntimeError(
                     f"{APPROVAL_REQUIRED_ERROR_PREFIX} {result.note or ''}".strip()
                 )
+            if result.note:
+                # Envelope notes are user-visible BY DESIGN (final review
+                # F2; locked owner ruling): the truncation / not-presented
+                # disclosure must reach the run summary. It rides the text
+                # as a trailing bracketed line — the consumer's
+                # ``_bound_summary`` carries it through to the run row and
+                # the notification (bounded at 1000 chars).
+                return f"{result.text}\n[automation note: {result.note}]"
             return result.text
     return await _run_generation(definition, raw_message)
 

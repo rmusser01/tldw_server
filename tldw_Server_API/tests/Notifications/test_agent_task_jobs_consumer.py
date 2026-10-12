@@ -619,6 +619,103 @@ async def test_executor_approval_required_prefix_maps_to_terminal(
     assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
 
 
+@pytest.mark.asyncio
+async def test_mcp_approval_demand_terminates_run_approval_required(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end (final review F1): an MCP-side approval demand surfaced by
+    the tool-execution chain ends the run ``approval_required`` — never a
+    ``succeeded`` run that swallowed the refusal and kept looping.
+
+    Chain under test: real ``_execute_agent_task`` -> real
+    ``run_read_only_envelope`` with a faked execution seam returning one
+    approval-flagged record -> the documented error prefix -> this
+    consumer's terminal approval outcome.
+    """
+    import tldw_Server_API.app.core.Chat.tool_auto_exec as tae
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    user_id = 1043
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={"message_ref": "redacted:example", "tools": ["media_search"]},
+    )
+    _agent_task_job_env(monkeypatch)
+
+    class _FakeStore:
+        def resolve_message(self, owner_id: int, message_ref: str) -> str | None:
+            return "RAW_AGENT_PROMPT"
+
+    monkeypatch.setattr(
+        em.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _FakeStore()),
+    )
+
+    async def _fake_derive(owner_id: int):
+        return [{"name": "media_search", "module": "media"}]
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _fake_derive)
+
+    llm_calls: list[dict[str, Any]] = []
+
+    async def _fake_llm(**kwargs):
+        llm_calls.append(kwargs)
+        return {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "media_search", "arguments": "{}"}}]}}]}
+
+    monkeypatch.setattr(em, "_envelope_llm_call", _fake_llm)
+
+    async def _approval_demand(**kwargs):
+        record = tae.ToolExecutionRecord(
+            tool_call_id="c1",
+            tool_name="media_search",
+            ok=False,
+            content='{"ok": false, "error": "approval required"}',
+            result=None,
+            approval_required=True,
+        )
+        return tae.ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=0,
+            truncated=False,
+            results=[record],
+        )
+
+    monkeypatch.setattr(em, "_envelope_execute_calls", _approval_demand)
+
+    em.register_automation_executors()
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "approval_required"
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "approval_required"
+    summary = run["result_summary"] or ""
+    assert "media_search" in summary
+    assert "approval" in summary
+    pinned = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert pinned is not None  # nosec B101
+    assert pinned.health == "ready"  # approval is health-neutral
+    # The flagged record was never fed back to the model: one round only.
+    assert len(llm_calls) == 1
+    notification = _latest_notification(user_id)
+    assert notification is not None  # nosec B101
+    assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
+
+
 async def test_no_executor_fails_honestly(consumer_env) -> None:
     user_id = 1015
     definition = _create_definition(user_id)
