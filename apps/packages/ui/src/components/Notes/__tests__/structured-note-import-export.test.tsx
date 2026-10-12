@@ -69,6 +69,70 @@ describe('source and portable import contracts', () => {
     });
   });
 
+  it("keeps only the latest import choice and blocks submit during re-reading", async () => {
+    const { result } = renderHook(() =>
+      useNotesImport({
+        isOnline: true,
+        listMode: "active",
+        message,
+        t: (key) => key,
+        refetch: vi.fn(),
+      }),
+    );
+    const text = '\ufeff{"title":"Container","content":"literal"}';
+    const bytes = new TextEncoder().encode(text).buffer;
+    let releaseSource!: (value: ArrayBuffer) => void;
+    let releaseContainer!: (value: ArrayBuffer) => void;
+    const arrayBuffer = vi
+      .fn()
+      .mockResolvedValueOnce(bytes)
+      .mockImplementationOnce(
+        () =>
+          new Promise<ArrayBuffer>((resolve) => {
+            releaseSource = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<ArrayBuffer>((resolve) => {
+            releaseContainer = resolve;
+          }),
+      );
+    await act(async () => {
+      await result.current.prepareImportFiles([
+        { name: "Data.json", arrayBuffer } as unknown as File,
+      ]);
+    });
+    let sourceRead!: Promise<void>;
+    let containerRead!: Promise<void>;
+    act(() => {
+      sourceRead = result.current.changeImportSourceMode(true);
+    });
+    expect(result.current.importPreparing).toBe(true);
+    await act(async () => {
+      await result.current.confirmImport();
+    });
+    expect(bgRequest).not.toHaveBeenCalled();
+    act(() => {
+      containerRead = result.current.changeImportSourceMode(false);
+    });
+    await act(async () => {
+      releaseContainer(bytes);
+      await containerRead;
+    });
+    expect(result.current.pendingImportFiles[0].format).toBe("json");
+    await act(async () => {
+      releaseSource(bytes);
+      await sourceRead;
+    });
+    expect(result.current.importSourceMode).toBe(false);
+    expect(result.current.pendingImportFiles[0]).toMatchObject({
+      format: "json",
+      content: text.slice(1),
+    });
+    expect(result.current.importPreparing).toBe(false);
+  });
+
   it('retains the legacy BOM-bearing JSON container reader', async () => {
     const { result } = renderHook(() =>
       useNotesImport({

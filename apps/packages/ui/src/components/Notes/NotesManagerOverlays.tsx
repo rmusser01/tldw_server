@@ -60,11 +60,14 @@ type KeywordState = {
 }
 
 type ImportState = {
-  importModalOpen: boolean
-  closeImportModal: () => void
-  confirmImport: () => Promise<void> | void
-  importSubmitting: boolean
-  importDuplicateStrategy: ImportDuplicateStrategy
+  importPreparing: boolean;
+  importSourceMode: boolean;
+  changeImportSourceMode: (sourceMode: boolean) => Promise<void>;
+  importModalOpen: boolean;
+  closeImportModal: () => void;
+  confirmImport: () => Promise<void> | void;
+  importSubmitting: boolean;
+  importDuplicateStrategy: ImportDuplicateStrategy;
   setImportDuplicateStrategy: React.Dispatch<
     React.SetStateAction<ImportDuplicateStrategy>
   >
@@ -449,6 +452,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         })}
         cancelText={t("common:cancel", { defaultValue: "Cancel" })}
         confirmLoading={imp.importSubmitting}
+        okButtonProps={{ disabled: imp.importPreparing }}
         destroyOnHidden
         title={t("option:notesSearch.importModalTitle", {
           defaultValue: "Import notes",
@@ -461,9 +465,41 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           >
             {t("option:notesSearch.importModalHelp", {
               defaultValue:
-                "Upload JSON exports, Markdown (.md/.markdown), or plain text (.txt) files. Choose how to handle imported IDs that already exist.",
+                "Import note containers, or choose exact source for JSON, JSONL, YAML, Markdown and text files. Source mode creates one note per file using its extension for language.",
             })}
           </Typography.Text>
+          <div className="space-y-1">
+            <label
+              htmlFor="notes-import-mode"
+              className="text-xs font-medium text-text"
+            >
+              {t("option:notesSearch.importMode", {
+                defaultValue: "Read files as",
+              })}
+            </label>
+            <select
+              id="notes-import-mode"
+              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text"
+              value={imp.importSourceMode ? "source" : "container"}
+              disabled={imp.importSubmitting}
+              onChange={(event) => {
+                void imp.changeImportSourceMode(
+                  event.target.value === "source",
+                );
+              }}
+            >
+              <option value="container">
+                {t("option:notesSearch.importContainer", {
+                  defaultValue: "Note containers (default)",
+                })}
+              </option>
+              <option value="source">
+                {t("option:notesSearch.importSource", {
+                  defaultValue: "Exact source — one note per file",
+                })}
+              </option>
+            </select>
+          </div>
           <div className="space-y-1">
             <label
               htmlFor="notes-import-strategy"

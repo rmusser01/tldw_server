@@ -33,12 +33,22 @@ export function useNotesImport(deps: UseNotesImportDeps) {
   const [importModalOpen, setImportModalOpen] = React.useState(false)
   const [importSubmitting, setImportSubmitting] = React.useState(false)
   const [importDuplicateStrategy, setImportDuplicateStrategy] =
-    React.useState<ImportDuplicateStrategy>('create_copy')
-  const [pendingImportFiles, setPendingImportFiles] = React.useState<PendingImportFile[]>([])
-  const importInputRef = React.useRef<HTMLInputElement | null>(null)
+    React.useState<ImportDuplicateStrategy>("create_copy");
+  const [pendingImportFiles, setPendingImportFiles] = React.useState<
+    PendingImportFile[]
+  >([]);
+  const [importSourceMode, setImportSourceMode] = React.useState(false);
+  const [importPreparing, setImportPreparing] = React.useState(false);
+  const selectedImportFiles = React.useRef<File[]>([]);
+  const preparationGeneration = React.useRef(0);
+  const importInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const clearImportSelection = React.useCallback(() => {
-    setPendingImportFiles([])
+    preparationGeneration.current += 1;
+    selectedImportFiles.current = [];
+    setImportPreparing(false);
+    setImportSourceMode(false);
+    setPendingImportFiles([]);
     if (importInputRef.current) {
       importInputRef.current.value = ''
     }
@@ -51,6 +61,10 @@ export function useNotesImport(deps: UseNotesImportDeps) {
 
   const prepareImportFiles = React.useCallback(
     async (selectedFiles: File[], sourceMode = false) => {
+      const generation = ++preparationGeneration.current;
+      selectedImportFiles.current = selectedFiles;
+      setImportSourceMode(sourceMode);
+      setImportPreparing(true);
       const loaded = await Promise.all(
         selectedFiles.map(async (file): Promise<PendingImportFile> => {
           const initialFormat = detectImportFormatFromFileName(file.name, sourceMode);
@@ -80,6 +94,8 @@ export function useNotesImport(deps: UseNotesImportDeps) {
           }
         })
       );
+      if (generation !== preparationGeneration.current) return;
+      setImportPreparing(false);
       setPendingImportFiles(loaded);
       setImportModalOpen(true);
     },
@@ -91,7 +107,14 @@ export function useNotesImport(deps: UseNotesImportDeps) {
       if (selectedFiles.length === 0) {
         return
       }
-      await prepareImportFiles(selectedFiles)
+      await prepareImportFiles(selectedFiles, importSourceMode);
+    },
+    [prepareImportFiles, importSourceMode],
+  );
+
+  const changeImportSourceMode = React.useCallback(
+    async (sourceMode: boolean) => {
+      await prepareImportFiles(selectedImportFiles.current, sourceMode);
     },
     [prepareImportFiles]
   )
@@ -102,6 +125,7 @@ export function useNotesImport(deps: UseNotesImportDeps) {
   }, [clearImportSelection])
 
   const confirmImport = React.useCallback(async () => {
+    if (importPreparing || importSubmitting) return;
     if (pendingImportFiles.length === 0) {
       message.warning('Select at least one import file')
       return
@@ -160,6 +184,8 @@ export function useNotesImport(deps: UseNotesImportDeps) {
   }, [
     closeImportModal,
     importDuplicateStrategy,
+    importPreparing,
+    importSubmitting,
     message,
     pendingImportFiles,
     refetch,
@@ -168,6 +194,9 @@ export function useNotesImport(deps: UseNotesImportDeps) {
 
   return {
     importModalOpen,
+    importPreparing,
+    importSourceMode,
+    changeImportSourceMode,
     importSubmitting,
     importDuplicateStrategy, setImportDuplicateStrategy,
     pendingImportFiles,

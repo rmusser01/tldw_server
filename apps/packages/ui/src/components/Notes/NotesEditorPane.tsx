@@ -544,6 +544,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   const currentRequest = React.useRef(request);
   currentRequest.current = request;
   const diagnostics = useDocumentDiagnostics(request, composing);
+  const formatRefused = Boolean(
+    diagnostics.result &&
+    (!diagnostics.result.complete || !diagnostics.result.format_allowed),
+  );
   const formatDocument = async () => {
     const captured = currentRequest.current;
     if (!captured || !nativeSource.current?.captureRequest(captured)) return;
@@ -1493,7 +1497,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         )}
         {onContentLanguageChange && <DocumentDiagnostics language={contentLanguage} persistence={languagePersistence}
           languageDisabled={editorDisabled || loadingDetail || !documentRequest}
-          disabled={!active || composing || !documentRequest} formatDisabled={!structured || !active || composing || !documentRequest}
+          disabled={!active || composing || !documentRequest} formatDisabled={!structured || !active || composing || !documentRequest || currentFormatUnavailable}
           status={diagnostics.status} announce={diagnostics.announce} diagnostics={diagnostics.diagnostics} complete={diagnostics.result?.complete} truncated={diagnostics.result?.truncated} source={content}
           onLanguageChange={onContentLanguageChange} onCheck={diagnostics.checkNow} onFormat={() => void formatDocument()}
           onNavigate={(start, end) => {

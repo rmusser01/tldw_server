@@ -11,6 +11,7 @@ export function DocumentDiagnostics(props: {
   disabled: boolean;
   languageDisabled?: boolean;
   formatDisabled: boolean;
+  formatRefused?: boolean;
   status: string;
   announce?: boolean;
   diagnostics: readonly Diagnostic[];
@@ -127,6 +128,9 @@ export function DocumentDiagnostics(props: {
         data-testid="notes-document-status"
       >
         {statusLabels[props.status] ?? statusLabels.failed}
+        {props.formatRefused
+          ? ` · ${label("formatRefused", "Format unavailable for this check; edit source or retry Check")}`
+          : ""}
       </p>
       {props.diagnostics.length > 0 ? (
         <div className="max-h-40 overflow-auto">

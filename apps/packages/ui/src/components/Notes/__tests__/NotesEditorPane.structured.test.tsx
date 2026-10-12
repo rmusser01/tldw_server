@@ -1,8 +1,12 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import NotesEditorPane, { type NotesEditorPaneProps } from "../NotesEditorPane";
-import { createDocumentRequest } from "@/services/document-editing/types";
+import {
+  type CheckResult,
+  createCheckResult,
+  createDocumentRequest,
+} from "@/services/document-editing/types";
 
 vi.mock("@/components/Notes/NotesEditorHeader", () => ({
   default: () => <div />,
@@ -18,15 +22,28 @@ vi.mock("@/components/Common/MarkdownPreview", () => ({
     <p data-testid="markdown-render">{content}</p>
   ),
 }));
+const worker = vi.hoisted(() => ({
+  submit: vi.fn(),
+  receive: (_result: CheckResult) => undefined,
+}));
 vi.mock("@/services/document-editing/app-service", () => ({
   getDocumentWorkerClient: () => ({
-    acquire: () => ({ submit: vi.fn(), close: vi.fn(), format: vi.fn() }),
+    acquire: (receive: (result: CheckResult) => void) => {
+      worker.receive = receive;
+      return { submit: worker.submit, close: vi.fn(), format: vi.fn() };
+    },
   }),
 }));
 vi.mock("@/components/Notes/StructuredNoteSource", () => ({
-  StructuredNoteSource: React.forwardRef((_props, _ref) => (
-    <div data-testid="native-source" />
-  )),
+  StructuredNoteSource: React.forwardRef(
+    ({ onReady }: { onReady: (ready: boolean) => void }, _ref) => {
+      React.useEffect(() => {
+        onReady(true);
+        return () => onReady(false);
+      }, [onReady]);
+      return <div data-testid="native-source" />;
+    },
+  ),
 }));
 
 const noop = () => undefined;
@@ -247,3 +264,66 @@ describe("Notes pane structured ownership", () => {
     expect(changed).toHaveBeenCalledWith("Changed title");
   });
 });
+
+it.each([
+  ["syntax", "checked", true],
+  ["duplicate_key", "checked", true],
+  ["unsupported", "unsupported", false],
+  ["resource_limited", "resource_limited", false],
+  ["incomplete", "checked", false],
+] as const)(
+  "disables current %s refusal but admits a newer draft",
+  (code, state, complete) => {
+    const props = {
+      ...base,
+      documentRequest: request,
+      contentLanguage: "json",
+      markdownAllowed: false,
+      onContentLanguageChange: noop,
+    };
+    const view = render(<NotesEditorPane {...props} />);
+    const format = screen.getByRole("button", { name: "Format document" });
+    const check = screen.getByRole("button", { name: "Check document" });
+    expect(format).toBeEnabled();
+    const submitted = worker.submit.mock.calls.at(-1)![0];
+    const refusal = createCheckResult(submitted, {
+      state,
+      complete,
+      format_allowed: false,
+      truncated: false,
+      diagnostics: [
+        { code, severity: "error", message: code, start: 0, end: 1 },
+      ],
+    });
+    act(() => worker.receive(refusal));
+    expect(format).toBeDisabled();
+    expect(check).toBeEnabled();
+    expect(screen.getByTestId("notes-document-status")).toHaveTextContent(
+      "Format unavailable for this check",
+    );
+    const next = createDocumentRequest({
+      ...request,
+      text: '{"next":1}',
+      key: { ...request.key, draft_revision: 1, request_id: 2 },
+    });
+    view.rerender(
+      <NotesEditorPane {...props} content={next.text} documentRequest={next} />,
+    );
+    expect(format).toBeEnabled();
+    act(() => worker.receive(refusal));
+    expect(format).toBeEnabled();
+    const current = worker.submit.mock.calls.at(-1)![0];
+    act(() =>
+      worker.receive(
+        createCheckResult(current, {
+          state: "checked",
+          complete: true,
+          format_allowed: true,
+          diagnostics: [],
+          truncated: false,
+        }),
+      ),
+    );
+    expect(format).toBeEnabled();
+  },
+);
