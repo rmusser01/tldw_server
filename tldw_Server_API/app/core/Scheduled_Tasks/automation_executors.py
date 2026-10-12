@@ -3,9 +3,11 @@
 Wires the TASK-13021 consumer's executor seam to the server's canonical
 chat entrypoint (``perform_chat_api_call_async`` — the same surface the
 Flashcards, Research, and MCP modules use). Phase-1 scope per tldw_chatbook
-ADR-077 decision 4 (owner-accepted): generation-only completions. Tools are
-already refused upstream by the consumer's phase-1 boundary; these
-executors never pass ``tools``/``tool_choice``.
+ADR-077 decision 4 (owner-accepted): generation-only completions. The one
+routed exception (ADR-184 read-only envelope) is ``_execute_agent_task``
+with a tool-requesting input: it derives the owner's read-only eligible
+tools and runs them inside the bounded envelope; every other path stays
+generation-only and never passes ``tools``/``tool_choice``.
 
 Model precedence (definition first, server last):
 
@@ -31,7 +33,11 @@ from tldw_Server_API.app.core.DB_Management.Automation_Message_Store_DB import (
     AutomationMessageStore,
 )
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow
-from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import register_executor
+from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
+    APPROVAL_REQUIRED_ERROR_PREFIX,
+    _phase1_tools_requested,
+    register_executor,
+)
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 
 if TYPE_CHECKING:
@@ -345,18 +351,28 @@ async def _execute_generation_only(
 
 
 async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]) -> str:
-    """Run one agent_task definition generation-only (ADR-184 phase 2).
+    """Run one agent_task definition (ADR-184 phase 2 + read-only envelope).
 
     Ruling 1A read path: the raw message lives only in the owner's
     encrypted store; resolve it here, in memory, at dispatch. An
     unresolvable ref (purged TTL, store miss, undecryptable blob) is an
     honest failed run via the raised LookupError -- never a silent skip.
 
-    Ruling 2A step 1: the consumer's tool gate terminates tool-requesting
-    definitions as ``approval_required`` before this executor runs; what
-    reaches here executes generation-only (no tool loop exists yet -- the
-    read-only envelope is the next slice and will route through this same
-    seam).
+    Read-only envelope (task 4): when the input requests tools, the
+    eligible set is RE-derived here at execution time via
+    ``derive_read_only_eligible_tools`` — the consumer gate's derivation
+    is routing-only, and ``payload["_envelope_eligible"]`` is an audit
+    hint this executor deliberately never reads. A non-empty eligible set
+    runs ``run_read_only_envelope`` instead of ``_run_generation``; an
+    empty set fails closed to generation-only (nothing presented, nothing
+    executes).
+
+    Outcome contract: this executor returns text. An envelope
+    ``approval_required`` classification (out-of-set tool call) is raised
+    as ``RuntimeError(APPROVAL_REQUIRED_ERROR_PREFIX + note)`` — the
+    consumer's executor-exception handler recognizes that exact prefix
+    and finishes the run ``approval_required`` (terminal, health-neutral)
+    instead of ``failed``.
     """
     source = definition.input if isinstance(definition.input, dict) else {}
     message_ref = str(source.get("message_ref") or "").strip()
@@ -376,6 +392,15 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
             f"agent_task message_ref {message_ref!r} is unresolvable "
             "(purged TTL, store unavailable, or wrong owner)"
         )
+    if _phase1_tools_requested(definition):
+        eligible = await derive_read_only_eligible_tools(definition.owner_id)
+        if eligible:
+            result = await run_read_only_envelope(definition, raw_message, eligible)
+            if result.status == "approval_required":
+                raise RuntimeError(
+                    f"{APPROVAL_REQUIRED_ERROR_PREFIX} {result.note or ''}".strip()
+                )
+            return result.text
     return await _run_generation(definition, raw_message)
 
 
@@ -383,26 +408,29 @@ def register_automation_executors() -> None:
     """Register the production executors for the wired families.
 
     ``recurring_question`` (phase-1 generation-only) and ``agent_task``
-    (ADR-184 phase 2: generation-only with the message resolved from the
-    encrypted store at dispatch). agent_task dispatch additionally sits
-    behind the deployment certification gate, and tool-requesting runs
-    terminate ``approval_required`` before the executor runs. Idempotent:
-    safe at every worker startup. The seam stays test-overridable — tests
-    replace entries in the consumer's registry directly.
+    (ADR-184 phase 2: the message resolved from the encrypted store at
+    dispatch; a tool-requesting input whose names are all read-only
+    eligible runs inside the bounded envelope). agent_task dispatch
+    additionally sits behind the deployment certification gate, and tool
+    requests the gate cannot route terminate ``approval_required`` before
+    this executor runs. Idempotent: safe at every worker startup. The seam
+    stays test-overridable — tests replace entries in the consumer's
+    registry directly.
     """
     global _REGISTERED
     register_executor("recurring_question", _execute_generation_only)
-    # ADR-184 phase 2: agent_task executes generation-only with its message
-    # resolved from the encrypted store. Dispatch still sits behind the
-    # deployment certification gate (Phase 4D) and tool-requesting
-    # definitions terminate approval_required (ruling 2A) before this
-    # executor runs.
+    # ADR-184 phase 2: agent_task resolves its message from the encrypted
+    # store. Dispatch still sits behind the deployment certification gate
+    # (Phase 4D); the consumer routes fully read-only-eligible tool
+    # requests here (the envelope re-derives the eligible set at execution
+    # time) and every other tool request terminates approval_required
+    # (ruling 2A) before this executor runs.
     register_executor("agent_task", _execute_agent_task)
     _REGISTERED = True
     logger.info(
         "Automation LLM executors registered (recurring_question + "
-        "agent_task generation-only via the ADR-184 message store; "
-        "tool-requesting runs terminate approval_required)"
+        "agent_task via the ADR-184 message store; read-only-eligible "
+        "tool requests run inside the bounded envelope)"
     )
 
 

@@ -470,6 +470,155 @@ async def test_approval_required_slot_replays_on_redelivery(consumer_env) -> Non
     assert second.get("deduped") is True
 
 
+# ---------------------------------------------------------------------------
+# Read-only envelope routing (ADR-184 task 4)
+# ---------------------------------------------------------------------------
+
+
+def _agent_task_job_env(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    eligible_entries: list[dict[str, Any]] | None = None,
+) -> AsyncMock:
+    """Patch the gate's routing-only derivation where it is imported."""
+    derivation = AsyncMock(
+        return_value=eligible_entries
+        if eligible_entries is not None
+        else [{"name": "media_search", "module": "media"}]
+    )
+    monkeypatch.setattr(agent_task_jobs, "derive_read_only_eligible_tools", derivation)
+    return derivation
+
+
+@pytest.mark.asyncio
+async def test_gate_routes_agent_task_readonly_tools_to_envelope(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """agent_task + every requested name read-only eligible -> executor dispatch.
+
+    The payload carries ``_envelope_eligible`` (sorted eligible names) as an
+    audit hint; the run executes and succeeds instead of terminating
+    approval_required at the gate.
+    """
+    user_id = 1040
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+            "tools": ["media_search"],
+        },
+    )
+    derivation = _agent_task_job_env(monkeypatch)
+    captured: list[dict[str, Any]] = []
+
+    async def spy(d: DefinitionRow, p: dict[str, Any]) -> str:
+        captured.append(p)
+        return "done"
+
+    register_executor("agent_task", spy)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "succeeded"
+    derivation.assert_awaited_once_with(user_id)
+    assert [p.get("_envelope_eligible") for p in captured] == [["media_search"]]
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "succeeded"
+    assert run["result_summary"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_gate_keeps_approval_required_for_out_of_set_agent_task_tools(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent_task requesting a name outside the eligible set stays terminal."""
+    user_id = 1041
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+            "tools": ["media_search", "notes_write"],
+        },
+    )
+    _agent_task_job_env(monkeypatch)
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("agent_task", executor)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "approval_required"
+    executor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_executor_approval_required_prefix_maps_to_terminal(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The executor's ``approval_required:`` error prefix finishes approval_required.
+
+    Not a failed run: the envelope's classification (out-of-set tool call)
+    travels through the executor-exception path with the documented prefix,
+    records the ADR-184 error code with the note as summary, keeps health
+    ready, and delivers the approval notification kind.
+    """
+    user_id = 1042
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+            "tools": ["media_search"],
+        },
+    )
+    _agent_task_job_env(monkeypatch)
+
+    async def envelope_refusal(d: DefinitionRow, p: dict[str, Any]) -> str:
+        raise RuntimeError(
+            "approval_required: attempted non-envelope tool: notes_write"
+        )
+
+    register_executor("agent_task", envelope_refusal)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "approval_required"
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "approval_required"
+    assert run["error"] == "tools_require_read_only_envelope"
+    assert "notes_write" in (run["result_summary"] or "")
+    pinned = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert pinned is not None  # nosec B101
+    assert pinned.health == "ready"
+    notification = _latest_notification(user_id)
+    assert notification is not None  # nosec B101
+    assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
+
+
 async def test_no_executor_fails_honestly(consumer_env) -> None:
     user_id = 1015
     definition = _create_definition(user_id)

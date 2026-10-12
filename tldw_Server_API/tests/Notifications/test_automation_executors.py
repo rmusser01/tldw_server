@@ -578,3 +578,154 @@ async def test_envelope_presented_empty_note(monkeypatch) -> None:
     assert result.status == "succeeded"
     assert result.text == "plain answer"
     assert "not presented" in (result.note or "")
+
+
+# ---------------------------------------------------------------------------
+# Envelope wiring inside _execute_agent_task (ADR-184 task 4)
+# ---------------------------------------------------------------------------
+
+
+def _fake_message_store(monkeypatch) -> None:
+    """Resolve any message_ref to a fixed raw prompt (no store on disk)."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    class _FakeStore:
+        def resolve_message(self, owner_id: int, message_ref: str) -> str | None:
+            return "RAW_AGENT_PROMPT"
+
+    monkeypatch.setattr(
+        em.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _FakeStore()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_task_with_tools_runs_envelope_with_rederived_set(monkeypatch) -> None:
+    """Tools requested -> the eligible set is re-derived HERE, hint never read."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_message_store(monkeypatch)
+    derived: list[int] = []
+
+    async def _fake_derive(owner_id: int):
+        derived.append(owner_id)
+        return [{"name": "media_search", "module": "media"}]
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _fake_derive)
+
+    envelope_calls: list[tuple[str, list[dict[str, Any]]]] = []
+
+    async def _fake_envelope(definition, raw_message, eligible, **kwargs):
+        envelope_calls.append((raw_message, eligible))
+        return em.EnvelopeResult("succeeded", "envelope answer", None)
+
+    monkeypatch.setattr(em, "run_read_only_envelope", _fake_envelope)
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-9",
+         "tools": ["media_search"]},
+        family="agent_task",
+    )
+    # A deliberately stale audit hint: the executor re-derives the
+    # authoritative set and must never trust the payload key.
+    text = await em._execute_agent_task(definition, {"_envelope_eligible": ["stale"]})
+
+    assert text == "envelope answer"
+    assert derived == [7]
+    assert envelope_calls == [
+        ("RAW_AGENT_PROMPT", [{"name": "media_search", "module": "media"}])
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_task_envelope_approval_required_raises_prefixed(monkeypatch) -> None:
+    """Envelope approval_required surfaces as the documented error prefix."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_message_store(monkeypatch)
+
+    async def _fake_derive(owner_id: int):
+        return [{"name": "media_search", "module": "media"}]
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _fake_derive)
+
+    async def _fake_envelope(definition, raw_message, eligible, **kwargs):
+        return em.EnvelopeResult(
+            "approval_required", "", "attempted non-envelope tool: notes_write"
+        )
+
+    monkeypatch.setattr(em, "run_read_only_envelope", _fake_envelope)
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-9",
+         "tools": ["media_search"]},
+        family="agent_task",
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=r"^approval_required: attempted non-envelope tool: notes_write",
+    ):
+        await em._execute_agent_task(definition, {})
+
+
+@pytest.mark.asyncio
+async def test_agent_task_tools_with_empty_eligible_fails_closed_to_generation(
+    monkeypatch,
+) -> None:
+    """An empty re-derived set presents nothing: plain generation, no envelope."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_message_store(monkeypatch)
+
+    async def _empty_derive(owner_id: int):
+        return []
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _empty_derive)
+
+    async def _must_not_run(definition, raw_message, eligible, **kwargs):
+        raise AssertionError("envelope must not run with an empty eligible set")
+
+    monkeypatch.setattr(em, "run_read_only_envelope", _must_not_run)
+
+    async def _fake_generation(**kwargs: Any) -> dict[str, Any]:
+        return {"choices": [{"message": {"content": "plain answer"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _fake_generation,
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-9",
+         "tools": ["media_search"]},
+        family="agent_task",
+    )
+    assert await em._execute_agent_task(definition, {}) == "plain answer"
+
+
+@pytest.mark.asyncio
+async def test_agent_task_without_tools_skips_derivation_entirely(monkeypatch) -> None:
+    """No tools requested: no catalogue read, no envelope, generation only."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    _fake_message_store(monkeypatch)
+
+    async def _must_not_derive(owner_id: int):
+        raise AssertionError("eligible-set derivation must not run without tools")
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _must_not_derive)
+
+    async def _fake_generation(**kwargs: Any) -> dict[str, Any]:
+        assert "tools" not in kwargs
+        return {"choices": [{"message": {"content": "gen only"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _fake_generation,
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-9"}, family="agent_task"
+    )
+    assert await em._execute_agent_task(definition, {}) == "gen only"
