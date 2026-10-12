@@ -220,14 +220,14 @@ describe("ModelDb storage efficiency", () => {
       configurable: true,
       get: () => callbackError
     })
-  
+
     const { ModelDb } = await import("@/db/models")
     const db = new ModelDb()
-  
+
     // getAll must reject (loud failure) rather than silently return [].
     await expect(db.getAll()).rejects.toThrow(/QUOTA_BYTES/)
     expect(failedSet).toHaveBeenCalledOnce()
-  
+
     // A later write on the same instance must also fail rather than persist
     // an index built from the cached empty migration result.
     await expect(db.createMany([model("y-model-1")])).rejects.toThrow(
@@ -235,7 +235,7 @@ describe("ModelDb storage efficiency", () => {
     )
     expect(failedSet).toHaveBeenCalledTimes(2)
     expect(area.__store.has("__tldwModelDbIndexV1")).toBe(false)
-  
+
     // Once storage recovers, a fresh operation on a fresh instance migrates
     // correctly and the legacy record is still visible — nothing was lost.
     failSets = false

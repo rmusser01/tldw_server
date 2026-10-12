@@ -448,7 +448,7 @@ describe('ViewMediaPage metadata search integration', () => {
       mocks.bgRequest.mock.calls.filter(([request]) =>
         request.path.startsWith('/api/v1/media/keywords?')
       )
-  
+
     fireEvent.change(screen.getByTestId('keyword-search'), {
       target: { value: 'bio' }
     })
