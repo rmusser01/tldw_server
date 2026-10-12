@@ -1,7 +1,7 @@
 # LLM usage accounting: record and gate every LLM call at one point
 
 - **Date:** 2026-10-09 (revised 2026-10-10 after an independent review against the code; see [Review changes](#review-changes))
-- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged. §4, §6 and §9 were revised on 2026-10-12 for PR 2 and approved by the owner the same day; see [Review changes](#review-changes).
+- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a in progress.
 - **Backlog:** TASK-13437 (gate LLM tokens/month at every LLM entry point) and TASK-13436 (evaluation cost caps per user, re-scoped below). Both are follow-ups of spec 2, TASK-13434.
 - **Builds on:** `Docs/Design/2026-10-02-usage-quota-posture-design.md` (spec 2) and ADR-064. Quotas are per-user `limits.*` values, resolved by `quota_resolver.user_quota`. Nothing is enforced unless `USAGE_QUOTAS_ENABLED` is on, `0` blocks, and errors fail open.
 
@@ -207,6 +207,7 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | Entry point | Checks |
 |---|---|
 | `/chat/completions` | Always. This is the existing check, extended to the two cost keys. |
+| The Anthropic-compatible Messages API (`/messages`, `/v1/messages`) | Always. Its native path for Anthropic and llama.cpp never reaches a provider adapter, so only this check gates it. |
 | Character chat reply (`character_chat_sessions.py`) | Always, at the top of the handler. The provider call is made before the streaming response is built. |
 | RAG search, its batch and resume forms, and its streaming form (`rag_unified.py`) | When the effective request asks for answer generation. |
 | Document generation from a chat (`chat_documents.py`) | Always. |
@@ -217,7 +218,7 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 
 - **A RAG search with answer generation off is not checked here and not marked.** The pipeline's optional LLM stages (query rewriting, expansion, HyDE, LLM reranking, gap analysis, critique, suggestions) are governed by §4b. For a user over quota they degrade as they do for any provider failure, and the response's stage metadata says so. Until PR 2b they are unchecked, as today.
 - **An endpoint that enqueues a job has no boundary check:** `/media/ingest-jobs` and evaluation recipe runs. The job is checked by §4b when it runs.
-- **The plan lists every other HTTP endpoint that reaches an LLM.** Each is added to this table or left to §4b, and the operator page names both groups.
+- **Left to §4b:** these HTTP endpoints are not in the table: `/media/ingest-web-content` with analysis, `/media/{id}/insights`, the writing and manuscript analysis endpoints, prompt improvement and Prompt Studio, reading, study suggestions, paper search, chunking, sharing, and `/translate`. So are background jobs (`/media/ingest-jobs`, evaluation recipe runs, audio jobs), workflow runs, WebSocket sessions (audio, realtime) and MCP tools. The operator page names both groups.
 
 **Why these entry points need a boundary check.** With the error raised only at the call, each would do worse than a 402 before any work:
 - **Streaming RAG** has already sent a 200 when the pipeline runs, so the client would get an error frame.
@@ -284,7 +285,7 @@ Costs come from the pricing catalog when the row is written (`Usage/pricing_cata
 **Local providers cost nothing by default (owner decision 5).** No local provider is in the pricing catalog, so today every call to one is costed at the catalog's unknown-model rate: $0.01 per 1K prompt tokens and $0.03 per 1K completion tokens. A cost limit would be used up by calls that cost nothing. From PR 2a:
 - **The catalog resolves a provider-wide `default` entry** when no model of that provider matches. The file already has one, `huggingface.default`, which nothing can reach today (`pricing_catalog.py:264-275`).
 - **Each local provider ships with a zero `default`:** llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite and mlx, the set in `DEFAULT_LOCAL_PROVIDERS` (`LLM_Calls/adapter_registry.py`). The entries are in the built-in defaults and in `Config_Files/model_pricing.json`.
-- **`compute_costs` resolves the provider's canonical name first,** so an alias such as `llamacpp` is priced the same. The writers pass different spellings today.
+- **The catalog lookup resolves the provider's canonical name first,** so an alias such as `llamacpp` is priced the same. The writers pass different spellings today. The resolution lives in `get_rate_details`, which `compute_costs` and the other pricing helpers all call.
 - **It is data, so an operator can change it.** A local provider that points at a paid service can be priced, and a custom OpenAI-compatible endpoint that runs locally can be set to zero. That endpoint is not zero by default, because it may point at a paid service.
 - **This changes what is stored,** so every reader of stored cost agrees: the new cost limits, admin usage reports, the Prometheus cost metric and virtual-key USD budgets. Virtual-key budgets have the same problem today. An operator who used a virtual-key USD budget to bound local usage loses that bound; the operator page says so.
 - **Rows already written keep their cost.**

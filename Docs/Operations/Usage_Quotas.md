@@ -65,7 +65,9 @@ Days and months are calendar UTC. With the switch on and the key unset, nothing 
 | `limits.audio_daily_minutes` | Audio transcription minutes per day (HTTP, WebSocket streaming, realtime, workers) | Resource ledger `user/minutes` (stored in seconds) | HTTP 402 `{"status":"quota_exceeded","message":"Transcription quota exceeded (daily minutes)"}` |
 | `limits.transcription_minutes_per_month` | Transcription minutes per month | The same ledger rows summed over the month | HTTP 402 `{"status":"quota_exceeded","message":"Transcription quota exceeded (monthly minutes)"}` |
 | `limits.audio_concurrent_jobs` | Audio jobs processing at once per user | The audio Jobs worker's count of `processing` rows for the owner | The job waits until the owner is under the cap. With `0` the job fails with `audio job quota is 0 for this user (limits.audio_concurrent_jobs)` |
-| `limits.llm_tokens_per_month` | LLM tokens per month, enforced on `/chat/completions` only | `llm_usage_log` summed per user over the month | HTTP 402 `{"error":"limit_exceeded","category":"llm_tokens_month",...}` |
+| `limits.llm_tokens_per_month` | LLM tokens per calendar month (UTC), checked before LLM work at the entry points listed below | `llm_usage_log` summed per user over the month | HTTP 402 `{"error":"limit_exceeded","category":"llm_tokens_month",...}` |
+| `limits.llm_cost_per_day_usd` | LLM spend per UTC day, in US dollars | `llm_usage_log` costs summed per user over the day | HTTP 402 `{"error":"limit_exceeded","category":"llm_cost_day",...}` |
+| `limits.llm_cost_per_month_usd` | LLM spend per calendar month, in US dollars | `llm_usage_log` costs summed per user over the month | HTTP 402 `{"error":"limit_exceeded","category":"llm_cost_month",...}` |
 | `limits.rag_queries_per_day` | RAG queries per day (unified RAG, Text2SQL, MCP RAG) | Resource ledger `user/rag_queries` | HTTP 402 `{"error":"limit_exceeded","category":"rag_queries_day",...}` |
 | `limits.storage_quota_mb` | Per-user storage in MB (media ingest, audio and video downloads, generated files) | `users.storage_used_mb` | HTTP 413 `Storage quota exceeded. Current: ...MB, New: ...MB, Quota: ...MB, Available: ...MB` |
 | `limits.media_ingest_mb_per_day` | Uploaded media megabytes per day | Resource ledger `user/ingestion_bytes` (bytes) | HTTP 429 `Daily ingestion size budget exceeded.`, with `RateLimit-*`, `X-RateLimit-*` and `Retry-After` headers |
@@ -76,7 +78,7 @@ Days and months are calendar UTC. With the switch on and the key unset, nothing 
 | `limits.chatbooks_imports_per_day` | Chatbook imports per day | `import_jobs` rows since 00:00 UTC | HTTP 429 `Daily import limit (N) reached. Try again tomorrow.` |
 | `limits.chatbooks_concurrent_jobs` | Chatbook export and import jobs active at once | Active chatbook job rows | HTTP 429 `Maximum concurrent jobs (N) reached...` |
 
-What `limits.llm_tokens_per_month` counts:
+What `limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd` count:
 
 - The monthly count includes every LLM chat call recorded for the user, not just chat completions: RAG generation, character chat, summarization, evaluations and other calls made during a request. Users reach a token limit sooner than before.
 - That includes calls a request triggers without the user asking for them directly, such as query rewriting and classification.
@@ -85,6 +87,15 @@ What `limits.llm_tokens_per_month` counts:
 - Recorded: calls made while serving a request; background jobs, including audio analysis and scheduled agent tasks; workflow runs; watchlist output enrichment; audio and realtime WebSocket sessions.
 - Not recorded: MCP tool calls, the in-process claims rebuild, and system jobs with no user, such as the scheduled quality evaluation.
 - The count depends on `LLM_USAGE_ENABLED` (default on). With it off, nothing is recorded and the limit never triggers.
+- **Where a refusal happens.** These entry points refuse with a 402 before they start any LLM work, streaming requests included: `/chat/completions`; the Anthropic-compatible Messages API (`/messages` and `/v1/messages`); character chat replies; RAG search, batch, batch resume and streaming, when the request generates an answer; document generation from a chat; the flashcards and quizzes study assistants; `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality`; `/evaluations/batch` of type `geval`, `rag` or `response_quality`; the `/media/process-*` endpoints and `/media/add`, when analysis is on.
+- **Not checked yet** (a later change refuses them at the call): background jobs (`/media/ingest-jobs`, evaluation recipe runs, audio jobs), workflow runs, WebSocket sessions (audio, realtime), MCP tools, and these HTTP endpoints: `/media/ingest-web-content` with analysis, `/media/{id}/insights`, the writing and manuscript analysis endpoints, prompt improvement and Prompt Studio, reading, study suggestions, paper search, chunking, sharing, and `/translate`. Their usage is recorded and counts toward the limits. MCP tools are not recorded (they carry no user).
+- **Not recorded today:** Messages API calls to Anthropic or llama.cpp take a native path that never reaches a provider adapter, so they write no usage row. The boundary check still refuses them. TASK-13610 covers recording them.
+- **How the cost keys compare.** A cost key refuses once today's or this month's spend has reached the limit. The token key refuses when this request's estimated tokens would take the month past it; outside `/chat/completions` the estimate is one token.
+- **An admitted request runs to completion,** so a user can pass a limit by one request's worth of usage. A media batch or an evaluation batch can be large.
+- **Local providers cost nothing by default:** llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite and mlx. To give one a price, edit its `default` entry in `Config_Files/model_pricing.json`. A custom OpenAI-compatible endpoint is priced at the unknown-model rate ($0.01 per 1K prompt tokens, $0.03 per 1K completion tokens) unless you give it a price. A virtual-key USD budget no longer counts local calls either.
+- **Two settings defeat these limits, and the server warns at startup when quotas are on:** `LLM_USAGE_ENABLED` off (nothing is recorded, so nothing is refused), and `LLM_USAGE_LOG_RETENTION_DAYS` under 31 (the monthly counts lose rows).
+- **Failures let requests through.** If a limit cannot be read or a counter fails, the request is admitted and a warning is logged.
+- **The profile reports it.** `GET /api/v1/users/me/profile?sections=quotas` has an `llm` block with tokens used this month, spend today and this month, and each limit that is set.
 
 Two other `limits.*` entries in the catalog are not part of this scheme:
 
