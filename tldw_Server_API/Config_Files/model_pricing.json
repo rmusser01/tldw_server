@@ -298,5 +298,15 @@
   },
   "huggingface": {
     "default": { "prompt": 0.00005, "completion": 0.00005, "note": "Hugging Face hosted model availability and pricing are endpoint-dependent." }
-  }
+  },
+  "_local_providers_note": "Local providers cost nothing by default. Give one a price if it points at a paid service.",
+  "llama.cpp": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "kobold": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "ooba": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "tabbyapi": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "vllm": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "local-llm": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "ollama": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "aphrodite": { "default": { "prompt": 0, "completion": 0, "estimated": false } },
+  "mlx": { "default": { "prompt": 0, "completion": 0, "estimated": false } }
 }
