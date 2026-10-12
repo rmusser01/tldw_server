@@ -1,7 +1,7 @@
 ---
 id: TASK-13520
 title: Integrate structured document checking into web Notes
-status: In Progress
+status: Done
 created_date: 2026-10-11 22:06
 dependencies:
 - TASK-13513
@@ -17,7 +17,7 @@ labels:
 - structured-editing
 documentation:
 - /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/Docs/superpowers/plans/2026-09-27-structured-document-editing.md
-updated_date: 2026-10-12 05:50
+updated_date: 2026-10-12 08:09
 ---
 
 ## Description
@@ -28,12 +28,12 @@ Help users detect source errors and explicitly format whole web Notes without lo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Known structured and future language modes retain raw source and metadata without Markdown-to-WYSIWYG conversion; unsupported portable peers keep recoverable metadata and truthful status.
-- [ ] #2 Typing retires old results immediately and checks after400ms or open/mode change, with separate save status and accessible navigable Problems in logical coordinates.
-- [ ] #3 Qualified explicit formatting is one native undoable edit with captured-source/full-key/editability and composition guards; syntax errors do not veto saves.
-- [ ] #4 Existing canonical draft and language revisions, save acknowledgements, secondary editors and authority transitions preserve source and language without implicit metadata reset.
-- [ ] #5 Actual web Notes and installed extension shared loading/worker compatibility, live metadata round trip and targeted browser/mounted controls are recorded with precise support limits.
-- [ ] #6 Relevant ADR assessment, scoped static/security evidence and completion documentation are recorded without hiding unfinished release gates.
+- [x] #1 Known structured and future language modes retain raw source and metadata without Markdown-to-WYSIWYG conversion; unsupported portable peers keep recoverable metadata and truthful status.
+- [x] #2 Typing retires old results immediately and checks after400ms or open/mode change, with separate save status and accessible navigable Problems in logical coordinates.
+- [x] #3 Qualified explicit formatting is one native undoable edit with captured-source/full-key/editability and composition guards; syntax errors do not veto saves.
+- [x] #4 Existing canonical draft and language revisions, save acknowledgements, secondary editors and authority transitions preserve source and language without implicit metadata reset.
+- [x] #5 Actual web Notes and installed extension shared loading/worker compatibility, live metadata round trip and targeted browser/mounted controls are recorded with precise support limits.
+- [x] #6 Relevant ADR assessment, scoped static/security evidence and completion documentation are recorded without hiding unfinished release gates.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -65,18 +65,20 @@ Verification: meaningful mounted/native RED controls retained; affected mounted 
 Limits: initial seven-page result had an inherited readiness flag and is not normal-startup proof; final runs assert both bypass flags absent and use normal health/runtime/auth. Six canonical baseline failures remain. Extension Presentation's normal metadata-safety refusal precedes its expected WebUI-only restriction and remains unqualified; no routing/provider repair. YAML BOM native formatting is qualified for model-owned/in-buffer origins; strict JSON/JSONL BOM format refusal remains. Mixed/lone-CR source-only profiles retain exact title/save. Physical OS IME/system clipboard, other extension browsers and arbitrary-rate/heap/physical-zero-worker-overlap guarantees remain unqualified. Large CDP insertion timeouts are retained separately from successful public native paste and smaller native input controls. Capture now saves text/captured tag only; displayed page URL is explicitly not persisted and old-note bodies stay unchanged.
 
 Bounded report and durable evidence: /Users/macbook-dev/.codex/worktrees/structured-document-editing/tldw_chatbook/.superpowers/sdd/2026-09-27-structured-document-editing/task-13-report.md and task-13-evidence/. Source base8d7051b3de7306e0fb78cce8cc6b47469ac870b7; dependency C production unchanged from0f1abde, current metadata-only C ref6ad75dad65ba839d26b41eb144b1177c02d7d243. R53 correction chronology and failed checks/fixture corrections are retained truthfully. Task remains In Progress with all six AC/six DoD unchecked for controller independent review. No push/merge or C production edits.
+Implemented local YAML/JSON/JSONL diagnostics and qualified native formatting through the existing Notes owner, preserving exact structured/future source, canonical nullable/opaque language, recovery and save behavior. Fixed installed local Monaco assets/shared initialization, source-safe secondary capture and scoped temporary old-peer view mode. Deferred attachment/Studio completions now use live canonical owner admission and exact internally issued reload tokens; committed browser controls own their output/profile/Note cleanup and make stored Presentation fixtures explicit. Existing ADR065/066/067/068/069 govern these boundaries; no new fix ADR. Planned Header/re-export/NoteListItem files reuse incumbent interfaces while controls live in the pane/hook.
+Independent task review and fresh scoped fix review accepted all Important findings at3a3f524. Final affected owner run56 passed with the same six immutable-baseline canonical failures; focused12 is included, not additive. Lifecycle4, normal web6, installed Chrome1, bounds1 pass; absent stored Presentation is one honest skip. Scoped types/new-source lint/changed-region formatting/no-introduced legacy debt pass with inherited output disclosed. Original746/formatting560/fix282 artifact hashes and68 final source hashes are recorded in the programme report/indices. Bandit N/A: shipped changes are TypeScript/TSX/config/docs; private Python drivers are evidence tools. Physical IME/system clipboard/accessibility, historical server, native JSONL/other platform and installed Presentation HTML, cross-app release and the six canonical scenarios remain I1/I5 gates. No full sweep; synthetic resources cleaned up.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Integrated actual structured Notes/native history and source-safe entry points; qualified bounded real/mounted/API/host evidence is in task-13-report.md and task-13-evidence. Six immutable canonical baseline failures, extension Presentation metadata refusal, physical IME/clipboard and remaining release/platform gates are disclosed. In Progress/all six AC and DoD stay controller-owned for independent review.
+Reviewed web structured-editing integration complete for recorded host/source profiles. Both scoped Important fixes accepted, source/evidence hashes verified. ADR065-069 apply; unfinished programme and platform gates remain explicitly carried to release qualification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
