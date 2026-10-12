@@ -17,3 +17,8 @@ Open gates: atomic retention publication and mapping; active Sync admission; nat
 ADR assessment: no new decision in this publication unit. Existing049/050 and proposed069/070/071 remain relevant; proposed records are not promoted to Accepted. Repository policy Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md requires the human requester to write a Change summary before merge. AI-authored PR prose does not satisfy that gate. No merge or ready-for-review action is authorized here.
 
 Remote publication/head read-back and draft URL will be recorded after creation. Worktree remains active for continued remediation.
+
+Published draft: https://github.com/rmusser01/tldw_server/pull/3229
+Read-back confirms OPEN/isDraft:true, base dev, head codex/chat-ux-remediation-20261004. Initial remote head f80d58e40174c741d13df79aff97b93b132211a6 exactly matches local. Initial CI snapshot has26 pending and24 skipping checks; no passing/merge-ready claim. The PR is attached to this Codex task. Publication-record update follows on the same draft branch; no merge/auto-merge/ready action. Normal exact-owned hooks and all143 changed active task format checks pass. Worktree is preserved.
+
+Continuation starts with the remaining immutable reference provenance/mapping and atomic retention publication boundaries in approved H2 Task2.3; the existing preparation receipt alone does not grant claims or ready-state. The open character, client, Sync and qualification gates above remain open.
