@@ -508,7 +508,10 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useChatDraftOwner", () => {
-  const owner = { ownerKey: "account-a", isCurrent: () => nativeSetupFixture.ownerCurrent }
+  const owner = {
+    ownerKey: "a".repeat(64),
+    isCurrent: () => nativeSetupFixture.ownerCurrent
+  }
   return { useChatDraftOwner: () => owner }
 })
 
@@ -781,7 +784,22 @@ vi.mock("antd", async (original) => {
 })
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (key: unknown, defaultValue: unknown) => React.useState(key === "playgroundAppendFormattingGuidePrompt" ? nativeSetupFixture.formattingGuide : key === "playgroundStartupTemplateBundles" ? savedSetupFixture.raw : (key as { key?: string })?.key === "defaultCharacterSelection:owner:account-a" ? { ownerKey: "account-a", selection: selectedAssistantMock.ownedDefaultCharacter } : (key as { key?: string })?.key === "defaultCharacterSelection" ? selectedAssistantMock.defaultCharacter : defaultValue)
+  useStorage: (key: unknown, defaultValue: unknown) =>
+    React.useState(
+      key === "playgroundAppendFormattingGuidePrompt"
+        ? nativeSetupFixture.formattingGuide
+        : key === "playgroundStartupTemplateBundles"
+          ? savedSetupFixture.raw
+          : (key as { key?: string })?.key ===
+              `defaultCharacterSelection:owner:${"a".repeat(64)}`
+            ? {
+                ownerKey: "a".repeat(64),
+                selection: selectedAssistantMock.ownedDefaultCharacter
+              }
+            : (key as { key?: string })?.key === "defaultCharacterSelection"
+              ? selectedAssistantMock.defaultCharacter
+              : defaultValue
+    )
 }))
 
 vi.mock("react-router-dom", () => ({
@@ -5895,10 +5913,63 @@ describe("PlaygroundForm role-play starter", () => {
     expect(onSubmitMock).not.toHaveBeenCalled()
   })
 
+  it("keeps saved native Character uploads blocked before live preparation", async () => {
+    const { source } = prepareQualifiedSceneSource("native", "saved-source")
+    const originalMessages = source.messages
+    const item = {
+      ...buildQueuedRequest({
+        promptText: "Keep native queued upload",
+        sourceContext: {
+          uploadedFiles: [
+            {
+              id: "queued-file",
+              filename: "scene.txt",
+              content: "data:text/plain;base64,c2NlbmU=",
+              processingMode: "add_to_chat"
+            }
+          ]
+        },
+        snapshot: { selectedModel: "openai:gpt-4.1" }
+      }),
+      status: "blocked",
+      blockedReason: "restored_request"
+    }
+    source.queuedMessages = [item]
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.type(screen.getByTestId("composer-textarea"), "Source draft  ")
+      await user.click(screen.getByRole("button", { name: "Retry next" }))
+      await waitFor(() =>
+        expect(source.queuedMessages).toEqual([
+          expect.objectContaining({
+            id: item.id,
+            promptText: item.promptText,
+            status: "blocked",
+            blockedReason: expect.stringContaining(
+              "uses its saved roleplay setup"
+            )
+          })
+        ])
+      )
+      expect(queuedDocumentPreparation).not.toHaveBeenCalled()
+      expect(source.setSelectedModel).not.toHaveBeenCalled()
+      expect(onSubmitMock).not.toHaveBeenCalled()
+      expect(source.messages).toBe(originalMessages)
+      expect(source.serverChatId).toBe("saved-source")
+      expect(source.historyId).toBe("native-current-mirror")
+      expect(screen.getByTestId("composer-textarea")).toHaveValue(
+        "Source draft  "
+      )
+    } finally {
+      view.unmount()
+    }
+  })
+
   it.each([false, true])(
-    "retires held queue preparation when a character setup blocker appears (then clears: %s)",
+    "retires held local queue preparation when a character setup blocker appears (then clears: %s)",
     async (clears) => {
-      const { source } = prepareQualifiedSceneSource("native", "saved-source")
+      const { source, originalOwner } = prepareNativeSource()
       nativeSetupFixture.realSettings = true
       const modelStore = nativeSetupFixture.actualSettingsStore!
       modelStore.getState().setActiveSettingsScope("openai:deepseek-chat")
@@ -5980,7 +6051,8 @@ describe("PlaygroundForm role-play starter", () => {
             status: "blocked"
           })
         ])
-        expect(source.serverChatId).toBe("saved-source")
+        expect(source.serverChatId).toBeNull()
+        expect(source.historyId).toBe(originalOwner.conversation_id)
         expect(screen.getByTestId("composer-textarea")).toHaveValue(
           "Source draft  "
         )
@@ -7099,6 +7171,8 @@ describe("PlaygroundForm role-play starter", () => {
 })
 
 it("UAT355: a plain composer ignores an untracked cross-tab Character mirror", async () => {
+  const { source } = prepareQualifiedSceneSource("fresh")
+  const originalMessages = source.messages
   Object.assign(playgroundFormMessageOptionState.value, {
     historyId: null,
     serverChatId: null,
@@ -7138,6 +7212,15 @@ it("UAT355: a plain composer ignores an untracked cross-tab Character mirror", a
     expect
       .soft(screen.queryByText("Add expression images for Foreign Robot."))
       .toBeNull()
+    expect(
+      screen.queryByText("Foreign greeting", { exact: true })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Start with this greeting" })
+    ).not.toBeInTheDocument()
+    expect(nativeSetupFixture.getCharacter).not.toHaveBeenCalled()
+    expect(source.messages).toBe(originalMessages)
+    expect(onSubmitMock).not.toHaveBeenCalled()
   } finally {
     view.unmount()
   }
@@ -7146,6 +7229,26 @@ it.each(["tracked_character", "overlay", "fresh_character"])(
   "UAT355: preserves owned composer %s context",
   async (mode) => {
     const hasOwner = mode === "tracked_character"
+    const { source, requestScope } = prepareQualifiedSceneSource(
+      hasOwner ? "native" : "fresh",
+      "owned-chat",
+      "owned-chat-mirror"
+    )
+    if (hasOwner) {
+      source.messages = [
+        {
+          id: "saved-owned-row",
+          isBot: true,
+          name: "Owned Character",
+          message: "Saved owned scene",
+          sources: []
+        }
+      ]
+      source.history = [{ role: "assistant", content: "Saved owned scene" }]
+    }
+    const originalMessages = source.messages
+    const originalTranscript = structuredClone(source.messages)
+    const originalHistory = structuredClone(source.history)
     const selection = {
       kind: "character",
       id: "owned",
@@ -7154,8 +7257,13 @@ it.each(["tracked_character", "overlay", "fresh_character"])(
       metadata: { selectionMode: mode === "overlay" ? "overlay" : "tracked" }
     }
     selectedAssistantMock.initialSelection = selection
+    nativeSetupFixture.getCharacter.mockResolvedValue({
+      id: "owned",
+      name: "Owned Character",
+      first_message: "Verified owned opening"
+    })
     Object.assign(playgroundFormMessageOptionState.value, {
-      historyId: null,
+      historyId: hasOwner ? "owned-chat-mirror" : null,
       serverChatId: hasOwner ? "owned-chat" : null,
       serverChatAssistantKind: hasOwner ? "character" : null,
       serverChatAssistantId: hasOwner ? "owned" : null,
@@ -7182,8 +7290,33 @@ it.each(["tracked_character", "overlay", "fresh_character"])(
         "Character context"
       )
       if (mode === "fresh_character") {
-        expect(screen.queryByRole("link", { name: "Edit expressions" })).not.toBeInTheDocument()
+        expect(
+          screen.queryByRole("link", { name: "Edit expressions" })
+        ).not.toBeInTheDocument()
+        expect(
+          await screen.findByText("Verified owned opening", { selector: "div" })
+        ).toBeInTheDocument()
+        expect(
+          screen.getByRole("button", { name: "Start with this greeting" })
+        ).toBeEnabled()
+        expect(nativeSetupFixture.getCharacter).toHaveBeenCalledWith(
+          "owned",
+          expect.objectContaining({ requestScope })
+        )
+      } else {
+        expect(
+          screen.queryByText("Verified owned opening", { exact: true })
+        ).not.toBeInTheDocument()
+        expect(
+          screen.queryByRole("button", { name: "Start with this greeting" })
+        ).not.toBeInTheDocument()
+        expect(nativeSetupFixture.getCharacter).not.toHaveBeenCalled()
       }
+      expect(source.messages).toBe(originalMessages)
+      expect(source.messages).toEqual(originalTranscript)
+      expect(source.history).toEqual(originalHistory)
+      expect(onSubmitMock).not.toHaveBeenCalled()
+      expect(createChatCompletionMock).not.toHaveBeenCalled()
     } finally {
       view.unmount()
     }

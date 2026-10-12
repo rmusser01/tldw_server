@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, act, waitFor } from "@testing-library/react"
+import { render, screen, act } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import { PlaygroundChat } from "../PlaygroundChat"
-import type { Character } from "@/types/character"
-
-const mirroredCharacter = vi.hoisted(() => ({ value: null as Character | null }))
 
 const queryState = vi.hoisted(() => ({
   chatModels: [] as any[],
@@ -80,6 +77,9 @@ vi.mock("@tanstack/react-query", () => ({
       return {
         data: queryState.chatModels,
         isFetched: queryState.chatModelsFetched,
+        isSuccess: queryState.chatModelsFetched,
+        isFetching: !queryState.chatModelsFetched,
+        isError: false,
         refetch: vi.fn()
       }
     }
@@ -105,10 +105,6 @@ vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => useMessageOptionState.value
 }))
 
-vi.mock("@/hooks/useSelectedCharacter", () => ({
-  useSelectedCharacter: () => [mirroredCharacter.value]
-}))
-
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
     success: vi.fn(),
@@ -130,21 +126,37 @@ vi.mock("@/components/Common/Playground/Message", () => ({
   PlaygroundMessage: () => null
 }))
 
-describe("PlaygroundChat selected server chat load state", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    queryState.chatModels = []
-    queryState.chatModelsFetched = true
-    queryState.providersStatus = undefined
-    useMessageOptionState.value = {
-      ...useMessageOptionState.value,
-      messages: [],
-      serverChatId: "chat-1",
-      serverChatLoadState: "failed",
-      serverChatLoadError: "Failed to load conversation."
+beforeEach(() => {
+  vi.clearAllMocks()
+  queryState.chatModels = []
+  queryState.chatModelsFetched = true
+  queryState.providersStatus = undefined
+  useMessageOptionState.value = {
+    ...useMessageOptionState.value,
+    messages: [],
+    serverChatId: "chat-1",
+    serverChatLoadState: "failed",
+    serverChatLoadError: "Failed to load conversation."
+  }
+  Object.assign(useMessageOptionState.value, {
+    selectedAssistant: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatCharacterId: null,
+    serverChatMetaLoaded: false,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
     }
   })
+})
 
+describe("PlaygroundChat selected server chat load state", () => {
   it("uses the tighter empty-state top spacing when no messages are present", () => {
     queryState.chatModels = [
       {
@@ -171,9 +183,9 @@ describe("PlaygroundChat selected server chat load state", () => {
     )
 
     const emptyState = screen.getByTestId("playground-empty")
-    expect(emptyState.parentElement).toHaveClass("mt-4")
+    expect(emptyState.parentElement).toHaveClass("mt-1", "sm:mt-4")
     expect(emptyState.parentElement).not.toHaveClass("mt-8")
-    expect(emptyState.parentElement?.parentElement).toHaveClass("pt-8")
+    expect(emptyState.parentElement?.parentElement).toHaveClass("pt-1", "sm:pt-8")
     expect(emptyState.parentElement?.parentElement).not.toHaveClass("pt-16")
   })
 
@@ -352,7 +364,6 @@ afterEach(() => { vi.useRealTimers() })
 
 it("UAT355: a plain chat does not gain a greeting picker from a cross-tab mirror", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-  mirroredCharacter.value = null
   Object.assign(useMessageOptionState.value, {
     historyId: null,
     serverChatId: null,
@@ -378,12 +389,15 @@ it("UAT355: a plain chat does not gain a greeting picker from a cross-tab mirror
       <PlaygroundChat />
     </MemoryRouter>
   )
-  mirroredCharacter.value = {
-    id: "foreign-robot",
-    name: "Foreign Robot",
-    greeting: "Foreign greeting",
-    system_prompt: "Foreign prompt"
-  }
+  Object.assign(useMessageOptionState.value, {
+    selectedAssistant: {
+      kind: "character",
+      id: "foreign-robot",
+      name: "Foreign Robot",
+      greeting: "Foreign greeting",
+      system_prompt: "Foreign prompt"
+    }
+  })
   view.rerender(
     <MemoryRouter>
       <PlaygroundChat />
@@ -397,10 +411,9 @@ it("UAT355: a plain chat does not gain a greeting picker from a cross-tab mirror
     .toEqual([])
   expect.soft(screen.queryByText("Include greeting in context")).toBeNull()
   view.unmount()
-  mirroredCharacter.value = null
 })
 it.each([null, "owned-chat"])(
-  "UAT355: preserves owned Character greeting for chat %s",
+  "UAT355: leaves owned Character greeting controls with the composer for chat %s",
   async (chatId) => {
     const selection = {
       kind: "character",
@@ -409,7 +422,6 @@ it.each([null, "owned-chat"])(
       greeting: "Owned greeting",
       metadata: { selectionMode: "tracked" }
     }
-    mirroredCharacter.value = selection
     Object.assign(useMessageOptionState.value, {
       historyId: null,
       serverChatId: chatId,
@@ -436,14 +448,15 @@ it.each([null, "owned-chat"])(
       </MemoryRouter>
     )
     try {
-      await waitFor(() =>
-        expect(
-          screen.getAllByText("Owned greeting", { exact: true }).length
-        ).toBeGreaterThan(0)
+      await act(async () => {})
+      expect(screen.queryAllByText("Owned greeting", { exact: true })).toEqual(
+        []
       )
+      expect(
+        screen.queryByRole("button", { name: "Start with this greeting" })
+      ).not.toBeInTheDocument()
     } finally {
       view.unmount()
-      mirroredCharacter.value = null
     }
   }
 )
