@@ -275,3 +275,86 @@ async def test_translation_prompt_store_failure_is_outside_provider_error_mappin
         )
 
     assert exc_info.value is failure
+
+
+@pytest.mark.asyncio
+async def test_translation_analyze_runs_off_the_event_loop_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sync analyze call runs on a worker thread, where it can be quota-checked (spec §4b)."""
+    import threading
+
+    seen: list[int] = []
+
+    def capture_analyze(**kwargs: object) -> str:
+        """Record the thread and answer."""
+        seen.append(threading.get_ident())
+        return "Bonjour"
+
+    monkeypatch.setattr(translate_module, "analyze", capture_analyze)
+
+    await translate_module.translate_text(_request(), current_user=SimpleNamespace(id=1), db=_PromptDatabase())
+
+    assert seen and seen[0] != threading.get_ident()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_translate_returns_402_and_calls_no_provider_when_llm_quota_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """/translate has no boundary check: the refusal comes from the provider call, and the handler passes it on."""
+    from collections.abc import Iterable
+    from typing import Any
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+    from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
+    from tldw_Server_API.app.core.Usage.llm_call_context import bind_llm_call_user
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_calls
+
+    refuse_llm_calls(monkeypatch)
+    provider_calls: list[dict[str, Any]] = []
+
+    class _CountingProvider(ChatProvider):
+        """A provider that records every request it receives."""
+
+        name = "openai"
+
+        def capabilities(self) -> dict[str, Any]:
+            """Streaming is supported."""
+            return {"supports_streaming": True}
+
+        def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+            """Record the call and answer."""
+            provider_calls.append(request)
+            return {"choices": [{"message": {"content": "Bonjour"}}]}
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Unused."""
+            return iter(())
+
+    registry = ChatProviderRegistry(include_defaults=False)
+    registry.register_adapter("openai", _CountingProvider)
+    monkeypatch.setattr(summarization_module, "get_registry", lambda: registry)
+
+    async def _user() -> SimpleNamespace:
+        """Authenticate user 1 and bind them as the LLM call user, as authentication does through the scope."""
+        bind_llm_call_user(1)
+        return SimpleNamespace(id=1)
+
+    app = FastAPI()
+    app.include_router(translate_module.router, prefix="/api/v1")
+    app.dependency_overrides[get_request_user] = _user
+    app.dependency_overrides[get_prompts_db_for_user] = lambda: _PromptDatabase()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/translate",
+            json={"text": "Hello", "target_language": "French", "provider": "openai", "model": "gpt-test"},
+        )
+
+    assert_llm_quota_402(response)
+    assert provider_calls == []

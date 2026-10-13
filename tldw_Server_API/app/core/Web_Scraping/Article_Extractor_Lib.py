@@ -413,13 +413,14 @@ async def scrape_and_summarize_multiple(
                             article_custom_prompt = summary_prompt_overrides.get("user", article_custom_prompt)
 
                         # Summarize the content using the summarize function
-                        summary = analyze(
+                        summary = await asyncio.to_thread(
+                            analyze,
                             input_data=content,
                             custom_prompt_arg=article_custom_prompt,
                             api_name=api_name,
                             api_key=api_key,
                             temp=temperature,
-                            system_message=system_message_final
+                            system_message=system_message_final,
                         )
                         article['summary'] = summary
                         log_counter("article_summarized", labels={"success": "true", "url": url})
