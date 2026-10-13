@@ -983,6 +983,88 @@ def test_batch_geval_uses_stable_and_webhook_user_identity(monkeypatch):
     assert captured["runtime_closed"] is True
 
 
+_LLM_EVAL_BODIES = {
+    "geval": {
+        "source_text": "source text long enough",
+        "summary": "summary text long enough",
+        "metrics": ["coherence"],
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+    "rag": {
+        "query": "What is context precision?",
+        "retrieved_contexts": ["Precision measures retrieved relevance."],
+        "generated_response": "It measures retrieved relevance.",
+        "metrics": ["context_precision"],
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+    "response-quality": {
+        "prompt": "What is RAG?",
+        "response": "RAG retrieves context.",
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+}
+
+
+@pytest.mark.parametrize("route", ["geval", "rag", "response-quality"])
+def test_sync_evaluation_llm_quota_refuses_before_the_rate_limiter(monkeypatch, route):
+    """An over-quota user gets the 402 before the per-user rate limiter reserves anything."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    app = _build_eval_only_app(monkeypatch)
+
+    def _limiter_must_not_run(_uid):
+        raise AssertionError("the limiter ran")
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_must_not_run)
+    refuse_llm_work(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/evaluations/{route}", json=_LLM_EVAL_BODIES[route])
+
+    assert_llm_quota_402(response)
+
+
+def test_batch_evaluation_llm_quota_refuses_llm_types_and_admits_propositions(monkeypatch):
+    """A geval batch is refused with the 402; a propositions batch makes no LLM call and is not."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    app = _build_eval_only_app(monkeypatch)
+
+    class _AllowLimiter:
+        async def check_rate_limit(self, *_args, **_kwargs):
+            return True, {}
+
+    class _PropositionsService:
+        async def evaluate_propositions(self, **_kwargs):
+            return {"evaluation_id": "eval_props_1", "results": {"score": 1.0}}
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr(
+        eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _PropositionsService()
+    )
+    refuse_llm_work(monkeypatch)
+
+    with TestClient(app) as client:
+        refused = client.post(
+            "/api/v1/evaluations/batch",
+            json={"evaluation_type": "geval", "parallel_workers": 1, "items": [_LLM_EVAL_BODIES["geval"]]},
+        )
+        admitted = client.post(
+            "/api/v1/evaluations/batch",
+            json={
+                "evaluation_type": "propositions",
+                "parallel_workers": 1,
+                "items": [{"extracted": ["Claim A"], "reference": ["Claim A"], "method": "jaccard", "threshold": 0.5}],
+            },
+        )
+
+    assert_llm_quota_402(refused)
+    assert admitted.status_code != 402, admitted.text
+
+
 def test_batch_client_teardown_poison_isolated_before_next_credential_resolution(
     monkeypatch,
 ):

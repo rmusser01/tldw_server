@@ -120,6 +120,11 @@ class UserProfileQuotas(BaseModel):
         None,
         description="Prompt Studio quota summary",
     )
+    llm: Optional[dict[str, Any]] = Field(
+        None,
+        description="LLM tokens used this month and USD spent today and this month, with the user's LLM limits; "
+        "an unset limit is absent",
+    )
 
 
 class UserProfileRawOverrideEntry(BaseModel):

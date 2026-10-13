@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
@@ -2459,7 +2460,11 @@ def get_flashcard_assistant(
         raise map_db_error_to_http(exc, default_detail="Failed to fetch study assistant context") from exc
 
 
-@router.post("/{card_uuid}/assistant/respond", response_model=StudyAssistantRespondResponse)
+@router.post(
+    "/{card_uuid}/assistant/respond",
+    response_model=StudyAssistantRespondResponse,
+    dependencies=[Depends(require_llm_quota)],
+)
 async def respond_flashcard_assistant(
     card_uuid: str,
     payload: StudyAssistantRespondRequest,

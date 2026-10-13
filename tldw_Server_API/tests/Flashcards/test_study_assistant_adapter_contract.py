@@ -221,6 +221,8 @@ def study_route(request, study_database, provider_boundary):
     app.include_router(flashcards.router, prefix="/api/v1")
     app.include_router(quizzes.router, prefix="/api/v1")
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
+    # The study-assistant routes depend on require_llm_quota, which resolves the user itself.
+    app.dependency_overrides[flashcards.get_request_user] = lambda: SimpleNamespace(id=1)
     app.dependency_overrides[get_study_assistant_guidance] = lambda: "Stay with the study context."
     with TestClient(app, raise_server_exceptions=False) as client:
         initial = client.get(path)

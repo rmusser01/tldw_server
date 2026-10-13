@@ -20,6 +20,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
 
 def _lower_keys(d: dict) -> dict:
     out = {}
@@ -164,6 +166,11 @@ DEFAULT_PRICING: dict[str, dict[str, dict[str, float]]] = {
         # Default to small sentinel for hosted models; often free/varied
         "default": {"prompt": 0.05e-3, "completion": 0.05e-3}
     },
+    # Local providers cost nothing by default (LLM usage accounting spec §6). Change them in model_pricing.json.
+    **{
+        provider: {"default": {"prompt": 0.0, "completion": 0.0, "estimated": False}}
+        for provider in ("llama.cpp", "kobold", "ooba", "tabbyapi", "vllm", "local-llm", "ollama", "aphrodite", "mlx")
+    },
 }
 
 
@@ -257,7 +264,7 @@ class PricingCatalog:
         Optional ``cache_read`` and ``cache_write`` rates are present only when
         supplied by defaults or overrides.
         """
-        prov = (provider or "").lower()
+        prov = canonical_provider_name(provider or "")
         mdl = (model or "").lower()
         prov_map = self._catalog.get(prov, {})
 
@@ -266,12 +273,17 @@ class PricingCatalog:
 
         best_match: tuple[str, dict] | None = None
         for mk, rates in prov_map.items():
+            if mk == "default":
+                continue
             if mdl and mk and (mk in mdl or mdl in mk):
                 if best_match is None or len(mk) > len(best_match[0]):
                     best_match = (mk, rates)
         if best_match is not None:
             return self._entry_rate_details(best_match[1], estimated=True)
 
+        if "default" in prov_map:
+            # A provider-wide price (LLM usage accounting spec §6): local providers ship one at zero.
+            return self._entry_rate_details(prov_map["default"], estimated=True)
         return _unknown_billable_rate(), True
 
     @staticmethod
@@ -398,7 +410,8 @@ def list_provider_models(provider: str) -> list[str]:
             [
                 name
                 for name, meta in models_map.items()
-                if not (isinstance(meta, dict) and meta.get("placeholder"))
+                # "default" is a provider-wide price, not a model (LLM usage accounting spec §6).
+                if name != "default" and not (isinstance(meta, dict) and meta.get("placeholder"))
             ]
         )
     except Exception:

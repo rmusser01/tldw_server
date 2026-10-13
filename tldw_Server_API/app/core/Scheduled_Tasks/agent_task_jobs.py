@@ -10,7 +10,11 @@ Phase-1 boundary (tldw_chatbook ADR-077, decision 4, owner-accepted):
 ``recurring_question`` runs generate their answer through the registered
 executor. ``agent_task`` runs fail closed before executor lookup unless
 both deployment certification and the separately delivered execution stack
-are ready. Tool-using configurations are also rejected independently. These
+are ready. Tool-using configurations are also rejected independently,
+with one routed exception (ADR-184 read-only envelope): an ``agent_task``
+whose requested tool names ALL sit in the owner's read-only eligible set
+dispatches to the executor, which runs them inside the bounded envelope;
+every other tool request terminates ``approval_required``. These
 boundaries are enforced HERE, by the consumer, not assumed from the
 definition or scheduler.
 
@@ -66,8 +70,9 @@ NOTIFICATION_KIND_BY_STATUS = {
     "failed": "automation_run_failed",
     "timed_out": "automation_run_timed_out",
     "skipped": "automation_run_skipped",
-    # ADR-184 2A: terminal outcome for tool-requesting definitions until the
-    # read-only envelope (and later, queued escalation) exists.
+    # ADR-184 2A: terminal outcome for tool requests the read-only envelope
+    # cannot satisfy — refused at this gate, or classified by the envelope
+    # at runtime (and later, queued escalation).
     "approval_required": "automation_run_approval_required",
 }
 
@@ -81,6 +86,16 @@ RESULT_SUMMARY_MAX_CHARS = 1000
 
 #: Definition families executable in phase 1 (side-effect-free only).
 _PHASE1_EXECUTABLE_FAMILIES = {"recurring_question", "agent_task"}
+
+#: ADR-184 read-only envelope outcome contract: the ``agent_task``
+#: executor surfaces an envelope ``approval_required`` classification as a
+#: ``RuntimeError`` whose message starts with this exact prefix. This
+#: consumer's executor-exception handler recognizes the prefix and
+#: finishes the run ``approval_required`` (terminal, health-neutral)
+#: instead of ``failed``. Defined HERE — the authority on the outcome
+#: vocabulary — and imported by ``automation_executors`` so the raiser and
+#: the recognizer can never drift apart.
+APPROVAL_REQUIRED_ERROR_PREFIX = "approval_required:"
 
 
 Executor = Callable[[DefinitionRow, dict[str, Any]], Awaitable[str]]
@@ -110,6 +125,39 @@ def _phase1_tools_requested(definition: DefinitionRow) -> bool:
     if isinstance(tools, str) and tools.strip().lower() not in ("", "false", "none", "0"):
         return True
     return bool(isinstance(tools, bool) and tools)
+
+
+def _requested_tool_names(definition: DefinitionRow) -> set[str]:
+    """Return the concrete tool names the definition's input requests.
+
+    Mirrors :func:`_phase1_tools_requested`'s key reading (``tools`` /
+    ``allowed_tools`` / ``enable_tools``). A truthy NON-list request (for
+    example ``"tools": true``) carries no concrete names to check against
+    the envelope's eligible set, so it yields an empty set and the tools
+    gate falls back to its ``approval_required`` terminal.
+    """
+    config = definition.input if isinstance(definition.input, dict) else {}
+    tools = config.get("tools") or config.get("allowed_tools") or config.get("enable_tools")
+    if isinstance(tools, (list, tuple, set)):
+        return {str(name).strip() for name in tools if str(name).strip()}
+    return set()
+
+
+async def derive_read_only_eligible_tools(owner_id: int) -> list[dict[str, Any]]:
+    """Routing-only eligible-set derivation for the tools gate (ADR-184).
+
+    Delegates to ``automation_executors.derive_read_only_eligible_tools``
+    (the single source of truth; fails closed to ``[]``). The import is
+    deferred to call time because ``automation_executors`` imports this
+    module's executor registry at import time. The gate result is used for
+    ROUTING only — the executor re-derives the authoritative set when it
+    runs. Tests fake the catalogue by patching THIS name.
+    """
+    from tldw_Server_API.app.core.Scheduled_Tasks.automation_executors import (
+        derive_read_only_eligible_tools as executor_derivation,
+    )
+
+    return await executor_derivation(owner_id)
 
 
 def _normalize_slot_utc(value: Any) -> str:
@@ -349,10 +397,24 @@ async def handle_agent_task_job(
 
         # ADR-184 2A boundary, enforced by the consumer (not assumed): a
         # tool-requesting definition terminates approval_required (a terminal
-        # outcome with a pass-back notification), not a phase skip -- the
-        # read-only envelope routes here until it exists, and side-effecting
-        # calls will keep this outcome at runtime.
-        if _phase1_tools_requested(definition):
+        # outcome with a pass-back notification), not a phase skip. The
+        # read-only envelope now routes the one eligible slice THROUGH: an
+        # agent_task whose requested names are ALL in the owner's read-only
+        # eligible set dispatches to the executor (which runs the bounded
+        # envelope); every other tool request — including every
+        # recurring_question — keeps this terminal outcome.
+        requested = _requested_tool_names(definition)
+        eligible_names: set[str] = set()
+        if definition.family == "agent_task" and requested:
+            # Routing only: the executor re-derives the authoritative set
+            # at execution time. The payload key produced below is an audit
+            # hint the executor deliberately never requires.
+            eligible = await derive_read_only_eligible_tools(user_id)
+            eligible_names = {entry["name"] for entry in eligible}
+        if definition.family == "agent_task" and requested and requested <= eligible_names:
+            payload = {**payload, "_envelope_eligible": sorted(eligible_names)}
+            # Fall through to executor dispatch with the enriched payload.
+        elif _phase1_tools_requested(definition):
             _finish(
                 sdb,
                 cdb,
@@ -416,6 +478,8 @@ async def handle_agent_task_job(
         timed_out = False
         result_text: str | None = None
         error_text: str | None = None
+        approval_required = False
+        approval_note: str | None = None
         jobs_job_id = str(job.get("id")) if job.get("id") is not None else None
         try:
             executor_task = asyncio.ensure_future(executor(definition, payload))
@@ -439,26 +503,55 @@ async def handle_agent_task_job(
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - one bad run must not kill the worker
-            error_text = f"{type(exc).__name__}: {exc}"
-            logger.warning(
-                "Automation run executor failed for definition {}: {}",
-                definition_id,
-                error_text,
-                definition_id=definition_id,
-                user_id=user_id,
-                run_id=run["id"],
-                job_id=job.get("id"),
-            )
+            # ADR-184 envelope contract: the agent_task executor surfaces an
+            # envelope approval_required classification as an error carrying
+            # APPROVAL_REQUIRED_ERROR_PREFIX. That is a terminal approval
+            # outcome (health-neutral, approval notification), not a failed
+            # run — everything else records honestly as a failure.
+            message = str(exc)
+            if message.startswith(APPROVAL_REQUIRED_ERROR_PREFIX):
+                approval_required = True
+                approval_note = (
+                    message[len(APPROVAL_REQUIRED_ERROR_PREFIX):].strip() or None
+                )
+            else:
+                error_text = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "Automation run executor failed for definition {}: {}",
+                    definition_id,
+                    error_text,
+                    definition_id=definition_id,
+                    user_id=user_id,
+                    run_id=run["id"],
+                    job_id=job.get("id"),
+                )
 
-        status = "timed_out" if timed_out else ("failed" if error_text else "succeeded")
+        if timed_out:
+            status = "timed_out"
+        elif approval_required:
+            status = "approval_required"
+        elif error_text:
+            status = "failed"
+        else:
+            status = "succeeded"
+        if status == "approval_required":
+            finish_error: str | None = "tools_require_read_only_envelope"
+            finish_summary = (
+                _bound_summary(approval_note) if approval_note is not None else None
+            )
+        else:
+            finish_error = error_text
+            finish_summary = (
+                _bound_summary(result_text) if result_text is not None else None
+            )
         _finish(
             sdb,
             cdb,
             definition=definition,
             run_id=run["id"],
             status=status,
-            error=error_text,
-            summary=_bound_summary(result_text) if result_text is not None else None,
+            error=finish_error,
+            summary=finish_summary,
             jobs_job_id=jobs_job_id,
             execution_timeout_seconds=execution_timeout_seconds,
             execution_claim_id=claim_id,
