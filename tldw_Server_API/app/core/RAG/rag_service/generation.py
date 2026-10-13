@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
     get_global_context_integrity_resolver,
 )
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
@@ -477,6 +478,8 @@ class LLMGenerator(BaseGenerator):
                 }
             )
 
+        except LLMQuotaExceededError:
+            raise  # the user's limit: never replaced by a fallback answer (LLM usage accounting spec §4b)
         except Exception:
             logger.error("Error generating response")
 

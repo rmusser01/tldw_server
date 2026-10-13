@@ -168,7 +168,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
@@ -3486,9 +3486,13 @@ def build_structured_http_exception(exc: StructuredGenerationError) -> HTTPExcep
 
 
 def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
-    """Return whether an HTTP error was created and bounded by this service."""
+    """Return whether an HTTP error was created and bounded by this service.
 
-    return isinstance(exc, UnsupportedMultiChoiceToolAutoexecError) or (
+    An LLM quota refusal is trusted: it is the user's limit, not a provider failure,
+    and reaches the caller as its own 402 (LLM usage accounting spec §4b).
+    """
+
+    return isinstance(exc, (UnsupportedMultiChoiceToolAutoexecError, LLMQuotaExceededError)) or (
         isinstance(exc, HTTPException)
         and trusted_local_chat_signal_kind(exc) is not None
     )
@@ -5295,6 +5299,8 @@ async def execute_streaming_call(
                                 queued=True,
                             )
                     return result
+                except LLMQuotaExceededError:
+                    raise  # the user's limit, not the provider's health: no failure, no fallback
                 except Exception as proc_error:  # noqa: BLE001 - adapter trust boundary
                     latency = time.time() - local_start
                     metrics.track_llm_call(
@@ -6901,6 +6907,8 @@ async def _execute_non_stream_call_impl(
                                 queued=True,
                             )
                     return result
+                except LLMQuotaExceededError:
+                    raise  # the user's limit, not the provider's health: no failure, no fallback
                 except _CHAT_NONCRITICAL_EXCEPTIONS as proc_error:
                     latency = time.time() - local_start
                     metrics.track_llm_call(

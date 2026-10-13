@@ -328,6 +328,8 @@ async def generate_document_insights(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LLM provider configuration error",
         ) from e
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as e:
         logger.error("LLM call failed for document insights")
         raise HTTPException(

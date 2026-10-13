@@ -4320,3 +4320,23 @@ async def test_unified_optional_sync_stage_owns_worker_until_actual_exit(
         "mark-used",
         "runtime-close",
     ]
+
+
+@pytest.mark.asyncio
+async def test_answer_generator_never_replaces_a_quota_refusal_with_a_fallback_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a credential runtime, a provider failure falls back to an extractive answer; a refusal does not (§4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    async def refused_chat_call(**kwargs: Any) -> None:  # noqa: ARG001
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", refused_chat_call)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await AnswerGenerator(provider="anthropic", model="claude-test").generate(query="question", context="evidence")

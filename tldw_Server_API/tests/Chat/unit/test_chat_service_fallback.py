@@ -7284,3 +7284,36 @@ def test_merge_api_keys_prefers_dynamic_over_module():
     )
     assert raw_anthropic == "module-anthropic"
     assert normalized_anthropic == "module-anthropic"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("queued", [False, True])
+async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(monkeypatch, queued):
+    """An LLM quota refusal reaches the caller as its 402, records no provider failure and starts no fallback (§4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+    )
+    metrics = _DummyMetrics()
+    provider_manager = _DummyProviderManager()
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: _ProcessorQueue() if queued else None)
+
+    def refused_llm_call():
+        raise refusal
+
+    with pytest.raises(LLMQuotaExceededError) as captured:
+        await execute_non_stream_call(
+            **_nonstream_call_kwargs(
+                llm_call_func=refused_llm_call,
+                provider_manager=provider_manager,
+                metrics=metrics,
+                refresh_provider_params=lambda _provider: ({}, None),
+                queue_execution_enabled=queued,
+            )
+        )
+
+    assert captured.value.status_code == 402
+    assert captured.value.detail["error"] == "limit_exceeded"
+    assert provider_manager.failure_records == []
+    assert provider_manager.fallback_requests == []
