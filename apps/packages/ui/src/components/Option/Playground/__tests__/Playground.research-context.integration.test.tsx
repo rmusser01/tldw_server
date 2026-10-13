@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render as renderComponent, renderHook, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { Playground } from "../Playground"
 import { useStoreMessageOption } from "@/store/option"
@@ -578,11 +580,22 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
+let queryClient: QueryClient
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
+vi.mock("@/services/tldw-server", async original => ({
+  ...await original<typeof import("@/services/tldw-server")>(),
+  fetchChatModels: async () => []
+}))
+
 // Integration tests render the full Playground tree (4k+ lines with many
 // children); individual tests normally take 1-3.5s but can exceed the 5s
 // default timeout under parallel CI load, so give them explicit headroom.
 describe("Playground research context integration", { timeout: 20000 }, () => {
+  afterEach(() => queryClient.clear())
   beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     vi.clearAllMocks()
     historySelectionState.controller = null
     historySelectionState.owner = {

@@ -1,3 +1,4 @@
+import { createDefaultActorSettings } from "@/types/actor"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
@@ -183,7 +184,7 @@ const {
   ]
 }))
 
-const quickPopupFixture = vi.hoisted(() => ({ send: vi.fn(), id: "quick-chat-session-default", reply: "Quick chat response", sessionId: null as string | null, characterId: null as string | number | null }))
+const quickPopupFixture = vi.hoisted(() => ({ retain: vi.fn(), send: vi.fn(), id: "quick-chat-session-default", reply: "Quick chat response", sessionId: null as string | null, characterId: null as string | number | null }))
 const quickOwnerCurrent = () => true
 const quickOwnerScope = { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: "account-a" }
 vi.mock("@/hooks/useChatDraftOwner", async original => ({
@@ -191,13 +192,28 @@ vi.mock("@/hooks/useChatDraftOwner", async original => ({
   useChatDraftOwner: () => ({ ownerKey: "a".repeat(64), serverScopeKey: "account-a", requestScope: quickOwnerScope, isCurrent: quickOwnerCurrent, verificationState: "ready", retryVerification: vi.fn() })
 }))
 // Renderer-level IO adapters; actual native admission, settlement and durability have separate integration regressions.
+vi.mock("@/hooks/useDraftPersistence", () => ({
+  useDraftPersistence: () => ({ draftReady: true, draftSaved: true, retainDraft: quickPopupFixture.retain, clearDraft: vi.fn() })
+}))
+vi.mock("@/services/pending-chat-promotion", async original => ({
+  ...await original<typeof import("@/services/pending-chat-promotion")>(),
+  listChatCreationRecovery: async () => ({ attempts: [], unavailable: false }),
+  readChatCreationRecovery: async () => null
+}))
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: async ({ target }: { target: unknown }) => ({
+    target, settings: createDefaultActorSettings(), originalRecord: null,
+    origin: "default", profileUnavailable: false
+  })
+}))
 vi.mock("@/hooks/chat/native-history-character-send", async original => ({
   ...await original<typeof import("@/hooks/chat/native-history-character-send")>(), sendNativeHistoryCharacter: quickPopupFixture.send
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async original => ({
   ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
   useHistorySelection: () => ({ reset: () => { quickPopupFixture.sessionId = null },
-    getCurrent: () => ({ owner: quickPopupFixture.sessionId ? { kind: "native", conversation_id: quickPopupFixture.sessionId, request_scope: quickOwnerScope, scope: { type: "global" }, validate_lease: () => true } : null }),
+    getCurrent: () => ({ status: quickPopupFixture.sessionId ? "ready" : "idle", view: null, owner: quickPopupFixture.sessionId ? { kind: "native", conversation_id: quickPopupFixture.sessionId, request_scope: quickOwnerScope, scope: { type: "global" }, validate_lease: () => true } : null }),
     fence: () => () => true,
     prepareExpansionPath: async () => `/chat?chatId=${quickPopupFixture.sessionId}&client_session_id=popup-ui-fixture`
   })
@@ -324,9 +340,11 @@ vi.mock("../CharacterEditorForm", async () => {
 
 const makeUseQueryResult = (value: Record<string, unknown>) => ({
   data: undefined,
-  status: "success",
+  status: value.status ?? "success",
+  isSuccess: (value.status ?? "success") === "success",
+  isError: value.status === "error",
   error: null,
-  isPending: false,
+  isPending: value.status === "pending",
   isFetching: false,
   isLoading: false,
   refetch: vi.fn(),
@@ -371,6 +389,7 @@ const findEditSubmitButton = async (timeout = 15000) =>
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    quickPopupFixture.retain.mockReset().mockResolvedValue(true)
     quickPopupFixture.id = "quick-chat-session-default"
     quickPopupFixture.reply = "Quick chat response"
     quickPopupFixture.sessionId = null
@@ -423,7 +442,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -688,7 +707,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1036,7 +1055,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1098,7 +1117,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1170,7 +1189,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1219,7 +1238,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1338,7 +1357,7 @@ describe("CharactersManager first-use onboarding", () => {
           }
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1414,7 +1433,7 @@ describe("CharactersManager first-use onboarding", () => {
           }
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1509,7 +1528,7 @@ describe("CharactersManager first-use onboarding", () => {
           }
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1579,7 +1598,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [galleryRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1623,7 +1642,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1702,7 +1721,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1751,7 +1770,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1814,7 +1833,7 @@ describe("CharactersManager first-use onboarding", () => {
           status: "success"
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1874,7 +1893,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1944,7 +1963,7 @@ describe("CharactersManager first-use onboarding", () => {
           status: "success"
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2025,7 +2044,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2068,7 +2087,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2153,7 +2172,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2233,7 +2252,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2308,7 +2327,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2400,7 +2419,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2450,7 +2469,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2516,7 +2535,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2632,7 +2651,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2681,7 +2700,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2728,7 +2747,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2813,7 +2832,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2892,7 +2911,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2972,7 +2991,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3081,7 +3100,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3226,7 +3245,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3367,7 +3386,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: listCharactersData, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
@@ -3505,7 +3524,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3592,7 +3611,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3753,7 +3772,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3801,7 +3820,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3865,7 +3884,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3924,7 +3943,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3983,7 +4002,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
@@ -4018,6 +4037,31 @@ describe("CharactersManager first-use onboarding", () => {
     expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
   }, 30000)
 
+  it("keeps the popup draft and does not send when private retention fails", async () => {
+    const user = userEvent.setup()
+    const characterRecord = { id: "101", name: "Retention Character", version: 1 }
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+    quickPopupFixture.retain.mockResolvedValue(false)
+    useStorageMock.mockImplementation((key: unknown, initial: unknown) => [
+      resolveStorageKey(key) === "selectedModel" ? "openai:mock-chat-model" : initial ?? null,
+      vi.fn(), { isLoading: false }
+    ])
+    useQueryMock.mockImplementation((opts: any) => makeUseQueryResult({ data:
+      opts.queryKey[0] === "tldw:listCharacters" ? [characterRecord] :
+      opts.queryKey[0] === "playground:chatModels" ? [{ model: "mock-chat-model", provider: "openai", is_configured: true }] : []
+    }))
+    render(<CharactersManager />)
+    await user.click(await screen.findByRole("button", { name: /More actions/i }))
+    await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
+    const input = await screen.findByPlaceholderText("Ask this character a quick question...")
+    await user.type(input, "Keep this exact draft")
+    await user.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(quickPopupFixture.retain).toHaveBeenCalled())
+    expect(quickPopupFixture.send).not.toHaveBeenCalled()
+    expect(input).toHaveValue("Keep this exact draft")
+    expect(navigateMock).not.toHaveBeenCalled()
+  }, 30000)
+
   it("shows an in-context blocker when quick chat has no chat model", async () => {
     const user = userEvent.setup()
     const characterRecord = {
@@ -4043,7 +4087,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4105,7 +4149,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4181,7 +4225,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: [{ model: "implicit-catalog-model", provider: "openai" }]
         })
@@ -4234,7 +4278,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: undefined,
           status: "pending",
@@ -4302,7 +4346,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
@@ -4367,7 +4411,7 @@ describe("CharactersManager first-use onboarding", () => {
           ]
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4430,7 +4474,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:characterPreviewWorldBooks") {
         return makeUseQueryResult({ data: [] })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4475,7 +4519,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:characterPreviewWorldBooks") {
         return makeUseQueryResult({ data: [] })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4517,7 +4561,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:characterPreviewWorldBooks") {
         return makeUseQueryResult({ data: [], isFetching: true })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4569,7 +4613,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
@@ -4616,7 +4660,7 @@ describe("CharactersManager first-use onboarding", () => {
     useQueryMock.mockImplementation((opts: { queryKey?: readonly unknown[] }) => {
       const key = opts?.queryKey?.[0]
       if (key === "tldw:listCharacters") return makeUseQueryResult({ data: [record] })
-      if (key === "getModelsForFieldGeneration") return makeUseQueryResult({ data: [{ model: "gpt-4.1", provider: "openai", is_configured: true }] })
+      if (key === "playground:chatModels") return makeUseQueryResult({ data: [{ model: "gpt-4.1", provider: "openai", is_configured: true }] })
       return makeUseQueryResult({ data: [] })
     })
     render(<CharactersManager />)
@@ -4645,7 +4689,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4694,7 +4738,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4745,7 +4789,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4880,7 +4924,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4967,7 +5011,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -5041,7 +5085,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -5122,7 +5166,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {

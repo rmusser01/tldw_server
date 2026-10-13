@@ -171,7 +171,10 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({ ArtifactsPanel: (
 vi.mock("@/hooks/useCharacterGreeting", () => ({ useCharacterGreeting: () => undefined }))
 vi.mock("@/hooks/useLoadLocalConversation", () => ({ useLoadLocalConversation: () => vi.fn() }))
 vi.mock("@/services/app", () => ({ webUIResumeLastChat: async () => false }))
-vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
+vi.mock("@/services/chat-settings", async original => ({
+  ...await original<typeof import("@/services/chat-settings")>(),
+  syncChatSettingsForServerChat: async () => null
+}))
 vi.mock("@/services/chat-surface-scope", async original => ({ ...await original<typeof import("@/services/chat-surface-scope")>(), buildChatSurfaceScopeKeyFromConfig: () => "scope-A" }))
 vi.mock("@/services/tldw-server", async original => ({ ...await original<typeof import("@/services/tldw-server")>(), fetchChatModels: async () => [] }))
 vi.mock("@/services/tldw/TldwAuth", () => ({
@@ -459,7 +462,8 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByText(/open linked conversation/i))
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
     expect(atNavigation[0]).toMatchObject({ chat: "cedar", selection: { kind: "character", id: "4", metadata: { selectionMode: "tracked" } } })
-    expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4, serverChatVersion: 3, serverChatMetaLoaded: true, temporaryChat: false })
+    // H1 publishes identity/messages first; metadata admission remains pending at navigation.
+    expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4, serverChatVersion: 3, serverChatMetaLoaded: false, temporaryChat: false })
     expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "q" }, { serverMessageId: "a", message: "08:30" }])
     expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", historyId: null, trackedCharacterId: "4", scopeKey: "scope-A" })
   })
