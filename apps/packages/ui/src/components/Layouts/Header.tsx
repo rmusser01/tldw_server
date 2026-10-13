@@ -29,6 +29,8 @@ import {
 } from "./chat-share-links"
 import { getHeaderActionPolicy } from "./header-action-policy"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
+import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
 
 type Props = {
   onToggleSidebar?: () => void
@@ -63,6 +65,13 @@ export const Header: React.FC<Props> = ({
   const { mode: themeMode, toggleDarkMode } = useDarkMode()
   const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, effectiveAssistantState } =
     useMessageOption()
+  // The session badge reports acknowledged persistence, not connectivity (CS-03).
+  const serverChatSaveStatus = useServerChatSaveStatus(serverChatId)
+  const persistenceKind = resolveChatPersistenceKind({
+    temporaryChat,
+    serverChatId,
+    serverSaveStatus: serverChatSaveStatus
+  })
   const [selectedCharacter, setSelectedCharacter] = useSelectedCharacter<Character | null>(
     null
   )
@@ -391,6 +400,7 @@ export const Header: React.FC<Props> = ({
         }
         showChatTitle={headerActionPolicy.showChatTitle}
         showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
+        persistenceKind={persistenceKind}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}

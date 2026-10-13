@@ -121,6 +121,12 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
+  /**
+   * Persisted timestamp of the last forced refresh. The in-memory cooldown
+   * alone dies with every MV3 worker suspension, which would let each wake
+   * hammer the server with refresh_openrouter=true again.
+   */
+  private readonly FORCE_COOLDOWN_KEY = "tldwModelsForceCooldown"
   private readonly CACHE_SCHEMA_VERSION = 4
   private readonly INVALIDATION_TOKEN_HISTORY_LIMIT = 64
   private storage = createSafeStorage({ area: "local" })
@@ -172,6 +178,21 @@ export class TldwModelsService {
             this.lastFetchTime = Number(cached.timestamp || 0)
             this.cacheScopeKey =
               typeof cached.scope === "string" ? cached.scope : null
+          }
+          // Hydrate the force-cooldown so a restarted worker instance still
+          // honors the cooldown window from before the suspension.
+          const persistedCooldown = await this.storage.get<
+            number | { at?: number } | null
+          >(this.FORCE_COOLDOWN_KEY)
+          const persistedAt =
+            typeof persistedCooldown === "number"
+              ? persistedCooldown
+              : Number((persistedCooldown as { at?: number } | null)?.at || 0)
+          if (
+            Number.isFinite(persistedAt) &&
+            persistedAt > this.lastForcedFetchTime
+          ) {
+            this.lastForcedFetchTime = persistedAt
           }
         } catch {
           // ignore storage read failures
@@ -233,6 +254,20 @@ export class TldwModelsService {
     await write
   }
 
+  private async persistForceCooldown(at: number): Promise<void> {
+    // Ride the serialized write queue so a blocked cache write cannot be
+    // overtaken (and vice versa); failures are best-effort only.
+    const write = this.storageWritePromise.then(async () => {
+      try {
+        await this.storage.set(this.FORCE_COOLDOWN_KEY, at)
+      } catch {
+        // Best-effort persistence; ignore errors
+      }
+    })
+    this.storageWritePromise = write
+    await write
+  }
+
   private invalidateCacheState() {
     this.invalidationGeneration += 1
     this.cachedModels = null
@@ -241,6 +276,15 @@ export class TldwModelsService {
     this.inFlightFetch = null
     this.inFlightFreshFetch = null
     this.cacheScopeKey = null
+    if (this.storageLoaded) {
+      try {
+        void (this.storage as { remove?: (key: string) => Promise<void> })
+          .remove?.(this.FORCE_COOLDOWN_KEY)
+          ?.catch(() => undefined)
+      } catch {
+        // Best-effort cooldown clear only
+      }
+    }
   }
 
   private applyInvalidationRecord(value: unknown): boolean {
@@ -415,6 +459,9 @@ export class TldwModelsService {
         this.lastFetchTime = Date.now()
         if (forceRefresh) {
           this.lastForcedFetchTime = this.lastFetchTime
+          // Queue the cooldown marker before the cache record so the cache
+          // record stays the final durable write in the serialized queue.
+          void this.persistForceCooldown(this.lastForcedFetchTime)
         }
         // Cookie catalogs require live auth and never hydrate offline.
         if (!cookieSession) await this.persistCache(fetchGeneration)
@@ -712,6 +759,16 @@ export class TldwModelsService {
     options?: { refreshOpenRouter?: boolean }
   ): Promise<ModelInfo[]> {
     return await this.getModels(force, options)
+  }
+
+  /**
+   * Whether the persisted catalog is present and inside its TTL, without
+   * issuing any network traffic. Used to no-op periodic warm-up work.
+   */
+  async isCatalogFresh(): Promise<boolean> {
+    await this.ensureStorageLoaded()
+    if (!this.cachedModels) return false
+    return Date.now() - this.lastFetchTime < this.CACHE_DURATION
   }
 }
 

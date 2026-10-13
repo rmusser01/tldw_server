@@ -6,7 +6,9 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -16,6 +18,28 @@ from tldw_Server_API.app.core.stt_observability_context import (
     get_opaque_stt_endpoint_id,
 )
 from tldw_Server_API.app.core.testing import is_truthy
+
+_PUBLIC_URL_POLICY: ContextVar[bool] = ContextVar("public_url_policy", default=False)
+
+
+@contextmanager
+def public_url_policy_scope(*, enabled: bool = True) -> Iterator[None]:
+    """Require public, credential-free destinations in this task and its workers.
+
+    Nested scopes cannot weaken an existing scope. asyncio.to_thread propagates
+    the context to canonical HTTP retries, robots redirects and probe guards.
+    """
+    token = _PUBLIC_URL_POLICY.set(enabled or _PUBLIC_URL_POLICY.get())
+    try:
+        yield
+    finally:
+        _PUBLIC_URL_POLICY.reset(token)
+
+
+def public_url_policy_active() -> bool:
+    """Return whether this request requires strictly public destinations."""
+    return _PUBLIC_URL_POLICY.get()
+
 
 DEFAULT_ALLOWED_SCHEMES = {"http", "https"}
 DEFAULT_ALLOWED_PORTS = (80, 443, 8080)
@@ -668,6 +692,12 @@ def evaluate_url_policy(
     sensitive_observability: bool = False,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
+    public_only = public_url_policy_active()
+    if public_only:
+        block_private_override = True
+        # The local-provider exception cannot grant authority to public capture.
+        configured_endpoint = None
+        sensitive_observability = True
     try:
         parsed = urlparse(url)
     except (TypeError, AttributeError, ValueError):
@@ -677,7 +707,9 @@ def evaluate_url_policy(
     if scheme not in DEFAULT_ALLOWED_SCHEMES:
         return URLPolicyResult(False, "Unsupported URL scheme", reason_code="unsupported_scheme")
 
-    if configured_endpoint is not None and (parsed.username is not None or parsed.password is not None):
+    if (configured_endpoint is not None or public_only) and (
+        parsed.username is not None or parsed.password is not None
+    ):
         return URLPolicyResult(False, "URL userinfo is not allowed", reason_code="userinfo_not_allowed")
 
     try:
@@ -837,6 +869,18 @@ def evaluate_url_policy(
                 "dns_changed",
             )
 
+    if public_only and (
+        not resolved_ips
+        or any(
+            not ipaddress.ip_address(ip).is_global
+            or _is_private_ip(ip)
+            or ipaddress.ip_address(ip) in _METADATA_ADDRESSES
+            for ip in resolved_ips
+        )
+    ):
+        return URLPolicyResult(
+            False, "URL resolves to a private or reserved address", resolved_ips, "address_forbidden"
+        )
     return URLPolicyResult(True, None, resolved_ips)
 
 

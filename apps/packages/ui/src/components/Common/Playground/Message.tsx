@@ -340,7 +340,62 @@ export type MessageResearchActions = {
   onFollowUp?: () => void
 }
 
-export const PlaygroundMessage = (props: Props) => {
+/**
+ * Structural comparison for `researchActions`: render sites rebuild this
+ * object per render (PlaygroundChat memoizes it, PlaygroundCompareCluster
+ * builds it inline). The callbacks only capture the research run id/query,
+ * so comparing the visible shape plus callback presence is sufficient for
+ * memoization without defeating re-renders when the actions really change.
+ */
+const isEquivalentResearchActions = (
+  prev: MessageResearchActions | undefined,
+  next: MessageResearchActions | undefined
+): boolean => {
+  if (prev === next) return true
+  if (!prev || !next) return false
+  return (
+    prev.reasonLabel === next.reasonLabel &&
+    prev.primaryLink?.href === next.primaryLink?.href &&
+    prev.primaryLink?.label === next.primaryLink?.label &&
+    Boolean(prev.onUseInChat) === Boolean(next.onUseInChat) &&
+    Boolean(prev.onFollowUp) === Boolean(next.onFollowUp)
+  )
+}
+
+/**
+ * Memo comparator for PlaygroundMessage rows.
+ *
+ * Default shallow equality plus one tolerance: `researchActions` is compared
+ * structurally (see isEquivalentResearchActions). Every other prop — message
+ * text, streaming/processing flags, identity fields, callbacks — must be
+ * referentially equal, so a streaming flush that only replaces the streaming
+ * row's entry re-renders exactly that row. Render sites must therefore pass
+ * stable callbacks and per-row derived objects (see PlaygroundChat.tsx and
+ * Sidepanel/Chat/body.tsx).
+ */
+const arePlaygroundMessagePropsEqual = (prev: Props, next: Props): boolean => {
+  const prevKeys = Object.keys(prev)
+  const nextKeys = Object.keys(next)
+  if (prevKeys.length !== nextKeys.length) return false
+  for (const key of prevKeys) {
+    const prevValue = prev[key as keyof Props]
+    const nextValue = next[key as keyof Props]
+    if (Object.is(prevValue, nextValue)) continue
+    if (
+      key === "researchActions" &&
+      isEquivalentResearchActions(
+        prevValue as MessageResearchActions | undefined,
+        nextValue as MessageResearchActions | undefined
+      )
+    ) {
+      continue
+    }
+    return false
+  }
+  return true
+}
+
+const PlaygroundMessageImpl = (props: Props) => {
   const articleRef = useRef<HTMLElement | null>(null)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
@@ -488,6 +543,11 @@ export const PlaygroundMessage = (props: Props) => {
   const interruptedGeneration = missingFinalAnswer || Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
   )
+  // The user stopped this reply on purpose; label it "Stopped", not
+  // "Interrupted" (CS-04, #3104).
+  const stoppedGeneration =
+    interruptedGeneration &&
+    Boolean((props.generationInfo as Record<string, unknown> | undefined)?.stopped)
   const interruptionReason = React.useMemo(() => {
     const raw = (props.generationInfo as Record<string, unknown> | undefined)
       ?.interruptionReason
@@ -2557,12 +2617,27 @@ export const PlaygroundMessage = (props: Props) => {
               aria-live="polite"
               className="rounded-md border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
               <p className="font-medium">
-                {t(
-                  "playground:errorRecovery.interruptedSummary",
-                  "Generation was interrupted. You can retry, switch model, or continue from the partial response."
-                )}
+                <span
+                  data-interruption-label
+                  className="mr-1.5 inline-flex items-center rounded border border-warn/40 px-1.5 py-0.5 text-[11px] font-semibold">
+                  {stoppedGeneration
+                    ? t("playground:errorRecovery.stoppedLabel", "Stopped")
+                    : t(
+                        "playground:errorRecovery.interruptedLabel",
+                        "Interrupted"
+                      )}
+                </span>
+                {stoppedGeneration
+                  ? t(
+                      "playground:errorRecovery.stoppedSummary",
+                      "You stopped this reply. What it wrote so far is kept."
+                    )
+                  : t(
+                      "playground:errorRecovery.interruptedSummary",
+                      "Generation was interrupted. You can retry, switch model, or continue from the partial response."
+                    )}
               </p>
-              {interruptionReason && (
+              {interruptionReason && !stoppedGeneration && (
                 <p className="mt-1 opacity-90">{interruptionReason}</p>
               )}
               {interruptionRecoveryActions.length > 0 && (
@@ -3124,3 +3199,13 @@ export const PlaygroundMessage = (props: Props) => {
     </article>
   )
 }
+
+/**
+ * Memoized message row. Completed rows only re-render when their own props
+ * change (message content/identity, streaming flags, toggles, callbacks);
+ * see arePlaygroundMessagePropsEqual for the exact contract.
+ */
+export const PlaygroundMessage = React.memo(
+  PlaygroundMessageImpl,
+  arePlaygroundMessagePropsEqual
+)

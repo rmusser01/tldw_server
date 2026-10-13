@@ -868,6 +868,133 @@ it("first durable ordinary send creates its local owner and admits before infere
   expect(addChatMessageMock).not.toHaveBeenCalled()
 })
 
+describe("fresh-chat submit with a selection another conversation left behind (CS-01, #3106)", () => {
+  const freshOptions = () => ({
+    ...ordinaryOptions(),
+    historyId: null,
+    serverChatId: null,
+    messages: [],
+    history: []
+  })
+  const renderActions = (options: object) =>
+    renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+
+  it("resets the stale selection before the turn's fence and sends only the new message", async () => {
+    // The native tracked-chat-1 selection (cursor after A1) survives a New chat.
+    let current: unknown = h1.controller.getCurrent()
+    const order: string[] = []
+    const load = vi.fn(async (
+      { historyId }: { historyId: string; serverChatId?: string | null },
+      _reference: unknown,
+      onLoaded: (receipt: { owner: unknown; view: unknown }) => void
+    ) => {
+      const view = {
+        owner_key: "local-key",
+        conversation_id: historyId,
+        view_session_id: "new",
+        selection_revision: 0,
+        cursor: { kind: "empty" },
+        interpretation: { kind: "parent_graph_v1" }
+      }
+      const capture = {
+        ...captureFor(view),
+        snapshot: { ...captureFor(view).snapshot, owner_key: "local-key", conversation_id: historyId, nodes: [] }
+      }
+      const owner = { kind: "local", profile_id: "profile", owner_key: "local-key", conversation_id: historyId }
+      current = {
+        owner,
+        view,
+        status: "ready",
+        capture,
+        bookmarkScope: { profile_id: "profile", client_session_id: "client" }
+      }
+      h1.localCapture.mockResolvedValue(capture)
+      onLoaded({ owner, view })
+      return true
+    })
+    h1.controller = {
+      getCurrent: () => current,
+      reset: vi.fn(() => {
+        order.push("reset")
+        current = { owner: null, view: null, capture: null, bookmarkScope: null, status: "idle" }
+      }),
+      fence: () => {
+        order.push("fence")
+        return () => true
+      },
+      loadConversation: load,
+      followResult: vi.fn(async () => true)
+    }
+    h1.saveHistory.mockResolvedValue({ id: "new-local" })
+    h1.localAppend.mockImplementation(async (_owner, selection, input) => ({
+      version: 1,
+      owner_key: "local-key",
+      conversation_id: "new-local",
+      input_message_id: input.id,
+      input_message_revision: "1",
+      selection_digest: selection.selection_digest,
+      messages: [],
+      originating_selection_revision: 0
+    }))
+    h1.localSettle.mockImplementation(async (_owner, _admission, input) => input)
+    h1.wire.mockImplementation(async function* () {
+      yield { choices: [{ delta: { content: "answer" } }] }
+    })
+    const { result } = renderActions(freshOptions())
+    await act(async () => {
+      await result.current.onSubmit({ message: "unrelated", image: "" })
+    })
+
+    expect(order.slice(0, 2)).toEqual(["reset", "fence"])
+    expect(h1.saveHistory).toHaveBeenCalledOnce()
+    expect(load.mock.calls[0][0]).toMatchObject({ historyId: "new-local" })
+    expect(load.mock.calls[0][0].serverChatId).toBeFalsy()
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const sent = JSON.stringify(h1.wire.mock.calls[0][0].messages)
+    expect(sent).toContain("unrelated")
+    expect(sent).not.toContain("old question")
+    expect(sent).not.toContain("same answer")
+    // Nothing is admitted into the conversation the user left.
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(h1.capture).not.toHaveBeenCalled()
+  })
+
+  it("leaves a selection that is still loading in place and refuses the send without dispatching", async () => {
+    const loading = { ...h1.controller.getCurrent(), capture: null, status: "loading" }
+    const reset = vi.fn()
+    h1.controller = {
+      getCurrent: () => loading,
+      reset,
+      fence: () => () => true,
+      loadConversation: vi.fn(),
+      followResult: vi.fn(async () => true)
+    }
+    const { result } = renderActions(freshOptions())
+    await act(async () => {
+      await result.current.onSubmit({ message: "unrelated", image: "" })
+    })
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(h1.saveHistory).not.toHaveBeenCalled()
+  })
+
+  it("keeps the selection of a turn that addresses its conversation", async () => {
+    const reset = vi.fn()
+    h1.controller = { ...h1.controller, reset }
+    const { result } = renderActions({ ...ordinaryOptions(), serverChatId: "tracked-chat-1" })
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(JSON.stringify(h1.wire.mock.calls[0][0].messages)).toContain("old question")
+  })
+})
+
 it("a first-create acknowledgement after navigation never installs or dispatches into the new view", async () => {
   const options = {
     ...ordinaryOptions(),

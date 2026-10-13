@@ -15,3 +15,6 @@ export type { UseNotesImportDeps } from './useNotesImport'
 
 export { useNotesWikilinks } from './useNotesWikilinks'
 export type { UseNotesWikilinksDeps } from './useNotesWikilinks'
+
+export { useNotesWikilinkRename } from './useNotesWikilinkRename'
+export type { NoteRenamedEvent, UseNotesWikilinkRenameDeps } from './useNotesWikilinkRename'

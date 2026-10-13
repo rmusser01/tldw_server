@@ -196,7 +196,7 @@ def test_registration_is_idempotent_and_fills_both_families(monkeypatch) -> None
     register_automation_executors()
     first = dict(atj._EXECUTORS)
     register_automation_executors()
-    assert set(atj._EXECUTORS) == {"recurring_question"}
+    assert set(atj._EXECUTORS) == {"recurring_question", "agent_task"}
     assert atj._EXECUTORS == first  # same callables, not re-created
 
 
@@ -308,3 +308,101 @@ async def test_registered_executor_flows_through_the_consumer(monkeypatch, tmp_p
                 del settings.USER_DB_BASE_DIR
             except AttributeError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# agent_task executor (ADR-184 phase 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_task_resolves_message_from_store(monkeypatch) -> None:
+    """The raw prompt comes from the encrypted store, in memory, at dispatch."""
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_call(**kwargs: Any) -> dict[str, Any]:
+        captured.append(kwargs)
+        return {"choices": [{"message": {"content": "agent answer"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        _fake_call,
+    )
+
+    resolved: list[tuple[int, str]] = []
+
+    class _FakeStore:
+        def resolve_message(self, owner_id: int, message_ref: str) -> str | None:
+            resolved.append((owner_id, message_ref))
+            return "RAW_AGENT_PROMPT"
+
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as executors_module
+
+    monkeypatch.setattr(
+        executors_module.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _FakeStore()),
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_redacted": True,
+         "message_ref": "ref-9"},
+        family="agent_task",
+    )
+    text = await executors_module._execute_agent_task(definition, {})
+
+    assert text == "agent answer"
+    assert resolved == [(7, "ref-9")]
+    assert captured[0]["messages"] == [
+        {"role": "user", "content": "RAW_AGENT_PROMPT"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_task_unresolvable_ref_fails_honestly(monkeypatch) -> None:
+    """A purged/missing ref raises with a precise reason (failed run upstream)."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as executors_module
+
+    class _EmptyStore:
+        def resolve_message(self, owner_id: int, message_ref: str) -> str | None:
+            return None
+
+    monkeypatch.setattr(
+        executors_module.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _EmptyStore()),
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-gone"},
+        family="agent_task",
+    )
+    with pytest.raises(LookupError, match="unresolvable"):
+        await executors_module._execute_agent_task(definition, {})
+
+
+@pytest.mark.asyncio
+async def test_agent_task_without_ref_fails_before_store(monkeypatch) -> None:
+    """Pre-store definitions (no ref) fail with the authoring-era reason."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as executors_module
+
+    called = {"resolve": False}
+
+    class _SpyStore:
+        def resolve_message(self, owner_id: int, message_ref: str) -> str | None:
+            called["resolve"] = True
+            return None
+
+    monkeypatch.setattr(
+        executors_module.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _SpyStore()),
+    )
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_redacted": True},
+        family="agent_task",
+    )
+    with pytest.raises(LookupError, match="no message_ref"):
+        await executors_module._execute_agent_task(definition, {})
+    assert called["resolve"] is False

@@ -39,7 +39,7 @@ export const useTemporaryChatToggle = (
           )
         : t(
             "playground:composer.persistence.local",
-            "Saved in this browser only."
+            "Saved on this device only. This chat is not on your tldw server."
           ),
     [t]
   )
@@ -51,7 +51,10 @@ export const useTemporaryChatToggle = (
             "playground:composer.persistence.ephemeralShort",
             "Temporary (not saved)"
           )
-        : t("playground:composer.persistence.localShort", "Saved locally"),
+        : t(
+            "playground:composer.persistence.localShort",
+            "Saved on this device"
+          ),
     [t]
   )
 

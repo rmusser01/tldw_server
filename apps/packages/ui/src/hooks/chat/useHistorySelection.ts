@@ -4,6 +4,7 @@ import {
   allowNewForkOperation
 } from "@/db/dexie/fork-operations"
 import type { ForkOperation } from "@/db/dexie/types"
+import { latestHistoryTipId } from "@/utils/history-selection"
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 import type { ChatScope } from "@/types/chat-scope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
@@ -394,16 +395,11 @@ export function useHistorySelection(
           result.status === "captured" &&
           result.snapshot.nodes.length
         ) {
-          const parents = new Set(
-            result.snapshot.nodes.map((node) => node.parent_id)
-          )
-          const tip = [...result.snapshot.nodes]
-            .reverse()
-            .find((node) => !parents.has(node.id))
+          const tip = latestHistoryTipId(result.snapshot.nodes)
           if (tip) {
             view = {
               ...result.view,
-              cursor: { kind: "after_message", message_id: tip.id }
+              cursor: { kind: "after_message", message_id: tip }
             }
             result = await captureHistorySnapshot(
               owner,

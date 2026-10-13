@@ -4,6 +4,35 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -136,7 +165,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: ({ onSelectNote }: any) => (
+  default: ({ onSelectNote }: Pick<React.ComponentProps<typeof import("../NotesListPanel").default>, "onSelectNote">) => (
     <button data-testid="mock-select-note" onClick={() => onSelectNote("note-delete")}>
       Select note
     </button>
@@ -144,7 +173,7 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesEditorHeader", () => ({
-  default: ({ onDelete }: any) => (
+  default: ({ onDelete }: Pick<React.ComponentProps<typeof import("../NotesEditorHeader").default>, "onDelete">) => (
     <button data-testid="mock-delete-note" onClick={() => onDelete()}>
       Delete note
     </button>
@@ -216,6 +245,7 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
 
     renderPage()
     fireEvent.click(await screen.findByTestId("mock-select-note"))
+    await screen.findByDisplayValue("Delete me")
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
     await waitFor(() => {
@@ -252,6 +282,7 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
 
     renderPage()
     fireEvent.click(await screen.findByTestId("mock-select-note"))
+    await screen.findByDisplayValue("Delete me")
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
     await waitFor(() => {

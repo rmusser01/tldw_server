@@ -30,12 +30,12 @@ function searchQueryInContent(content: string, query: string): boolean {
   if (!content || !query) {
     return false;
   }
-  
+
   const normalizedContent = content.toLowerCase();
   const normalizedQuery = query.toLowerCase().trim();
-  
+
   const wordBoundaryPattern = new RegExp(`\\b${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-  
+
   return wordBoundaryPattern.test(normalizedContent);
 }
 
@@ -144,6 +144,19 @@ export class PageAssistDatabase {
 
   async getChatHistories(): Promise<ChatHistory> {
     return await db.chatHistories.orderBy('createdAt').reverse().toArray();
+  }
+
+  /** The `limit` most recently active histories that pass `filter`, newest first. */
+  async getRecentChatHistories(
+    limit: number,
+    filter: (history: HistoryInfo) => boolean = () => true
+  ): Promise<ChatHistory> {
+    return await db.chatHistories
+      .orderBy('createdAt')
+      .reverse()
+      .filter(filter)
+      .limit(limit)
+      .toArray();
   }
 
   async fullTextSearchChatHistories(query: string): Promise<ChatHistory> {

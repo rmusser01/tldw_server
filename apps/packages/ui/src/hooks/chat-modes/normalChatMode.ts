@@ -3,6 +3,7 @@ import type {
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
 import type { HistorySendTurn } from "@/types/chat-modes"
+import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import {
   captureHistorySnapshot,
   historyAdmissionReference
@@ -12,6 +13,13 @@ import {
   dismissHistoryTurnRecovery
 } from "@/db/dexie/history-selection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
+import {
+  keepHistoryTurnRecovery,
+  markHistoryTurnLive,
+  releaseHistoryTurn
+} from "@/services/history-turn-keep"
+import { beginServerChatWrite } from "@/store/server-chat-save-status"
+import { wasChatTurnStoppedByUser } from "@/hooks/chat/abort-turn-cleanup"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
@@ -159,6 +167,11 @@ type NormalChatModeParams = {
     originIsCurrent: () => boolean
     temporary?: boolean
     createServerChat?: boolean
+    /**
+     * Retry of a reply that ended early (CS-04): the admission the question
+     * already has. The view must stand just before that question.
+     */
+    retryAdmission?: HistoryAdmissionReferenceV1
   }
   historyTurn?: HistorySendTurn
 
@@ -193,6 +206,7 @@ type NormalChatModeParams = {
   ownsAbortController?: (signal: AbortSignal) => boolean
   releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
   discardCurrentTurnOnAbort?: () => boolean
+  wasStoppedByUser?: () => boolean
   historyId: string | null
   serverChatId?: string | null
   setServerChatId?: (id: string) => void
@@ -641,6 +655,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
   }
 }
 
+/** How often a streaming reply is checkpointed so a reload can keep it (CS-04). */
+const HISTORY_TURN_CHECKPOINT_INTERVAL_MS = 1_000
+
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
 const captureNormalHistoryTurn = async (
   params: NormalChatModeParams,
@@ -755,6 +772,17 @@ const captureNormalHistoryTurn = async (
   }
   if (current.owner.validate_lease?.() === false) throw new Error("stale_selection")
   const view = structuredClone(current.view)
+  const retryAdmission = params.historySelection!.retryAdmission
+  // A retry reasks the question from the point just before it, in the chat
+  // that admitted it.
+  if (
+    retryAdmission &&
+    (retryAdmission.owner_key !== view.owner_key ||
+      retryAdmission.conversation_id !== view.conversation_id ||
+      view.cursor.kind !== "before_message" ||
+      view.cursor.message_id !== retryAdmission.input_message_id)
+  )
+    throw new Error("invalid_history_retry")
   const bookmarkScope = { ...current.bookmarkScope }
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   const owner =
@@ -810,14 +838,35 @@ const captureNormalHistoryTurn = async (
   if (capture.status !== "captured") throw new Error(capture.code)
   if (!canUpdateView()) throw new Error("stale_selection")
   const operationId = crypto.randomUUID()
+  // Until this turn ends, no view may keep its record: the reply is still
+  // being written (CS-04). Released by normalChatMode when the turn ends.
+  markHistoryTurnLive(operationId)
+  // Record writes run in order, so a late checkpoint never replaces the final
+  // record of the turn.
+  let recoveryWrites: Promise<void> = Promise.resolve()
+  let lastRecord: HistoryTurnRecovery | null = null
+  const saveRecord = (next: HistoryTurnRecovery) => {
+    const write = recoveryWrites.then(async () => {
+      lastRecord = next
+      await saveHistoryTurnRecovery(bookmarkScope, view, next)
+    })
+    recoveryWrites = write.catch(() => undefined)
+    return write
+  }
   const record = (
     turn: HistorySendTurn,
     content: string,
-    state: HistoryTurnRecovery["state"]
+    state: HistoryTurnRecovery["state"],
+    extra: Pick<
+      Partial<HistoryTurnRecovery>,
+      "outcome" | "interruption_reason" | "settled_message_id"
+    > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
     origin_view: view,
-    selection_digest: turn.selection!.selection_digest,
+    // A retry's input was admitted under the selection of its first send.
+    selection_digest:
+      turn.retryAdmission?.selection_digest ?? turn.selection!.selection_digest,
     request_context_digest: turn.selection!.request_context_digest,
     owner_key: view.owner_key,
     conversation_id: view.conversation_id,
@@ -828,34 +877,83 @@ const captureNormalHistoryTurn = async (
     input_images: turn.input!.images ?? [],
     result_text: content,
     state,
+    ...(turn.replyModel?.name ? { model_name: turn.replyModel.name } : {}),
+    ...(turn.replyModel?.id ? { model_id: turn.replyModel.id } : {}),
     ...(turn.admission
       ? { admission: historyAdmissionReference(turn.admission) }
-      : {})
+      : {}),
+    ...extra
   })
+  // A server chat holds the question once it is admitted; until the reply is
+  // settled there too, its latest write is still in flight (CS-04).
+  let endReplyWrite: ((outcome: "saved" | "failed" | "unknown") => void) | null =
+    null
+  // The reply was written to the owner (`complete`).
+  let settled = false
+  // Throttled checkpoints of the reply so far: a reload keeps what arrived.
+  let checkpointsStopped = false
+  let checkpointTimer: ReturnType<typeof setTimeout> | null = null
+  let lastCheckpointAt = 0
+  let pendingCheckpoint: string | null = null
+  const stopCheckpoints = () => {
+    checkpointsStopped = true
+    pendingCheckpoint = null
+    if (checkpointTimer) clearTimeout(checkpointTimer)
+    checkpointTimer = null
+  }
+  const flushCheckpoint = () => {
+    checkpointTimer = null
+    const content = pendingCheckpoint
+    pendingCheckpoint = null
+    if (checkpointsStopped || content == null || !turn.admission) return
+    lastCheckpointAt = Date.now()
+    // If the page goes away now, this partial reply was interrupted.
+    void saveRecord(
+      record(turn, content, "generated_unsaved", { outcome: "interrupted" })
+    ).catch(() => undefined)
+  }
   const turn: HistorySendTurn = {
     owner,
     capture,
+    ...(retryAdmission ? { retryAdmission } : {}),
     currentView: () => controller.getCurrent().view,
     validateLease,
     canUpdateView,
     beforeDispatch: async () => {
-      await saveHistoryTurnRecovery(
-        bookmarkScope,
-        view,
-        record(turn, "", "dispatching")
-      )
+      await saveRecord(record(turn, "", "dispatching"))
     },
     afterAdmission: async () => {
-      await saveHistoryTurnRecovery(
-        bookmarkScope,
-        view,
-        record(turn, "", "accepted_unsent")
+      if (turn.owner.kind === "native")
+        endReplyWrite = beginServerChatWrite(turn.owner.conversation_id)
+      await saveRecord(record(turn, "", "accepted_unsent"))
+    },
+    checkpoint: (content) => {
+      if (checkpointsStopped || !turn.admission || !content.trim()) return
+      pendingCheckpoint = content
+      if (checkpointTimer) return
+      const wait = Math.max(
+        0,
+        HISTORY_TURN_CHECKPOINT_INTERVAL_MS - (Date.now() - lastCheckpointAt)
       )
+      checkpointTimer = setTimeout(flushCheckpoint, wait)
     },
     recover: async (data) => {
-      await saveHistoryTurnRecovery(
-        bookmarkScope,
-        view,
+      stopCheckpoints()
+      if (settled) {
+        // The reply is already saved with its owner (only a later step, such
+        // as an account change, failed): there is nothing to review or keep.
+        await recoveryWrites
+        await dismissHistoryTurnRecovery(
+          bookmarkScope,
+          view,
+          operationId,
+          "completed"
+        )
+        return
+      }
+      // A reply the server never received leaves the server copy incomplete.
+      endReplyWrite?.(data.content.trim() ? "failed" : "unknown")
+      await saveRecord(
         record(
           turn,
           data.content,
@@ -863,24 +961,65 @@ const captureNormalHistoryTurn = async (
             ? "generated_unsaved"
             : turn.admission
               ? "accepted_unsent"
-              : "unknown"
+              : "unknown",
+          data.outcome
+            ? {
+                outcome: data.outcome,
+                ...(data.interruptionReason
+                  ? { interruption_reason: data.interruptionReason }
+                  : {})
+              }
+            : {}
         )
       )
       await controller.refreshRecovery?.()
     },
     cancelPreparation: async () => {
+      stopCheckpoints()
+      await recoveryWrites
       await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
     },
     complete: async () => {
-      await dismissHistoryTurnRecovery(
-        bookmarkScope,
-        view,
-        operationId,
-        "completed"
+      // The reply is settled. Its record stays until the view follows it.
+      settled = true
+      stopCheckpoints()
+      endReplyWrite?.("saved")
+      await recoveryWrites
+    },
+    followResult: async (id) => controller.followResult(view, id),
+    finish: async (followed) => {
+      await recoveryWrites
+      if (followed || !turn.resultId) {
+        await dismissHistoryTurnRecovery(
+          bookmarkScope,
+          view,
+          operationId,
+          "completed"
+        )
+        return
+      }
+      // The view went away before it could follow the settled reply (the
+      // user left /chat): the next view of this chat follows it instead.
+      await saveRecord(
+        record(turn, lastRecord?.result_text ?? "", "generated_unsaved", {
+          outcome: "complete",
+          settled_message_id: turn.resultId
+        })
       )
     },
-    followResult: async (id) => {
-      await controller.followResult(view, id)
+    keep: async () => {
+      await recoveryWrites
+      if (!lastRecord?.outcome) return
+      releaseHistoryTurn(operationId)
+      await keepHistoryTurnRecovery(controller, {
+        scope: bookmarkScope,
+        turn: lastRecord
+      })
+    },
+    release: () => {
+      stopCheckpoints()
+      endReplyWrite?.("unknown")
+      releaseHistoryTurn(operationId)
     }
   }
   return turn
@@ -920,6 +1059,7 @@ export const normalChatMode = async (
   const executionSignal = servicePromptSnapshot
     ? servicePromptSnapshot.scopeSignal
     : signal
+  let createdTurn: HistorySendTurn | undefined
   try {
     if (params.webSearch) {
       getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
@@ -934,6 +1074,7 @@ export const normalChatMode = async (
         servicePromptSnapshot!,
         executionSignal
       )
+      createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
       const selected = historyTurn.capture.rows.map((node, index) => {
         const content = historyTurn.capture.selected_content[index]
@@ -970,6 +1111,10 @@ export const normalChatMode = async (
       params = {
         ...params,
         historyTurn,
+        // A retry shows and settles under the question it reasks.
+        ...(historyTurn.retryAdmission
+          ? { userMessageId: historyTurn.retryAdmission.input_message_id }
+          : {}),
         userParentMessageId: selectedParent,
         historyForModel: selected as ChatHistory,
         historyId:
@@ -1002,16 +1147,24 @@ export const normalChatMode = async (
         ownsAbortController: params.ownsAbortController
           ? () => params.ownsAbortController!(signal)
           : undefined,
+        wasStoppedByUser: () => wasChatTurnStoppedByUser(signal),
         releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
           ? () => params.releaseAbortControllerIfOwned!(signal)
           : undefined
       }
     )
-    if (result.status === "submitted" && params.historyTurn?.resultId) {
-      await params.historyTurn.followResult(params.historyTurn.resultId)
+    const historyTurn = params.historyTurn
+    if (historyTurn?.outcome) {
+      // The reply ended early or lost its view: keep it in the transcript
+      // instead of parking it for review (CS-04, #3104).
+      await historyTurn.keep?.()
+    } else if (result.status === "submitted" && historyTurn?.resultId) {
+      const followed = await historyTurn.followResult(historyTurn.resultId)
+      await historyTurn.finish?.(followed !== false)
     }
     return result
   } finally {
+    createdTurn?.release?.()
     if (ownsServicePromptSnapshot && servicePromptSnapshot) {
       servicePromptSnapshot.release()
     }

@@ -345,8 +345,10 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
 
     await waitFor(() => {
       expect(createCalls()).toHaveLength(1)
-      expect(mockMessageError).toHaveBeenCalledWith("Save failed")
+      // One surface for the failure (NS-03): the issue panel, not a toast too.
+      expect(screen.getByTestId("notes-save-issue")).toBeInTheDocument()
     })
+    expect(mockMessageError).not.toHaveBeenCalled()
 
     expect(titleInput).toHaveValue("Do not lose this")
     expect(contentInput).toHaveValue("The save failed, so this text must remain.")
@@ -425,13 +427,14 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
 
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
-    await waitFor(() => {
-      expect(mockMessageError).toHaveBeenCalledWith("Server temporarily unavailable")
-    })
+    // One surface for the failure (NS-03): the issue panel, not a toast too.
+    const issue = await screen.findByTestId("notes-save-issue")
+    expect(issue).toHaveAttribute("data-kind", "retrying")
+    expect(mockMessageError).not.toHaveBeenCalled()
 
     expect(titleInput).toHaveValue("Recoverable note")
     expect(contentInput).toHaveValue("Draft survives failure")
-    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "error")
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "retrying")
 
     fireEvent.click(screen.getByTestId("notes-save-retry"))
 

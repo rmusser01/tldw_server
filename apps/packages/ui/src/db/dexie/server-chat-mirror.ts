@@ -5,7 +5,7 @@ import { db } from "./schema"
 import { generateID } from "./helpers"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
-import type { HistoryOperationOptions } from "./history-selection"
+import { assertNoPendingLocalSettingsWrite, type HistoryOperationOptions } from "./history-selection"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
 export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "requestScope">): string => {
@@ -40,6 +40,25 @@ export const linkServerChatMirror = async ({
     message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey })
   return id
 }, undefined, validate_lease)
+
+/**
+ * Delete this owner's local copies of a server chat once the chat itself is
+ * deleted (moved to Trash), so local history search stops offering it. Another
+ * owner's copy is left alone. Returns the ids of the removed histories.
+ */
+export const removeServerChatMirror = async ({ chatId, ownerKey }: {
+  chatId: string; ownerKey: string
+}): Promise<string[]> => db.transaction("rw", [db.chatHistories, db.messages, db.compareStates], async () => {
+  const owned = (await db.chatHistories.where("server_chat_id").equals(chatId).toArray())
+    .filter(history => history.server_scope_key === ownerKey)
+  owned.forEach(assertNoPendingLocalSettingsWrite)
+  for (const history of owned) {
+    await db.chatHistories.delete(history.id)
+    await db.messages.where("history_id").equals(history.id).delete()
+    await db.compareStates.delete(history.id)
+  }
+  return owned.map(history => history.id)
+})
 
 /** Persist a receipt only onto the captured source row; edits are never replaced. */
 export const acknowledgePromotedChatMessage = async ({

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
 
 def _make_doc(doc_id: str, text: str, title: str) -> Document:
@@ -85,7 +85,15 @@ async def test_golden_sentence_level_citations_offsets(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_golden_multihop_merge_and_citations(monkeypatch):
+@pytest.mark.parametrize(
+    "answer,supported",
+    [
+        ("Residual connections help gradient flow in deep networks.", True),
+        ("Residual connections help gradient flow. They enable deeper networks.", False),
+    ],
+    ids=["exact-source-span", "unsupported-claims"],
+)
+async def test_golden_multihop_merge_and_citations(monkeypatch, answer, supported):
     # Load HotpotQA-like fixture with two contexts
     fx = _load_first_fixture("tldw_Server_API/tests/fixtures/rag_agentic/hotpotqa_golden.jsonl")
     ctxs = fx["contexts"]
@@ -100,13 +108,13 @@ async def test_golden_multihop_merge_and_citations(monkeypatch):
 
     monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
 
-    # Generation returns sentence from first context and a short claim
+    # Exercise exact evidence and unsupported claims through the same pipeline
     class FakeAnswerGenerator:
         def __init__(self, *args, **kwargs):
             pass
 
         async def generate(self, *, query: str, context: str, prompt_template=None, max_tokens=None, temperature=None):  # noqa: ARG002
-            return {"answer": "Residual connections help gradient flow. They enable deeper networks."}
+            return {"answer": answer}
 
     import tldw_Server_API.app.core.RAG.rag_service.generation as gen_mod
     monkeypatch.setattr(gen_mod, "AnswerGenerator", FakeAnswerGenerator, raising=False)
@@ -123,7 +131,7 @@ async def test_golden_multihop_merge_and_citations(monkeypatch):
 
     md = res.metadata or {}
     hc = md.get("hard_citations") or {}
-    assert hc.get("coverage", 0.0) > 0.0
+    assert (hc.get("coverage", 0.0) > 0.0) is supported
     # Ensure the assembled chunk contains the cited sentence
     syn = res.documents[0]
     chunk = syn.content if not isinstance(syn, dict) else syn.get("content", "")

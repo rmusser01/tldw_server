@@ -315,6 +315,12 @@ _ORDER_BY_EXPR_RE = re.compile(
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CHAT_GRAMMAR_VALIDATION_STATUSES = frozenset({"unchecked", "valid", "invalid"})
 
+# The persona older Sync v2 projections stored for a chat that named no assistant
+# (#3182). It never existed. This one definition serves the migration that clears it
+# from stored chats and the Sync materializer, which reads it in a payload as no assistant.
+RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND = "persona"
+RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID = "sync-v2"
+
 # --- Custom Exceptions ---
 class CharactersRAGDBError(Exception):
     """Base exception for CharactersRAGDB related errors."""
@@ -788,8 +794,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 74  # Permanent Workspace startup receipts after Companion storage
-    _POSTGRES_SCHEMA_VERSION = 78
+    _CURRENT_SCHEMA_VERSION = 78  # Knowledge provenance and durable receipts after upstream Chat migrations
+    _POSTGRES_SCHEMA_VERSION = 82
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7600,6 +7606,53 @@ ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
 UPDATE db_schema_version SET version = 74 WHERE schema_name = 'rag_char_chat_schema' AND version = 73;
 """
 
+    # D7 P3: fingerprint of a client-id create request, written by the same INSERT.
+    # Existing chats stay NULL, so they are never mistaken for client-id creates.
+    _MIGRATION_SQL_V74_TO_V75 = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        typeof(create_request_fingerprint) = 'text'
+        AND length(create_request_fingerprint) = 64
+        AND length(CAST(create_request_fingerprint AS BLOB)) = 64
+        AND create_request_fingerprint NOT GLOB '*[^0-9a-f]*'
+    ));
+UPDATE db_schema_version SET version = 75 WHERE schema_name = 'rag_char_chat_schema' AND version = 74;
+"""
+
+    _MIGRATION_SQL_V78_TO_V79_POSTGRES = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        length(create_request_fingerprint) = 64 AND create_request_fingerprint !~ '[^0-9a-f]'
+    ));
+UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
+"""
+
+    # #3182: until the Sync v2 conversation materializer stopped doing it, a chat whose
+    # payload named no assistant was stored as persona 'sync-v2'. That persona never
+    # existed, so persona admission answered 404 for the chat. The repair makes such a
+    # row a plain chat: no kind, no id, no memory mode, and no startup provenance, which
+    # belongs to a binding the chat never really had.
+    #
+    # Only the exact placeholder is matched, compared byte for byte. A chat whose owner
+    # has, or had, a persona profile with that id is that owner's own binding and is
+    # left alone, as is any chat bound to a character. `version` and `last_modified` do
+    # not move: nothing was edited, and under Sync the row version is the object revision.
+    _RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL = f"""
+UPDATE conversations
+   SET assistant_kind = NULL,
+       assistant_id = NULL,
+       persona_memory_mode = NULL,
+       assistant_startup_json = NULL
+ WHERE assistant_kind = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND}'
+   AND assistant_id = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID}'
+   AND character_id IS NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM persona_profiles AS profile
+        WHERE profile.id = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID}'
+          AND profile.user_id = conversations.client_id
+   )
+"""  # nosec B608 - the interpolated values are the two module constants above.
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7717,6 +7770,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
             CharacterStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.chat_import_store import ChatImportStore
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
             ConversationResumeStore,
         )
@@ -7744,6 +7798,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             NoteGraphSuggestionStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import NoteProvenanceStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
@@ -7761,7 +7816,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.native_assets = NativeChatAssetStore(self)
         self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
+        self.chat_imports = ChatImportStore(self)
         self.note_store = NoteStore(self)
+        self.note_provenance_store = NoteProvenanceStore(self)
         self.moodboard_sync_store = MoodboardSyncStore(self)
         self.note_attachment_store = NoteAttachmentStore(self)
         self.notes_link_store = NotesLinkStore(self)
@@ -8751,6 +8808,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (71, "_migrate_from_v71_to_v72"),
             (72, "_migrate_from_v72_to_v73_persona_companion"),
             (73, "_migrate_from_v73_to_v74"),
+            (74, "_migrate_from_v74_to_v75"),
+            (75, "_migrate_from_v75_to_v76"),
+            (76, "_migrate_from_v76_to_v77"),
+            (77, "_migrate_from_v77_to_v78"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17933,6 +17994,58 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v77_to_v78(self, conn: sqlite3.Connection) -> None:
+        """Install owner-scoped local provenance receipts in the Notes transaction."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
+            notes_provenance_receipts_schema_sql,
+        )
+
+        conn.execute(notes_provenance_receipts_schema_sql())
+        conn.execute(
+            "UPDATE db_schema_version SET version = 78 WHERE schema_name = ? AND version = 77", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 78:
+            raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
+
+    def _migrate_from_v81_to_v82_postgres(self, conn: Any) -> None:
+        """Install permanent local receipts with forced owner RLS before the version bump."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
+            build_notes_provenance_receipts_rls_sql,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
+            notes_provenance_receipts_schema_sql,
+        )
+
+        for statement in (notes_provenance_receipts_schema_sql(), *build_notes_provenance_receipts_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 81",
+            (82, self._SCHEMA_NAME),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 82:
+            raise SchemaError("Knowledge provenance receipt PostgreSQL migration failed version verification.")
+
+    def _migrate_from_v76_to_v77(self, conn: sqlite3.Connection) -> None:
+        """Install owner-bound Knowledge evidence in the registered SQLite migration."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+
+        conn.execute(notes_provenance_schema_sql(postgres=False))
+        conn.execute("UPDATE db_schema_version SET version = 77 WHERE schema_name = ? AND version = 76", (self._SCHEMA_NAME,))
+        if self._get_db_version(conn) != 77:
+            raise SchemaError("Knowledge provenance SQLite migration failed version verification.")
+
+    def _migrate_from_v80_to_v81_postgres(self, conn: Any) -> None:
+        """Install owner-bound Knowledge evidence and forced RLS before version bump."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+
+        for statement in (notes_provenance_schema_sql(postgres=True), *build_notes_provenance_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute("UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 80", (81, self._SCHEMA_NAME), connection=conn)
+        if self._get_schema_version_postgres(conn) != 81:
+            raise SchemaError("Knowledge provenance PostgreSQL migration failed version verification.")
+
     def _migrate_from_v73_to_v74(self, conn: sqlite3.Connection) -> None:
         """Install permanent startup receipts inside the registered SQLite migration."""
         from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
@@ -17944,6 +18057,85 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conn.execute("UPDATE db_schema_version SET version = 74 WHERE schema_name = ? AND version = 73", (self._SCHEMA_NAME,))
         if self._get_db_version(conn) != 74:
             raise SchemaError("Workspace startup migration V73->V74 failed version verification.")
+
+    def _migrate_from_v74_to_v75(self, conn: sqlite3.Connection) -> None:
+        """Add client-id create fingerprints without inferring them for existing chats."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V74_TO_V75):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 75:
+            raise SchemaError("Conversation create fingerprint migration V74->V75 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v78_to_v79_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL client-id create fingerprints in the caller's upgrade transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V78_TO_V79_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 79:
+            raise SchemaError(  # noqa: TRY003
+                "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
+            )
+
+    def _migrate_from_v75_to_v76(self, conn: sqlite3.Connection) -> None:
+        """Clear the retired Sync placeholder persona from this owner's chats."""
+        conn.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 76 WHERE schema_name = ? AND version = 75", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 76:
+            raise SchemaError("Sync placeholder repair migration V75->V76 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v79_to_v80_postgres(self, conn: Any) -> None:
+        """Clear the retired Sync placeholder persona from every owner's chats.
+
+        One PostgreSQL database holds every owner's chats, and `conversations`
+        has a forced tenant policy. A role that bypasses row-level security (the
+        documented superuser setup) sees all rows. A table owner that does not
+        bypass it would repair only the rows its session happens to see and then
+        record the version, leaving the other owners' chats broken for good. So
+        the policy is lifted for the owner inside this transaction, behind an
+        ACCESS EXCLUSIVE lock that keeps every other session out of the table,
+        and put back before the version bump.
+        """
+        backend = self.backend
+        backend.execute("LOCK TABLE conversations IN ACCESS EXCLUSIVE MODE", connection=conn)
+        states = backend.execute(
+            """
+            SELECT table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   pg_has_role(current_user, table_row.relowner, 'USAGE') AS is_table_owner,
+                   (SELECT role_row.rolsuper OR role_row.rolbypassrls
+                      FROM pg_roles AS role_row
+                     WHERE role_row.rolname = current_user) AS bypasses_rls
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname = 'conversations'
+            """,
+            connection=conn,
+        ).rows
+        if len(states) != 1:
+            raise SchemaError("Sync placeholder repair v80 cannot verify the conversations relation.")  # noqa: TRY003
+        state = states[0]
+        policy_applies = bool(state.get("relrowsecurity")) and not bool(state.get("bypasses_rls"))
+        is_table_owner = bool(state.get("is_table_owner"))
+        if policy_applies and not is_table_owner:
+            raise SchemaError(  # noqa: TRY003
+                "Sync placeholder repair v80 requires the PostgreSQL schema-owner migration path."
+            )
+        lift_forced_policy = policy_applies and bool(state.get("relforcerowsecurity"))
+        if lift_forced_policy:
+            backend.execute("ALTER TABLE conversations NO FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL, connection=conn)
+        if lift_forced_policy:
+            backend.execute("ALTER TABLE conversations FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 79",
+            (80, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 80:
+            raise SchemaError(  # noqa: TRY003
+                "Sync placeholder repair PostgreSQL migration V79->V80 failed version verification."
+            )
 
     def _migrate_from_v77_to_v78_postgres(self, conn: Any) -> None:
         """Install PostgreSQL receipts with forced owner RLS before the version bump."""
@@ -21149,6 +21341,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 74 and current_db_version == 73:
                         self._migrate_from_v73_to_v74(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 75 and current_db_version == 74:
+                        self._migrate_from_v74_to_v75(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 76 and current_db_version == 75:
+                        self._migrate_from_v75_to_v76(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 77 and current_db_version == 76:
+                        self._migrate_from_v76_to_v77(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 78 and current_db_version == 77:
+                        self._migrate_from_v77_to_v78(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21619,6 +21823,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 74 and current_db_version == 73:
                     self._migrate_from_v73_to_v74(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 75 and current_db_version == 74:
+                    self._migrate_from_v74_to_v75(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 76 and current_db_version == 75:
+                    self._migrate_from_v75_to_v76(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 77 and current_db_version == 76:
+                    self._migrate_from_v76_to_v77(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 78 and current_db_version == 77:
+                    self._migrate_from_v77_to_v78(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25480,7 +25696,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25505,6 +25721,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 78 and current_version < 78:
                     self._migrate_from_v77_to_v78_postgres(conn)
                     current_version = 78
+                if target_version >= 79 and current_version < 79:
+                    self._migrate_from_v78_to_v79_postgres(conn)
+                    current_version = 79
+                if target_version >= 80 and current_version < 80:
+                    self._migrate_from_v79_to_v80_postgres(conn)
+                    current_version = 80
+                if target_version >= 81 and current_version < 81:
+                    self._migrate_from_v80_to_v81_postgres(conn)
+                    current_version = 81
+                if target_version >= 82 and current_version < 82:
+                    self._migrate_from_v81_to_v82_postgres(conn)
+                    current_version = 82
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -25951,6 +26179,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v77_to_v78_postgres(conn)
                 self._runtime_schema_version = 78
                 current_version = 78
+            if target_version >= 79 and current_version < 79:
+                self._migrate_from_v78_to_v79_postgres(conn)
+                self._runtime_schema_version = 79
+                current_version = 79
+
+            if target_version >= 80 and current_version < 80:
+                self._migrate_from_v79_to_v80_postgres(conn)
+                self._runtime_schema_version = 80
+                current_version = 80
+
+            if target_version >= 81 and current_version < 81:
+                self._migrate_from_v80_to_v81_postgres(conn)
+                self._runtime_schema_version = 81
+                current_version = 81
+
+            if target_version >= 82 and current_version < 82:
+                self._migrate_from_v81_to_v82_postgres(conn)
+                self._runtime_schema_version = 82
+                current_version = 82
 
             if current_version < target_version:
                 logger.warning(
@@ -31109,7 +31356,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "INSERT INTO workspace_sources "
             "(id, workspace_id, media_id, title, source_type, url, position, selected, added_at, "
             "review_state, review_state_updated_at, reviewed_at, reviewed_by_user_id, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+            "ON CONFLICT(workspace_id, id) DO NOTHING"
         )
         params = (
             source_id,
@@ -31119,7 +31367,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             data.get("source_type", ""),
             data.get("url"),
             data.get("position", 0),
-            1 if data.get("selected", True) else 0,
+            bool(data.get("selected", True)),
             now,
             review_transition["review_state"],
             review_transition["review_state_updated_at"],
@@ -31130,12 +31378,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             try:
                 conn.execute(query, params)
             except sqlite3.IntegrityError as exc:
-                existing = conn.execute(
-                    "SELECT * FROM workspace_sources WHERE workspace_id = ? AND id = ?",
-                    (workspace_id, source_id),
-                ).fetchone()
-                if existing is not None:
-                    return dict(existing)
                 raise ConflictError(  # noqa: TRY003
                     f"Workspace source '{source_id}' could not be added.",
                     entity="workspace_sources",
@@ -31531,14 +31773,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         with self.transaction() as conn:
             conn.execute(
-                "UPDATE workspace_sources SET selected = 0, version = version + 1 WHERE workspace_id = ?",
-                (workspace_id,),
+                "UPDATE workspace_sources SET selected = ?, version = version + 1 WHERE workspace_id = ?",
+                (False, workspace_id),
             )
             if selected_ids:
                 placeholders = ", ".join("?" for _ in selected_ids)
                 conn.execute(
-                    f"UPDATE workspace_sources SET selected = 1, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
-                    (workspace_id, *selected_ids),
+                    f"UPDATE workspace_sources SET selected = ?, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                    (True, workspace_id, *selected_ids),
                 )
 
     def reorder_workspace_sources(self, workspace_id: str, ordered_ids: list[str]) -> None:
@@ -45797,6 +46039,7 @@ for _message_store_method in (
     "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",
+    "tombstone_unsynced_message_from_sync",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
@@ -45856,6 +46099,8 @@ for _note_store_method in (
     "delete_note",
     "restore_note",
     "search_notes",
+    "search_note_titles",
+    "count_note_titles_matching",
     "search_notes_with_keywords",
     "count_notes_matching_keywords",
     "link_note_to_keyword",

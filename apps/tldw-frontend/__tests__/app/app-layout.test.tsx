@@ -154,6 +154,9 @@ vi.mock("@/components/Common/PageAssistLoader", () => ({
 }))
 
 vi.mock("@web/components/networking/ServerReadinessGate", () => ({
+  // Mirrors the real module surface: _app also imports the warm-up helper
+  // used to overlap the readiness probe with auth resolution (W1).
+  warmServerReadinessHealth: vi.fn(),
   ServerReadinessGate: ({
     children,
     allowDegraded

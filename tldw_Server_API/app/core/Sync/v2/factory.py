@@ -42,6 +42,7 @@ from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.notes import NotesDomainAdapter
 from .domain_adapters.notes_link import NotesLinkDomainAdapter
 from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
+from .domain_adapters.notes_provenance import NotesProvenanceDomainAdapter
 from .domain_adapters.notes_task import NotesTaskDomainAdapter
 from .domain_adapters.notes_task_activity import NotesTaskActivityDomainAdapter
 from .domain_adapters.personal_context import PersonalContextDomainAdapter
@@ -110,6 +111,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [MediaMetadataAdapter(domain=domain) for domain in MEDIA_SYNC_DOMAINS]
         + [NotesOrganizationDomainAdapter(domain=domain) for domain in NOTES_ORGANIZATION_DOMAINS]
         + [NotesLinkDomainAdapter()]
+        + [NotesProvenanceDomainAdapter()]
         + [NotesTaskDomainAdapter()]
         + [NotesTaskActivityDomainAdapter()]
         + [

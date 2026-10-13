@@ -162,7 +162,7 @@ with in-repo examples (`Review/hooks/useMediaReviewState.ts:5`,
 
 ### F19 (MEDIUM) — Unstable rowKeys
 `DataOpsPage.tsx:329,479,1017` (`JSON.stringify(record)` fallback — O(rows × payload)
-per render); `BillingDashboardPage.tsx:323,433` (`Math.random()`); 
+per render); `BillingDashboardPage.tsx:323,433` (`Math.random()`);
 `RateLimitingPage.tsx:328-330` (array index); `ServerArgsEditor.tsx:160-161` (index keys
 on a removable kv list — focus misalignment on delete).
 

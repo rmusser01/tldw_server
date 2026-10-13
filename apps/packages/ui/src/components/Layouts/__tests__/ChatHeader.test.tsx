@@ -264,12 +264,77 @@ describe("ChatHeader shortcut toggle", () => {
     const props = createProps({
       showSessionModeBadge: false,
       temporaryChat: false,
+      persistenceKind: "server",
       activeCharacterName: "Rin"
     })
     render(<ChatHeader {...props} />)
 
-    expect(screen.queryByText("Saved")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("chat-header-persistence-badge")
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Saved on server")).not.toBeInTheDocument()
     expect(screen.queryByText("Character: Rin")).not.toBeInTheDocument()
+  })
+
+  // CS-03 (#3104): the header badge reports where the chat is actually saved,
+  // derived from acknowledged state rather than from server connectivity.
+  it("labels a saved chat without an acknowledged server copy as saved on this device", () => {
+    render(<ChatHeader {...createProps({ temporaryChat: false })} />)
+
+    const badge = screen.getByTestId("chat-header-persistence-badge")
+    expect(badge).toHaveTextContent("Saved on this device")
+    expect(badge).toHaveAttribute(
+      "title",
+      "Saved on this device only. This chat is not on your tldw server."
+    )
+    expect(screen.queryByText("Saved on server")).not.toBeInTheDocument()
+  })
+
+  it("labels a chat whose server write was acknowledged as saved on server", () => {
+    render(
+      <ChatHeader
+        {...createProps({ temporaryChat: false, persistenceKind: "server" })}
+      />
+    )
+
+    const badge = screen.getByTestId("chat-header-persistence-badge")
+    expect(badge).toHaveTextContent("Saved on server")
+    expect(badge).toHaveAttribute(
+      "title",
+      "Saved on your tldw server and on this device."
+    )
+  })
+
+  it.each([
+    ["serverSaving", "Saving to server…"],
+    ["serverFailed", "Couldn't save to server"]
+  ] as const)(
+    "does not claim the server while the server write is %s",
+    (persistenceKind, label) => {
+      render(
+        <ChatHeader {...createProps({ temporaryChat: false, persistenceKind })} />
+      )
+
+      expect(
+        screen.getByTestId("chat-header-persistence-badge")
+      ).toHaveTextContent(label)
+      expect(screen.queryByText("Saved on server")).not.toBeInTheDocument()
+    }
+  )
+
+  it("keeps the temporary badge for temporary chats", () => {
+    render(
+      <ChatHeader
+        {...createProps({ temporaryChat: true, persistenceKind: "temporary" })}
+      />
+    )
+
+    const badge = screen.getByTestId("chat-header-persistence-badge")
+    expect(badge).toHaveTextContent("Temporary")
+    expect(badge).toHaveAttribute(
+      "title",
+      "Temporary chat. Messages are not saved."
+    )
   })
 
   it("hides chat title when chat title display is disabled", () => {

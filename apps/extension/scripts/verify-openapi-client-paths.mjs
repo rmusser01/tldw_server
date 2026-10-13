@@ -428,6 +428,23 @@ function extractClientPaths() {
     process.exit(1)
   }
   const src = fs.readFileSync(guardFile, 'utf8')
+
+  // Since ADR-065, ClientPath is derived from the generated
+  // @tldw/api-types path union rather than hand-maintained literals. When
+  // that form is detected, path-existence is guaranteed by construction
+  // (the union IS the spec's path list), so this verifier skips to the
+  // schema-subset checks below instead of failing to parse literals.
+  if (
+    /export\s+type\s+ClientPath\s*=\s*ApiPath\b/.test(src) &&
+    /from\s+["']@tldw\/api-types["']/.test(src)
+  ) {
+    console.log(
+      'ClientPath is derived from @tldw/api-types (ADR-065); ' +
+        'path existence is guaranteed by the generated union — checking remaining invariants only.'
+    )
+    return []
+  }
+
   const astPaths = extractClientPathsFromTypeScript(src)
   if (astPaths.length > 0) return [...new Set(astPaths)]
 

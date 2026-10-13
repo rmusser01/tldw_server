@@ -23,6 +23,7 @@ import type {
 import {
   bindSelectedHistoryContent,
   HistorySelectionError,
+  LOCAL_HISTORY_OWNER_KEY_PREFIX,
   resolveHistorySelection,
   resolveParentPath,
   selectionDigest
@@ -111,7 +112,7 @@ export const ensureLocalProfileId = async (): Promise<string> =>
     })
     return profile
   })
-const localKey = (profile: string) => `local-history-v1:${profile}`
+const localKey = (profile: string) => `${LOCAL_HISTORY_OWNER_KEY_PREFIX}${profile}`
 export const getLocalHistoryOwner = async (
   conversation_id: string
 ): Promise<LocalHistoryOwnerV1> => {
@@ -860,6 +861,40 @@ export const appendLocalSelectedUser = (
     return admission
   })
 }
+/**
+ * The admission a local question was accepted with, while the question is
+ * unchanged. A retried reply settles against it again (CS-04), so the
+ * question is not admitted a second time. Null when there is none.
+ */
+export const loadLocalHistoryAdmission = (
+  owner: LocalHistoryOwnerV1,
+  messageId: string,
+  opts?: HistoryOperationOptions
+): Promise<HistoryAdmissionReferenceV1 | null> =>
+  transaction("r", opts, async () => {
+    await ownedHistory(owner)
+    const message = await db.messages.get(messageId)
+    const admission = message?.history_admission
+    if (
+      !message ||
+      !admission ||
+      message.history_id !== owner.conversation_id ||
+      admission.version !== 1 ||
+      admission.owner_key !== owner.owner_key ||
+      admission.conversation_id !== owner.conversation_id ||
+      admission.input_message_id !== message.id ||
+      admission.input_message_revision !== messageRevision(message)
+    )
+      return null
+    return {
+      version: admission.version,
+      owner_key: admission.owner_key,
+      conversation_id: admission.conversation_id,
+      input_message_id: admission.input_message_id,
+      input_message_revision: admission.input_message_revision,
+      selection_digest: admission.selection_digest
+    }
+  })
 export const settleLocalAcceptedAssistant = (
   owner: LocalHistoryOwnerV1,
   admission: HistoryAdmissionReferenceV1,
@@ -917,6 +952,8 @@ export const settleLocalAcceptedAssistant = (
 }
 
 
+const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopped"])
+
 /** Store a credential-free operation intent before dispatch, separate from all ancestry. */
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
@@ -929,6 +966,11 @@ export const saveHistoryTurnRecovery = async (
     persistence: turn.persistence ?? "client",
     input_id: turn.input_id, assistant_id: turn.assistant_id, created_at: turn.created_at,
     input_text: turn.input_text, input_images: turn.input_images, result_text: turn.result_text, state: turn.state,
+    ...(turn.outcome && HISTORY_TURN_OUTCOMES.has(turn.outcome) ? {outcome: turn.outcome} : {}),
+    ...(turn.interruption_reason ? {interruption_reason: turn.interruption_reason} : {}),
+    ...(turn.settled_message_id ? {settled_message_id: turn.settled_message_id} : {}),
+    ...(turn.model_name ? {model_name: turn.model_name} : {}),
+    ...(turn.model_id ? {model_id: turn.model_id} : {}),
     ...(turn.admission ? {admission: {
       version: turn.admission.version, owner_key: turn.admission.owner_key,
       conversation_id: turn.admission.conversation_id, input_message_id: turn.admission.input_message_id,

@@ -130,7 +130,9 @@ vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
     get: mockStorageGet,
     set: mockStorageSet,
-    remove: mockStorageRemove
+    remove: mockStorageRemove,
+    watch: vi.fn(),
+    unwatch: vi.fn()
   })
 }))
 

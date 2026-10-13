@@ -1,3 +1,5 @@
+import { normalizePendingWebClipAnalyzeRequest, readPendingWebClipAnalyzeRequest, writePendingWebClipAnalyzeRequest } from "@/services/web-clipper/enrichment"
+import { WEB_CLIPPER_ANALYZE_MESSAGE_TYPE } from "@/services/web-clipper/analyze-handoff"
 import { buildQueuedRequest } from "@/utils/chat-request-queue"
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -23,7 +25,9 @@ const io = vi.hoisted(() => ({
   read: vi.fn(),
   local: vi.fn(),
   scope: vi.fn(),
-  server: vi.fn()
+  server: vi.fn(),
+  submit: vi.fn(),
+  notifyError: vi.fn()
 }))
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
@@ -50,7 +54,9 @@ vi.mock("@/hooks/useMessage", () => ({
           ? Reflect.get(selection, key)
           : key in target
             ? Reflect.get(target, key)
-            : key === "clearChat"
+            : key === "onSubmit"
+              ? io.submit
+              : key === "clearChat"
               ? () =>
                   useStoreMessageOption.setState({
                     messages: [],
@@ -87,9 +93,10 @@ vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionActions: () => ({ checkOnce: io.noop })
 }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: io.noop }))
-vi.mock("@/hooks/useAntdNotification", () => ({
-  useAntdNotification: () => ({ warning: io.noop, error: io.noop })
-}))
+vi.mock("@/hooks/useAntdNotification", () => {
+  const notification = { warning: io.noop, error: io.notifyError }
+  return { useAntdNotification: () => notification }
+})
 vi.mock("@/hooks/useCharacterGreeting", () => ({
   useCharacterGreeting: io.noop
 }))
@@ -125,10 +132,6 @@ vi.mock("@/db/dexie/helpers", async (importOriginal) => ({
   getFullChatData: (id: string) => io.local(id)
 }))
 vi.mock("@/services/app", () => ({ copilotResumeLastChat: async () => false }))
-vi.mock("@/services/web-clipper/enrichment", () => ({
-  readPendingWebClipAnalyzeRequest: () => null,
-  clearPendingWebClipAnalyzeRequest: io.noop
-}))
 vi.mock("@/components/Sidepanel/Chat/body", () => ({
   SidePanelBody: () => (
     <div>
@@ -291,6 +294,118 @@ const completedReplyFixture = () => {
   return { saved, stale, mirror }
 }
 
+describe("current shared Clipper handoff consumer", () => {
+  beforeEach(() => {
+    io.user = "alice"
+    io.sequence = 0
+    sessionStorage.clear()
+    io.submit.mockReset()
+    io.notifyError.mockReset()
+    io.data.clear()
+    io.read.mockReset().mockImplementation(async (key) => io.data.get(key))
+    io.local.mockReset()
+    io.server.mockReset()
+    io.scope
+      .mockReset()
+      .mockImplementation(async () => ({
+        requestScope: {
+          config: { serverUrl: "http://chat.test", authMode: "multi-user" },
+          userId: io.user
+        },
+        scopeSignal: new AbortController().signal,
+        scopeInvalidatedSignal: new AbortController().signal,
+        release: io.noop
+      }))
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+    useSidepanelChatTabsStore.getState().clear()
+    useStoreChatModelSettings.getState().reset()
+  })
+
+  it("fails closed for an old unowned pending clip while preserving a verified owner", () => {
+    const pending = {
+      id: "pending", clipId: "clip", noteId: "note", pageUrl: "https://example.test/clip",
+      pageTitle: "Clip", image: "", message: "Captured text", requestOverrides: { chatMode: "normal", useOCR: false }
+    }
+    expect(normalizePendingWebClipAnalyzeRequest(pending)).toBeNull()
+    const owned = { ...pending, ownerKey: ownerKey("alice") }
+    expect(normalizePendingWebClipAnalyzeRequest(owned)).toEqual(owned)
+  })
+
+  it.each([
+    ["another account", ownerKey("bob")],
+    ["another origin", ownerKey("alice").replace("http://chat.test", "http://other.test")]
+  ])("does not dispatch retained clip text from %s", async (_label, pendingOwnerKey) => {
+    io.data.set(storedKey("alice"), tabsState())
+    writePendingWebClipAnalyzeRequest({
+      id: "private-clip", ownerKey: pendingOwnerKey, clipId: "clip", noteId: "note",
+      pageUrl: "https://example.test/private", pageTitle: "Private clip", image: "",
+      message: "Another owner's private capture", requestOverrides: { chatMode: "normal", useOCR: false }
+    })
+    render(<SidepanelChat />)
+    await screen.findByText("alice first")
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(io.submit).not.toHaveBeenCalled()
+  })
+
+  it("does not retire a replacement owner's pending clip after the consumer unmounts", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    const pending = {
+      id: "same-id", ownerKey: ownerKey("alice"), clipId: "clip", noteId: "note",
+      pageUrl: "https://example.test/private", pageTitle: "Private clip", image: "",
+      message: "Alice capture", requestOverrides: { chatMode: "normal" as const, useOCR: false }
+    }
+    let release!: () => void
+    io.submit.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+    writePendingWebClipAnalyzeRequest(pending)
+    const view = render(<SidepanelChat />)
+    await waitFor(() => expect(io.submit).toHaveBeenCalledTimes(1))
+    act(() => useStoreMessageOption.setState(state => ({ messages: [...state.messages, {
+      id: "accepted-clip", isBot: false, name: "You", message: pending.message,
+      messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
+    }] })))
+    view.unmount()
+    const replacement = { ...pending, ownerKey: ownerKey("bob"), message: "Bob capture" }
+    writePendingWebClipAnalyzeRequest(replacement)
+    await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(readPendingWebClipAnalyzeRequest()).toEqual(replacement)
+    expect(io.notifyError).not.toHaveBeenCalled()
+  })
+
+  it("keeps a rejected Clipper handoff and current work, then retires one accepted retry", async () => {
+    const pending = {
+      id: "pending-clip", ownerKey: ownerKey("alice"), clipId: "clip", noteId: "note", pageUrl: "https://example.test/clip",
+      pageTitle: "Captured page", image: "", message: "Analyze retained page",
+      requestOverrides: { chatMode: "normal" as const, useOCR: false }
+    }
+    io.data.set(storedKey("alice"), tabsState())
+    io.submit.mockRejectedValueOnce(new Error("unsupported_history_action_context"))
+    writePendingWebClipAnalyzeRequest(pending)
+    const view = render(<SidepanelChat />)
+    await waitFor(() => expect(io.notifyError).toHaveBeenCalledWith(expect.objectContaining({
+      description: "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
+    })))
+    expect(readPendingWebClipAnalyzeRequest()).toEqual(pending)
+    expect(screen.getByText("alice first")).toBeInTheDocument()
+    expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
+    expect(io.submit).toHaveBeenCalledTimes(1)
+    io.submit.mockImplementationOnce(async () => {
+      useStoreMessageOption.setState(state => ({ messages: [...state.messages, {
+        id: "accepted-clip", isBot: false, name: "You", message: pending.message,
+        messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
+      }] }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    // A changed model retries the pending handoff through the existing effect.
+    act(() => useStoreMessageOption.setState({ selectedModel: "llama:retry" }))
+    await waitFor(() => expect(readPendingWebClipAnalyzeRequest()).toBeNull())
+    expect(screen.getByText(pending.message)).toBeInTheDocument()
+    view.rerender(<SidepanelChat />)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(io.submit).toHaveBeenCalledTimes(2)
+  })
+
+})
+
 describe.each([
   ["shared", SidepanelChat],
   ["legacy", LegacySidepanelChat]
@@ -298,6 +413,9 @@ describe.each([
   beforeEach(() => {
     io.user = "alice"
     io.sequence = 0
+    sessionStorage.clear()
+    io.submit.mockReset()
+    io.notifyError.mockReset()
     io.data.clear()
     io.read.mockReset().mockImplementation(async (key) => io.data.get(key))
     io.local.mockReset()

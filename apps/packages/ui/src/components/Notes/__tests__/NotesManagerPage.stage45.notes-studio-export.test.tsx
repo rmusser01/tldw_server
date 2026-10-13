@@ -4,6 +4,35 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -122,9 +151,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: ({ notes = [], onSelectNote }: any) => (
+  default: ({ notes = [], onSelectNote }: Pick<React.ComponentProps<typeof import("../NotesListPanel").default>, "notes" | "onSelectNote">) => (
     <div data-testid="notes-list-panel">
-      {notes.map((note: { id: string; title: string }) => (
+      {notes.map((note) => (
         <button
           key={note.id}
           data-testid={`notes-list-item-${note.id}`}
@@ -138,7 +167,7 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesEditorHeader", () => ({
-  default: ({ onExport }: any) => (
+  default: ({ onExport }: Pick<React.ComponentProps<typeof import("../NotesEditorHeader").default>, "onExport">) => (
     <div>
       <button data-testid="print-note-action" onClick={() => onExport("print")}>
         Print note
@@ -369,7 +398,7 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
       focus: vi.fn(),
       print: vi.fn()
     }
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as unknown as Window)
 
     renderPage()
 
@@ -403,7 +432,7 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
       focus: vi.fn(),
       print: vi.fn()
     }
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(usPrintWindow as any)
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(usPrintWindow as unknown as Window)
 
     setNavigatorLanguage("en-US")
     renderPage()
@@ -427,7 +456,7 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
       focus: vi.fn(),
       print: vi.fn()
     }
-    openSpy.mockReturnValue(intlPrintWindow as any)
+    openSpy.mockReturnValue(intlPrintWindow as unknown as Window)
     setNavigatorLanguage("de-DE")
     renderPage()
     await screen.findByTestId("notes-studio-view")
@@ -481,7 +510,7 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
       focus: vi.fn(),
       print: vi.fn()
     }
-    vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as unknown as Window)
 
     renderPage()
 
@@ -509,7 +538,7 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
       focus: vi.fn(),
       print: vi.fn()
     }
-    vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as unknown as Window)
 
     renderPage()
 

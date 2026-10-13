@@ -2,6 +2,8 @@ import { createInstance } from "i18next"
 import { describe, expect, it, vi } from "vitest"
 
 import commonEn from "../../assets/locale/en/common.json"
+import optionEn from "../../assets/locale/en/option.json"
+import reviewEn from "../../assets/locale/en/review.json"
 
 import ICUWithInterpolation from "../icu-format"
 
@@ -30,6 +32,14 @@ const createI18n = async () => {
 }
 
 describe("ICUWithInterpolation", () => {
+  it.each([1, 2])("formats actual saved-item and retry-count English resources for %s items", async count => {
+    const i18n = createInstance()
+    await i18n.use(ICUWithInterpolation).init({ lng: "en", fallbackLng: false, resources: { en: { option: optionEn, review: reviewEn } } })
+    expect(i18n.t("option:quickIngest.wizard.results.reviewSaved", { count })).toBe(count === 1 ? "Review this 1 saved item" : "Review these 2 saved items")
+    expect(i18n.t("review:mediaPage.reviewImportSaved", { count })).toBe(count === 1 ? "Review 1 saved item" : "Review 2 saved items")
+    expect(i18n.t("option:quickIngest.configureEligibleCount", { count })).toBe(count === 1 ? "1 eligible item in this run" : "2 eligible items in this run")
+  })
+
   it("preserves object-valued English resources without stringifying them", async () => {
     const i18n = createInstance()
     await i18n.use(ICUWithInterpolation).init({

@@ -383,6 +383,18 @@ With `format_for_completions=true&include_character_context=true&include_message
 
 When `include_metadata=true`, the response also includes a top-level `metadata_extra` object keyed by `message_id`, containing stored JSON sidecar data.
 
+Assistant replies that the server saved itself (`POST /api/v1/chat/completions` with `save_to_db: true`) carry generation metadata in that sidecar:
+
+| Key | Meaning |
+|---|---|
+| `generation_status` | How the reply ended: `complete`, `length` (the model hit its output-token limit), `interrupted` (the client disconnected or the provider failed mid-stream; the content is the partial reply), `stopped` (a stop signal ended generation; the content is the partial reply) or `error` (reserved for imported replies). |
+| `model_id` | The model the request resolved to. |
+| `provider` | The provider that produced the reply. |
+| `finish_reason` | The provider's finish reason, when it reported one. |
+| `usage` | Provider-reported `prompt_tokens`, `completion_tokens` and `total_tokens`, when available. |
+
+Partial replies (`interrupted`, `stopped`) are kept only for turns sent with `tldw_history_selection_v1`. Replies saved before this metadata existed have none of these keys.
+
 ### Get Chat Context (compact)
 
 Return compact context for a chat, including character name and messages formatted for completions when available.

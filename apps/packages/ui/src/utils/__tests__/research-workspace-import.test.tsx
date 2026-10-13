@@ -1,3 +1,5 @@
+import type { BgRequestInit } from "@/services/background-proxy"
+import type { KnowledgeNoteProvenance } from "../knowledge-note-provenance"
 import {
   readKnowledgeNoteProvenance,
   retainKnowledgeNoteProvenance,
@@ -33,6 +35,8 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   details: vi.fn(),
   request: vi.fn(),
+  sourceNoteRequest: vi.fn(),
+  sourceNoteIds: new Set<string>(),
   persistent: true,
   writeError: false,
   readGate: null as Promise<void> | null,
@@ -129,7 +133,11 @@ vi.mock("@/hooks/useFeatureFlags", () => ({
   useFeatureFlag: () => [true],
 }))
 vi.mock("@/services/background-proxy", () => ({
-  bgRequest: (...args: unknown[]) => mocks.request(...args),
+  bgRequest: (request: any) =>
+    request.method === "GET" &&
+    mocks.sourceNoteIds.has(decodeURIComponent(request.path.split("/").at(-1)))
+      ? mocks.sourceNoteRequest(request)
+      : mocks.request(request),
 }))
 vi.mock("@/components/Option/ResearchWorkspace/WorkspaceHeader", () => ({
   WorkspaceHeader: () => null,
@@ -190,6 +198,18 @@ beforeEach(() => {
   mocks.upload.mockReset()
   mocks.details.mockReset()
   mocks.request.mockReset().mockResolvedValue({})
+  mocks.sourceNoteIds.clear()
+  mocks.sourceNoteIds.add("note-uuid")
+  mocks.sourceNoteRequest
+    .mockReset()
+    .mockImplementation(async (request: any) => ({
+      id: decodeURIComponent(request.path.split("/").at(-1)),
+      title: "Field note",
+      version: 4,
+      deleted: false,
+      content:
+        "First excerpt\nSecond excerpt\nComplete note ending outside retrieved chunks.",
+    }))
   mocks.writeError = false
   mocks.readGate = null
   localStorage.clear()
@@ -487,7 +507,7 @@ describe("mounted Knowledge research import", () => {
     ])
     expect(useWorkspaceStore.getState().currentNote.content).toBe(firstNote)
     expect(mocks.upload.mock.calls.map(([file]) => file.name)).toEqual([
-      "Field note - retrieved excerpts.txt",
+      "Field note - full note snapshot (v4).txt",
       "Source 3 - retrieved excerpts.txt",
       "Source 3 - retrieved excerpts.txt",
     ])
@@ -555,7 +575,9 @@ describe("mounted Knowledge research import", () => {
       )
       const view = renderHook(
         ({ workspace }) => useResearchWorkspacePrefill(workspace, true),
-        { initialProps: { workspace: "workspace-a" } },
+        {
+          initialProps: { workspace: "workspace-a" },
+        },
       )
       await waitFor(() => expect(mocks.upload).toHaveBeenCalled())
       if (change === "owner")
@@ -744,10 +766,9 @@ it.each([false, true])(
           throw Object.assign(new Error("missing"), { status: 404 })
         if (method === "PUT") {
           if (headers?.["expected-version"] !== String(canonical.version))
-            throw Object.assign(
-              new Error("expected-version header required"),
-              { status: 422 },
-            )
+            throw Object.assign(new Error("expected-version header required"), {
+              status: 422,
+            })
           canonical = {
             ...canonical,
             ...body,
@@ -772,6 +793,7 @@ it.each([false, true])(
       })
     await restore()
     const transfer = payload()
+    mocks.sourceNoteIds.add("b905bb24-0657-45de-af47-6c8a4d5db498")
     transfer.sources = [
       transfer.sources[3],
       ...transfer.sources.slice(0, 2).map((source) => ({
@@ -1005,7 +1027,6 @@ it("retains an existing canonical note's unsaved title and body when appending t
   receiver.unmount()
 })
 
-
 it.each([
   ["lost response", false],
   ["lost response", true],
@@ -1193,10 +1214,9 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           throw Object.assign(new Error("missing"), { status: 404 })
         if (method === "PUT") {
           if (headers?.["expected-version"] !== String(canonical.version))
-            throw Object.assign(
-              new Error("expected-version header required"),
-              { status: 422 },
-            )
+            throw Object.assign(new Error("expected-version header required"), {
+              status: 422,
+            })
           canonical = {
             ...canonical,
             title: body.title,
@@ -1511,6 +1531,7 @@ it.each([false, true])(
         },
       ],
     }
+    mocks.sourceNoteIds.add(originalNoteId)
     const caller = render(<AnswerPanel />)
     fireEvent.click(
       screen.getByRole("button", { name: "Continue in Research Workspace" }),
@@ -1815,4 +1836,525 @@ it("imports an external web result's arbitrary numeric ID as a snapshot, not sto
   ).not.toContain(7)
   expect(mocks.upload).toHaveBeenCalledTimes(1)
   receiver.unmount()
+})
+
+it("imports complete canonical note content once and retains the original evidence and revision", async () => {
+  localStorage.setItem(
+    "tldw:research-workspace:migration:tombstone:workspace-a",
+    JSON.stringify({
+      legacyWorkspaceId: "workspace-a",
+      serverWorkspaceId: "workspace-a",
+      migrationId: "migration-a",
+      serverScopeKey: "alice",
+      contentRetained: false,
+      deletedAt: "2026-10-03T00:00:00Z",
+    }),
+  )
+  let canonical: any = null
+  mocks.request.mockImplementation(async ({ method, body }: any) => {
+    if (method === "POST") canonical = { ...body, version: 1 }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const handoff = payload()
+  handoff.sources = handoff.sources.filter(
+    (source) => source.sourceType === "notes",
+  )
+  await queueResearchWorkspacePrefill(handoff, "alice")
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const view = renderHook(() =>
+    useResearchWorkspacePrefill("workspace-a", true),
+  )
+  await waitFor(() => expect(view.result.current.attached).toBe(1))
+  expect(mocks.sourceNoteRequest).toHaveBeenCalledTimes(1)
+  expect(mocks.sourceNoteRequest).toHaveBeenCalledWith(
+    expect.objectContaining({
+      method: "GET",
+      path: "/api/v1/notes/note-uuid",
+      abortSignal: expect.any(AbortSignal),
+    }),
+  )
+  const file: File = mocks.upload.mock.calls[0][0]
+  const content = await new Promise<string>((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.readAsText(file)
+  })
+  expect(content).toContain("Complete note ending outside retrieved chunks.")
+  expect(content).toContain("Original reference: notes / note-uuid")
+  const source = useWorkspaceStore.getState().sources[0]
+  expect(source.title).toBe("Field note — full note snapshot (v4)")
+  expect(source.knowledgeQaEvidence?.sources).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        originalId: "note-uuid",
+        originalVersion: 4,
+        excerpt: "First excerpt",
+      }),
+      expect.objectContaining({
+        originalId: "note-uuid",
+        originalVersion: 4,
+        excerpt: "Second excerpt",
+      }),
+    ]),
+  )
+  expect(mocks.upload).toHaveBeenCalledTimes(1)
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).toBeNull()
+  expect(
+    readKnowledgeNoteProvenance(canonical.content)?.research?.sources[0]
+      .evidence.sources[0],
+  ).toEqual(expect.objectContaining({ originalVersion: 4 }))
+  view.unmount()
+})
+
+it.each([
+  ["denied read", null],
+  [
+    "wrong identity",
+    {
+      id: "other-note",
+      content: "Private content",
+      title: "Other",
+      version: 4,
+    },
+  ],
+  [
+    "deleted note",
+    {
+      id: "note-uuid",
+      content: "Deleted content",
+      title: "Field",
+      version: 4,
+      deleted: true,
+    },
+  ],
+  [
+    "invalid revision",
+    { id: "note-uuid", content: "Content", title: "Field", version: 0 },
+  ],
+])(
+  "retains a failed import instead of substituting old excerpts after a %s",
+  async (_label, note) => {
+    const handoff = payload()
+    handoff.sources = handoff.sources.filter(
+      (source) => source.sourceType === "notes",
+    )
+    await queueResearchWorkspacePrefill(handoff, "alice")
+    if (note) mocks.sourceNoteRequest.mockResolvedValue(note)
+    else
+      mocks.sourceNoteRequest.mockRejectedValue(
+        Object.assign(new Error("Denied"), { status: 403 }),
+      )
+    mocks.upload.mockResolvedValue({ media_id: 101 })
+    const view = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(view.result.current.failed).toBe(1))
+    expect(view.result.current.importing).toBe(false)
+    expect(mocks.upload).not.toHaveBeenCalled()
+    expect(
+      (await consumeResearchWorkspacePrefill("alice"))?.sources[0].importError,
+    ).toContain("full note")
+    view.unmount()
+  },
+)
+
+it("retires a late full-note read before uploading into a changed workspace", async () => {
+  const handoff = payload()
+  handoff.sources = handoff.sources.filter(
+    (source) => source.sourceType === "notes",
+  )
+  await queueResearchWorkspacePrefill(handoff, "alice")
+  let finish!: (value: unknown) => void
+  mocks.sourceNoteRequest.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const view = renderHook(() =>
+    useResearchWorkspacePrefill("workspace-a", true),
+  )
+  await waitFor(() => expect(mocks.sourceNoteRequest).toHaveBeenCalled())
+  await act(async () => {
+    useWorkspaceStore.setState({ workspaceId: "workspace-b" })
+    finish({
+      id: "note-uuid",
+      title: "Field note",
+      content: "Complete note",
+      version: 4,
+    })
+  })
+  expect(mocks.upload).not.toHaveBeenCalled()
+  expect(useWorkspaceStore.getState().sources).toEqual([])
+  view.unmount()
+})
+
+it.each(["streamed", "restored"])(
+  "imports %s note chunks using their canonical source identity",
+  async (shape) => {
+    const handoff = buildKnowledgeQaWorkspacePrefill({
+      threadId: "thread-a",
+      query: "Field evidence",
+      answer: null,
+      citations: [],
+      results: ["First excerpt", "Second excerpt"].map((content, index) => ({
+        id: `note_chunk_${index}`,
+        content,
+        ...(shape === "streamed" ? { sourceId: "note-uuid" } : {}),
+        metadata: {
+          source_type: "notes",
+          title: "Field note",
+          ...(shape === "restored" ? { source_id: "note-uuid" } : {}),
+        },
+      })),
+    })
+    expect(handoff.sources.map((source) => source.originalId)).toEqual([
+      "note-uuid",
+      "note-uuid",
+    ])
+    await queueResearchWorkspacePrefill(handoff, "alice")
+    mocks.upload.mockResolvedValue({ media_id: 101 })
+    const view = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(view.result.current.attached).toBe(1))
+    expect(mocks.sourceNoteRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/api/v1/notes/note-uuid" }),
+    )
+    expect(mocks.upload).toHaveBeenCalledTimes(1)
+    expect(
+      useWorkspaceStore
+        .getState()
+        .sources[0].knowledgeQaEvidence?.sources.map(
+          (source) => source.excerpt,
+        ),
+    ).toEqual(["First excerpt", "Second excerpt"])
+    view.unmount()
+  },
+)
+
+it("retains canonical import provenance in a fresh server workspace", async () => {
+  let canonical: any = null
+  mocks.request.mockImplementation(async ({ method, body }: any) => {
+    if (method === "POST") canonical = { ...body, version: 1,
+      content: stripKnowledgeNoteProvenance(body.content),
+      knowledge_provenance_state: "active", knowledge_provenance_version: 1,
+      knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+    }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const handoff = payload()
+  handoff.sources = handoff.sources.filter(
+    (source) => source.sourceType === "notes",
+  )
+  await queueResearchWorkspacePrefill(handoff, "alice")
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const view = renderHook(() =>
+    useResearchWorkspacePrefill("workspace-a", true, true),
+  )
+  await waitFor(() => expect(canonical).not.toBeNull())
+  expect(
+    canonical.knowledge_provenance?.research?.import_id,
+  ).toBe(handoff.id)
+  expect(useWorkspaceStore.getState().currentNote.id).toBe(canonical.id)
+  expect(mocks.upload).toHaveBeenCalledTimes(1)
+  expect(view.result.current.error).toBeNull()
+  view.unmount()
+})
+
+it("does not revive a discarded completed local import when the server workspace is confirmed", async () => {
+  const handoff = payload()
+  handoff.sources = handoff.sources.filter(
+    (source) => source.sourceType === "notes",
+  )
+  await queueResearchWorkspacePrefill(handoff, "alice")
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const view = renderHook(
+    ({ serverBacked }) =>
+      useResearchWorkspacePrefill("workspace-a", true, serverBacked),
+    { initialProps: { serverBacked: false } },
+  )
+  await waitFor(() =>
+    expect((mocks.values.values().next().value as any)?.completed).toBe(true),
+  )
+  act(() => {
+    useWorkspaceStore.getState().clearCurrentNote()
+  })
+  view.rerender({ serverBacked: true })
+  await act(async () => {
+    await Promise.resolve()
+  })
+  expect(mocks.request).not.toHaveBeenCalled()
+  expect(useWorkspaceStore.getState().currentNote.content).toBe("")
+  view.unmount()
+})
+
+it("waits for server workspace confirmation before starting a fresh canonical import", async () => {
+  const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+  const client = tldwClient as any
+  let confirm!: (value: unknown) => void
+  client.upsertWorkspace = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        confirm = resolve
+      }),
+  )
+  client.getWorkspaceSources = vi.fn().mockResolvedValue([])
+  client.addWorkspaceSource = vi.fn().mockResolvedValue({})
+  let canonical: any = null
+  mocks.request.mockImplementation(async ({ method, body }: any) => {
+    if (method === "POST") canonical = { ...body, version: 1 }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const handoff = payload()
+  handoff.sources = handoff.sources.filter(
+    (source) => source.sourceType === "notes",
+  )
+  await queueResearchWorkspacePrefill(handoff, "alice")
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const view = render(<ResearchWorkspace />)
+  try {
+    await waitFor(() => expect(client.upsertWorkspace).toHaveBeenCalled())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.upload).not.toHaveBeenCalled()
+    await act(async () => {
+      confirm({})
+    })
+    await waitFor(() => expect(canonical).not.toBeNull())
+    expect(
+      readKnowledgeNoteProvenance(canonical.content)?.research?.import_id,
+    ).toBe(handoff.id)
+  } finally {
+    view.unmount()
+    delete client.upsertWorkspace
+    delete client.getWorkspaceSources
+    delete client.addWorkspaceSource
+  }
+})
+
+it.each(["streamed", "restored"])(
+  "reuses %s media chunks through their canonical media identity",
+  async (form) => {
+    const handoff = buildKnowledgeQaWorkspacePrefill({
+      threadId: "thread-a",
+      query: "Evidence?",
+      answer: "A cited answer",
+      citations: [1],
+      results: [
+        {
+          id: "media-chunk-7-0",
+          content: "Original media excerpt",
+          ...(form === "streamed" ? { sourceId: "7" } : {}),
+          metadata: {
+            source_type: "media_db",
+            title: "Original media",
+            ...(form === "restored" ? { source_id: "7" } : {}),
+          },
+        },
+      ],
+    })
+    await queueResearchWorkspacePrefill(handoff, "alice")
+    mocks.upload.mockResolvedValue({ media_id: 101 })
+    mocks.details.mockResolvedValue({
+      content: { text: "Original media excerpt" },
+      vector_processing_status: "completed",
+    })
+    const view = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true),
+    )
+    await waitFor(() => expect(view.result.current.attached).toBe(1))
+    expect(useWorkspaceStore.getState().sources[0].mediaId).toBe(7)
+    expect(mocks.upload).not.toHaveBeenCalled()
+    view.unmount()
+  },
+)
+
+it.each(["note-first", "media-first"])(
+  "retains both original references when a note snapshot reuses retrieved media: %s",
+  async (order) => {
+    const handoff = payload()
+    const noteSources = handoff.sources.filter(
+      (source) => source.sourceType === "notes",
+    )
+    const mediaSource = buildKnowledgeQaWorkspacePrefill({
+      threadId: "thread-1",
+      query: "Evidence?",
+      answer: null,
+      citations: [],
+      results: [
+        {
+          id: "media-chunk-7-0",
+          sourceId: "7",
+          content: "Existing snapshot excerpt",
+          metadata: {
+            source_type: "media_db",
+            title: "Existing note snapshot",
+          },
+        },
+      ],
+    }).sources[0]
+    handoff.sources =
+      order === "note-first"
+        ? [...noteSources, mediaSource]
+        : [mediaSource, ...noteSources]
+    await queueResearchWorkspacePrefill(handoff, "alice")
+    mocks.upload.mockResolvedValue({ media_id: 7 })
+    let canonical: any = null
+    mocks.request.mockImplementation(async ({ method, body }: any) => {
+      if (method === "POST") canonical = { ...body, version: 1 }
+      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+      return canonical
+    })
+    const view = renderHook(() =>
+      useResearchWorkspacePrefill("workspace-a", true, true),
+    )
+    await waitFor(() => expect(view.result.current.importing).toBe(false))
+    await waitFor(() => expect(canonical).not.toBeNull())
+    const retained = readKnowledgeNoteProvenance(canonical.content)?.research
+      ?.sources
+    expect(retained).toEqual([
+      expect.objectContaining({
+        mediaId: 7,
+        evidence: expect.objectContaining({
+          snapshot: true,
+          sources: expect.arrayContaining([
+            expect.objectContaining({
+              originalId: "note-uuid",
+              originalVersion: 4,
+              excerpt: "First excerpt",
+            }),
+            expect.objectContaining({
+              originalId: "note-uuid",
+              originalVersion: 4,
+              excerpt: "Second excerpt",
+            }),
+            expect.objectContaining({
+              originalId: "7",
+              excerpt: "Existing snapshot excerpt",
+            }),
+          ]),
+        }),
+      }),
+    ])
+    expect(useWorkspaceStore.getState().sources).toHaveLength(1)
+    expect(mocks.upload).toHaveBeenCalledTimes(1)
+    view.unmount()
+  },
+)
+
+it("replays canonical import receipts without replacing edits made before retry", async () => {
+  const transfer = payload()
+  transfer.sources = transfer.sources.filter(source => source.sourceType === "notes")
+  await queueResearchWorkspacePrefill(transfer, "alice")
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  let canonical: { id: string; content: string; knowledge_provenance: KnowledgeNoteProvenance } | null = null
+  const writes: BgRequestInit[] = []
+  mocks.request.mockImplementation(async request => {
+    if (request.method === "POST") {
+      writes.push(request)
+      if (!canonical) canonical = { ...request.body, version: 1, knowledge_provenance_state: "active", knowledge_provenance_version: 1, knowledge_provenance_hash: `sha256:${"a".repeat(64)}` }
+      if (writes.length === 1) throw new Error("Lost acknowledgment")
+    }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const view = renderHook(() => useResearchWorkspacePrefill("workspace-a", true, true))
+  await waitFor(() => expect(view.result.current.error).not.toBeNull())
+  await act(async () => {
+    useWorkspaceStore.getState().updateNoteContent("Edited before receipt recovery")
+    await view.result.current.retry()
+  })
+  await waitFor(() => expect(view.result.current.error).toBeNull())
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(writes).toHaveLength(2)
+  expect(writes[1].body).toEqual(writes[0].body)
+  expect(writes[1].headers).toEqual(writes[0].headers)
+  expect(writes[0].headers["Idempotency-Key"]).toBeTruthy()
+  expect(stripKnowledgeNoteProvenance(useWorkspaceStore.getState().currentNote.content)).toBe("Edited before receipt recovery")
+  expect(useWorkspaceStore.getState().currentNote).toMatchObject({ id: canonical.id, isDirty: true, knowledge_provenance_version: 1 })
+  view.unmount()
+})
+
+it("does not finish a partial import when its recovered receipt lacks newly attached sources", async () => {
+  const transfer = payload()
+  transfer.sources = transfer.sources.slice(0, 3)
+  await queueResearchWorkspacePrefill(transfer, "alice")
+  mocks.upload.mockResolvedValueOnce({ media_id: 101 })
+    .mockRejectedValueOnce(new Error("source unavailable"))
+    .mockResolvedValueOnce({ media_id: 102 })
+  let canonical: { id: string; content: string; knowledge_provenance: KnowledgeNoteProvenance } | null = null
+  const writes: BgRequestInit[] = []
+  mocks.request.mockImplementation(async request => {
+    if (request.method === "POST" || request.method === "PUT") {
+      writes.push(request)
+      if (!canonical || request.method === "PUT") canonical = {
+        ...request.body, id: transfer.id, version: writes.length,
+        knowledge_provenance_state: "active", knowledge_provenance_version: writes.length,
+        knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+      }
+      if (writes.length === 1) throw new Error("Lost acknowledgment")
+    }
+    if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
+    return canonical
+  })
+  const view = renderHook(() => useResearchWorkspacePrefill("workspace-a", true, true))
+  await waitFor(() => expect(view.result.current.error).not.toBeNull())
+  await act(async () => {
+    useWorkspaceStore.getState().updateNoteContent("Later authored draft")
+    await view.result.current.retry()
+  })
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).not.toBeNull()
+  expect((await consumeResearchWorkspacePrefill("alice"))?.completed).not.toBe(true)
+  expect(writes[1].body).toEqual(writes[0].body)
+  expect(writes[1].headers).toEqual(writes[0].headers)
+  await act(async () => { await view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).toBeNull()
+  expect(writes[2].method).toBe("PUT")
+  expect(writes[2].headers["Idempotency-Key"]).not.toBe(writes[0].headers["Idempotency-Key"])
+  expect(canonical.knowledge_provenance.research.sources.map(source => source.mediaId)).toEqual([101, 102])
+  expect(stripKnowledgeNoteProvenance(canonical.content)).toBe("Later authored draft")
+  view.unmount()
+})
+
+it.each([
+    { status: 409, detail: { error_code: 'notes_provenance_encryption_unsupported' }, message: 'Policy unavailable' },
+    { status: 429, detail: 'Rate limit exceeded for notes.create', message: 'Rate limit exceeded for notes.create' },
+    { status: 409, detail: { error_code: 'notes_organization_sync_not_ready' }, message: 'Notes organization Sync is not ready for writes.' },
+  ])('retains the pending canonical import through $status $message receipt replay', async ({ status, detail, message }) => {
+  const transfer = payload()
+  transfer.sources = transfer.sources.filter(source => source.sourceType === 'notes')
+  await queueResearchWorkspacePrefill(transfer, 'alice')
+  mocks.upload.mockResolvedValue({ media_id: 101 })
+  const writes: BgRequestInit[] = []
+  let canonical: { id: string; content: string; knowledge_provenance: KnowledgeNoteProvenance } | null = null
+  mocks.request.mockImplementation(async request => {
+    if (request.method === 'POST') {
+      writes.push(request)
+      canonical ||= { ...request.body, version: 1, knowledge_provenance_state: 'active', knowledge_provenance_version: 1 }
+      if (writes.length === 1) throw new Error('Lost response')
+      if (writes.length === 2) throw Object.assign(new Error(message), { status, details: { detail } })
+    }
+    if (!canonical) throw Object.assign(new Error('missing'), { status: 404 })
+    return canonical
+  })
+  const view = renderHook(() => useResearchWorkspacePrefill('workspace-a', true, true))
+  await waitFor(() => expect(view.result.current.error).not.toBeNull())
+  await act(async () => { await view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.importing).toBe(false))
+  expect(view.result.current.error).not.toBeNull()
+  await act(async () => { await view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.error).toBeNull())
+  expect(writes).toHaveLength(3)
+  expect(writes[2].body).toEqual(writes[0].body)
+  expect(writes[2].headers).toEqual(writes[0].headers)
+  view.unmount()
 })

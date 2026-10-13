@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -353,3 +355,46 @@ def test_web_clipper_save_expected_principal_boundary(
         expected_note_id = stable_note_id("web-clipper", f"{authenticated_user_id}\0clip-owner-boundary")
         assert response.json()["note_id"] == document["note_id"] == expected_note_id
         assert response.json()["status"] == "saved"
+
+
+@pytest.mark.parametrize(("digest", "expected"), [("0" * 64, 400), ("A" * 64, 422)])
+def test_web_capture_invalid_descriptor_or_digest_persists_nothing(client_with_web_clipper_db, digest, expected):
+    client = client_with_web_clipper_db
+    payload = _save_payload(clip_id="capture-invalid", destination_mode="workspace")
+    payload["capture_metadata"] = {
+        "web_capture_v1": {
+            "mode": "server_article",
+            "requested_url": payload["source_url"],
+            "captured_at": "2026-10-07T18:00:00Z",
+            "content_sha256": digest,
+            "refresh_of": None,
+        }
+    }
+    response = client.post("/api/v1/web-clipper/save", json=payload)
+    assert response.status_code == expected, response.text
+    db = client.app.state.web_clipper_db
+    assert db.get_note_clipper_document_by_clip_id("capture-invalid") is None
+    assert db.get_note_by_id(stable_note_id("web-clipper", "1\0capture-invalid")) is None
+    assert db.list_workspace_sources("ws-1") == []
+
+
+def test_web_capture_save_status_and_exact_retry(client_with_web_clipper_db):
+    client = client_with_web_clipper_db
+    payload = _save_payload(clip_id="capture-api", destination_mode="workspace")
+    payload["capture_metadata"] = {
+        "web_capture_v1": {
+            "mode": "server_article",
+            "requested_url": payload["source_url"],
+            "captured_at": "2026-10-07T18:00:00Z",
+            "content_sha256": hashlib.sha256(payload["content"]["full_extract"].strip().encode("utf-8")).hexdigest(),
+            "refresh_of": None,
+        }
+    }
+    first = client.post("/api/v1/web-clipper/save", json=payload)
+    retry = client.post("/api/v1/web-clipper/save", json=payload)
+    assert first.status_code == retry.status_code == 200
+    assert first.json()["note"] == retry.json()["note"]
+    status = client.get("/api/v1/web-clipper/capture-api")
+    assert status.status_code == 200
+    assert status.json()["note"]["id"] == first.json()["note"]["id"]
+    assert len(client.app.state.web_clipper_db.list_workspace_sources("ws-1")) == 1

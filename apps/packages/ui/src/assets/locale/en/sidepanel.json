@@ -111,7 +111,8 @@
     "transcriptionFallback": "Transcription completed. Open Media in the Web UI to view it.",
     "sourceLabel": "Source",
     "transcriptLabel": "Transcript",
-    "summaryLabel": "Summary"
+    "summaryLabel": "Summary",
+    "webClipAnalyzeNewChatRequired": "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
   },
   "clipper": {
     "routeLabel": "Clipper",

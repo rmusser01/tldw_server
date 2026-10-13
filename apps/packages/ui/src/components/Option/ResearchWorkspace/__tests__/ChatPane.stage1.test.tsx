@@ -866,7 +866,8 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     renderChatPane()
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
-      scope: { type: "workspace", workspaceId: "workspace-a" }
+      scope: { type: "workspace", workspaceId: "workspace-a" },
+      hydrateServerChat: true
     })
   })
 

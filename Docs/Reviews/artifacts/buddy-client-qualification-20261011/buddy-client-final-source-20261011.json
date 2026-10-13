@@ -1,0 +1,9 @@
+{
+  "source_base": "39b53a876f2cfefcede02c92ae7dacf88f7a98ec",
+  "sha256": {
+    "apps/packages/ui/src/entries/shared/options-app.tsx": "7933736b64dc4f2f65dc49649420bf004e956d11033d0e4d06e5cad87af84a82",
+    "apps/extension/tests/e2e/persona-assistant-setup.spec.ts": "fe071875c5ae27dd49d09f9109397ac2caa8bf7ffc6d68d8d41a936204190e53",
+    "apps/extension/tests/e2e/buddy-independent-setup.spec.ts": "63a045f79b1b1d8c173468f48dfffbb5ab8820b439de6ea33e50e4ab244def96",
+    "apps/extension/.output/chrome-mv3/manifest.json": "5a28cc368433e285d793a166165297d6dd36c33b14e78a4806c45fc1e337c100"
+  }
+}

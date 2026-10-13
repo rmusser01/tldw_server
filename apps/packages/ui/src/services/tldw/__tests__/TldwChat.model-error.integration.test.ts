@@ -1,4 +1,8 @@
 import i18n from "i18next"
+import { getPrompt } from "@/services/application"
+import { humanMessageFormatter } from "@/utils/human-message"
+import { ChatTldw } from "@/models/ChatTldw"
+import { WEB_CLIPPER_ANALYZE_MESSAGE_TYPE } from "@/services/web-clipper/analyze-handoff"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { chatRagMethods } from "../domains/chat-rag"
 import { TldwChatService } from "../TldwChat"
@@ -35,6 +39,30 @@ describe("ordinary chat unavailable-model recovery through browser transport", (
   })
 
   afterEach(() => { vi.unstubAllGlobals() })
+
+  it("sends the composed Clipper analysis through the real preset adapter and SSE transport", async () => {
+    storage.set("copilotCustomPrompt", "An unrelated custom preset")
+    const clip = "Analyze captured Vega page. Inspection: 24 November 2026."
+    const requests: Record<string, unknown>[] = []
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)))
+      return new Response('data: {"choices":[{"delta":{"content":"24 November 2026"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200, headers: { "content-type": "text/event-stream" }
+      })
+    }))
+    const template = await getPrompt(WEB_CLIPPER_ANALYZE_MESSAGE_TYPE)
+    const human = await humanMessageFormatter({
+      content: [{ type: "text", text: template.replace("{text}", clip) }],
+      model: "tldw:test-model", useOCR: false
+    })
+    const adapter = new ChatTldw({ model: "test-model", apiProvider: "llamacpp" })
+    let answer = ""
+    for await (const chunk of await adapter.stream([human])) answer += chunk
+    expect(answer).toBe("24 November 2026")
+    expect(requests).toMatchObject([{ model: "test-model", api_provider: "llamacpp", messages: [{ role: "user", content: clip }] }])
+    expect(await getPrompt("custom")).toBe("An unrelated custom preset")
+    expect(await getPrompt("unknown-action")).toBe("")
+  })
 
   it("renders actionable HTTP400 guidance and preserves request identity when retried", async () => {
     // Keep service wrapping, direct HTTP error parsing, SSE parsing and the

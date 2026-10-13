@@ -22,6 +22,7 @@ _DELEGATED_MESSAGE_METHODS = {
     "add_message",
     "append_message_from_sync",
     "tombstone_message_from_sync",
+    "tombstone_unsynced_message_from_sync",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "get_message_images",
@@ -174,6 +175,84 @@ def test_message_store_sync_append_dedupe_divergent_versions_and_tombstone(db):
     assert conflict is not None
     assert bool(conflict["deleted"]) is True
     assert store.get_conversation_by_id(conversation_id) is not None
+
+
+def _tombstone_unsynced(store, stable_message_id, object_hash="sha256:tombstone"):
+    return store.tombstone_unsynced_message_from_sync(
+        stable_message_id=stable_message_id,
+        sync_client_id="message-store-user",
+        object_revision=1,
+        object_hash=object_hash,
+    )
+
+
+def test_unsynced_tombstone_of_a_message_that_does_not_exist_changes_nothing(db):
+    store = db["db"]
+    conversation_id = db["conversation_id"]
+    store.add_message({"id": "neighbour", "conversation_id": conversation_id, "sender": "user", "content": "stays"})
+
+    assert _tombstone_unsynced(store, "never-existed") == "absent"
+
+    assert store.get_message_by_id("never-existed", include_deleted=True) is None
+    assert store.count_messages_for_conversation(conversation_id) == 1
+
+
+def test_unsynced_tombstone_deletes_a_copy_kept_outside_sync_and_replays(db):
+    store = db["db"]
+    conversation_id = db["conversation_id"]
+    store.add_message({"id": "outside-sync", "conversation_id": conversation_id, "sender": "user", "content": "copy"})
+    store.add_message({"id": "neighbour", "conversation_id": conversation_id, "sender": "user", "content": "stays"})
+
+    assert _tombstone_unsynced(store, "outside-sync") == "deleted"
+
+    assert store.get_message_by_id("outside-sync") is None
+    assert bool(store.get_message_by_id("outside-sync", include_deleted=True)["deleted"]) is True
+    assert store.get_message_by_id("neighbour") is not None
+    # The same tombstone again recognises its own work; a different one does not claim it.
+    assert _tombstone_unsynced(store, "outside-sync") == "deleted"
+    assert _tombstone_unsynced(store, "outside-sync", object_hash="sha256:another-tombstone") == "foreign"
+
+
+def test_unsynced_tombstone_leaves_a_row_with_its_own_sync_history(db):
+    store = db["db"]
+    store.append_message_from_sync(
+        stable_message_id="projected",
+        conversation_id=db["conversation_id"],
+        sender="user",
+        content="Projected by Sync",
+        timestamp="2026-05-23T18:13:00+00:00",
+        sync_client_id="message-store-user",
+        object_revision=1,
+        payload_hash="sha256:projected",
+    )
+
+    assert _tombstone_unsynced(store, "projected") == "foreign"
+
+    assert store.get_message_by_id("projected") is not None
+
+
+def test_unsynced_tombstone_only_reaches_chats_the_projection_owner_holds(db):
+    store = db["db"]
+    with store.transaction() as conn:
+        conn.execute(
+            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+            ("their-chat", "their-chat", "Theirs", "another-owner"),
+        )
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, sender, content, client_id) VALUES (?, ?, ?, ?, ?)",
+            ("their-message", "their-chat", "user", "not yours", "another-owner"),
+        )
+
+    assert _tombstone_unsynced(store, "their-message") == "absent"
+
+    assert bool(store.get_message_by_id("their-message", include_deleted=True)["deleted"]) is False
+    assert [item["id"] for item in store.get_messages_by_sync_stable_id("their-message")] == ["their-message"]
+    assert store.get_messages_by_sync_stable_id("their-message", owner_client_id="message-store-user") == []
+
+
+def test_unsynced_tombstone_requires_a_message_id(db):
+    with pytest.raises(InputError):
+        _tombstone_unsynced(db["db"], "  ")
 
 
 def test_message_store_add_and_fetch_roundtrip(db):

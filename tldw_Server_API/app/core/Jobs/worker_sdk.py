@@ -18,6 +18,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 from .manager import JobManager
 from .operations.contracts import (
@@ -716,7 +717,8 @@ class WorkerSDK:
             try:
                 error_class: type[BaseException] | None = None
                 try:
-                    disposition = await handler(copy.deepcopy(acquired_job), context)
+                    with llm_call_root(acquired_job.get("owner_user_id")):
+                        disposition = await handler(copy.deepcopy(acquired_job), context)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 - handler isolation boundary
@@ -952,7 +954,8 @@ class WorkerSDK:
                 renew_task = asyncio.create_task(self._auto_renew(job, progress_cb=progress_cb))
                 # Handle job
                 try:
-                    result = await handler(job)
+                    with llm_call_root(job.get("owner_user_id")):
+                        result = await handler(job)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:

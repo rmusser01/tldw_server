@@ -2,6 +2,7 @@ import React from "react";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { useQueryClient } from "@tanstack/react-query";
 import { useStoreMessageOption } from "~/store/option";
+import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
 import { useWebUI } from "@/store/webui";
@@ -114,6 +115,9 @@ export const useMessageOption = (
     setUseOCR,
   } = useChatBaseState(useStoreMessageOption);
 
+  // Grouped shallow selectors: each group only re-renders this hook's host
+  // when one of its own fields changes (e.g. a streaming messages flush must
+  // not churn the settings/config subscriptions, and vice versa).
   const {
     webSearch,
     setWebSearch,
@@ -121,24 +125,70 @@ export const useMessageOption = (
     setToolChoice,
     isSearchingInternet,
     setIsSearchingInternet,
+    temporaryChat,
+    setTemporaryChat,
+    fileRetrievalEnabled,
+    setFileRetrievalEnabled,
+    actionInfo,
+    setActionInfo,
+    replyTarget,
+    clearReplyTarget,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      webSearch: state.webSearch,
+      setWebSearch: state.setWebSearch,
+      toolChoice: state.toolChoice,
+      setToolChoice: state.setToolChoice,
+      isSearchingInternet: state.isSearchingInternet,
+      setIsSearchingInternet: state.setIsSearchingInternet,
+      temporaryChat: state.temporaryChat,
+      setTemporaryChat: state.setTemporaryChat,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
+      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
+      actionInfo: state.actionInfo,
+      setActionInfo: state.setActionInfo,
+      replyTarget: state.replyTarget,
+      clearReplyTarget: state.clearReplyTarget,
+    })),
+  );
+
+  const {
     queuedMessages: storeQueuedMessages,
     addQueuedMessage: storeAddQueuedMessage,
     setQueuedMessages: storeSetQueuedMessages,
     clearQueuedMessages: storeClearQueuedMessages,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      queuedMessages: state.queuedMessages,
+      addQueuedMessage: state.addQueuedMessage,
+      setQueuedMessages: state.setQueuedMessages,
+      clearQueuedMessages: state.clearQueuedMessages,
+    })),
+  );
+
+  const {
     selectedKnowledge,
     setSelectedKnowledge,
-    temporaryChat,
-    setTemporaryChat,
     documentContext,
     setDocumentContext,
     uploadedFiles,
     setUploadedFiles,
     contextFiles,
     setContextFiles,
-    actionInfo,
-    setActionInfo,
-    setFileRetrievalEnabled,
-    fileRetrievalEnabled,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      selectedKnowledge: state.selectedKnowledge,
+      setSelectedKnowledge: state.setSelectedKnowledge,
+      documentContext: state.documentContext,
+      setDocumentContext: state.setDocumentContext,
+      uploadedFiles: state.uploadedFiles,
+      setUploadedFiles: state.setUploadedFiles,
+      contextFiles: state.contextFiles,
+      setContextFiles: state.setContextFiles,
+    })),
+  );
+
+  const {
     ragMediaIds,
     setRagMediaIds,
     ragSearchMode,
@@ -155,6 +205,28 @@ export const useMessageOption = (
     setRagAdvancedOptions,
     ragPinnedResults,
     setRagPinnedResults,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      ragMediaIds: state.ragMediaIds,
+      setRagMediaIds: state.setRagMediaIds,
+      ragSearchMode: state.ragSearchMode,
+      setRagSearchMode: state.setRagSearchMode,
+      ragTopK: state.ragTopK,
+      setRagTopK: state.setRagTopK,
+      ragEnableGeneration: state.ragEnableGeneration,
+      setRagEnableGeneration: state.setRagEnableGeneration,
+      ragEnableCitations: state.ragEnableCitations,
+      setRagEnableCitations: state.setRagEnableCitations,
+      ragSources: state.ragSources,
+      setRagSources: state.setRagSources,
+      ragAdvancedOptions: state.ragAdvancedOptions,
+      setRagAdvancedOptions: state.setRagAdvancedOptions,
+      ragPinnedResults: state.ragPinnedResults,
+      setRagPinnedResults: state.setRagPinnedResults,
+    })),
+  );
+
+  const {
     serverChatId,
     setServerChatId,
     serverChatTitle,
@@ -185,14 +257,56 @@ export const useMessageOption = (
     setServerChatSource,
     serverChatExternalRef,
     setServerChatExternalRef,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      serverChatId: state.serverChatId,
+      setServerChatId: state.setServerChatId,
+      serverChatTitle: state.serverChatTitle,
+      setServerChatTitle: state.setServerChatTitle,
+      serverChatCharacterId: state.serverChatCharacterId,
+      setServerChatCharacterId: state.setServerChatCharacterId,
+      serverChatAssistantKind: state.serverChatAssistantKind,
+      setServerChatAssistantKind: state.setServerChatAssistantKind,
+      serverChatAssistantId: state.serverChatAssistantId,
+      setServerChatAssistantId: state.setServerChatAssistantId,
+      serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
+      setServerChatPersonaMemoryMode: state.setServerChatPersonaMemoryMode,
+      serverChatMetaLoaded: state.serverChatMetaLoaded,
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
+      serverChatLoadState: state.serverChatLoadState,
+      setServerChatLoadState: state.setServerChatLoadState,
+      serverChatLoadError: state.serverChatLoadError,
+      setServerChatLoadError: state.setServerChatLoadError,
+      serverChatState: state.serverChatState,
+      setServerChatState: state.setServerChatState,
+      serverChatVersion: state.serverChatVersion,
+      setServerChatVersion: state.setServerChatVersion,
+      serverChatTopic: state.serverChatTopic,
+      setServerChatTopic: state.setServerChatTopic,
+      serverChatClusterId: state.serverChatClusterId,
+      setServerChatClusterId: state.setServerChatClusterId,
+      serverChatSource: state.serverChatSource,
+      setServerChatSource: state.setServerChatSource,
+      serverChatExternalRef: state.serverChatExternalRef,
+      setServerChatExternalRef: state.setServerChatExternalRef,
+    })),
+  );
+
+  const {
     messageSteeringMode,
     setMessageSteeringMode,
     messageSteeringForceNarrate,
     setMessageSteeringForceNarrate,
     clearMessageSteering,
-    replyTarget,
-    clearReplyTarget,
-  } = useStoreMessageOption();
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      messageSteeringMode: state.messageSteeringMode,
+      setMessageSteeringMode: state.setMessageSteeringMode,
+      messageSteeringForceNarrate: state.messageSteeringForceNarrate,
+      setMessageSteeringForceNarrate: state.setMessageSteeringForceNarrate,
+      clearMessageSteering: state.clearMessageSteering,
+    })),
+  );
 
   const {
     compareMode,

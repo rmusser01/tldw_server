@@ -334,6 +334,49 @@ def test_conversation_store_title_exists_uses_postgres_placeholders():
     assert fake_db.backend.params == ("Existing title", "postgres-client")
 
 
+@pytest.mark.parametrize(
+    ("assistant_kind", "assistant_id", "character_id", "expected"),
+    [
+        ("persona", "sync-v2", None, True),
+        ("Persona", " sync-v2 ", None, True),
+        ("persona", "sync-v2-custom", None, False),
+        ("persona", "SYNC-V2", None, False),
+        ("persona", "persona-gardener", None, False),
+        ("character", "sync-v2", None, False),
+        ("persona", "sync-v2", 1, False),
+        (None, None, None, False),
+    ],
+)
+def test_retired_sync_placeholder_is_only_the_exact_identity(db, assistant_kind, assistant_id, character_id, expected):
+    """Kind and id are read the way they would be stored; anything else is someone's real identity."""
+    assert (
+        db.conversation_store.is_retired_sync_placeholder_assistant(
+            assistant_kind=assistant_kind, assistant_id=assistant_id, character_id=character_id
+        )
+        is expected
+    )
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_retired_sync_placeholder_is_not_claimed_when_the_owner_has_that_persona(db, deleted):
+    db.create_persona_profile({"id": "sync-v2", "user_id": db.owner_user_id, "name": "Really mine", "deleted": deleted})
+
+    assert (
+        db.conversation_store.is_retired_sync_placeholder_assistant(
+            assistant_kind="persona", assistant_id="sync-v2", character_id=None
+        )
+        is False
+    )
+
+
+def test_retired_sync_placeholder_ignores_another_owners_persona(db):
+    db.create_persona_profile({"id": "sync-v2", "user_id": "another-owner", "name": "Theirs"})
+
+    assert db.conversation_store.is_retired_sync_placeholder_assistant(
+        assistant_kind="persona", assistant_id="sync-v2", character_id=None
+    )
+
+
 def test_conversation_store_preserves_assistant_identity_updates(db):
     conversation_id = db.add_conversation(
         {

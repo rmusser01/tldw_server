@@ -5,6 +5,7 @@ import {
 } from "@/hooks/chat/chat-action-utils";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
+import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { systemPromptForNonRag } from "~/services/tldw-server";
@@ -55,6 +56,30 @@ import {
   createRegenerateLastMessage,
 } from "./handlers/messageHandlers";
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
+import {
+  createStreamingUpdateScheduler,
+  type StreamingUpdateScheduler,
+} from "@/utils/streaming-update-scheduler";
+
+type StreamingTextUpdate = { text: string; reasoningTime: number };
+
+const createStreamingTextScheduler = (
+  generateMessageId: string,
+  setMessages: (updater: (prev: Message[]) => Message[]) => void,
+): StreamingUpdateScheduler<StreamingTextUpdate> =>
+  createStreamingUpdateScheduler<StreamingTextUpdate>({
+    apply: ({ text, reasoningTime }) =>
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === generateMessageId
+            ? updateActiveVariant(message, {
+                message: text,
+                reasoning_time_taken: reasoningTime,
+              })
+            : message,
+        ),
+      ),
+  });
 import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ToolCall } from "@/types/tool-calls";
 import {
@@ -86,7 +111,10 @@ import type { UploadedFile } from "@/db/dexie/types";
 import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure";
 import { normalizeChatModelId } from "@/utils/chat-model-availability";
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation";
-import { discardAbortedTurnIfRequested } from "@/hooks/chat/abort-turn-cleanup";
+import {
+  discardAbortedTurnIfRequested,
+  markChatTurnStoppedByUser
+} from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
 import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration";
 import {
@@ -94,6 +122,7 @@ import {
   isGreetingMessageType,
 } from "@/utils/character-greetings";
 import { useSidepanelChatMetadata, type QueuedDispatchGuard } from "@/hooks/chat/useSidepanelChatMetadata";
+import { useShallow } from "zustand/react/shallow";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
@@ -131,6 +160,7 @@ type ServerBackedMessage = Message & {
 
 export const useMessage = () => {
   const historySelection = useHistorySelectionContext();
+  const sendGate = React.useContext(SidepanelSendGateContext);
   // Controllers come from Context (for aborting streaming requests)
   const {
     controller: abortController,
@@ -169,7 +199,26 @@ export const useMessage = () => {
     setActionInfo,
     replyTarget,
     clearReplyTarget,
-  } = useStoreMessageOption();
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      setIsSearchingInternet: state.setIsSearchingInternet,
+      webSearch: state.webSearch,
+      setWebSearch: state.setWebSearch,
+      toolChoice: state.toolChoice,
+      setToolChoice: state.setToolChoice,
+      isSearchingInternet: state.isSearchingInternet,
+      temporaryChat: state.temporaryChat,
+      setTemporaryChat: state.setTemporaryChat,
+      queuedMessages: state.queuedMessages,
+      addQueuedMessage: state.addQueuedMessage,
+      setQueuedMessages: state.setQueuedMessages,
+      clearQueuedMessages: state.clearQueuedMessages,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
+      setActionInfo: state.setActionInfo,
+      replyTarget: state.replyTarget,
+      clearReplyTarget: state.clearReplyTarget,
+    })),
+  );
   const [defaultInternetSearchOn] = useStorage(
     "defaultInternetSearchOn",
     false,
@@ -236,7 +285,35 @@ export const useMessage = () => {
     setServerChatSource,
     serverChatExternalRef,
     setServerChatExternalRef,
-  } = useStoreMessageOption();
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      serverChatId: state.serverChatId,
+      setServerChatId: state.setServerChatId,
+      serverChatTitle: state.serverChatTitle,
+      setServerChatTitle: state.setServerChatTitle,
+      serverChatCharacterId: state.serverChatCharacterId,
+      setServerChatCharacterId: state.setServerChatCharacterId,
+      serverChatAssistantKind: state.serverChatAssistantKind,
+      setServerChatAssistantKind: state.setServerChatAssistantKind,
+      serverChatAssistantId: state.serverChatAssistantId,
+      setServerChatAssistantId: state.setServerChatAssistantId,
+      serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
+      setServerChatPersonaMemoryMode: state.setServerChatPersonaMemoryMode,
+      serverChatMetaLoaded: state.serverChatMetaLoaded,
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
+      serverChatState: state.serverChatState,
+      setServerChatState: state.setServerChatState,
+      setServerChatVersion: state.setServerChatVersion,
+      serverChatTopic: state.serverChatTopic,
+      setServerChatTopic: state.setServerChatTopic,
+      serverChatClusterId: state.serverChatClusterId,
+      setServerChatClusterId: state.setServerChatClusterId,
+      serverChatSource: state.serverChatSource,
+      setServerChatSource: state.setServerChatSource,
+      serverChatExternalRef: state.serverChatExternalRef,
+      setServerChatExternalRef: state.setServerChatExternalRef,
+    })),
+  );
   const notification = useAntdNotification();
   const { settings: chatSettings } = useChatSettingsRecord({
     historyId,
@@ -556,6 +633,12 @@ export const useMessage = () => {
       }
     }
     setMessages(newMessage);
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+    );
     try {
       let query = message;
       if (newMessage.length > 2) {
@@ -689,16 +772,9 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        setMessages((prev) => {
-          return prev.map((message) => {
-            if (message.id === generateMessageId) {
-              return updateActiveVariant(message, {
-                message: fullText + "▋",
-                reasoning_time_taken: timetaken,
-              });
-            }
-            return message;
-          });
+        streamingScheduler.schedule({
+          text: fullText + "▋",
+          reasoningTime: timetaken,
         });
         count++;
       }
@@ -709,6 +785,9 @@ export const useMessage = () => {
         throw abortError;
       }
 
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the checks below throw.
+      streamingScheduler.flushNow();
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -769,6 +848,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       const scopeAborted = shouldAbortForScopeChange();
       if (scopeAborted || isRequestConfigScopeChangedError(e)) {
         setMessages(messages);
@@ -967,6 +1049,12 @@ export const useMessage = () => {
     }
     let fullText = "";
     let contentToSave = "";
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+    );
 
     try {
       const prompt = await systemPromptForNonRag();
@@ -1074,19 +1162,15 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        setMessages((prev) => {
-          return prev.map((message) => {
-            if (message.id === generateMessageId) {
-              return updateActiveVariant(message, {
-                message: fullText + "▋",
-                reasoning_time_taken: timetaken,
-              });
-            }
-            return message;
-          });
+        streamingScheduler.schedule({
+          text: fullText + "▋",
+          reasoningTime: timetaken,
         });
         count++;
       }
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the checks below throw.
+      streamingScheduler.flushNow();
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -1135,6 +1219,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -1292,6 +1379,12 @@ export const useMessage = () => {
     if (!activeCharacter?.id) {
       throw new Error("No character selected");
     }
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+    );
     const emoteStream = createCharacterEmoteStream();
     const getExplicitEmoteMoodLabel = () =>
       emoteStream.events.length > 0
@@ -1672,16 +1765,10 @@ export const useMessage = () => {
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
         if (chunkState.token && fullText !== previousFullText) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === generateMessageId
-                ? updateActiveVariant(m, {
-                    message: fullText + "▋",
-                    reasoning_time_taken: timetaken,
-                  })
-                : m,
-            ),
-          );
+          streamingScheduler.schedule({
+            text: fullText + "▋",
+            reasoningTime: timetaken,
+          });
         }
         if (count === 0) setIsProcessing(true);
 
@@ -1703,6 +1790,9 @@ export const useMessage = () => {
         count++;
         if (signal?.aborted) break;
       }
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the inactivity/abort checks below throw.
+      streamingScheduler.flushNow();
       if (inactivityTimer) clearTimeout(inactivityTimer);
       flushCharacterEmoteStream();
 
@@ -1962,6 +2052,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -2176,6 +2269,12 @@ export const useMessage = () => {
     }
     let fullText = "";
     let contentToSave = "";
+    // Declared before the try so the catch can drop any pending trailing
+    // flush when the turn is restored after an error.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+    );
 
     try {
       const prompt = await getPrompt(messageType);
@@ -2252,20 +2351,16 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        setMessages((prev) => {
-          return prev.map((message) => {
-            if (message.id === generateMessageId) {
-              return updateActiveVariant(message, {
-                message: fullText + "▋",
-                reasoning_time_taken: timetaken,
-              });
-            }
-            return message;
-          });
+        streamingScheduler.schedule({
+          text: fullText + "▋",
+          reasoningTime: timetaken,
         });
         count++;
       }
 
+      // Flush any trailing streamed text before terminal handling so no
+      // content is lost even if the checks below throw.
+      streamingScheduler.flushNow();
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -2317,6 +2412,9 @@ export const useMessage = () => {
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      // Drop any pending trailing flush so it cannot land on top of the
+      // restored or error state written below.
+      streamingScheduler.cancel();
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -2414,6 +2512,19 @@ export const useMessage = () => {
     historyIdOverride?: string | null;
     assertQueuedDispatchCurrent?: QueuedDispatchGuard;
   }) => {
+    // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
+    // onto the chat's latest message (or the send is held) before a new turn,
+    // so the turn never silently forks the conversation. This runs before the
+    // history fence below because a refresh moves the history selection.
+    if (sendGate?.current && !isRegenerate && !chatHistory && !memory) {
+      const gate = await sendGate.current({ message });
+      if (!gate.proceed) return;
+      if (gate.refreshed) {
+        const refreshed = useStoreMessageOption.getState();
+        chatHistory = refreshed.messages;
+        memory = refreshed.history;
+      }
+    }
     const historyOriginIsCurrent = historySelection?.fence();
     assertQueuedDispatchCurrent?.();
     const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);
@@ -3106,6 +3217,7 @@ export const useMessage = () => {
       }
     }
     if (abortController) {
+      markChatTurnStoppedByUser(abortController.signal);
       abortController.abort();
       setAbortController(null);
     }

@@ -129,7 +129,9 @@ type NotesListPanelProps = {
     fetchedNotes: number
     fetchedPages: number
     failedBatches: number
+    totalNotes?: number | null
   } | null
+  onCancelExport?: () => void
 }
 
 const NotesListPanel: React.FC<NotesListPanelProps> = ({
@@ -170,7 +172,8 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onSyncFolder,
   importInProgress = false,
   syncFolderInProgress = false,
-  exportProgress = null
+  exportProgress = null,
+  onCancelExport
 }) => {
   const { t } = useTranslation(['option', 'settings'])
   const isTrashView = listMode === 'trash'
@@ -364,35 +367,58 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
           </div>
         </div>
         {exportProgress && (
-          <div
-            className="mt-2 inline-flex items-center gap-2 text-[11px] text-text-muted"
-            role="status"
-            aria-live="polite"
-            data-testid="notes-export-progress"
-          >
-            <Spin size="small" />
-            <span>
-              {t('option:notesSearch.exportProgressLabel', {
-                defaultValue: 'Exporting {{format}}'
-              })
-                .replace('{{format}}', exportProgress.format.toUpperCase())}
-              {' '}
-              {t('option:notesSearch.exportProgressCount', {
-                defaultValue: '{{count}} notes exported so far...',
-                count: exportProgress.fetchedNotes
-              })
-                .replace('{{count}}', String(exportProgress.fetchedNotes))}
-            </span>
-            {exportProgress.failedBatches > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+            <div
+              className="inline-flex items-center gap-2"
+              role="status"
+              aria-live="polite"
+              data-testid="notes-export-progress"
+            >
+              <Spin size="small" />
               <span>
-                {` · ${t('option:notesSearch.exportProgressFailedBatches', {
-                  defaultValue:
-                    exportProgress.failedBatches === 1
-                      ? '{{count}} batch failed; export may be partial'
-                      : '{{count}} batches failed; export may be partial',
-                  count: exportProgress.failedBatches
-                }).replace('{{count}}', String(exportProgress.failedBatches))}`}
+                {t('option:notesSearch.exportProgressLabel', {
+                  defaultValue: 'Exporting {{format}}'
+                })
+                  .replace('{{format}}', exportProgress.format.toUpperCase())}
+                {' '}
+                {exportProgress.totalNotes != null && exportProgress.totalNotes > 0
+                  ? t('option:notesSearch.exportProgressCountOfTotal', {
+                      defaultValue: '{{count}} of {{total}} notes exported so far...',
+                      count: exportProgress.fetchedNotes,
+                      total: exportProgress.totalNotes
+                    })
+                      .replace('{{count}}', String(exportProgress.fetchedNotes))
+                      .replace('{{total}}', String(exportProgress.totalNotes))
+                  : t('option:notesSearch.exportProgressCount', {
+                      defaultValue: '{{count}} notes exported so far...',
+                      count: exportProgress.fetchedNotes
+                    })
+                      .replace('{{count}}', String(exportProgress.fetchedNotes))}
               </span>
+              {exportProgress.failedBatches > 0 && (
+                <span>
+                  {` · ${t('option:notesSearch.exportProgressFailedBatches', {
+                    defaultValue:
+                      exportProgress.failedBatches === 1
+                        ? '{{count}} batch failed; export may be partial'
+                        : '{{count}} batches failed; export may be partial',
+                    count: exportProgress.failedBatches
+                  }).replace('{{count}}', String(exportProgress.failedBatches))}`}
+                </span>
+              )}
+            </div>
+            {onCancelExport && (
+              <Button
+                size="small"
+                type="link"
+                className="h-auto p-0 text-[11px]"
+                onClick={onCancelExport}
+                data-testid="notes-export-cancel"
+              >
+                {t('option:notesSearch.exportCancel', {
+                  defaultValue: 'Cancel export'
+                })}
+              </Button>
             )}
           </div>
         )}

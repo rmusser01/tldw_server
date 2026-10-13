@@ -1,72 +1,40 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-
-const getPersistenceModeLabel = (
-  t: (...args: any[]) => any,
-  temporaryChat: boolean,
-  isConnectionReady: boolean,
-  serverChatId: string | null
-) => {
-  if (temporaryChat) {
-    return t(
-      "playground:composer.persistence.ephemeral",
-      "Not saved: cleared when you close this window."
-    )
-  }
-  if (serverChatId || isConnectionReady) {
-    return t(
-      "playground:composer.persistence.server",
-      "Saved to your tldw server (and locally)."
-    )
-  }
-  return t(
-    "playground:composer.persistence.local",
-    "Saved locally until your tldw server is connected."
-  )
-}
+import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import {
+  getChatPersistenceCopy,
+  resolveChatPersistenceKind
+} from "@/utils/chat-persistence-status"
 
 export type UsePersistenceModeParams = {
   temporaryChat: boolean
   serverChatId: string | null
-  isConnectionReady: boolean
 }
 
+/**
+ * Persistence status for the active chat (CS-03 / XS-05, #3104).
+ *
+ * The label claims the server only when the chat has a server id and its
+ * latest server write was acknowledged. Connectivity alone never counts.
+ */
 export function usePersistenceMode({
   temporaryChat,
-  serverChatId,
-  isConnectionReady
+  serverChatId
 }: UsePersistenceModeParams) {
   const { t } = useTranslation(["playground", "common"])
+  const serverSaveStatus = useServerChatSaveStatus(serverChatId)
 
-  const persistenceModeLabel = React.useMemo(
-    () =>
-      getPersistenceModeLabel(
-        t,
-        temporaryChat,
-        isConnectionReady,
-        serverChatId
-      ),
-    [isConnectionReady, serverChatId, temporaryChat, t]
-  )
+  const persistenceKind = resolveChatPersistenceKind({
+    temporaryChat,
+    serverChatId,
+    serverSaveStatus
+  })
 
-  const persistencePillLabel = React.useMemo(() => {
-    if (temporaryChat) {
-      return t(
-        "playground:composer.persistence.ephemeralPill",
-        "Not saved"
-      )
-    }
-    if (serverChatId || isConnectionReady) {
-      return t(
-        "playground:composer.persistence.serverPill",
-        "Server"
-      )
-    }
-    return t(
-      "playground:composer.persistence.localPill",
-      "Local"
+  const { pill: persistencePillLabel, description: persistenceModeLabel } =
+    React.useMemo(
+      () => getChatPersistenceCopy(t, persistenceKind),
+      [persistenceKind, t]
     )
-  }, [isConnectionReady, serverChatId, temporaryChat, t])
 
   const persistenceTooltip = React.useMemo(
     () => (
@@ -100,11 +68,10 @@ export function usePersistenceMode({
   }, [])
 
   return {
+    persistenceKind,
     persistenceModeLabel,
     persistencePillLabel,
     persistenceTooltip,
-    focusConnectionCard,
-    /** Re-exported for callers that need the raw function (e.g. toggle handler) */
-    getPersistenceModeLabel
+    focusConnectionCard
   }
 }

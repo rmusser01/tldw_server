@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { BetaTag } from "@/components/Common/Beta"
 import { useFontSize } from "@/context/FontSizeProvider"
-import { useMessageOption } from "@/hooks/useMessageOption"
+import { useClearChat } from "@/hooks/chat/useClearChat"
 import {
   exportPageAssistData,
   importPageAssistData
@@ -32,7 +32,7 @@ import {
 export const DataManagementSettings = () => {
   const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
-  const { clearChat } = useMessageOption()
+  const clearChat = useClearChat()
   const notification = useAntdNotification()
   const [resetModalOpen, setResetModalOpen] = useState(false)
   const [resetInput, setResetInput] = useState("")

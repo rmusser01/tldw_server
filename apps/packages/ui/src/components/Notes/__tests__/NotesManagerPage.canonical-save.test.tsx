@@ -339,6 +339,9 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
   afterEach(() => vi.restoreAllMocks())
   beforeEach(() => {
     vi.clearAllMocks()
+    // Unsaved drafts now survive an unmount in the offline queue (#3102
+    // NS-01); start every test without the previous test's drafts.
+    localStorage.clear()
     canonicalBoundary.userId = 7
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",

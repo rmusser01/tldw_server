@@ -37,10 +37,8 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
-vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => ({
-    clearChat: mocks.clearChat
-  })
+vi.mock("@/hooks/chat/useClearChat", () => ({
+  useClearChat: () => mocks.clearChat
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({

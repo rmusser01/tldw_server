@@ -647,7 +647,7 @@ def test_email_sqlite_schema_failure_logs_safe_diagnostics_and_preserves_cause(m
         raise failure
 
     # Keep the real backend schema/error boundary; only the failing connection is injected.
-    connection = SimpleNamespace(executescript=fail_schema)
+    connection = SimpleNamespace(in_transaction=False, executescript=fail_schema)
     backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=":memory:"))
     monkeypatch.setattr(backend, "get_pool", lambda: SimpleNamespace(get_connection=lambda: connection))
     with pytest.raises(BackendDatabaseError) as raised:

@@ -888,6 +888,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "notes.folder",
         "notes.folder_link",
         "notes.link",
+        "notes.provenance",
         *PERSONAL_CONTEXT_SYNC_DOMAINS,
     ]
     assert {
@@ -902,6 +903,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "notes.folder_link": ["upsert", "tombstone"],
     }
     assert capabilities.operations["notes.link"] == ["upsert", "tombstone"]
+    assert capabilities.operations["notes.provenance"] == ["upsert", "tombstone"]
     assert capabilities.max_batch_size == 10
     assert capabilities.max_envelope_payload_bytes == 1024
     assert capabilities.max_attachment_bytes == 4096

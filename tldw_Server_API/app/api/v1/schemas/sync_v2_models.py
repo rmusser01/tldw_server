@@ -20,10 +20,8 @@ from tldw_Server_API.app.core.Notes.attachment_policy import (
     canonicalize_note_attachment_file_name,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
-    NOTES_LINK_DOMAINS,
-    NOTES_LINK_SYNC_OPERATIONS,
-    NOTES_ORGANIZATION_DOMAINS,
-    NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    SYNC_V2_SUPPORTED_OPERATIONS,
     normalize_supported_adapter_versions,
     normalize_sync_v2_requested_domains,
     sync_v2_dataset_writable_adapter_versions,
@@ -58,6 +56,7 @@ SyncDomain = Literal[
     "notes.folder",
     "notes.folder_link",
     "notes.link",
+    "notes.provenance",
     "notes.task",
     "notes.task_activity",
     "personal_context.manifest",
@@ -156,24 +155,6 @@ PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "personal_context.record": ["upsert", "tombstone"],
     "personal_context.proposal": ["upsert"],
     "personal_context.purge": ["tombstone"],
-}
-SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
-    list(M1_SYNC_DOMAINS)
-    + list(WORKSPACE_SYNC_DOMAINS)
-    + list(SOURCE_CACHE_SYNC_DOMAINS)
-    + list(MEDIA_SYNC_DOMAINS)
-    + list(NOTES_ORGANIZATION_DOMAINS)
-    + list(NOTES_LINK_DOMAINS)
-    + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
-)
-SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
-    **M1_SYNC_OPERATIONS,
-    **WORKSPACE_SYNC_OPERATIONS,
-    **SOURCE_CACHE_SYNC_OPERATIONS,
-    **MEDIA_SYNC_OPERATIONS,
-    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
-    **NOTES_LINK_SYNC_OPERATIONS,
-    **PERSONAL_CONTEXT_SYNC_OPERATIONS,
 }
 SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
     *SYNC_V2_SUPPORTED_DOMAINS,
@@ -1101,6 +1082,7 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
     notes_organization: SyncNotesOrganizationStatusResponse | None = None
     notes_link: SyncNotesOrganizationStatusResponse | None = None
+    notes_provenance: SyncNotesOrganizationStatusResponse | None = None
     notes_attachment: SyncNotesOrganizationStatusResponse | None = None
 
 

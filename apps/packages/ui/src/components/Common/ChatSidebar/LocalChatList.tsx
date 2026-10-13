@@ -37,7 +37,10 @@ import { updatePageTitle } from "@/utils/update-page-title"
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { IconButton } from "@/components/Common/IconButton"
-import { useMessageOption } from "@/hooks/useMessageOption"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
+import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useStoreMessageOption } from "@/store/option"
+import { useShallow } from "zustand/react/shallow"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation"
 import { cn } from "@/libs/utils"
@@ -113,13 +116,22 @@ export function LocalChatList({
     setMessages,
     setHistory,
     setHistoryId,
-    historyId,
-    clearChat,
-    setSelectedModel,
-    setSelectedSystemPrompt,
     setContextFiles,
-    setServerChatId
-  } = useMessageOption()
+    setServerChatId,
+    setSelectedSystemPrompt
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      setMessages: state.setMessages,
+      setHistory: state.setHistory,
+      setHistoryId: state.setHistoryId,
+      setContextFiles: state.setContextFiles,
+      setServerChatId: state.setServerChatId,
+      setSelectedSystemPrompt: state.setSelectedSystemPrompt
+    }))
+  )
+  const historyId = useStoreMessageOption((state) => state.historyId)
+  const { setSelectedModel } = useSelectedModel()
+  const clearChat = useClearChat()
   const { setSystemPrompt } = useStoreChatModelSettings()
 
   const [dexiePrivateWindowError, setDexiePrivateWindowError] = useState(false)

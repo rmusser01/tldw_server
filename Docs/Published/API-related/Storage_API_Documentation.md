@@ -157,20 +157,22 @@ These endpoints require admin privileges. There are two groups.
 Per-user quota values are the user's own `limits.storage_quota_mb` UserProfiles value. A quota is enforced only when `USAGE_QUOTAS_ENABLED` is on. See `Docs/Operations/Usage_Quotas.md`.
 
 Under `/api/v1/storage` (`tldw_Server_API/app/api/v1/endpoints/storage_admin_quotas.py`):
-- User quota set: `PUT /admin/quotas/user/{user_id}` (`storage_admin_quotas.py:40`)
-- Team quota set: `PUT /admin/quotas/team/{team_id}` (`storage_admin_quotas.py:73`)
-- Org quota set: `PUT /admin/quotas/org/{org_id}` (`storage_admin_quotas.py:97`)
-- Team quota get: `GET /admin/quotas/team/{team_id}` (`storage_admin_quotas.py:121`)
-- Org quota get: `GET /admin/quotas/org/{org_id}` (`storage_admin_quotas.py:136`)
+- User quota set: `PUT /admin/quotas/user/{user_id}` (`storage_admin_quotas.py:41`)
+- Team quota set: `PUT /admin/quotas/team/{team_id}` (`storage_admin_quotas.py:77`)
+- Org quota set: `PUT /admin/quotas/org/{org_id}` (`storage_admin_quotas.py:101`)
+- Team quota get: `GET /admin/quotas/team/{team_id}` (`storage_admin_quotas.py:125`)
+- Org quota get: `GET /admin/quotas/org/{org_id}` (`storage_admin_quotas.py:140`)
 
 Under `/api/v1/admin/storage-quotas` (`tldw_Server_API/app/api/v1/endpoints/admin/admin_storage_quotas.py`):
-- `GET /api/v1/admin/storage-quotas/users/{user_id}`: the user's quota and usage (`admin_storage_quotas.py:117`)
-- `PUT /api/v1/admin/storage-quotas/users/{user_id}`: set or remove the user's own quota (`admin_storage_quotas.py:138`)
-- `GET` / `PUT /api/v1/admin/storage-quotas/orgs/{org_id}` (`admin_storage_quotas.py:172`, `:191`) and `GET /api/v1/admin/storage-quotas/summary` (`:223`)
+- `GET /api/v1/admin/storage-quotas/users/{user_id}`: the user's quota and usage (`admin_storage_quotas.py:118`)
+- `PUT /api/v1/admin/storage-quotas/users/{user_id}`: set or remove the user's own quota (`admin_storage_quotas.py:139`)
+- `GET` / `PUT /api/v1/admin/storage-quotas/orgs/{org_id}` (`admin_storage_quotas.py:175`, `:194`) and `GET /api/v1/admin/storage-quotas/summary` (`:226`)
+
+Both per-user `PUT` routes record the same audit event as `PUT /api/v1/admin/users/{id}`: `USER_UPDATED`, action `admin.user.update`, with the acting admin and the new `storage_quota_mb` (`null` when removed).
 
 ### User versus team and org request bodies
 
-The user routes take `SetUserQuotaRequest` (`storage_schemas.py:254`); the admin-prefixed user route takes `UpdateUserQuotaRequest` (`admin_storage_quotas.py:79`):
+The user routes take `SetUserQuotaRequest` (`storage_schemas.py:254`); the admin-prefixed user route takes `UpdateUserQuotaRequest` (`admin_storage_quotas.py:80`):
 
 | Field | Rule |
 |---|---|

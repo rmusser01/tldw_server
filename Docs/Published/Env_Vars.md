@@ -466,6 +466,7 @@ Config file support (optional):
 - `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS`: Process-local capacity reserved for synchronous cleanup after late or non-cooperative stream work (default `4`). This is not additional request throughput.
 - `CHAT_STREAM_ASYNC_MAX_TASKS`: Process-local cap for asynchronous provider stream tasks (default `256`).
 - `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS`: Process-local capacity reserved for asynchronous cleanup tasks (default `32`). This is not additional request throughput.
+- `CHAT_STREAM_SETTLEMENT_MAX_TASKS`: Process-local cap for detached writes that save a partial reply after a stream ended early (default `256`). When it is reached, further partial replies are not saved.
 
 All five values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
 

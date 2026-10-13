@@ -43,6 +43,11 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
     sanitize_sender_name,
 )
+from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_METADATA_KEYS,
+    GenerationMetadataError,
+    validate_generation_metadata,
+)
 from tldw_Server_API.app.core.Chat.history_selection import (
     HistorySelectionError,
     _freeze_json,
@@ -154,7 +159,7 @@ _METADATA_FIELDS = {
     "image_details",
     "status",
     "rag_context",
-}
+} | GENERATION_METADATA_KEYS
 
 
 def _project_settings(settings: dict[str, Any], selected_ids: set[str]) -> dict[str, Any]:
@@ -380,8 +385,15 @@ def _project_messages(
         if "rag_context" in extra:
             extra["rag_context"] = _project_citations(extra["rag_context"])
             effects.add("historical_citations")
+        # Server-settled generation metadata is retained as allow-listed data.
+        generation = {key: extra.pop(key) for key in GENERATION_METADATA_KEYS if key in extra}
+        try:
+            generation = validate_generation_metadata(generation)
+        except GenerationMetadataError:
+            _unsupported("metadata")
         if any(not isinstance(value, str) for key, value in extra.items() if key not in {"rag_context", "image_details"}):
             _unsupported("metadata")
+        extra.update(generation)
         role = extra.get("sender_role")
         if role is None:
             sender = row.get("role")

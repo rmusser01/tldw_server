@@ -285,28 +285,28 @@ export const launchWebClipperFromContextMenu = async (
   const tabsApi = (browser as any)?.tabs;
   let clipDraft = fallbackDraft;
 
-  if (tab?.id != null && typeof tabsApi?.sendMessage === "function") {
-    try {
-      const response = await tabsApi.sendMessage(tab.id, {
-        type: "capture-web-clipper",
-        requestedType,
-        pageUrl,
-        pageTitle: pageTitle || pageUrl,
-        selectionText: selectionText || undefined,
-      });
-      const normalized = normalizePendingClipDraft(response);
-      if (normalized) {
-        clipDraft = normalized;
-      }
-    } catch (error) {
-      logBackgroundError("request web clipper capture", error);
-    }
-  }
-
   const title =
     browser.i18n.getMessage("contextSaveToClipper") || "Save to Clipper";
   try {
+    // Chrome requires sidebar opening to begin in the original menu gesture.
     await ensureSidepanelOpen(tab?.id ?? undefined);
+    if (tab?.id != null && typeof tabsApi?.sendMessage === "function") {
+      try {
+        const response = await tabsApi.sendMessage(tab.id, {
+          type: "capture-web-clipper",
+          requestedType,
+          pageUrl,
+          pageTitle: pageTitle || pageUrl,
+          selectionText: selectionText || undefined,
+        });
+        const normalized = normalizePendingClipDraft(response);
+        if (normalized) {
+          clipDraft = normalized;
+        }
+      } catch (error) {
+        logBackgroundError("request web clipper capture", error);
+      }
+    }
     await sendBackgroundRuntimeMessage(
       {
         from: "background",
@@ -397,27 +397,30 @@ const warmModels = async (
         existing.map((m: any) => m?.lookup).filter(Boolean),
       );
 
+      const newModels: any[] = [];
       for (const model of models) {
+        const lookup = `${model.id}_tldw_${model.provider}`;
+        if (existingLookups.has(lookup)) continue;
+
+        // Transform ModelInfo to Model format
+        newModels.push({
+          id: `${model.id}_${generateID()}`,
+          model_id: model.id,
+          name: model.name,
+          provider_id: `tldw_${model.provider}`,
+          lookup,
+          model_type: model.type || "chat",
+          db_type: "openai_model",
+        });
+      }
+
+      if (newModels.length > 0) {
         try {
-          const lookup = `${model.id}_tldw_${model.provider}`;
-          if (existingLookups.has(lookup)) continue;
-
-          // Transform ModelInfo to Model format
-          const dbModel = {
-            id: `${model.id}_${generateID()}`,
-            model_id: model.id,
-            name: model.name,
-            provider_id: `tldw_${model.provider}`,
-            lookup,
-            model_type: model.type || "chat",
-            db_type: "openai_model",
-          };
-
-          await db.create(dbModel);
-          existingLookups.add(lookup);
+          // One batched storage write instead of a set() per model.
+          await db.createMany(newModels);
         } catch (err) {
-          // Log but don't fail the entire sync if one model fails
-          console.debug("[tldw] Failed to sync model to DB:", model.id, err);
+          // Log but don't fail the entire sync if the batch fails
+          console.debug("[tldw] Failed to sync models to DB:", err);
         }
       }
     }
@@ -982,7 +985,9 @@ export default defineBackground({
       type: string,
       payload?: Record<string, unknown>,
     ) => {
-      ensureSidepanelOpen(tabId);
+      void ensureSidepanelOpen(tabId).catch((error) =>
+        logBackgroundError("open sidebar", error),
+      );
       try {
         await browser.runtime.sendMessage({
           from: "background",
@@ -1191,7 +1196,9 @@ export default defineBackground({
           bodyParts.join("\n\n") ||
           "Request completed. Open Media or the sidebar to view results.";
 
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         try {
           await browser.runtime.sendMessage({
             from: "background",
@@ -1962,6 +1969,57 @@ export default defineBackground({
           await cancelRemoteIngestBatches(opts.lease, opts.tracker, "user_cancelled");
         },
         onPendingJobIds: opts.onPendingJobIds,
+        fetchJobs: async (batchId, jobIds) => {
+          // One batched status request per cycle instead of one request per
+          // job. Follows the endpoint's offset pagination so every tracked
+          // job can be reconciled from the batch response.
+          const collected: any[] = [];
+          const limit = Math.min(500, Math.max(jobIds.length, 100));
+          let offset = 0;
+          for (let page = 0; page < 10; page += 1) {
+            const response = (await opts.lease.request({
+              path: `/api/v1/media/ingest/jobs?batch_id=${encodeURIComponent(
+                batchId,
+              )}&limit=${limit}&offset=${offset}`,
+              method: "GET",
+              timeoutMs: 4200,
+            })) as
+              | { ok: boolean; status?: number; data?: any; error?: string }
+              | undefined;
+            if (!response?.ok) {
+              // First page failure carries the error for the whole batch;
+              // later-page failures keep whatever was already collected.
+              if (page === 0) return response;
+              break;
+            }
+            if (!Array.isArray(response.data?.jobs)) {
+              // Unexpected payload shape: surface it verbatim so each job is
+              // reconciled against the raw response, exactly like the old
+              // per-job GET path did.
+              return response;
+            }
+            const jobs = response.data.jobs;
+            collected.push(...jobs);
+            const hasMore =
+              response.data?.has_more ??
+              response.data?.pagination?.has_more;
+            const nextOffset =
+              response.data?.next_offset ??
+              response.data?.pagination?.next_offset;
+            if (!hasMore) break;
+            if (
+              !Number.isSafeInteger(nextOffset) ||
+              (nextOffset as number) <= offset
+            ) {
+              break;
+            }
+            offset = nextOffset as number;
+          }
+          return {
+            ok: true,
+            data: { jobs: collected },
+          } as { ok: boolean; status?: number; data?: any; error?: string };
+        },
         fetchJob: async (jobId) =>
           (await opts.lease.request({
             path: `/api/v1/media/ingest/jobs/${jobId}`,
@@ -3812,7 +3870,9 @@ export default defineBackground({
       if (message.type === "sidepanel") {
         try {
           const tabId = sender?.tab?.id ?? undefined;
-          ensureSidepanelOpen(tabId);
+          void ensureSidepanelOpen(tabId).catch((error) =>
+            logBackgroundError("open sidebar", error),
+          );
         } catch (error) {
           logBackgroundError("ensure sidepanel open", error);
         }
@@ -4143,13 +4203,17 @@ export default defineBackground({
       if (actionIconClick === "webui") {
         openOptionsTab();
       } else {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
       }
     });
 
     browser.contextMenus.onClicked.addListener(async (info, tab) => {
       if (info.menuItemId === "open-side-panel-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
       } else if (info.menuItemId === "open-web-ui-pa") {
         openOptionsTab();
       } else if (info.menuItemId === transcribeMenuId.transcribe) {
@@ -4173,10 +4237,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSaveToNotesOpeningSidebar") ||
           "Opening sidebar to save note…";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab.id!);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               await browser.runtime.sendMessage({
                 from: "background",
                 type: "save-to-notes",
@@ -4214,10 +4280,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSaveToCompanionOpeningSidebar") ||
           "Opening sidebar to save selection to companion...";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab?.id);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               const captureId =
                 typeof globalThis.crypto?.randomUUID === "function"
                   ? globalThis.crypto.randomUUID()
@@ -4261,10 +4329,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSidebarOpening") ||
           "Opening sidebar...";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab?.id);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               await browser.runtime.sendMessage({
                 from: "background",
                 type: "narrate-selection",
@@ -4323,7 +4393,9 @@ export default defineBackground({
           notify("tldw_server", "Failed to process page");
         }
       } else if (info.menuItemId === "summarize-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         // this is a bad method hope somone can fix it :)
         setTimeout(
           async () => {
@@ -4336,7 +4408,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "rephrase-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         setTimeout(
           async () => {
             await browser.runtime.sendMessage({
@@ -4348,7 +4422,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "translate-pg") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4361,7 +4437,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "explain-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4374,7 +4452,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "custom-pg") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4404,21 +4484,15 @@ export default defineBackground({
           return;
         }
         try {
-          await browser.tabs.sendMessage(
-            tabId,
-            {
-              type: "tldw:popup:open",
-              payload: {
-                selectionText: selection,
-                pageUrl: info.pageUrl || tab?.url || "",
-                pageTitle: tab?.title || "",
-                frameId: info.frameId,
-              },
+          await browser.tabs.sendMessage(tabId, {
+            type: "tldw:popup:open",
+            payload: {
+              selectionText: selection,
+              pageUrl: info.pageUrl || tab?.url || "",
+              pageTitle: tab?.title || "",
+              frameId: info.frameId,
             },
-            typeof info.frameId === "number"
-              ? { frameId: info.frameId }
-              : undefined,
-          );
+          });
         } catch (error) {
           logBackgroundError("contextual popup sendMessage", error);
           notify(
@@ -4867,7 +4941,16 @@ export default defineBackground({
         if (alarm.name !== MODEL_WARM_ALARM_NAME) return;
         backgroundDiagnostics.alarmFires += 1;
         backgroundDiagnostics.lastAlarmAt = Date.now();
-        void warmModels(true);
+        // Periodic warm-up uses the cached catalog (no forced refresh); it
+        // no-ops entirely while the persisted catalog is still fresh.
+        void (async () => {
+          try {
+            if (await tldwModels.isCatalogFresh()) return;
+          } catch {
+            // Fall through to a non-forced warm attempt.
+          }
+          await warmModels(false);
+        })();
       });
     }
 

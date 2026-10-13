@@ -62,7 +62,7 @@ export function createKnowledgeQaClient(snapshot: ServicePromptSnapshot | null, 
     revokeConversationShareLink: (id: string, shareId: string) => run(() => tldwClient.revokeConversationShareLink(id, shareId, options())),
     exportChatbook: (payload: Parameters<typeof tldwClient.exportChatbook>[0]) => run(() => tldwClient.exportChatbook(payload, options())),
     downloadChatbookExport: (id: string) => run(() => tldwClient.downloadChatbookExport(id, options())),
-    createNote: (content: string, metadata?: Record<string, unknown>) => run(() => tldwClient.createNote(content, metadata, options())),
+    createNote: (content: string, metadata?: Record<string, unknown>, request?: { idempotencyKey?: string }) => run(() => tldwClient.createNote(content, metadata, { ...options(), idempotencyKey: request?.idempotencyKey })),
     submitSourceFeedback: (payload: ExplicitFeedbackRequest) => run(() => submitExplicitFeedback(payload, options())),
   }
 }

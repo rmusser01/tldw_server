@@ -1,0 +1,28 @@
+{
+  "initial": {
+    "hasInitialHero": true,
+    "noResultsCount": 0,
+    "requestsBefore": 10
+  },
+  "body": "Skip to main content\ntldw Assistant\nSearch\n⌘K\n?\nSkip to search\nSources: Notes\n• Specific: 1 note\nCustom\nWeb\nAI: Server default\nAvailable services: 8 of 8 · Stored personal items: 1 · Searchable personal items: unknown\n\nAsk questions about your documents and get AI-powered answers with citations from your knowledge base.\n\nAsk\nPress / to focus, Cmd/Ctrl+K opens the command palette\nNew search\nExport\nSearch complete. 1 source found.\nAI Answer\nAnswer status: Uncited answer\nSummarize\nShow more\nCopy answer\nContinue in Research Workspace\nSearched Notes. 1 source returned, 0 cited.\nWeb fallback disabled.\nAI model: Server default.\nSelected sources look ready.\nTrust: Uncited answer.\nGenerated answer is missing citations that map to returned sources.\nDegraded\nAnswer needs review\n\nGenerated answer is missing citations that map to returned sources.\n\nSource diagnostics: 1 searched, 0 empty, 0 unavailable.\n\nRefine search\nInclude web sources\nAdjust sources\nDismiss\n\nThe research note says a short first-run wizard can reduce setup abandonment. Deterministic evidence makes onboarding regressions easier to diagnose.\n\nWas this answer helpful?\nHelpful\nNeeds work\n\nTry a sharper follow-up\n\nAsk for the missing detail, timeframe, or source you still need.\n\nNew Topic\nEvidence\nHelp & Documentation",
+  "errors": [],
+  "requests": [
+    {
+      "path": "/api/v1/rag/search/stream",
+      "query": "When is the Vega native capture inspection scheduled?",
+      "sources": [
+        "notes"
+      ],
+      "includeNoteIds": [
+        "5d0d9205-008f-4307-8775-f0362d82c2a7"
+      ],
+      "webFallback": false
+    }
+  ],
+  "responses": [
+    {
+      "path": "/api/v1/rag/search/stream",
+      "status": 200
+    }
+  ]
+}

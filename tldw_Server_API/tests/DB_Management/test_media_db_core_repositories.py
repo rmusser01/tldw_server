@@ -858,3 +858,20 @@ def test_media_source_projection_rejects_invalid_character_budget(max_chars) -> 
             )
     finally:
         db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("writer", ["add_media_with_keywords", "add_text_media"])
+def test_media_repository_default_content_deduplication_remains_owner_scoped(writer):
+    db = MediaDatabase(db_path=":memory:", client_id="1")
+    try:
+        add_media = getattr(MediaRepository.from_legacy_db(db), writer)
+        first_id, first_uuid, _ = add_media(url="https://example.com/first", content="same body", owner_user_id=1)
+        same_id, same_uuid, _ = add_media(url="https://example.com/second", content="same body", owner_user_id=1)
+        foreign_id, foreign_uuid, _ = add_media(url="https://example.com/third", content="same body", owner_user_id=2)
+        assert (same_id, same_uuid) == (first_id, first_uuid)
+        assert foreign_id != first_id
+        assert foreign_uuid != first_uuid
+        assert MediaLookupRepository.from_legacy_db(db).by_id(foreign_id)["owner_user_id"] == 2
+    finally:
+        db.close_connection()

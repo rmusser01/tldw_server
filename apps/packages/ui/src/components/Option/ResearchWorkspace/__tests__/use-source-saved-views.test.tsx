@@ -1,5 +1,7 @@
+import userEvent from "@testing-library/user-event";
+import { SourceViewControls, SourceViewOverlayHost, type SourceViewOverlayRequest } from "../SourcesPane/SourceViewControls";
 import React from "react";
-import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view";
 
@@ -8,6 +10,32 @@ const api = vi.hoisted(() => ({
   createWorkspaceSourceView: vi.fn(),
   updateWorkspaceSourceView: vi.fn(),
   deleteWorkspaceSourceView: vi.fn(),
+  loadSnapshot: vi.fn(),
+  storageListeners: new Set<(changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => void>(),
+}));
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    storage: {
+      onChanged: {
+        addListener: (
+          listener: (
+            changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+            area: string,
+          ) => void,
+        ) => api.storageListeners.add(listener),
+        removeListener: (
+          listener: (
+            changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+            area: string,
+          ) => void,
+        ) => api.storageListeners.delete(listener),
+      },
+    },
+  },
+}));
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: (...args: unknown[]) => api.loadSnapshot(...args),
 }));
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: api }));
@@ -64,6 +92,17 @@ const invalidView = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const scopedOptions = expect.objectContaining({
+  requestScope: {
+    config: {
+      serverUrl: "https://saved-views.test",
+      authMode: "single-user",
+      expectedSingleUserApiKeyScope: "fixture-key-scope",
+    },
+    userId: null,
+  },
+  signal: expect.any(AbortSignal),
+});
 const localState = (overrides: Record<string, unknown> = {}) => ({
   ...DEFAULT_SOURCE_LIST_VIEW_STATE,
   typeFilters: [...DEFAULT_SOURCE_LIST_VIEW_STATE.typeFilters],
@@ -106,6 +145,327 @@ describe("useSourceSavedViews", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [] });
+    api.loadSnapshot.mockImplementation(async (_ids, options) => ({
+      requestScope: {
+        config: {
+          serverUrl: "https://saved-views.test",
+          authMode: "single-user",
+          expectedSingleUserApiKeyScope: "fixture-key-scope",
+        },
+        userId: null,
+      },
+      scopeSignal: options.signal,
+      scopeInvalidatedSignal: options.signal,
+      release: vi.fn(),
+    }));
+  });
+
+  it("re-resolves a transient initial authority failure through the real explicit Retry control", async () => {
+    api.loadSnapshot.mockRejectedValueOnce(
+      new Error("Authority temporarily unavailable"),
+    );
+    let current!: ReturnType<typeof useSourceSavedViews>;
+    const Harness = () => {
+      const controller = useSourceSavedViews(
+        "ws-a",
+        true,
+        localState(),
+        vi.fn(),
+      );
+      React.useLayoutEffect(() => {
+        current = controller;
+      }, [controller]);
+      return (
+        <SourceViewOverlayHost
+          controller={controller}
+          request={null}
+          onRequestHandled={vi.fn()}
+        />
+      );
+    };
+    render(<Harness />);
+    const retry = await screen.findByRole("button", {
+      name: "Retry saved views",
+    });
+    expect(current.available).toBe(false);
+    expect(api.listWorkspaceSourceViews).not.toHaveBeenCalled();
+    await userEvent.setup().click(retry);
+    await waitFor(() => expect(current.available).toBe(true));
+    expect(api.loadSnapshot).toHaveBeenCalledTimes(2);
+    expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "Retry saved views" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not offer an authority retry for an invalidated scope", async () => {
+    api.loadSnapshot.mockRejectedValueOnce(
+      Object.assign(new Error("Changed owner"), {
+        status: 412,
+        details: { detail: { code: "request_config_scope_changed" } },
+      }),
+    );
+    const { result } = setup();
+    await waitFor(() => expect(result.current.generation).toBeGreaterThan(0));
+    expect(result.current.available).toBe(false);
+    expect(result.current.listError).toBeNull();
+    await act(async () => result.current.retry());
+    expect(api.loadSnapshot).toHaveBeenCalledTimes(1);
+    expect(api.listWorkspaceSourceViews).not.toHaveBeenCalled();
+  });
+
+  it.each(["storage withdrawal", "typed API invalidation"])(
+    "retires a busy native Save on %s and opens a fresh current-owner draft",
+    async (boundary) => {
+      let current!: ReturnType<typeof useSourceSavedViews>;
+      const response = deferred<ReturnType<typeof validView>>();
+      api.createWorkspaceSourceView.mockReturnValue(response.promise);
+      const Harness = () => {
+        const controller = useSourceSavedViews(
+          "ws-a",
+          true,
+          localState(),
+          vi.fn(),
+        );
+        React.useLayoutEffect(() => {
+          current = controller;
+        }, [controller]);
+        const [request, setRequest] =
+          React.useState<SourceViewOverlayRequest | null>(null);
+        return (
+          <>
+            <SourceViewControls
+              controller={controller}
+              sourceListViewState={localState()}
+              onApplySourceListViewState={vi.fn()}
+              onOpenOverlay={setRequest}
+            />
+            <SourceViewOverlayHost
+              controller={controller}
+              request={request}
+              onRequestHandled={() => setRequest(null)}
+            />
+          </>
+        );
+      };
+      render(<Harness />);
+      const user = userEvent.setup();
+      const trigger = screen.getByRole("button", { name: "Save source view" });
+      await waitFor(() => expect(trigger).toBeEnabled());
+      await user.click(trigger);
+      const input = await screen.findByRole("textbox", { name: "View name" });
+      const dialog = input.closest<HTMLElement>("[role='dialog']")!;
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-appear-active"),
+      );
+      fireEvent.animationEnd(dialog);
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }));
+      await waitFor(() => expect(dialog.className).not.toContain("ant-zoom"));
+      await user.type(input, "Retired draft");
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+      expect(current.busy).toBe(true);
+      expect(
+        within(dialog).getByRole("button", { name: "Cancel" }),
+      ).toBeDisabled();
+      const old = current;
+      const config = {
+        serverUrl: "https://saved-views.test",
+        authMode: "single-user",
+        apiKey: "fixture-key",
+      };
+      if (boundary === "storage withdrawal") {
+        act(() => {
+          for (const listener of api.storageListeners)
+            listener({ tldwConfig: { oldValue: config } }, "local");
+        });
+      } else {
+        await act(async () =>
+          response.reject(
+            Object.assign(new Error("Changed owner"), {
+              status: 412,
+              details: { detail: { code: "request_config_scope_changed" } },
+            }),
+          ),
+        );
+      }
+      expect(current.available).toBe(false);
+      expect(current.generation).toBeGreaterThan(old.generation);
+      expect(current.mutationError).toBeNull();
+      expect(current.listError).toBeNull();
+      await act(async () => {
+        await old.retryMutation();
+        await old.retry();
+      });
+      expect(api.loadSnapshot).toHaveBeenCalledTimes(1);
+      await waitFor(() =>
+        expect(dialog.className).toContain("ant-zoom-leave-active"),
+      );
+      fireEvent.animationEnd(dialog);
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }));
+      await waitFor(() => expect(dialog).not.toBeInTheDocument());
+      await act(async () => {
+        for (const listener of api.storageListeners)
+          listener({ tldwConfig: { newValue: config } }, "local");
+        response.resolve(validView({ name: "Retired draft" }));
+      });
+      await waitFor(() => expect(trigger).toBeEnabled());
+      await old.createView("Retained handler");
+      expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+      expect(current.views).toEqual([]);
+      expect(current.announcement).toBeNull();
+      await user.click(trigger);
+      expect(
+        await screen.findByRole("textbox", { name: "View name" }),
+      ).toHaveValue("");
+    },
+  );
+
+  it("does not resurrect an authority lookup retired before native restoration", async () => {
+    const lookup = deferred<unknown>();
+    api.loadSnapshot.mockReturnValueOnce(lookup.promise);
+    const { result } = setup();
+    const config = {
+      serverUrl: "https://saved-views.test",
+      authMode: "single-user",
+      apiKey: "fixture-key",
+    };
+    act(() => {
+      for (const listener of api.storageListeners)
+        listener({ tldwConfig: { oldValue: config } }, "local");
+    });
+    const retiredGeneration = result.current.generation;
+    await act(async () => {
+      for (const listener of api.storageListeners)
+        listener({ tldwConfig: { newValue: config } }, "local");
+    });
+    await waitFor(() => expect(result.current.available).toBe(true));
+    const currentGeneration = result.current.generation;
+    expect(currentGeneration).toBeGreaterThan(retiredGeneration);
+    const release = vi.fn();
+    await act(async () =>
+      lookup.resolve({
+        requestScope: { config: {}, userId: null },
+        scopeSignal: api.loadSnapshot.mock.calls[0][1].signal,
+        scopeInvalidatedSignal: new AbortController().signal,
+        release,
+      }),
+    );
+    expect(release).toHaveBeenCalledOnce();
+    expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1);
+    expect(result.current.generation).toBe(currentGeneration);
+    expect(result.current.available).toBe(true);
+  });
+
+  it("keeps an unrelated 412 transport error retryable under the current authority", async () => {
+    api.createWorkspaceSourceView
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Temporary conflict"), {
+          status: 412,
+          details: { detail: { code: "other_precondition" } },
+        }),
+      )
+      .mockResolvedValueOnce(validView({ name: "Current work" }));
+    const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
+    const generation = result.current.generation;
+    await act(async () => result.current.createView("Current work"));
+    expect(result.current.available).toBe(true);
+    expect(result.current.generation).toBe(generation);
+    expect(result.current.mutationError?.retryable).toBe(true);
+    await act(async () => result.current.retryMutation());
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(2);
+    expect(result.current.announcement).toBe("Saved view created.");
+  });
+
+  it("retires same-workspace work through native account withdrawal and restoration", async () => {
+    const oldResponse = deferred<ReturnType<typeof validView>>();
+    api.createWorkspaceSourceView.mockReturnValue(oldResponse.promise);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
+    );
+    const old = result.current;
+    let pending!: Promise<void>;
+    act(() => {
+      pending = old.createView("Old owner write");
+    });
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    const oldGeneration = old.generation;
+    const config = {
+      serverUrl: "https://saved-views.test",
+      authMode: "single-user",
+      apiKey: "fixture-key",
+    };
+    act(() => {
+      for (const listener of api.storageListeners)
+        listener({ tldwConfig: { oldValue: config } }, "local");
+    });
+    expect(result.current.available).toBe(false);
+    expect(result.current.generation).toBeGreaterThan(oldGeneration);
+    expect(result.current.busy).toBe(false);
+    await act(async () => result.current.retry());
+    expect(api.loadSnapshot).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      for (const listener of api.storageListeners)
+        listener({ tldwConfig: { newValue: config } }, "local");
+    });
+    await waitFor(() => expect(result.current.available).toBe(true));
+    await act(async () => {
+      await old.createView("Retained create");
+      await old.replaceView(validView());
+      await old.resetView(invalidView());
+      await old.deleteView(validView());
+      await old.retry();
+      await old.retryMutation();
+      await old.retryVersionConflict();
+      oldResponse.resolve(validView({ name: "Old owner write" }));
+      await pending;
+    });
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    expect(api.updateWorkspaceSourceView).not.toHaveBeenCalled();
+    expect(api.deleteWorkspaceSourceView).not.toHaveBeenCalled();
+    expect(result.current.views).toEqual([]);
+    expect(result.current.announcement).toBeNull();
+  });
+
+  it("preserves active work on non-authority native configuration changes", async () => {
+    const response = deferred<ReturnType<typeof validView>>();
+    api.createWorkspaceSourceView.mockReturnValue(response.promise);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
+    );
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.createView("Current work");
+    });
+    const generation = result.current.generation;
+    const config = {
+      serverUrl: "https://saved-views.test",
+      authMode: "single-user",
+      apiKey: "fixture-key",
+    };
+    act(() => {
+      for (const listener of api.storageListeners)
+        listener(
+          {
+            tldwConfig: {
+              oldValue: config,
+              newValue: { ...config, timeout: 60000 },
+            },
+          },
+          "local",
+        );
+    });
+    expect(result.current.generation).toBe(generation);
+    expect(result.current.busy).toBe(true);
+    await act(async () => {
+      response.resolve(validView({ name: "Current work" }));
+      await pending;
+    });
+    expect(result.current.announcement).toBe("Saved view created.");
   });
 
   it("is unavailable for null workspaces and never requests", () => {
@@ -136,7 +496,7 @@ describe("useSourceSavedViews", () => {
 
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith(
-        "workspace-new",
+        "workspace-new", scopedOptions,
       ),
     );
     expect(result.current.available).toBe(true);
@@ -194,7 +554,7 @@ describe("useSourceSavedViews", () => {
       </React.Suspense>,
     );
     await waitFor(() =>
-      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-a"),
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-a", scopedOptions),
     );
 
     act(() => {
@@ -258,6 +618,7 @@ describe("useSourceSavedViews", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce({ items: [validView()] });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await waitFor(() => expect(result.current.listError?.retryable).toBe(true));
     expect(result.current.views).toEqual([]);
@@ -265,13 +626,14 @@ describe("useSourceSavedViews", () => {
 
     expect(result.current.views).toHaveLength(1);
     expect(result.current.listError).toBeNull();
-    expect(api.listWorkspaceSourceViews).toHaveBeenNthCalledWith(1, "ws-a");
-    expect(api.listWorkspaceSourceViews).toHaveBeenNthCalledWith(2, "ws-a");
+    expect(api.listWorkspaceSourceViews).toHaveBeenNthCalledWith(1, "ws-a", scopedOptions);
+    expect(api.listWorkspaceSourceViews).toHaveBeenNthCalledWith(2, "ws-a", scopedOptions);
   });
 
   it("keeps local preset controls available when saved-view listing fails", async () => {
     api.listWorkspaceSourceViews.mockRejectedValue(new Error("offline"));
     const { result } = setup("ws-a", localState({ typeFilters: ["pdf"] }));
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await waitFor(() => expect(result.current.listError).not.toBeNull());
 
@@ -294,6 +656,7 @@ describe("useSourceSavedViews", () => {
       .mockReturnValueOnce(reconciliation.promise);
     api.createWorkspaceSourceView.mockResolvedValue(created);
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -329,6 +692,7 @@ describe("useSourceSavedViews", () => {
   it("makes same-generation retries latest-wins", async () => {
     api.listWorkspaceSourceViews.mockResolvedValueOnce({ items: [] });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -361,6 +725,7 @@ describe("useSourceSavedViews", () => {
   it("does not let an older retry overwrite a newer replace", async () => {
     api.listWorkspaceSourceViews.mockResolvedValueOnce({ items: [validView()] });
     const { result } = setup("ws-a", localState({ typeFilters: ["pdf"] }));
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     const retryLoad = deferred<{ items: ReturnType<typeof validView>[] }>();
     api.listWorkspaceSourceViews.mockReturnValueOnce(retryLoad.promise);
@@ -393,6 +758,7 @@ describe("useSourceSavedViews", () => {
   it("does not let an older retry restore a deleted view", async () => {
     api.listWorkspaceSourceViews.mockResolvedValueOnce({ items: [validView()] });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     const retryLoad = deferred<{ items: ReturnType<typeof validView>[] }>();
     api.listWorkspaceSourceViews.mockReturnValueOnce(retryLoad.promise);
@@ -421,6 +787,7 @@ describe("useSourceSavedViews", () => {
       "ws-a",
       localState({ typeFilters: ["pdf"] }),
     );
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     let pending!: Promise<void>;
@@ -448,6 +815,7 @@ describe("useSourceSavedViews", () => {
     const pendingCreate = deferred<ReturnType<typeof validView>>();
     api.createWorkspaceSourceView.mockReturnValue(pendingCreate.promise);
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -475,6 +843,7 @@ describe("useSourceSavedViews", () => {
       items: [validView(), invalidView()],
     });
     const { result } = setup("ws-a", localState({ expanded: true }), onApply);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(2));
 
     act(() => result.current.applyView(result.current.views[0]!));
@@ -504,6 +873,7 @@ describe("useSourceSavedViews", () => {
       ],
     });
     const { result } = setup("ws-a", localState(), onApply);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     act(() => result.current.applyView(result.current.views[0]!));
@@ -526,6 +896,7 @@ describe("useSourceSavedViews", () => {
       }),
     );
     const { result, rerender } = setup("ws-a", state);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalled(),
     );
@@ -536,7 +907,7 @@ describe("useSourceSavedViews", () => {
       name: "PDFs",
       schema_version: 1,
       state: wireState({ type_filters: ["pdf"], sort: "name_asc" }),
-    });
+    }, scopedOptions);
     expect(result.current.activeViewId).toBe("view-1");
     expect(result.current.modified).toBe(false);
     expect(result.current.announcement).toBe("Saved view created.");
@@ -553,6 +924,7 @@ describe("useSourceSavedViews", () => {
       validView({ name: maximumName, state: wireState() }),
     );
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalled(),
     );
@@ -561,7 +933,7 @@ describe("useSourceSavedViews", () => {
 
     expect(api.createWorkspaceSourceView).toHaveBeenCalledWith(
       "ws-a",
-      expect.objectContaining({ name: maximumName }),
+      expect.objectContaining({ name: maximumName }), scopedOptions,
     );
 
     await act(async () => result.current.createView(tooLongName));
@@ -583,6 +955,7 @@ describe("useSourceSavedViews", () => {
     );
     const onApply = vi.fn();
     const { result } = setup("ws-a", localState(), onApply);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalled(),
     );
@@ -607,6 +980,7 @@ describe("useSourceSavedViews", () => {
       "ws-a",
       localState({ fileSizeMin: 20, fileSizeMax: 10 }),
     );
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Broken"));
 
@@ -629,6 +1003,7 @@ describe("useSourceSavedViews", () => {
       "ws-a",
       localState({ fileSizeMin: 20, fileSizeMax: 10 }),
     );
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Corrected view"));
     expect(result.current.serializationIssues).toEqual(
@@ -657,6 +1032,7 @@ describe("useSourceSavedViews", () => {
     });
     api.updateWorkspaceSourceView.mockResolvedValue(validView({ version: 3 }));
     const { result } = setup("ws-a", localState({ typeFilters: ["pdf"] }));
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("PDFs"));
     expect(result.current.duplicateConflict).toEqual(
@@ -673,7 +1049,7 @@ describe("useSourceSavedViews", () => {
         name: "PDFs",
         schema_version: 1,
         state: wireState({ type_filters: ["pdf"] }),
-      },
+      }, scopedOptions,
     );
     expect(result.current.duplicateConflict).toBeNull();
     expect(result.current.activeViewId).toBe("view-1");
@@ -695,6 +1071,7 @@ describe("useSourceSavedViews", () => {
       })
       .mockResolvedValueOnce(validView({ id: "view-2", name: "Fresh name" }));
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Duplicate"));
     expect(result.current.duplicateConflict).not.toBeNull();
@@ -721,6 +1098,7 @@ describe("useSourceSavedViews", () => {
     });
     api.updateWorkspaceSourceView.mockRejectedValue(new Error("offline"));
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Duplicate"));
     await act(async () => result.current.confirmReplace());
@@ -749,6 +1127,7 @@ describe("useSourceSavedViews", () => {
     });
     api.updateWorkspaceSourceView.mockReturnValue(replacement.promise);
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Duplicate"));
     let pending!: Promise<void>;
@@ -775,6 +1154,7 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
     api.updateWorkspaceSourceView.mockReturnValue(replacement.promise);
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     let pending!: Promise<void>;
@@ -801,6 +1181,7 @@ describe("useSourceSavedViews", () => {
       details: { detail: { code: "source_view_name_exists", version: "2" } },
     });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Name"));
 
@@ -821,6 +1202,7 @@ describe("useSourceSavedViews", () => {
       },
     });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     await act(async () => result.current.replaceView(result.current.views[0]!));
@@ -844,6 +1226,7 @@ describe("useSourceSavedViews", () => {
       details: { detail },
     });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Name"));
 
@@ -858,6 +1241,7 @@ describe("useSourceSavedViews", () => {
       details: { detail: { code: "source_view_limit_reached", limit: 100 } },
     });
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Name"));
 
@@ -897,6 +1281,7 @@ describe("useSourceSavedViews", () => {
       .mockResolvedValueOnce({ items: [] })
       .mockResolvedValueOnce({ items: [validView({ version: 5 })] });
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Name"));
     await act(async () => result.current.confirmReplace());
@@ -933,6 +1318,7 @@ describe("useSourceSavedViews", () => {
       .mockResolvedValueOnce({ items: [validView()] })
       .mockResolvedValueOnce({ items: [validView({ version: 5 })] });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     await act(async () => result.current.createView("Old create"));
@@ -976,6 +1362,7 @@ describe("useSourceSavedViews", () => {
       .mockResolvedValueOnce({ items: [] })
       .mockResolvedValueOnce({ items: [validView({ version: 5 })] });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Name"));
     await act(async () => result.current.confirmReplace());
@@ -984,7 +1371,7 @@ describe("useSourceSavedViews", () => {
     expect(api.updateWorkspaceSourceView).toHaveBeenLastCalledWith(
       "ws-a",
       "view-1",
-      expect.objectContaining({ version: 5, name: "Name" }),
+      expect.objectContaining({ version: 5, name: "Name" }), scopedOptions,
     );
     expect(result.current.versionConflict).toBeNull();
     expect(result.current.canRetryVersion).toBe(false);
@@ -1006,6 +1393,7 @@ describe("useSourceSavedViews", () => {
       },
     });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     await act(async () => result.current.replaceView(result.current.views[0]!));
@@ -1027,6 +1415,7 @@ describe("useSourceSavedViews", () => {
       api.updateWorkspaceSourceView.mockRejectedValue(new Error("offline"));
       api.deleteWorkspaceSourceView.mockRejectedValue(new Error("offline"));
       const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
       await waitFor(() => expect(result.current.views).toHaveLength(1));
 
       await act(async () => {
@@ -1063,6 +1452,7 @@ describe("useSourceSavedViews", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce(validView({ name: "Retry me" }));
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.createView("Retry me"));
     expect(result.current.mutationError?.retryable).toBe(true);
@@ -1091,6 +1481,7 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [row] });
     api.updateWorkspaceSourceView.mockResolvedValue(updated);
     const { result } = setup("ws-a", current);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     await act(async () => result.current.replaceView(result.current.views[0]!));
@@ -1099,7 +1490,7 @@ describe("useSourceSavedViews", () => {
       version: 2,
       schema_version: 1,
       state: wireState({ type_filters: ["pdf"], sort: "name_desc" }),
-    });
+    }, scopedOptions);
     expect(result.current.activeViewId).toBe("view-1");
     expect(result.current.activeSnapshot).toEqual(updated.state);
     expect(result.current.modified).toBe(false);
@@ -1118,6 +1509,7 @@ describe("useSourceSavedViews", () => {
       localState({ typeFilters: ["pdf"] }),
       onApply,
     );
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
     onApply.mockClear();
@@ -1163,6 +1555,7 @@ describe("useSourceSavedViews", () => {
         }),
       );
     const { result } = setup("ws-a", current);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     await act(async () => result.current.replaceView(result.current.views[0]!));
@@ -1174,7 +1567,7 @@ describe("useSourceSavedViews", () => {
         version: 2,
         schema_version: 1,
         state: wireState({ type_filters: ["pdf"] }),
-      },
+      }, scopedOptions,
     );
     expect(result.current.views[0]?.name).toBe("Renamed concurrently");
 
@@ -1188,7 +1581,7 @@ describe("useSourceSavedViews", () => {
         version: 5,
         schema_version: 1,
         state: wireState({ type_filters: ["pdf"] }),
-      },
+      }, scopedOptions,
     );
     expect(result.current.views[0]?.name).toBe("Renamed concurrently");
   });
@@ -1204,6 +1597,7 @@ describe("useSourceSavedViews", () => {
     api.updateWorkspaceSourceView.mockResolvedValue(resetResponse);
     const onApply = vi.fn();
     const { result } = setup("ws-a", localState({ expanded: true }), onApply);
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     await act(async () => result.current.resetView(row));
 
@@ -1211,7 +1605,7 @@ describe("useSourceSavedViews", () => {
       version: 4,
       schema_version: 1,
       state: wireState(),
-    });
+    }, scopedOptions);
     expect(onApply).toHaveBeenCalledWith(
       expect.objectContaining({ expanded: true, sort: "manual" }),
     );
@@ -1232,6 +1626,7 @@ describe("useSourceSavedViews", () => {
         message: "Saved view not found.",
       });
       const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
       await waitFor(() => expect(result.current.views).toHaveLength(1));
 
       await act(async () => {
@@ -1258,6 +1653,7 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
     api.deleteWorkspaceSourceView.mockResolvedValue(undefined);
     const { result } = setup("ws-a", localState(), onApply);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
 
@@ -1265,7 +1661,7 @@ describe("useSourceSavedViews", () => {
 
     expect(api.deleteWorkspaceSourceView).toHaveBeenCalledWith(
       "ws-a",
-      "view-1",
+      "view-1", scopedOptions,
     );
     expect(result.current.views).toEqual([]);
     expect(result.current.activeViewId).toBeNull();
@@ -1281,6 +1677,7 @@ describe("useSourceSavedViews", () => {
       message: "Saved view not found.",
     });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
 
@@ -1310,6 +1707,7 @@ describe("useSourceSavedViews", () => {
       message: "Saved view not found.",
     });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -1342,6 +1740,7 @@ describe("useSourceSavedViews", () => {
         message: "Saved view not found.",
       });
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     await act(async () => result.current.deleteView(result.current.views[0]!));
@@ -1364,6 +1763,7 @@ describe("useSourceSavedViews", () => {
     });
     api.deleteWorkspaceSourceView.mockResolvedValue(undefined);
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     await act(async () => result.current.createView("At limit"));
     rerender({
@@ -1408,6 +1808,7 @@ describe("useSourceSavedViews", () => {
     });
     api.deleteWorkspaceSourceView.mockResolvedValue(undefined);
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     await act(async () => result.current.createView("Duplicate"));
     await act(async () => result.current.confirmReplace());
@@ -1437,6 +1838,7 @@ describe("useSourceSavedViews", () => {
     api.updateWorkspaceSourceView.mockRejectedValue(new Error("offline"));
     api.deleteWorkspaceSourceView.mockResolvedValue(undefined);
     const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     await act(async () => result.current.createView("Duplicate"));
     await act(async () => result.current.confirmReplace());
@@ -1458,6 +1860,7 @@ describe("useSourceSavedViews", () => {
       validView({ name: "Snapshot", state: wireState() }),
     );
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
     await act(async () => result.current.createView("Snapshot"));
@@ -1494,6 +1897,7 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
     api.createWorkspaceSourceView.mockReturnValue(pendingCreate.promise);
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
 
@@ -1533,6 +1937,7 @@ describe("useSourceSavedViews", () => {
     });
     api.updateWorkspaceSourceView.mockRejectedValue(new Error("offline"));
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
     await act(async () => result.current.createView("Duplicate"));
@@ -1551,6 +1956,7 @@ describe("useSourceSavedViews", () => {
     const pendingList = deferred<{ items: ReturnType<typeof validView>[] }>();
     api.listWorkspaceSourceViews.mockReturnValue(pendingList.promise);
     const { result, unmount } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -1567,6 +1973,7 @@ describe("useSourceSavedViews", () => {
     const pendingCreate = deferred<ReturnType<typeof validView>>();
     api.createWorkspaceSourceView.mockReturnValue(pendingCreate.promise);
     const { result, unmount } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -1589,6 +1996,7 @@ describe("useSourceSavedViews", () => {
     api.updateWorkspaceSourceView.mockReturnValue(pendingReset.promise);
     const onApply = vi.fn();
     const { result, unmount } = setup("ws-a", localState(), onApply);
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
     );
@@ -1612,10 +2020,11 @@ describe("useSourceSavedViews", () => {
       .mockResolvedValueOnce({ items: [] });
     api.createWorkspaceSourceView.mockReturnValue(createB.promise);
     const { result, rerender } = setup("ws-a");
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     rerender({ workspaceId: "ws-b", state: localState() });
     await waitFor(() =>
-      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-b"),
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-b", scopedOptions),
     );
     await act(async () => {
       const pending = result.current.createView("B view");
@@ -1637,10 +2046,11 @@ describe("useSourceSavedViews", () => {
       .mockResolvedValueOnce({ items: [] })
       .mockResolvedValueOnce({ items: [validView({ id: "new-a" })] });
     const { result, rerender } = setup("ws-a");
+    await waitFor(() => expect(result.current.available).toBe(true));
 
     rerender({ workspaceId: "ws-b", state: localState() });
     await waitFor(() =>
-      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-b"),
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-b", scopedOptions),
     );
     rerender({ workspaceId: "ws-a", state: localState() });
     await waitFor(() => expect(result.current.views[0]?.id).toBe("new-a"));
@@ -1660,8 +2070,9 @@ describe("useSourceSavedViews", () => {
       .mockResolvedValueOnce({ items: [] })
       .mockResolvedValueOnce({ items: [validView({ id: "fresh-a" })] });
     const { result, rerender } = setup("ws-a");
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() =>
-      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-a"),
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-a", scopedOptions),
     );
 
     let pending!: Promise<void>;
@@ -1671,7 +2082,7 @@ describe("useSourceSavedViews", () => {
     expect(result.current.busy).toBe(true);
     rerender({ workspaceId: "ws-b", state: localState() });
     await waitFor(() =>
-      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-b"),
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledWith("ws-b", scopedOptions),
     );
     rerender({ workspaceId: "ws-a", state: localState() });
     await waitFor(() => expect(result.current.views[0]?.id).toBe("fresh-a"));
@@ -1699,6 +2110,7 @@ describe("useSourceSavedViews", () => {
       "ws-a",
       localState({ typeFilters: ["pdf"] }),
     );
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
 
     let pending!: Promise<void>;
@@ -1729,6 +2141,7 @@ describe("useSourceSavedViews", () => {
         items: [validView({ id: "fresh-b", workspace_id: "ws-b" })],
       });
     const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
 
@@ -1758,6 +2171,7 @@ describe("useSourceSavedViews", () => {
       "ws-a",
       localState({ reviewStateFilters: ["needs_review"] }),
     );
+    await waitFor(() => expect(result.current.available).toBe(true));
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
     expect(result.current.modified).toBe(false);

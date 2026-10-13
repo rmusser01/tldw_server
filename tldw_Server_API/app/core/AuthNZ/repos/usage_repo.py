@@ -9,6 +9,11 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
 
+# LLM quota counters leave embeddings out. ``operation`` is nullable, so a bare
+# ``<>`` would also drop rows with no operation. This is a constant, never user
+# input, so the queries that interpolate it carry ``nosec B608``.
+_LLM_GENERATION_PREDICATE = "COALESCE(operation, '') <> 'embeddings'"
+
 _SQLITE_CORRUPTION_SIGNATURES = (
     "database disk image is malformed",
     "malformed database schema",
@@ -249,6 +254,7 @@ class AuthnzUsageRepo:
 
     async def sum_user_llm_tokens_since(self, *, user_id: int, since: datetime) -> float:
         """Sum ``llm_usage_log.total_tokens`` for a user from ``since`` (inclusive) onward.
+        Embeddings rows are excluded (LLM usage accounting spec §6).
 
         Used for the per-user monthly LLM-token quota (spec 2 §4). ``since`` is
         bound naive on Postgres: ``llm_usage_log.ts`` is TIMESTAMP without time
@@ -256,7 +262,8 @@ class AuthnzUsageRepo:
         """
         bound: Any = _strip_tzinfo(since) if self._is_postgres_backend() else since.strftime("%Y-%m-%d %H:%M:%S")
         value = await self.db_pool.fetchval(
-            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage_log WHERE user_id = ? AND ts >= ?",
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage_log "  # nosec B608
+            f"WHERE user_id = ? AND ts >= ? AND {_LLM_GENERATION_PREDICATE}",
             int(user_id),
             bound,
         )

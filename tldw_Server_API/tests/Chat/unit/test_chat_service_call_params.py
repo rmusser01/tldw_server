@@ -840,3 +840,12 @@ def test_history_owner_envelopes_do_not_reach_provider_extensions():
     assert "tldw_history_selection_v1" not in params
     assert params["extra_body"] == {"safe": 1}
     assert params["extra_headers"] == {"X-Safe": "yes"}
+
+
+def test_history_branch_opt_in_does_not_reach_provider():
+    req = ChatCompletionRequest.model_construct(
+        model="gpt-4o-mini", messages=[], tldw_history_selection_v1={"owner_key": "private-owner"},
+        tldw_history_branch=False)
+    params = build_call_params_from_request(request_data=req, target_api_provider="openai", provider_api_key="test",
+        templated_llm_payload=[], final_system_message=None, app_config=None)
+    assert "tldw_history_branch" not in params

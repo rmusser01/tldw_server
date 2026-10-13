@@ -13,7 +13,7 @@ import {
 import { useStorage } from '@plasmohq/storage/hook'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { autoSyncPrompt, shouldAutoSyncWorkspacePrompts } from '@/services/prompt-sync'
-import { useMessageOption } from "@/hooks/useMessageOption"
+import { useStoreMessageOption } from "@/store/option"
 import { Link } from 'react-router-dom'
 
 type PromptItem = { id?: string; title: string; content: string; is_system?: boolean; source: 'local' | 'server' }
@@ -28,7 +28,7 @@ type Props = {
 
 export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem, inputId, ariaLabel, ariaLabelledby }) => {
   const { t } = useTranslation(['option'])
-  const { historyId } = useMessageOption()
+  const historyId = useStoreMessageOption((s) => s.historyId)
   const [remote, setRemote] = useStorage('promptSearchIncludeServer', false)
   const [q, setQ] = React.useState('')
   const [open, setOpen] = React.useState(false)

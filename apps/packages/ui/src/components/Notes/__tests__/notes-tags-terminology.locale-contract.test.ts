@@ -30,7 +30,7 @@ describe("notes tags terminology locale contract", () => {
     expect(message(optionLocale, "notesSearch_keywordsPlaceholder")).toBe("Filter by tag")
     expect(message(optionLocale, "notesSearch_keywordsEditorPlaceholder")).toBe("Tags")
     expect(message(optionLocale, "notesSearch_tagsHelp")).toBe(
-      "Tags help you find this note using the tag filter on the left."
+      "Tags help you organize and filter notes. Add tags in the editor, then filter here."
     )
     expect(message(optionLocale, "notesSearch_keywordsBrowse")).toBe("Browse tags")
     expect(message(optionLocale, "notesSearch_keywordPickerTitle")).toBe("Browse tags")

@@ -1,3 +1,11 @@
+import { sha256Text } from "@/store/workspace-migration"
+import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import {
+  assertWebCaptureHeadCurrent,
+  WebCaptureNotCurrentError
+} from "@/utils/research-web-capture"
+import type { ScopedRequestOptions } from "@/services/tldw/TldwApiClient"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -2228,10 +2236,142 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [chatFocusTarget, clearChatFocusTarget])
 
+  const captureRequests = React.useRef(new Set<AbortController>())
+  React.useEffect(
+    () => () => {
+      for (const controller of captureRequests.current) controller.abort()
+      captureRequests.current.clear()
+    },
+    [workspaceId, workspaceChatReferenceId]
+  )
+
+  const withCurrentCaptureHeads = async (
+    action: (
+      options?: ScopedRequestOptions,
+      assertCurrent?: () => void,
+      controller?: AbortController
+    ) => Promise<boolean>
+  ): Promise<boolean> => {
+    const captures = queryableSelectedSources.filter((source) => source.webCapture)
+    if (!captures.length) return action()
+    const controller = new AbortController()
+    captureRequests.current.add(controller)
+    let scope: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined
+    const initial = useWorkspaceStore.getState()
+    const effectiveSelection = (
+      state: ReturnType<typeof useWorkspaceStore.getState>
+    ) => {
+      const ids = new Set([
+        ...state.selectedSourceIds,
+        ...collectSelectedFolderSourceIds(
+          state.selectedSourceFolderIds ?? [],
+          state.sourceFolders ?? [],
+          state.sourceFolderMemberships ?? []
+        )
+      ])
+      return JSON.stringify(
+        state.sources
+          .filter((source) => ids.has(source.id) && isQueryableWorkspaceSource(source, statusGuardrailsEnabled))
+          .map((source) => source.id)
+      )
+    }
+    const initialEffectiveSelection = effectiveSelection(initial)
+    const retire = () => controller.abort()
+    const selection = JSON.stringify([
+      initial.selectedSourceIds,
+      initial.selectedSourceFolderIds
+    ])
+    const assertCurrent = () => {
+      const current = useWorkspaceStore.getState()
+      if (
+        controller.signal.aborted ||
+        scope?.scopeSignal.aborted ||
+        scope?.scopeInvalidatedSignal.aborted ||
+        effectiveSelection(current) !== initialEffectiveSelection ||
+        current.workspaceId !== workspaceId ||
+        current.workspaceChatReferenceId !== initial.workspaceChatReferenceId ||
+        JSON.stringify([
+          current.selectedSourceIds,
+          current.selectedSourceFolderIds
+        ]) !== selection ||
+        captures.some(
+          (source) =>
+            !current.sources.some(
+              (item) =>
+                item.id === source.id &&
+                item.mediaId === source.mediaId &&
+                item.webCapture === source.webCapture
+            )
+        )
+      )
+        throw new Error(
+          "Research source selection or account changed. Retry your question."
+        )
+    }
+    const stop = useWorkspaceStore.subscribe(() => {
+      try {
+        assertCurrent()
+      } catch {
+        controller.abort()
+      }
+    })
+    try {
+      scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      scope.scopeSignal.addEventListener("abort", retire, { once: true })
+      assertCurrent()
+      const options = {
+        requestScope: scope.requestScope,
+        signal: scope.scopeSignal
+      }
+      for (const source of captures) {
+        await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+        assertCurrent()
+      }
+      return await action(options, assertCurrent, controller)
+    } catch (reason) {
+      if (reason instanceof WebCaptureNotCurrentError) {
+        try {
+          assertCurrent()
+        } catch {
+          return false
+        }
+        const source = captures.find((item) => item.id === reason.sourceId)
+        if (source) {
+          // Publish while current, before the error setter retires selection.
+          setSubmitError("Snapshot changed outside refresh")
+          useWorkspaceStore
+            .getState()
+            .setSourceStatusById(
+              source.id,
+              "error",
+              "Snapshot changed outside refresh",
+              undefined,
+              { statusReason: "capture_head_changed", retryEligible: false }
+            )
+          return false
+        }
+      }
+      if (!controller.signal.aborted)
+        setSubmitError(
+          reason instanceof Error
+            ? reason.message
+            : "Snapshot changed outside refresh"
+        )
+      return false
+    } finally {
+      scope?.scopeSignal.removeEventListener("abort", retire)
+      scope?.release()
+      stop()
+      captureRequests.current.delete(controller)
+    }
+  }
+
   const buildFullSourceContextPrompt = React.useCallback(
     async (
       message: string,
-      responsePresetInstruction?: string | null
+      responsePresetInstruction?: string | null,
+      options?: ScopedRequestOptions,
+      assertCurrent: () => void = () => {}
     ): Promise<string> => {
       const messageWithResponsePreset = responsePresetInstruction
         ? `${responsePresetInstruction}\n\nUser question: ${message}`
@@ -2246,11 +2386,41 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       try {
         const detailResults = await Promise.allSettled(
           queryableSelectedSources.map(async (source) => {
+            if (source.webCapture) {
+              if (!options) throw new Error("Capture scope unavailable")
+              await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+              assertCurrent()
+              const version = await tldwClient.getMediaDocumentVersion(
+                source.mediaId,
+                source.webCapture.versionNumber,
+                options
+              )
+              assertCurrent()
+              if (
+                version.uuid !== source.webCapture.versionUuid ||
+                version.version_number !== source.webCapture.versionNumber ||
+                typeof version.content !== "string"
+              )
+                throw new WebCaptureNotCurrentError(
+                  "Snapshot changed outside refresh",
+                  source.id
+                )
+              const digest = await sha256Text(version.content)
+              assertCurrent()
+              if (digest !== source.webCapture.contentSha256)
+                throw new WebCaptureNotCurrentError(
+                  "Snapshot changed outside refresh",
+                  source.id
+                )
+              return { source, fullText: version.content }
+            }
             const detail = await tldwClient.getMediaDetails(source.mediaId, {
               include_content: true,
               include_versions: false,
-              include_version_content: false
+              include_version_content: false,
+              ...options
             })
+            assertCurrent()
             const fullText = extractSourceFullText(detail)
             return {
               source,
@@ -2259,6 +2429,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           })
         )
 
+        assertCurrent()
+        const captureFailure = detailResults.find(
+          (result, index) =>
+            result.status === "rejected" &&
+            queryableSelectedSources[index].webCapture
+        )
+        if (captureFailure?.status === "rejected") throw captureFailure.reason
         const resolvedSourceContexts: Array<{
           source: WorkspaceSource
           fullText: string
@@ -2324,7 +2501,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           "",
           `${t("playground:chat.fullSourceContextQuestionLabel", "User question")}: ${message}`
         ].join("\n")
-      } catch {
+      } catch (reason) {
+        assertCurrent()
+        if (queryableSelectedSources.some((source) => source.webCapture))
+          throw reason
         messageApi.warning(
           t(
             "playground:chat.fullSourceContextFailed",
@@ -2336,7 +2516,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         setPreparingSourceContext(false)
       }
     },
-    [includeFullSourceContents, messageApi, queryableSelectedSources, t]
+    [
+      includeFullSourceContents,
+      messageApi,
+      queryableSelectedSources,
+      t,
+      workspaceId
+    ]
   )
 
   const buildResponsePresetInstruction = React.useCallback(() => {
@@ -2427,40 +2613,61 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
 
     setSubmitError(null)
-    try {
-      const responsePresetInstruction = buildResponsePresetInstruction()
-      const preparedMessage = await buildFullSourceContextPrompt(
-        message,
-        responsePresetInstruction
-      )
-      const submitResult = await onSubmit({ message: preparedMessage, image: "" })
-      if (
-        submitResult &&
-        typeof submitResult === "object" &&
-        "status" in submitResult &&
-        (submitResult as { status?: unknown }).status !== "submitted"
-      ) {
-        return false
-      }
-      const activeScope = temporarySourceScopeRef.current
-      if (activeScope) {
-        const selectedIds = selectedSourceIdsRef.current
-        const isStillScopedToDroppedSource =
-          selectedIds.length === 1 && selectedIds[0] === activeScope.sourceId
-        if (isStillScopedToDroppedSource) {
-          restoreTemporaryScope("auto", activeScope)
+    return withCurrentCaptureHeads(
+      async (options, assertCurrent = () => {}, controller) => {
+        try {
+          const responsePresetInstruction = buildResponsePresetInstruction()
+          const preparedMessage = await buildFullSourceContextPrompt(
+            message,
+            responsePresetInstruction,
+            options,
+            assertCurrent
+          )
+          if (options) {
+            for (const source of queryableSelectedSources.filter(
+              (item) => item.webCapture
+            )) {
+              await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+              assertCurrent()
+            }
+          }
+          assertCurrent()
+          const submitResult = await onSubmit({
+            message: preparedMessage,
+            image: "",
+            ...(controller ? { controller, assertCurrent } : {})
+          })
+          if (
+            submitResult &&
+            typeof submitResult === "object" &&
+            "status" in submitResult &&
+            (submitResult as { status?: unknown }).status !== "submitted"
+          ) {
+            return false
+          }
+          const activeScope = temporarySourceScopeRef.current
+          if (activeScope) {
+            const selectedIds = selectedSourceIdsRef.current
+            const isStillScopedToDroppedSource =
+              selectedIds.length === 1 &&
+              selectedIds[0] === activeScope.sourceId
+            if (isStillScopedToDroppedSource) {
+              restoreTemporaryScope("auto", activeScope)
+            }
+          }
+          return true
+        } catch (reason) {
+          if (options) throw reason
+          setSubmitError(
+            t(
+              "playground:chat.connectionError",
+              "Unable to reach server. Please check your connection and retry."
+            )
+          )
+          return false
         }
       }
-      return true
-    } catch {
-      setSubmitError(
-        t(
-          "playground:chat.connectionError",
-          "Unable to reach server. Please check your connection and retry."
-        )
-      )
-      return false
-    }
+    )
   }
 
   React.useEffect(() => {
@@ -2933,10 +3140,24 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       isBot: boolean
       message: string
       name?: string
+      sources?: unknown[]
     }) => {
       const snippet = String(msg.message || "").trim()
       if (!snippet) return
+      const citedMediaIds = new Set(
+        (msg.sources || []).map(extractCitationMediaId)
+      )
+      const citedCaptures = sources.filter(
+        (source) => source.webCapture && citedMediaIds.has(source.mediaId)
+      )
+      const provenance = citedCaptures.length
+        ? appendCapturedNoteProvenance(
+            useWorkspaceStore.getState().currentNote,
+            citedCaptures
+          )
+        : null
       captureToCurrentNote({
+        ...(provenance ? { provenance } : {}),
         title: buildCapturedMessageTitle(
           msg.isBot,
           snippet,
@@ -2947,7 +3168,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         mode: "append"
       })
     },
-    [captureToCurrentNote, t]
+    [captureToCurrentNote, sources, t]
   )
 
   // Share conversation handler (UX-044)
@@ -3181,7 +3402,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             <div className="flex min-w-0 items-center gap-2 text-sm text-error">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span className="truncate">
-                {t("playground:chat.connectionBanner", "Unable to reach server")}
+                {submitError === "Snapshot changed outside refresh"
+                  ? t(
+                      "playground:sources.snapshotChanged",
+                      "Snapshot changed outside refresh"
+                    )
+                  : t(
+                      "playground:chat.connectionBanner",
+                      "Unable to reach server"
+                    )}
                 : {connectionDescription}
               </span>
             </div>
@@ -3412,18 +3641,42 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                           handleSaveMessageToNotes({
                             isBot: msg.isBot,
                             message: msg.message,
-                            name: msg.name
+                            name: msg.name,
+                            sources: msg.sources
                           })
                         }
                         onRegenerate={
                           msg.isBot && idx === messages.length - 1
-                            ? () => regenerateLastMessage()
+                            ? () =>
+                                void withCurrentCaptureHeads(
+                                  async (_options, assertCurrent, controller) => {
+                                    assertCurrent?.()
+                                    await regenerateLastMessage({
+                                      controller,
+                                      assertCurrent
+                                    })
+                                    return true
+                                  }
+                                )
                             : () => {}
                         }
                         onDeleteMessage={() => handleDeleteMessageWithUndo(idx)}
                         suppressDeleteSuccessToast
                         onEditFormSubmit={(value: string, isSend: boolean) => {
-                          editMessage(idx, value, !msg.isBot, isSend)
+                          if (isSend)
+                            void withCurrentCaptureHeads(
+                              async (_options, assertCurrent) => {
+                                assertCurrent?.()
+                                await editMessage(
+                                  idx,
+                                  value,
+                                  !msg.isBot,
+                                  isSend
+                                )
+                                return true
+                              }
+                            )
+                          else editMessage(idx, value, !msg.isBot, isSend)
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}

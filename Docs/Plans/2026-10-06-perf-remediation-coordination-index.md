@@ -12,7 +12,10 @@ systemic patterns:
 5. Genuine O(n²) algorithms (string `+=` accumulation, pairwise dedup, signature-slice scans).
 
 Scope: **backend only** (`tldw_Server_API/**`). `apps/**` (WebUI) is explicitly out of
-scope — a separate workstream owns it. This mirrors the collision rules of the
+scope — a separate workstream owns it:
+[WebUI/extension perf remediation index](2026-10-06-webui-perf-remediation-coordination-index.md)
+(TASK-13520–13525). Its **[BE]**-marked stages request endpoints from this program's
+Batch 3 (TASK-13515). This mirrors the collision rules of the
 [credit workstreams index](2026-10-01-credit-workstreams-coordination-index.md).
 
 ## Batch → plan → task map

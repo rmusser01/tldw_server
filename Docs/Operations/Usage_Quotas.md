@@ -76,6 +76,16 @@ Days and months are calendar UTC. With the switch on and the key unset, nothing 
 | `limits.chatbooks_imports_per_day` | Chatbook imports per day | `import_jobs` rows since 00:00 UTC | HTTP 429 `Daily import limit (N) reached. Try again tomorrow.` |
 | `limits.chatbooks_concurrent_jobs` | Chatbook export and import jobs active at once | Active chatbook job rows | HTTP 429 `Maximum concurrent jobs (N) reached...` |
 
+What `limits.llm_tokens_per_month` counts:
+
+- The monthly count includes every LLM chat call recorded for the user, not just chat completions: RAG generation, character chat, summarization, evaluations and other calls made during a request. Users reach a token limit sooner than before.
+- That includes calls a request triggers without the user asking for them directly, such as query rewriting and classification.
+- Provider key validation and first-run chat verification are never counted.
+- Embedding tokens do not count toward it.
+- Recorded: calls made while serving a request; background jobs, including audio analysis and scheduled agent tasks; workflow runs; watchlist output enrichment; audio and realtime WebSocket sessions.
+- Not recorded: MCP tool calls, the in-process claims rebuild, and system jobs with no user, such as the scheduled quality evaluation.
+- The count depends on `LLM_USAGE_ENABLED` (default on). With it off, nothing is recorded and the limit never triggers.
+
 Two other `limits.*` entries in the catalog are not part of this scheme:
 
 - `limits.evaluations_per_minute` is listed in `user_profile_catalog.yaml` but nothing enforces it.

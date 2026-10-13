@@ -1,6 +1,23 @@
 import { bgRequest } from '@/services/background-proxy'
 import { db } from '@/db/dexie/schema'
 import { generateID } from '@/db/dexie/helpers'
+import type { ScopedRequestOptions } from './TldwApiClient'
+import { requestScopeFields } from './domains/service-prompts'
+
+/** Nonpersisting credential-free article extraction response. */
+export interface PublicArticleExtractionResponse {
+  status: string
+  message: string
+  results: {
+    url: string
+    title?: string | null
+    content?: string | null
+    ingested_at?: string | null
+    extraction_successful?: boolean
+    error?: string
+    metadata?: Record<string, unknown>
+  }[]
+}
 
 export interface ProcessOptions {
   storeLocal?: boolean
@@ -8,6 +25,32 @@ export interface ProcessOptions {
 }
 
 export const tldwMedia = {
+  async extractPublicArticle(
+    url: string,
+    options?: ScopedRequestOptions
+  ): Promise<PublicArticleExtractionResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    return await bgRequest<PublicArticleExtractionResponse>({
+      path: '/api/v1/media/ingest-web-content',
+      method: 'POST',
+      ...scopeFields,
+      abortSignal: options?.signal,
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
+      body: {
+        urls: [url],
+        scrape_method: 'individual',
+        credential_free: true,
+        perform_analysis: false,
+        perform_translation: false,
+        perform_chunking: false,
+        auto_chunking_use_llm: false,
+        use_cookies: false,
+        overwrite_existing: false,
+        perform_rolling_summarization: false,
+        perform_confabulation_check_of_analysis: false
+      }
+    })
+  },
   async addUrl(url: string, metadata?: Record<string, any>) {
     return await bgRequest<any>({
       path: '/api/v1/media/add',

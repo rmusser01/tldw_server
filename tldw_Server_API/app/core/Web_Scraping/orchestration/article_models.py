@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -298,6 +298,18 @@ class ArticlePlan:
             self,
             "limits",
             self.limits if isinstance(self.limits, ArticleLimits) else ArticleLimits(),
+        )
+
+    def for_public_capture(self) -> ArticlePlan:
+        """Discard site credentials and rebuild canonical negotiation headers."""
+        headers = build_browser_headers(self.ua_profile, accept_lang="en-US,en;q=0.9")
+        return replace(
+            self,
+            headers=headers,
+            cookies={},
+            llm_settings=None,
+            backend="playwright" if self.backend == "playwright" else "httpx",
+            browser=replace(self.browser, custom_cookies=(), user_agent=headers.get("User-Agent", "")),
         )
 
     @property

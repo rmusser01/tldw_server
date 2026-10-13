@@ -238,6 +238,9 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       expect(mockMessageOpen).toHaveBeenCalledTimes(1)
     })
 
+    expect(mockSetCurrentNote.mock.calls[0]?.[0]).toMatchObject({
+      content: "Local unsaved paragraph", version: 2, isDirty: true
+    })
     const conflictConfig = mockMessageOpen.mock.calls[0]?.[0]
     const renderedConflict = render(<>{conflictConfig?.content}</>)
     expect(renderedConflict.getByText("Reload latest")).toBeInTheDocument()
@@ -254,7 +257,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       )
     })
 
-    const merged = mockSetCurrentNote.mock.calls[0]?.[0]
+    const merged = mockSetCurrentNote.mock.calls.at(-1)?.[0]
     expect(merged.content).toContain("Server copy")
     expect(merged.content).toContain("## Local Draft (Unsaved)")
     expect(merged.content).toContain("Local unsaved paragraph")

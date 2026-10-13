@@ -2,20 +2,27 @@
  * Streaming Performance Tests
  *
  * Measures chat streaming latency and throughput against a real tldw_server.
- * Requires TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY environment variables.
+ * The live-server suites require TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY
+ * environment variables. The "Canned 100-chunk stream" suite at the bottom
+ * does not: it serves a scripted SSE stream from a loopback mock server and
+ * needs no live LLM (TASK-13520, WebUI perf batch W0 Stage 1).
  */
 
 import { test, expect, type Page } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import path from "path"
+import http from "node:http"
+import { AddressInfo } from "node:net"
 import { launchWithExtension } from "./utils/extension"
 import { waitForConnectionStore, forceConnected, setSelectedModel } from "./utils/connection"
+import { grantHostPermission } from "./utils/permissions"
 import {
   PerfTimer,
   measureStreamingThroughput,
   measureMemoryDelta,
   createReport,
-  logReport
+  logReport,
+  countDOMNodes
 } from "./utils/performance"
 
 // Configuration
@@ -386,6 +393,508 @@ test.describe("Sidepanel Streaming Performance", () => {
       expect(ttft).toBeLessThan(TARGETS.timeToFirstToken * 2)
     } finally {
       await context.close()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Canned 100-chunk stream (TASK-13520, WebUI perf batch W0 Stage 1).
+//
+// Deterministic, no live LLM: a loopback HTTP mock (same mechanism as
+// sidepanel-chat-smoke.spec.ts) serves a paced SSE stream of exactly 100
+// token chunks into the sidepanel chat. The production per-chunk store path
+// (`setMessages((prev) => prev.map(...))` in useMessage.tsx) processes each
+// chunk; an in-page bench subscribed to the real `useStoreMessageOption`
+// store records `performance.mark`/`performance.measure` deltas plus store
+// notification, DOM mutation and long-task counts inside the streaming
+// window (mirroring the vitest `streaming-render.bench` counters).
+//
+// This is a measurement harness, not a regression gate: assertions are
+// sanity-level only (finite/non-zero measured values, exactly 100 chunks
+// delivered, delivery correctness). Perf thresholds live in the Stage 3
+// baseline document (Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md).
+// ---------------------------------------------------------------------------
+
+const CANNED_EXT_PATH = path.resolve(process.env.TLDW_E2E_EXT_PATH || "build/chrome-mv3")
+const CANNED_MODEL_ID = "perf-stream-model"
+const CANNED_MODEL_KEY = `tldw:${CANNED_MODEL_ID}`
+const CANNED_CHUNK_COUNT = 100
+const CANNED_CHUNK_PACE_MS = 10
+const CANNED_STREAM_TIMEOUT_MS = 45_000
+
+const cannedTokenFor = (index: number) => `perf-token-${index} `
+const CANNED_FULL_TEXT = Array.from(
+  { length: CANNED_CHUNK_COUNT },
+  (_, index) => cannedTokenFor(index)
+).join("")
+
+const round = (value: number, digits = 2) => Number(value.toFixed(digits))
+
+interface CannedStreamServer {
+  server: http.Server
+  baseUrl: string
+  chunksServed: () => number
+}
+
+const readCannedRequestBody = (req: http.IncomingMessage) =>
+  new Promise<string>((resolve) => {
+    let body = ""
+    req.on("data", (chunk) => {
+      body += chunk
+    })
+    req.on("end", () => resolve(body))
+  })
+
+const startCannedStreamServer = async (): Promise<CannedStreamServer> => {
+  let chunksServed = 0
+
+  const server = http.createServer(async (req, res) => {
+    const method = (req.method || "GET").toUpperCase()
+    const url = req.url || "/"
+
+    const sendJson = (code: number, payload: unknown) => {
+      res.writeHead(code, {
+        "content-type": "application/json",
+        "access-control-allow-origin": "http://127.0.0.1",
+        "access-control-allow-credentials": "true"
+      })
+      res.end(JSON.stringify(payload))
+    }
+
+    if (method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": "http://127.0.0.1",
+        "access-control-allow-credentials": "true",
+        "access-control-allow-headers": "content-type, x-api-key, authorization"
+      })
+      return res.end()
+    }
+
+    if (url === "/api/v1/health" && method === "GET") {
+      return sendJson(200, { status: "ok" })
+    }
+
+    if (url === "/api/v1/llm/models/metadata" && method === "GET") {
+      return sendJson(200, [
+        {
+          id: CANNED_MODEL_ID,
+          name: "Perf Stream Mock Model",
+          provider: "mock",
+          context_length: 4096,
+          capabilities: ["chat"]
+        }
+      ])
+    }
+
+    if (url === "/api/v1/llm/models" && method === "GET") {
+      return sendJson(200, [CANNED_MODEL_ID])
+    }
+
+    if (url === "/openapi.json" && method === "GET") {
+      return sendJson(200, {
+        openapi: "3.0.0",
+        info: { version: "mock" },
+        paths: {
+          "/api/v1/health": {},
+          "/api/v1/chat/completions": {},
+          "/api/v1/llm/models": {},
+          "/api/v1/llm/models/metadata": {}
+        }
+      })
+    }
+
+    if (url === "/api/v1/chat/completions" && method === "POST") {
+      await readCannedRequestBody(req)
+
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive"
+      })
+
+      // The canned response: exactly CANNED_CHUNK_COUNT distinct token
+      // chunks at a fixed pace, then the terminal sentinel.
+      for (let index = 0; index < CANNED_CHUNK_COUNT; index += 1) {
+        if (res.destroyed || res.writableEnded) return
+        res.write(
+          `data: ${JSON.stringify({
+            choices: [{ delta: { content: cannedTokenFor(index) } }]
+          })}\n\n`
+        )
+        chunksServed += 1
+        await new Promise((resolve) => setTimeout(resolve, CANNED_CHUNK_PACE_MS))
+      }
+      if (res.destroyed || res.writableEnded) return
+      res.write("data: [DONE]\n\n")
+      return res.end()
+    }
+
+    return sendJson(404, { detail: "not found" })
+  })
+  server.on("error", () => {
+    // Ignore socket errors after the test closes the browser context.
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const addr = server.address() as AddressInfo
+  return { server, baseUrl: `http://127.0.0.1:${addr.port}`, chunksServed: () => chunksServed }
+}
+
+const stopCannedStreamServer = async (server: http.Server) => {
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+
+    server.close(done)
+    server.closeAllConnections?.()
+    const fallback = setTimeout(done, 1000)
+    fallback.unref?.()
+  })
+}
+
+interface CannedStreamPageResult {
+  completed: boolean
+  timedOut: boolean
+  chunksApplied: number
+  storeSubscriberNotifications: number
+  messageUpdateNotifications: number
+  domMutations: number
+  longTasks: number
+  finalAssistantText: string
+  sentAt: number
+  firstChunkAt: number
+  lastChunkAt: number
+  chunkMarkTimes: number[]
+  totalMeasureMs: number
+  ttftMeasureMs: number
+}
+
+/**
+ * Install the in-page measurement bench on the sidepanel.
+ *
+ * Subscribes to the real `useStoreMessageOption` store (exposed on window for
+ * Playwright) and records one `performance.mark("tldw-perf-streaming:chunk")`
+ * per assistant-content growth event, plus `performance.measure` entries for
+ * time-to-first-chunk and the total stream window. Also counts DOM mutations
+ * and long tasks inside the window. Resolves `window.__tldwStreamBenchDone`
+ * when the canned payload has fully arrived (or after a bounded timeout).
+ */
+const installCannedStreamBench = (page: Page, expectedFullText: string) =>
+  page.evaluate(
+    ({ expected, timeoutMs }: { expected: string; timeoutMs: number }) => {
+    const w = window as any
+    const store = w.__tldw_useStoreMessageOption
+    if (!store?.subscribe || !store?.getState) {
+      return "store-unavailable"
+    }
+
+    const MARK_SENT = "tldw-perf-streaming:sent"
+    const MARK_CHUNK = "tldw-perf-streaming:chunk"
+    const MEASURE_TOTAL = "tldw-perf-streaming:total"
+    const MEASURE_TTFT = "tldw-perf-streaming:ttft"
+    const CURSOR = "\u258b"
+
+    const assistantTextOf = (messages: any[]): string => {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index]
+        if (message && (message.isBot === true || message.role === "assistant")) {
+          return typeof message.message === "string" ? message.message : ""
+        }
+      }
+      return ""
+    }
+
+    const bench = {
+      completed: false,
+      timedOut: false,
+      started: false,
+      chunksApplied: 0,
+      storeSubscriberNotifications: 0,
+      messageUpdateNotifications: 0,
+      domMutations: 0,
+      longTasks: 0,
+      finalAssistantText: "",
+      firstChunkAt: 0,
+      lastChunkAt: 0,
+      prevAssistantLength: 0
+    }
+    bench.prevAssistantLength = assistantTextOf(store.getState().messages).length
+
+    const mutationObserver = new MutationObserver((records) => {
+      if (!bench.completed) bench.domMutations += records.length
+    })
+    mutationObserver.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true
+    })
+
+    let longTaskObserver: PerformanceObserver | null = null
+    try {
+      longTaskObserver = new PerformanceObserver((list) => {
+        if (!bench.completed) bench.longTasks += list.getEntries().length
+      })
+      longTaskObserver.observe({ entryTypes: ["longtask"] })
+    } catch {
+      // longtask entries are unsupported in this browser; count stays 0.
+    }
+
+    let resolveDone: (result: unknown) => void
+    const done = new Promise((resolve) => {
+      resolveDone = resolve
+    })
+
+    let finish: () => void = () => {}
+    const unsubscribe = store.subscribe((next: any, previous: any) => {
+      if (bench.completed) return
+      bench.storeSubscriberNotifications += 1
+      if (next?.messages !== previous?.messages) {
+        bench.messageUpdateNotifications += 1
+      }
+
+      const text = assistantTextOf(next?.messages || [])
+      if (text.length > bench.prevAssistantLength) {
+        const now = performance.now()
+        if (!bench.started) {
+          bench.started = true
+          bench.firstChunkAt = now
+        }
+        bench.prevAssistantLength = text.length
+        bench.chunksApplied += 1
+        bench.lastChunkAt = now
+        performance.mark(MARK_CHUNK)
+      }
+      bench.finalAssistantText = text
+
+      const delivered =
+        text === expected || text.replace(new RegExp(`${CURSOR}$`), "") === expected
+      if (bench.started && delivered && (text === expected || next?.streaming === false)) {
+        finish()
+      }
+    })
+
+    const timeoutId = setTimeout(() => {
+      if (bench.completed) return
+      bench.timedOut = true
+      finish()
+    }, timeoutMs)
+
+    finish = () => {
+      if (bench.completed) return
+      bench.completed = true
+      clearTimeout(timeoutId)
+      mutationObserver.disconnect()
+      longTaskObserver?.disconnect()
+      unsubscribe()
+
+      const sentMarks = performance.getEntriesByName(MARK_SENT)
+      const sentAt = sentMarks.length > 0 ? sentMarks[0].startTime : 0
+      try {
+        performance.measure(MEASURE_TTFT, { start: sentAt, end: bench.firstChunkAt })
+        performance.measure(MEASURE_TOTAL, { start: bench.firstChunkAt, end: bench.lastChunkAt })
+      } catch {
+        // Measures are best-effort; numeric marks below remain authoritative.
+      }
+
+      const totalEntries = performance.getEntriesByName(MEASURE_TOTAL)
+      const ttftEntries = performance.getEntriesByName(MEASURE_TTFT)
+      resolveDone({
+        completed: bench.completed && !bench.timedOut,
+        timedOut: bench.timedOut,
+        chunksApplied: bench.chunksApplied,
+        storeSubscriberNotifications: bench.storeSubscriberNotifications,
+        messageUpdateNotifications: bench.messageUpdateNotifications,
+        domMutations: bench.domMutations,
+        longTasks: bench.longTasks,
+        finalAssistantText: bench.finalAssistantText,
+        sentAt,
+        firstChunkAt: bench.firstChunkAt,
+        lastChunkAt: bench.lastChunkAt,
+        chunkMarkTimes: performance
+          .getEntriesByName(MARK_CHUNK)
+          .map((entry) => entry.startTime),
+        totalMeasureMs:
+          totalEntries.length > 0 ? totalEntries[totalEntries.length - 1].duration : 0,
+        ttftMeasureMs:
+          ttftEntries.length > 0 ? ttftEntries[ttftEntries.length - 1].duration : 0
+      })
+    }
+
+    w.__tldwStreamBenchDone = done
+    w.__tldwStreamBenchCleanup = () => {
+      clearTimeout(timeoutId)
+      mutationObserver.disconnect()
+      longTaskObserver?.disconnect()
+      unsubscribe()
+    }
+    return "ok"
+  },
+  { expected: expectedFullText, timeoutMs: CANNED_STREAM_TIMEOUT_MS })
+
+test.describe("Canned 100-chunk stream (no live LLM)", () => {
+  test("records performance.mark deltas for 100 streamed chunks in the sidepanel", async () => {
+    test.setTimeout(120_000)
+
+    const reportStartTime = performance.now()
+    const canned = await startCannedStreamServer()
+
+    const { context, page, extensionId, openSidepanel } = await launchWithExtensionOrSkip(
+      test,
+      CANNED_EXT_PATH,
+      {
+        seedConfig: {
+          __tldw_first_run_complete: true,
+          __tldw_allow_offline: true,
+          tldwConfig: {
+            serverUrl: canned.baseUrl,
+            authMode: "single-user",
+            apiKey: "test-key"
+          }
+        }
+      }
+    )
+
+    let sidepanel: Page | undefined
+    try {
+      const origin = `${new URL(canned.baseUrl).origin}/*`
+      const granted = await grantHostPermission(context, extensionId, origin)
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the canned stream server."
+      ).toBe(true)
+
+      await setSelectedModel(page, CANNED_MODEL_KEY)
+
+      sidepanel = await openSidepanel("/chat")
+      await sidepanel.setViewportSize({ width: 390, height: 780 })
+      await waitForConnectionStore(sidepanel, "perf-streaming:store")
+      await forceConnected(
+        sidepanel,
+        { serverUrl: canned.baseUrl },
+        "perf-streaming:connected"
+      )
+
+      // Chat input (same discovery sequence as sidepanel-chat-smoke.spec.ts).
+      const startButton = sidepanel.getByRole("button", { name: /Start chatting/i })
+      if ((await startButton.count()) > 0) {
+        await startButton.first().click()
+      }
+      let input = sidepanel.getByTestId("chat-input")
+      if ((await input.count()) === 0) {
+        input = sidepanel.getByPlaceholder(/Type a message/i)
+      }
+      await expect(input).toBeVisible({ timeout: 15_000 })
+      await expect(input).toBeEditable({ timeout: 15_000 })
+      await input.click()
+
+      // The real message store must be exposed before the bench can install.
+      await sidepanel.waitForFunction(
+        () => Boolean((window as any).__tldw_useStoreMessageOption?.getState),
+        null,
+        { timeout: 15_000 }
+      )
+      const installed = await installCannedStreamBench(sidepanel, CANNED_FULL_TEXT)
+      expect(installed).toBe("ok")
+
+      await input.fill(`perf stream bench ${Date.now()}`)
+
+      const sendButton = sidepanel.locator('[data-testid="chat-send"]')
+      if ((await sendButton.count()) > 0) {
+        await expect(sendButton).toBeEnabled({ timeout: 15_000 })
+      }
+      await sidepanel.evaluate(() => {
+        performance.mark("tldw-perf-streaming:sent")
+      })
+      if ((await sendButton.count()) > 0) {
+        await sendButton.click()
+      } else {
+        await input.press("Enter")
+      }
+
+      const raw = (await sidepanel.evaluate(
+        () => (window as any).__tldwStreamBenchDone
+      )) as CannedStreamPageResult
+
+      const domNodeCount = await countDOMNodes(sidepanel, "#root")
+
+      const ttftMs = raw.firstChunkAt - raw.sentAt
+      const streamPhaseMs = raw.lastChunkAt - raw.firstChunkAt
+      const chunkGapsMs: number[] = []
+      for (let index = 1; index < raw.chunkMarkTimes.length; index += 1) {
+        chunkGapsMs.push(raw.chunkMarkTimes[index] - raw.chunkMarkTimes[index - 1])
+      }
+
+      const summary = {
+        chunksServed: canned.chunksServed(),
+        chunksApplied: raw.chunksApplied,
+        storeSubscriberNotifications: raw.storeSubscriberNotifications,
+        messageUpdateNotifications: raw.messageUpdateNotifications,
+        domMutations: raw.domMutations,
+        longTasks: raw.longTasks,
+        ttftMs: round(ttftMs),
+        streamPhaseMs: round(streamPhaseMs),
+        msPerChunk: round(streamPhaseMs / raw.chunksApplied, 4),
+        minChunkGapMs: round(chunkGapsMs.length > 0 ? Math.min(...chunkGapsMs) : 0),
+        maxChunkGapMs: round(chunkGapsMs.length > 0 ? Math.max(...chunkGapsMs) : 0),
+        totalMeasureMs: round(raw.totalMeasureMs),
+        ttftMeasureMs: round(raw.ttftMeasureMs),
+        domNodeCount
+      }
+      console.log(`[performance-streaming] ${JSON.stringify(summary)}`)
+
+      const report = createReport(
+        "Canned 100-chunk sidepanel stream",
+        [
+          { name: "Chunks served", value: summary.chunksServed, unit: " chunks" },
+          { name: "Chunks applied (store growth events)", value: raw.chunksApplied, unit: " chunks" },
+          { name: "Store subscriber notifications", value: raw.storeSubscriberNotifications, unit: " notifications" },
+          { name: "Message-array update notifications", value: raw.messageUpdateNotifications, unit: " notifications" },
+          { name: "DOM mutations during stream", value: raw.domMutations, unit: " mutations" },
+          { name: "Long tasks during stream", value: raw.longTasks, unit: " tasks" },
+          { name: "Time to first chunk", value: round(ttftMs), unit: "ms" },
+          { name: "Stream phase total", value: round(streamPhaseMs), unit: "ms" },
+          { name: "ms per chunk", value: summary.msPerChunk, unit: "ms" },
+          { name: "Max chunk gap", value: summary.maxChunkGapMs, unit: "ms" },
+          { name: "performance.measure total", value: round(raw.totalMeasureMs), unit: "ms" },
+          { name: "DOM node count", value: domNodeCount, unit: " nodes" }
+        ],
+        reportStartTime
+      )
+      logReport(report)
+
+      // Harness-correctness assertions (not perf thresholds).
+      expect(raw.completed).toBe(true)
+      expect(raw.timedOut).toBe(false)
+      expect(canned.chunksServed()).toBe(CANNED_CHUNK_COUNT)
+      expect(raw.finalAssistantText.replace(/\u258b$/, "")).toBe(CANNED_FULL_TEXT)
+
+      // Measurement-recorded sanity assertions: finite and > 0.
+      for (const [name, value] of Object.entries(summary)) {
+        expect(Number.isFinite(value), `${name} must be finite`).toBe(true)
+      }
+      expect(raw.chunksApplied).toBeGreaterThan(0)
+      expect(raw.storeSubscriberNotifications).toBeGreaterThan(0)
+      expect(raw.messageUpdateNotifications).toBeGreaterThan(0)
+      expect(raw.domMutations).toBeGreaterThan(0)
+      expect(raw.longTasks).toBeGreaterThanOrEqual(0)
+      expect(ttftMs).toBeGreaterThan(0)
+      expect(streamPhaseMs).toBeGreaterThan(0)
+      expect(summary.msPerChunk).toBeGreaterThan(0)
+      expect(raw.totalMeasureMs).toBeGreaterThan(0)
+    } finally {
+      try {
+        await sidepanel?.evaluate(() => {
+          ;(window as any).__tldwStreamBenchCleanup?.()
+        })
+      } catch {
+        // Page may already be closed.
+      }
+      await context.close()
+      await stopCannedStreamServer(canned.server)
     }
   })
 })

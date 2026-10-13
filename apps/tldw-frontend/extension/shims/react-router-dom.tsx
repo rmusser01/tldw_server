@@ -36,10 +36,25 @@ export type NavigateFunction = (to: NavigateTo, options?: NavigateOptions) => vo
 
 type RouteParams = Record<string, string | undefined>
 
-type BlockerHookArg = boolean | ((...args: unknown[]) => boolean)
+type BlockerLocation = {
+  pathname: string
+  search: string
+  hash: string
+  state: null
+  key: string
+}
+
+type BlockerFunctionArgs = {
+  currentLocation: BlockerLocation
+  nextLocation: BlockerLocation
+  historyAction: "PUSH" | "POP" | "REPLACE"
+}
+
+type BlockerHookArg = boolean | ((args: BlockerFunctionArgs) => boolean)
 
 type ShimBlocker = {
   state: "unblocked" | "blocked" | "proceeding"
+  location?: BlockerLocation
   proceed: () => void
   reset: () => void
 }
@@ -319,15 +334,119 @@ export const useSearchParams = (): [
   return [params, setSearchParams]
 }
 
-export const useBlocker = (_when: BlockerHookArg): ShimBlocker =>
-  React.useMemo(
-    () => ({
-      state: "unblocked",
-      proceed: noop,
-      reset: noop
-    }),
-    []
+const toBlockerLocation = (href: string): BlockerLocation => {
+  const url = new URL(href || "/", "http://localhost")
+  return { pathname: url.pathname, search: url.search, hash: url.hash, state: null, key: href }
+}
+
+type PendingNavigation = { href: string; action: "PUSH" | "POP" }
+
+const UNBLOCKED: ShimBlocker = { state: "unblocked", proceed: noop, reset: noop }
+
+/**
+ * react-router's useBlocker for the Next pages router. A blocked push is
+ * cancelled from routeChangeStart and a blocked Back/Forward from
+ * beforePopState; proceed() replays it once and reset() stays (restoring the
+ * URL after a held Back press). `useBlocker(false)` stays inert so it never
+ * replaces another guard's beforePopState handler.
+ */
+const useNextRouterBlocker = (shouldBlock: BlockerHookArg): ShimBlocker => {
+  const router = useRouter()
+  const routerRef = React.useRef(router)
+  routerRef.current = router
+  const shouldBlockRef = React.useRef(shouldBlock)
+  shouldBlockRef.current = shouldBlock
+  const pendingRef = React.useRef<PendingNavigation | null>(null)
+  const bypassRef = React.useRef<string | null>(null)
+  const [pending, setPending] = React.useState<PendingNavigation | null>(null)
+  const active = shouldBlock !== false
+
+  React.useEffect(() => {
+    if (!active) return
+    const shouldHold = (href: string, action: PendingNavigation["action"]) => {
+      // Once one navigation is held, later ones wait behind it.
+      if (pendingRef.current) return true
+      const value = shouldBlockRef.current
+      if (typeof value !== "function") return Boolean(value)
+      return Boolean(
+        value({
+          currentLocation: toBlockerLocation(routerRef.current.asPath),
+          nextLocation: toBlockerLocation(href),
+          historyAction: action
+        })
+      )
+    }
+    const hold = (navigation: PendingNavigation) => {
+      pendingRef.current = navigation
+      setPending(navigation)
+    }
+    const handleRouteStart = (url: string, options?: unknown) => {
+      if (bypassRef.current === url) {
+        bypassRef.current = null
+        return
+      }
+      if (!shouldHold(url, "PUSH")) return
+      hold({ href: url, action: "PUSH" })
+      const error = createCancelledNavigationError()
+      router.events.emit("routeChangeError", error, url, options)
+      throw error
+    }
+    const handleBeforePopState = (state: { url: string; as: string }) => {
+      const href = state.as || state.url
+      if (!shouldHold(href, "POP")) return true
+      hold({ href, action: "POP" })
+      return false
+    }
+
+    router.events.on("routeChangeStart", handleRouteStart)
+    router.events.on("hashChangeStart", handleRouteStart)
+    router.beforePopState(handleBeforePopState)
+    return () => {
+      router.events.off("routeChangeStart", handleRouteStart)
+      router.events.off("hashChangeStart", handleRouteStart)
+      router.beforePopState(() => true)
+    }
+  }, [active, router])
+
+  const replay = React.useCallback((href: string, method: "push" | "replace") => {
+    bypassRef.current = href
+    const navigation = routerRef.current[method](href)
+    void Promise.resolve(navigation).catch((error) => {
+      if (bypassRef.current === href) bypassRef.current = null
+      if (isCancelledNavigationError(error)) return
+      console.error("[useBlocker shim] Navigation failed:", error)
+    })
+  }, [])
+
+  const proceed = React.useCallback(() => {
+    const held = pendingRef.current
+    if (!held) return
+    pendingRef.current = null
+    setPending(null)
+    // Next finishes a Back press itself with a replace; do the same.
+    replay(held.href, held.action === "POP" ? "replace" : "push")
+  }, [replay])
+
+  const reset = React.useCallback(() => {
+    const held = pendingRef.current
+    if (!held) return
+    pendingRef.current = null
+    setPending(null)
+    // After a held Back press the address bar already shows the target.
+    if (held.action === "POP") replay(routerRef.current.asPath, "push")
+  }, [replay])
+
+  return React.useMemo(
+    () =>
+      pending
+        ? { state: "blocked", location: toBlockerLocation(pending.href), proceed, reset }
+        : UNBLOCKED,
+    [pending, proceed, reset]
   )
+}
+
+/** Shared code checks this flag to know the shim can block (see route-leave-guard). */
+export const useBlocker = Object.assign(useNextRouterBlocker, { tldwNextRouterShim: true as const })
 
 export const useInRouterContext = () => true
 

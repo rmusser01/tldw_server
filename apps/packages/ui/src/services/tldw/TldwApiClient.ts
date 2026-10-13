@@ -1,3 +1,4 @@
+import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
@@ -1076,6 +1077,7 @@ export interface ChatCompletionRequest {
 }
 
 export type ScopedRequestOptions = {
+  idempotencyKey?: string
   signal?: AbortSignal
   requestScope?: ServicePromptRequestScope
 }
@@ -1117,6 +1119,12 @@ export interface ServerChatSummary {
   version?: number | null
   scope_type?: "global" | "workspace" | null
   workspace_id?: string | null
+  /** Where the search query matched. Set only by a search that includes message content. */
+  matched_in?: Array<"title" | "content"> | null
+  /** Plain-text excerpt of the message that matched the search query. */
+  match_snippet?: string | null
+  /** ID of the message that match_snippet is taken from. */
+  match_message_id?: string | null
 }
 
 export interface ChatLinkedResearchRun {
@@ -1682,6 +1690,53 @@ const stopWatchingDomainCacheAccount = watchChatAccountChanges(invalidated => {
 })
 const domainCacheHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
 domainCacheHot?.dispose(stopWatchingDomainCacheAccount)
+
+type TldwProvidersStatus = {
+  providers: Array<{
+    name: string
+    configured: boolean
+    requires_api_key: boolean
+    key_hint?: string | null
+    key_source?: string | null
+  }>
+  any_configured: boolean
+}
+
+// getProvidersStatus is mounted-on by 12+ components independently; this
+// module-level TTL cache + in-flight dedup (mirroring the apiSend pattern)
+// collapses the resulting burst into one request per TTL window.
+const PROVIDERS_STATUS_CACHE_TTL_MS = 60_000
+let providersStatusCache: { at: number; value: TldwProvidersStatus } | null = null
+let providersStatusInFlight: Promise<TldwProvidersStatus> | null = null
+
+const getProvidersStatusCached = async (): Promise<TldwProvidersStatus> => {
+  const now = Date.now()
+  if (
+    providersStatusCache &&
+    now - providersStatusCache.at < PROVIDERS_STATUS_CACHE_TTL_MS
+  ) {
+    return providersStatusCache.value
+  }
+  if (providersStatusInFlight) {
+    return providersStatusInFlight
+  }
+  const request = (async () => {
+    try {
+      const value = (await bgRequest<any>({
+        path: '/api/v1/config/providers',
+        method: 'GET'
+      })) as TldwProvidersStatus
+      providersStatusCache = { at: Date.now(), value }
+      return value
+    } finally {
+      if (providersStatusInFlight === request) {
+        providersStatusInFlight = null
+      }
+    }
+  })()
+  providersStatusInFlight = request
+  return request
+}
 
 export class TldwApiClientBase {
   private storage: Storage
@@ -2899,6 +2954,8 @@ export class TldwApiClientBase {
   /**
    * Check which LLM providers are configured on the server.
    * Returns `{ providers: [...], any_configured: boolean }`.
+   * Served from a short module-level TTL cache with in-flight dedup, since
+   * a dozen-plus components request it independently on mount.
    */
   async getProvidersStatus(): Promise<{
     providers: Array<{
@@ -2910,7 +2967,7 @@ export class TldwApiClientBase {
     }>
     any_configured: boolean
   }> {
-    return await bgRequest<any>({ path: '/api/v1/config/providers', method: 'GET' })
+    return await getProvidersStatusCached()
   }
 
   async getModelsMetadata(options?: {
@@ -4510,8 +4567,8 @@ export class TldwApiClientBase {
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: '/api/v1/notes/',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
-      body: { content, ...metadata }
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
+      body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
     })
   }
 
@@ -5701,7 +5758,22 @@ export class TldwApiClientBase {
             ? input.expected_version
             : null,
       scope_type,
-      workspace_id
+      workspace_id,
+      matched_in: Array.isArray(input?.matched_in)
+        ? input.matched_in.filter(
+            (field: unknown) => field === "title" || field === "content"
+          )
+        : null,
+      match_snippet:
+        typeof input?.match_snippet === "string" &&
+        input.match_snippet.trim().length > 0
+          ? input.match_snippet
+          : null,
+      match_message_id:
+        typeof input?.match_message_id === "string" &&
+        input.match_message_id.length > 0
+          ? input.match_message_id
+          : null
     }
   }
 

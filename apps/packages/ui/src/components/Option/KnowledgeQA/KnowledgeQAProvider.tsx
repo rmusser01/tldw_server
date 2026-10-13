@@ -51,6 +51,7 @@ import { createKnowledgeQaClient } from "./knowledgeQaClient"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
+import { createStreamingUpdateScheduler } from "@/utils/streaming-update-scheduler"
 import { getKnowledgeQaHistoryStorageKey, getKnowledgeQaStorageScopeKey, persistKnowledgeQaHistory } from "./historyStorage"
 import { useKnowledgeQAAuthority } from "./hooks/useKnowledgeQAAuthority"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
@@ -119,6 +120,7 @@ const KNOWLEDGE_QA_SETTINGS_OVERRIDES: Partial<RagSettings> = {
 // Initial state
 const initialState: KnowledgeQAState = {
   query: "",
+  resultQuery: null,
   isSearching: false,
   hasSearched: false,
   results: [],
@@ -162,6 +164,7 @@ const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
 type ResultsPayload = {
+  query: string | null
   completedGenerationEnabled?: boolean | null
   results: RagResult[]
   answer: string | null
@@ -268,6 +271,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        resultQuery: action.payload.query,
         completedGenerationEnabled: action.payload.completedGenerationEnabled ?? null,
         answer: action.payload.answer,
         citations: action.payload.citations,
@@ -286,6 +290,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        resultQuery: action.payload.query,
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
@@ -328,7 +333,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustReasonCodes: action.payload ? [] : state.answerTrustReasonCodes,
         answerEvidenceOrigin: action.payload ? null : state.answerEvidenceOrigin,
         extensionFailureState: action.payload ? "search_failed" : null,
-        hasSearched: true,
+        hasSearched: action.payload !== null || state.hasSearched,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
       }
@@ -347,6 +352,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
     case "CLEAR_RESULTS":
       return {
         ...state,
+        resultQuery: null,
         results: [],
         completedGenerationEnabled: null,
         answer: null,
@@ -770,7 +776,11 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     ragContext.search_query.trim().length > 0
       ? ragContext.search_query
       : null
-  const query = latestUserMessage?.content || queryFromContext
+  const answeredUserMessage = messages
+    .slice(0, messages.indexOf(latestAssistantMessage))
+    .reverse()
+    .find((message) => message.role === "user")
+  const query = queryFromContext || answeredUserMessage?.content || null
 
   return {
     query,
@@ -1432,6 +1442,7 @@ function buildScopeSnapshot(
     preset,
     sources: [...settings.sources],
     webFallback: Boolean(settings.enable_web_fallback),
+    keywordFilter: settings.keyword_filter,
     collectionId:
       typeof settings.collection_id === "number" &&
       Number.isInteger(settings.collection_id) &&
@@ -2245,7 +2256,7 @@ function OwnedKnowledgeQAProvider({
       if (!targetThreadId || isLocalThreadId(targetThreadId)) {
         const firstQuestion =
           messagesToSync.find((candidate) => candidate.role === "user")?.content ||
-          state.query ||
+          state.resultQuery || state.query ||
           "Knowledge QA"
         targetThreadId = await createNewThread(firstQuestion)
         if (!targetThreadId) return false
@@ -2360,6 +2371,7 @@ function OwnedKnowledgeQAProvider({
     state.currentThreadId,
     state.messages,
     state.query,
+    state.resultQuery,
     state.results,
     state.settings.strip_min_relevance,
   ])
@@ -2588,6 +2600,48 @@ function OwnedKnowledgeQAProvider({
           let terminalEvent: RagTerminalEvent | null = null
           let streamWhyPayload: unknown = null
           let streamSourceStatusPayload: unknown = null
+          // Streaming deltas are throttled (TASK-13511): citation parsing and
+          // trust normalization each scan the whole accumulated answer, so
+          // running them per token made long answers degrade quadratically.
+          // The scheduler flushes at most every 80ms with the latest state,
+          // mirroring the chat streaming cadence.
+          let streamEnded = false
+          const emitPartialAnswer = () => {
+            const partialAnswer = normalizeAnswerText(streamAnswer)
+            const partialCitations = partialAnswer
+              ? parseCitations(partialAnswer, streamResults)
+              : []
+            const partialTrust = normalizeKnowledgeAnswerTrust({
+              answer: partialAnswer,
+              results: streamResults,
+              citations: partialCitations,
+              hasRequiredMetadata: true,
+              syncFailed: isThreadSyncFailed(),
+              weakEvidence: hasWeakEvidence(
+                streamResults,
+                effectiveSettings.strip_min_relevance
+              ),
+            })
+            dispatch({
+              type: "SET_PARTIAL_RESULTS",
+              payload: {
+                query: trimmedQuery,
+                results: streamResults,
+                answer: partialAnswer,
+                citations: partialCitations,
+                answerTrustState: partialTrust.state,
+                answerTrustReasonCodes: partialTrust.reasonCodes,
+                answerEvidenceOrigin:
+                  partialTrust.evidenceOrigin === "unknown_origin"
+                    ? null
+                    : partialTrust.evidenceOrigin,
+              },
+            })
+          }
+          const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
+            shouldFlush: () => !streamEnded,
+            apply: () => emitPartialAnswer(),
+          })
 
           try {
             for await (const event of (tldwClient as {
@@ -2600,6 +2654,7 @@ function OwnedKnowledgeQAProvider({
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
+                streamingUpdateScheduler.cancel()
                 return
               }
               if (terminalEvent) {
@@ -2641,35 +2696,7 @@ function OwnedKnowledgeQAProvider({
                   type: "SET_SEARCH_DETAILS",
                   payload: resolvedSearchDetails,
                 })
-                const partialAnswer = normalizeAnswerText(streamAnswer)
-                const partialCitations = partialAnswer
-                  ? parseCitations(partialAnswer, streamResults)
-                  : []
-                const partialTrust = normalizeKnowledgeAnswerTrust({
-                  answer: partialAnswer,
-                  results: streamResults,
-                  citations: partialCitations,
-                  hasRequiredMetadata: true,
-                  syncFailed: isThreadSyncFailed(),
-                  weakEvidence: hasWeakEvidence(
-                    streamResults,
-                    effectiveSettings.strip_min_relevance
-                  ),
-                })
-                dispatch({
-                  type: "SET_PARTIAL_RESULTS",
-                  payload: {
-                    results: streamResults,
-                    answer: partialAnswer,
-                    citations: partialCitations,
-                    answerTrustState: partialTrust.state,
-                    answerTrustReasonCodes: partialTrust.reasonCodes,
-                    answerEvidenceOrigin:
-                      partialTrust.evidenceOrigin === "unknown_origin"
-                        ? null
-                        : partialTrust.evidenceOrigin,
-                  },
-                })
+                emitPartialAnswer()
                 continue
               }
 
@@ -2680,38 +2707,16 @@ function OwnedKnowledgeQAProvider({
                 if (!deltaText) continue
                 observedStreamOutput = true
                 streamAnswer += deltaText
-                const partialAnswer = normalizeAnswerText(streamAnswer)
-                const partialCitations = partialAnswer
-                  ? parseCitations(partialAnswer, streamResults)
-                  : []
-                const partialTrust = normalizeKnowledgeAnswerTrust({
-                  answer: partialAnswer,
-                  results: streamResults,
-                  citations: partialCitations,
-                  hasRequiredMetadata: true,
-                  syncFailed: isThreadSyncFailed(),
-                  weakEvidence: hasWeakEvidence(
-                    streamResults,
-                    effectiveSettings.strip_min_relevance
-                  ),
-                })
-                dispatch({
-                  type: "SET_PARTIAL_RESULTS",
-                  payload: {
-                    results: streamResults,
-                    answer: partialAnswer,
-                    citations: partialCitations,
-                    answerTrustState: partialTrust.state,
-                    answerTrustReasonCodes: partialTrust.reasonCodes,
-                    answerEvidenceOrigin:
-                      partialTrust.evidenceOrigin === "unknown_origin"
-                        ? null
-                        : partialTrust.evidenceOrigin,
-                  },
-                })
+                streamingUpdateScheduler.schedule(null)
                 continue
               }
             }
+
+            // Land the final buffered partial state before terminal handling
+            // so no streamed content is lost, then stop any trailing flush
+            // from racing the terminal/error dispatches.
+            streamingUpdateScheduler.flushNow()
+            streamEnded = true
 
             if (!terminalEvent) {
               throw new RagTerminalStreamError(
@@ -2735,6 +2740,8 @@ function OwnedKnowledgeQAProvider({
               effectiveSettings
             )
           } catch (streamError) {
+            streamEnded = true
+            streamingUpdateScheduler.cancel()
             const streamMessage =
               streamError instanceof Error
                 ? streamError.message
@@ -2833,6 +2840,7 @@ function OwnedKnowledgeQAProvider({
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: trimmedQuery,
             results,
             answer,
             citations,
@@ -3050,12 +3058,12 @@ function OwnedKnowledgeQAProvider({
   const rerunWithTokenLimit = useCallback(
     async (tokenLimit: number) => {
       const normalized = Math.max(64, Math.min(4000, Math.round(tokenLimit)))
-      await runKnowledgeQuery(state.query, false, {
+      await runKnowledgeQuery(state.resultQuery ?? state.query, false, {
         max_generation_tokens: normalized,
         enable_generation: true,
       })
     },
-    [runKnowledgeQuery, state.query]
+    [runKnowledgeQuery, state.query, state.resultQuery]
   )
 
   const clearResults = useCallback(() => {
@@ -3155,6 +3163,7 @@ function OwnedKnowledgeQAProvider({
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: hydration.query,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3272,6 +3281,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({
             type: "SET_RESULTS",
             payload: {
+              query: hydration.query,
               completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
               results: hydration.results,
               answer: hydration.answer,
@@ -3439,6 +3449,7 @@ function OwnedKnowledgeQAProvider({
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: hydration.query,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,

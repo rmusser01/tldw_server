@@ -72,7 +72,7 @@ import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerS
 import { useComposerAttachments } from "@/components/Chat/composer/hooks/useComposerAttachments"
 import { useSlashCommands, type SlashCommandItem } from "@/hooks/useSlashCommands"
 import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
-import { useDeferredComposerInput } from "@/hooks/playground"
+import { useDeferredComposerInput, usePersistenceMode } from "@/hooks/playground"
 import { KnowledgePanel } from "@/components/Knowledge"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
 import { ModelSelect } from "@/components/Common/ModelSelect"
@@ -1162,42 +1162,9 @@ export const SidepanelForm = ({
   const temporaryChatToggleLabel = temporaryChat
     ? t("playground:actions.temporaryOn", "Temporary chat (not saved)")
     : t("playground:actions.temporaryOff", "Save chat to history")
-  const persistenceModeLabel = React.useMemo(() => {
-    if (temporaryChat) {
-      return t(
-        "playground:composer.persistence.ephemeral",
-        "Not saved: cleared when you close this window."
-      )
-    }
-    if (serverChatId || isConnectionReady) {
-      return t(
-        "playground:composer.persistence.server",
-        "Saved to your tldw server (and locally)."
-      )
-    }
-    return t(
-      "playground:composer.persistence.local",
-      "Saved locally until your tldw server is connected."
-    )
-  }, [isConnectionReady, serverChatId, t, temporaryChat])
-  const persistencePillLabel = React.useMemo(() => {
-    if (temporaryChat) {
-      return t("playground:composer.persistence.ephemeralPill", "Not saved")
-    }
-    if (serverChatId || isConnectionReady) {
-      return t("playground:composer.persistence.serverPill", "Server")
-    }
-    return t("playground:composer.persistence.localPill", "Local")
-  }, [isConnectionReady, serverChatId, t, temporaryChat])
-  const persistenceTooltip = React.useMemo(
-    () => (
-      <div className="flex flex-col gap-0.5 text-xs">
-        <span className="font-medium">{persistencePillLabel}</span>
-        <span className="text-text-subtle">{persistenceModeLabel}</span>
-      </div>
-    ),
-    [persistenceModeLabel, persistencePillLabel]
-  )
+  // Where this chat is saved, from acknowledged server writes rather than from
+  // connectivity: plain side panel chats stay on this device (XS-05, #3104).
+  const { persistenceTooltip } = usePersistenceMode({ temporaryChat, serverChatId })
 
   // Character selection state
   const storedCharacterId = React.useMemo(

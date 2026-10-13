@@ -6,6 +6,7 @@ const projectDirectories = Object.freeze({
   "tier-1": "e2e/workflows/tier-1-critical",
   "tier-2": "e2e/workflows/tier-2-features",
   "tier-3": "e2e/workflows/tier-3-automation",
+  "ux-regression": "e2e/ux-regression",
 })
 
 function stringValue(node, sourceFile) {

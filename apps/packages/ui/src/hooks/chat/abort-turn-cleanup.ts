@@ -38,3 +38,15 @@ export const discardAbortedTurnIfRequested = ({
   setHistory(previousHistory)
   return true
 }
+
+// Turns the user stopped on purpose, so the kept reply reads "Stopped" rather
+// than "Interrupted" (CS-04, #3104). Keyed by the turn's own abort signal.
+const userStoppedSignals = new WeakSet<AbortSignal>()
+
+export const markChatTurnStoppedByUser = (signal: AbortSignal) => {
+  userStoppedSignals.add(signal)
+}
+
+export const wasChatTurnStoppedByUser = (
+  signal: AbortSignal | null | undefined
+): boolean => Boolean(signal && userStoppedSignals.has(signal))

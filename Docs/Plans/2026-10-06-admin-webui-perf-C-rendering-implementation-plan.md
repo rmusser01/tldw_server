@@ -127,7 +127,7 @@
 **Goal:** No `JSON.stringify`/`Math.random()`/index row keys; one `Intl.DateTimeFormat` instead of per-cell `new Date().toLocaleString()`; the maintenance banner's inputs stop re-rendering three tables.
 
 **Files:**
-- Create: `apps/packages/ui/src/components/Option/Admin/admin-format.ts` (formatter) 
+- Create: `apps/packages/ui/src/components/Option/Admin/admin-format.ts` (formatter)
 - Modify: `DataOpsPage.tsx:329,479,1017`; `BillingDashboardPage.tsx:323,433`; `RateLimitingPage.tsx:328-330`; `ServerArgsEditor.tsx:160-161`; `MaintenancePage.tsx:302,353,359,404-417`; `MonitoringDashboardPage.tsx:519,645`; `WatchlistsOversightPage.tsx:250,269,292`; `ApiKeyManagementPage.tsx:192`; `WatchlistsPage.tsx:228`; `ServerAdminPage.tsx:414-506,850-911,986`; `Layouts/Layout.tsx:789`
 - Test: new `__tests__/admin-format.test.ts`; extend touched pages' tests
 

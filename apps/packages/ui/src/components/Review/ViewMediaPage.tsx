@@ -54,6 +54,7 @@ import {
   trackMediaNavigationTelemetry
 } from "@/utils/media-navigation-telemetry"
 import { normalizeRequestedMediaRenderMode } from '@/utils/media-render-mode'
+import { stripMediaMetadata } from '@/utils/media-metadata-display'
 import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
 import {
   CheckSquare,
@@ -75,6 +76,10 @@ import { useMediaViewPreferences } from './hooks/useMediaViewPreferences'
 import { getMediaPermalinkIdFromSearch } from './mediaPermalink'
 
 export const MEDIA_STALE_CHECK_INTERVAL_MS = 30_000
+
+// Debounce for keyword-suggestion searches triggered by Select onSearch
+// (per-keystroke network calls, TASK-13511).
+const KEYWORD_SUGGESTION_DEBOUNCE_MS = 300
 
 const LazyJumpToNavigator = React.lazy(() =>
   import('@/components/Media/JumpToNavigator').then((module) => ({
@@ -348,6 +353,18 @@ const MediaPageContent: React.FC = () => {
 
   // --- Hooks ---
   const search = useMediaSearch({ t, message })
+  // Debounce timer for keyword-suggestion searches (per-keystroke Select
+  // onSearch, TASK-13511).
+  const keywordSuggestionTimer = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
+  React.useEffect(() => {
+    return () => {
+      if (keywordSuggestionTimer.current) {
+        clearTimeout(keywordSuggestionTimer.current)
+      }
+    }
+  }, [])
   const { isCurrent: isMediaCurrent } = search
   const viewPrefs = useMediaViewPreferences()
 
@@ -448,7 +465,20 @@ const MediaPageContent: React.FC = () => {
     enabled: navigationEnabled,
     includeGeneratedFallback: viewPrefs.includeGeneratedFallbackValue
   })
-  const navigationNodes = navigationData?.nodes || []
+  const navigationNodes = useMemo(() => {
+    const nodes = navigationData?.nodes || []
+    const readingContent = stripMediaMetadata(nav.selectedContent)
+    if (readingContent === nav.selectedContent) return nodes
+    // API character ranges refer to the stored source, including its envelope.
+    const prefixLength = nav.selectedContent.trimEnd().length - readingContent.length
+    return nodes
+      .filter(node => node.target_type !== 'char_range' || node.target_end == null || node.target_end > prefixLength)
+      .map(node => node.target_type === 'char_range' ? {
+        ...node,
+        target_start: node.target_start == null ? null : Math.max(0, node.target_start - prefixLength),
+        target_end: node.target_end == null ? null : Math.max(0, node.target_end - prefixLength)
+      } : node)
+  }, [nav.selectedContent, navigationData?.nodes])
 
   const [selectedNavigationNodeId, setSelectedNavigationNodeId] =
     useState<string | null>(null)
@@ -1515,7 +1545,16 @@ const MediaPageContent: React.FC = () => {
                   keywordOptions={search.keywordOptions}
                   keywordSourceMode={search.keywordSourceMode}
                   onKeywordSearch={(txt) => {
-                    search.loadKeywordSuggestions(txt)
+                    // Debounced: the Select fires onSearch per keystroke and
+                    // each undebounced call hit the keyword search API
+                    // (TASK-13511).
+                    if (keywordSuggestionTimer.current) {
+                      clearTimeout(keywordSuggestionTimer.current)
+                    }
+                    keywordSuggestionTimer.current = setTimeout(() => {
+                      keywordSuggestionTimer.current = null
+                      search.loadKeywordSuggestions(txt)
+                    }, KEYWORD_SUGGESTION_DEBOUNCE_MS)
                   }}
                   showFavoritesOnly={selection.showFavoritesOnly}
                   onShowFavoritesOnlyChange={(show) => {

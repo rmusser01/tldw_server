@@ -20,6 +20,10 @@ import {
 import { HeaderShortcuts } from "./HeaderShortcuts"
 import logoImage from "~/assets/icon.png"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
+import {
+  getChatPersistenceCopy,
+  type ChatPersistenceKind
+} from "@/utils/chat-persistence-status"
 
 type HeaderNotificationState = NotificationLifecycleState
 
@@ -49,6 +53,11 @@ type ChatHeaderProps = {
   activeCharacterName?: string | null
   showChatTitle?: boolean
   showSessionModeBadge?: boolean
+  /**
+   * Where the chat is saved, derived from acknowledged state. Defaults to
+   * "local" so the badge never claims the server without evidence.
+   */
+  persistenceKind?: ChatPersistenceKind
   shortcutsExpanded: boolean
   onToggleShortcuts: (next?: boolean) => void
   commandKeyLabel: string
@@ -89,6 +98,7 @@ export function ChatHeader({
   activeCharacterName,
   showChatTitle = true,
   showSessionModeBadge = true,
+  persistenceKind,
   shortcutsExpanded,
   onToggleShortcuts,
   commandKeyLabel,
@@ -114,6 +124,30 @@ export function ChatHeader({
   const companionHomeLabel = toText(
     t("option:header.companionHome", "Companion Home")
   )
+  const resolvedPersistenceKind: ChatPersistenceKind = temporaryChat
+    ? "temporary"
+    : persistenceKind && persistenceKind !== "temporary"
+      ? persistenceKind
+      : "local"
+  const persistenceCopy = getChatPersistenceCopy(t, resolvedPersistenceKind)
+  const persistenceBadgeLabel = temporaryChat
+    ? toText(t("playground:header.modeTemporary", "Temporary"))
+    : persistenceCopy.pill
+  const persistenceBadgeHelp = temporaryChat
+    ? toText(
+        t(
+          "playground:header.modeTemporaryHelp",
+          "Temporary chat. Messages are not saved."
+        )
+      )
+    : persistenceCopy.description
+  const persistenceBadgeClass =
+    resolvedPersistenceKind === "server"
+      ? "border-success/40 bg-success/10 text-success"
+      : resolvedPersistenceKind === "temporary" ||
+          resolvedPersistenceKind === "serverFailed"
+        ? "border-warn/50 bg-warn/10 text-warn"
+        : "border-border bg-surface2 text-text-muted"
   const canEditTitle =
     showChatTitle && !temporaryChat && historyId && historyId !== "temp"
   const isDarkTheme = themeMode !== "light"
@@ -320,30 +354,12 @@ export function ChatHeader({
           {showSessionModeBadge ? (
             <div className="flex max-w-full flex-wrap items-center gap-1">
               <span
-                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-                  temporaryChat
-                    ? "border-warn/50 bg-warn/10 text-warn"
-                    : "border-success/40 bg-success/10 text-success"
-                }`}
-                title={
-                  temporaryChat
-                    ? toText(
-                        t(
-                          "playground:header.modeTemporaryHelp",
-                          "Temporary chat. Messages are not saved."
-                        )
-                      )
-                    : toText(
-                        t(
-                          "playground:header.modeSavedHelp",
-                          "Saved chat. History is persisted."
-                        )
-                      )
-                }
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${persistenceBadgeClass}`}
+                title={persistenceBadgeHelp}
+                data-testid="chat-header-persistence-badge"
+                data-persistence-kind={resolvedPersistenceKind}
               >
-                {temporaryChat
-                  ? toText(t("playground:header.modeTemporary", "Temporary"))
-                  : toText(t("playground:header.modeSaved", "Saved"))}
+                {persistenceBadgeLabel}
               </span>
               {activeCharacterName ? (
                 <span
