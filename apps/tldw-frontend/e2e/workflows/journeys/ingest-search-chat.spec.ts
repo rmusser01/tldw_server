@@ -6,10 +6,11 @@
  * A-09 reuse are separate gates. Retain IDs for linked follow-up and review.
  */
 import { createHash, randomUUID } from 'node:crypto';
+import type { Request } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { test, expect } from '../../utils/fixtures';
 import { ChatPage, KnowledgeQAPage } from '../../utils/page-objects';
-import { ingestAndWaitForReady, waitForStreamComplete } from '../../utils/journey-helpers';
+import { captureStreamedResponseBody, ingestAndWaitForReady, waitForStreamComplete } from '../../utils/journey-helpers';
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from '../../utils/helpers';
 import { readStore } from '../../../../extension/tests/e2e/utils/history-selection';
 import type { HistoryBookmark } from '../../../../packages/ui/src/db/dexie/types';
@@ -62,6 +63,14 @@ test.describe('Ingest -> Search -> Chat journey', () => {
       const response = await fetchWithApiKey(`${TEST_CONFIG.serverUrl}${path}`);
       expect(response.ok, `Canonical GET ${path}: HTTP ${response.status}`).toBe(true);
       return response.json();
+    };
+    let browserMessageWrites = 0;
+    let completionRequests = 0;
+    const observeChatWrites = (request: Request) => {
+      if (request.method() !== 'POST') return;
+      const path = new URL(request.url()).pathname;
+      if (/^\/api\/v1\/chats\/[^/]+\/messages$/.test(path)) browserMessageWrites++;
+      if (path === '/api/v1/chat/completions') completionRequests++;
     };
     try {
       const owned: Array<{ id: string; title: string; text: string }> = [];
@@ -291,6 +300,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         ).toEqual(qaMessages);
       });
       await test.step('Hand off the full loaded source and save a grounded Chat turn', async () => {
+        page.on('request', observeChatWrites);
         await page.goto(`/media?id=${source.id}`, { waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         const handoff = page.getByRole('button', { name: 'Chat with this media', exact: true });
@@ -301,7 +311,10 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         await chat.waitForReady();
         const input = await chat.getChatInput();
         await expect(input).toHaveValue(/ORBIT-742/);
+        await expect.poll(async () => normalizeSourceText(await input.inputValue()))
+          .toContain(normalizeSourceText(source.text));
         const draft = await input.inputValue();
+        evidence.sourceHandoff = { draft, sourceText: source.text };
         assertFullSourceHandoff(draft, source.text);
         expect(draft).toContain(source.title);
         await chat.selectModel(model!);
@@ -309,20 +322,13 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         const createdChat = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chats\/?$/.test(response.url())
         );
-        const admittedUser = page.waitForResponse(response =>
-          response.request().method() === 'POST' && /\/api\/v1\/chats\/[^/]+\/messages(?:\?|$)/.test(response.url()) &&
-          response.request().postDataJSON().role === 'user'
-        );
-        const settledAssistant = page.waitForResponse(response =>
-          response.request().method() === 'POST' && /\/api\/v1\/chats\/[^/]+\/messages(?:\?|$)/.test(response.url()) &&
-          response.request().postDataJSON().role === 'assistant',
-          { timeout: 90_000 }
-        );
+        const readCompletionBody = await captureStreamedResponseBody(page, '/api/v1/chat/completions');
+        const initialCompletionRequests = completionRequests;
         const completionResponse = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chat\/completions(?:\?|$)/.test(response.url())
         );
-        const [creation, userWrite, completion, assistantWrite] = await Promise.all([
-          createdChat, admittedUser, completionResponse, settledAssistant, chat.sendMessage(prompt),
+        const [creation, completion] = await Promise.all([
+          createdChat, completionResponse, chat.sendMessage(prompt),
         ]);
         expect(creation.status()).toBe(201);
         const chatId = (await creation.json()).id;
@@ -332,8 +338,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         const sent = completion.request().postDataJSON();
         expect(sent.model).toBe(model);
         expect(sent.provider ?? sent.api_provider).toBe(provider);
-        expect(sent.save_to_db).toBe(false);
-        expect(sent).not.toHaveProperty('conversation_id');
+        expect(sent).toMatchObject({ stream: true, save_to_db: true, conversation_id: chatId });
         expect(sent.messages.filter((message: { role: string }) => message.role === 'user')
           .map((message: { role: string; content: unknown }) => ({ role: message.role, content: message.content })))
           .toEqual([{ role: 'user', content: prompt }]);
@@ -342,42 +347,55 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         await chat.waitForResponse();
         const visibleAnswer = (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)!.content;
         assertRowanFacts(visibleAnswer);
-        expect(userWrite.status()).toBe(201);
-        expect(assistantWrite.status()).toBe(201);
-        for (const write of [userWrite, assistantWrite])
-          expect(new URL(write.url()).pathname).toBe(`/api/v1/chats/${chatId}/messages`);
-        const userReceipt = await userWrite.json();
-        const assistantReceipt = await assistantWrite.json();
-        const userRequest = userWrite.request().postDataJSON();
-        const selection = userRequest.tldw_history_selection_v1;
+        const events = (await readCompletionBody()).replace(/\r\n/g, '\n').split('\n\n')
+          .map(block => ({ event: block.split('\n').find(line => line.startsWith('event: '))?.slice(7),
+            data: block.split('\n').find(line => line.startsWith('data: '))?.slice(6) }))
+          .filter(entry => entry.data && entry.data !== '[DONE]')
+          .map(entry => ({ event: entry.event, data: JSON.parse(entry.data!) }));
+        const frames = events.map(entry => entry.data);
+        const admissionFrames = frames.filter(frame => frame.tldw_history_admission_v1);
+        expect(admissionFrames).toHaveLength(1);
+        const admission = admissionFrames[0].tldw_history_admission_v1;
+        const settlementFrames = frames.filter(frame => frame.tldw_message_id);
+        const successfulEnd = events.filter(entry => entry.event === 'stream_end');
+        expect(successfulEnd).toHaveLength(1);
+        expect(successfulEnd[0].data).toMatchObject({ conversation_id: chatId, success: true });
+        const settlement = frames.find(frame => frame.tldw_message_id && frame.choices?.[0]?.finish_reason === 'stop');
+        expect(settlement).toBeDefined();
+        const selection = sent.tldw_history_selection_v1;
         expect(selection).toMatchObject({ version: 1, conversation_id: chatId,
           owner_key: expect.stringMatching(/^native-history-v1:sha256:/), cursor: { kind: 'empty' }, messages: [] });
-        const admission = userReceipt.tldw_history_admission_v1;
         expect(admission).toMatchObject({ version: 1, conversation_id: chatId,
-          owner_key: selection.owner_key, input_message_id: userReceipt.id,
-          selection_digest: selection.selection_digest, messages: selection.messages,
-          originating_selection_revision: selection.selection_revision });
+          owner_key: selection.owner_key, selection_digest: selection.selection_digest,
+          messages: selection.messages, originating_selection_revision: selection.selection_revision });
+        expect(admission.input_message_id).toEqual(expect.any(String));
+        expect(admission.input_message_id).not.toBe('');
         expect(admission.input_message_revision).toEqual(expect.any(String));
         expect(admission.input_message_revision).not.toBe('');
-        expect(userRequest).toMatchObject({ id: userReceipt.id, role: 'user', content: prompt });
-        expect(userRequest.parent_message_id ?? null).toBeNull();
-        const assistantRequest = assistantWrite.request().postDataJSON();
-        expect(assistantRequest).toMatchObject({ id: assistantReceipt.id, role: 'assistant',
-          content: visibleAnswer, parent_message_id: userReceipt.id });
-        expect(assistantRequest.tldw_history_admission_v1).toEqual({ version: 1,
-          owner_key: admission.owner_key, conversation_id: chatId, input_message_id: userReceipt.id,
-          input_message_revision: admission.input_message_revision, selection_digest: admission.selection_digest });
+        expect(settlement).toMatchObject({ tldw_conversation_id: chatId,
+          tldw_user_message_id: admission.input_message_id, tldw_message_id: expect.any(String) });
+        expect(settlement.tldw_message_id).not.toBe('');
+        expect(settlement.tldw_message_id).not.toBe(admission.input_message_id);
+        expect(successfulEnd[0].data).toMatchObject({ tldw_conversation_id: chatId,
+          tldw_user_message_id: admission.input_message_id, tldw_message_id: settlement.tldw_message_id });
+        for (const receipt of settlementFrames)
+          expect(receipt).toMatchObject({ tldw_conversation_id: chatId,
+            tldw_user_message_id: admission.input_message_id, tldw_message_id: settlement.tldw_message_id });
+        const streamedAnswer = frames.map(frame => frame.choices?.[0]?.delta?.content ?? '').join('');
+        assertRowanFacts(streamedAnswer);
+        expect(completionRequests - initialCompletionRequests).toBe(1);
+        expect(browserMessageWrites).toBe(0);
         let saved: CanonicalTurnMessage[] = [];
         await expect.poll(async () => {
           saved = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages;
           return saved.length;
         }).toBe(2);
-        const user = saved.find(row => row.id === userReceipt.id)!;
-        const assistant = saved.find(row => row.id === assistantReceipt.id)!;
+        const user = saved.find(row => row.id === admission.input_message_id)!;
+        const assistant = saved.find(row => row.id === settlement.tldw_message_id)!;
         expect(user).toMatchObject({ sender: 'user', content: prompt, conversation_id: chatId, parent_message_id: null });
-        expect(assistant).toMatchObject({ sender: 'assistant', content: visibleAnswer, conversation_id: chatId, parent_message_id: user.id });
+        expect(assistant).toMatchObject({ sender: 'assistant', content: streamedAnswer, conversation_id: chatId, parent_message_id: user.id });
         assertRowanFacts(assistant.content);
-        assertSavedTurn(readSavedMessages(saved, chatId), prompt, visibleAnswer);
+        assertSavedTurn(readSavedMessages(saved, chatId), prompt, streamedAnswer);
         let bookmarks: HistoryBookmark[] = [];
         await expect.poll(async () => {
           bookmarks = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
@@ -393,7 +411,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
           owner_key: bookmark.owner_key, conversation_id: chatId, owner_kind: 'native' };
         evidence.chatConversationId = chatId;
         evidence.chatAdmission = admission;
-        evidence.chatSettlement = assistantReceipt;
+        evidence.chatSettlement = settlement;
         evidence.chatMessages = saved;
         evidence.chatSelection = reference;
         // The page object normalizes rendered whitespace; canonical source text stays exact above.
@@ -413,6 +431,8 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         const reloaded: CanonicalTurnMessage[] = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages;
         expect(reloaded).toEqual(saved);
         assertFullSourceHandoff(reloaded.find(row => row.id === user.id)!.content, source.text);
+        expect(completionRequests - initialCompletionRequests).toBe(1);
+        expect(browserMessageWrites).toBe(0);
       });
       await test.step('Ask an absent fact without inventing a price', async () => {
         await page.goto(`/knowledge/thread/${encodeURIComponent(qaId)}`, {
@@ -434,6 +454,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         evidence.priceAnswer = await qa.getAnswerText();
       });
     } finally {
+      page.off('request', observeChatWrites);
       await testInfo.attach('uat390-linked-evidence.json', {
         body: JSON.stringify(evidence, null, 2),
         contentType: 'application/json',

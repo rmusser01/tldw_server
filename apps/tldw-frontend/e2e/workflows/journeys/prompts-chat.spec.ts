@@ -4,9 +4,10 @@
  * Export/import, failed sync, variables and account-switch variants remain separate.
  */
 import { randomUUID } from 'node:crypto';
+import type { Request } from '@playwright/test';
 import { test, expect } from '../../utils/fixtures';
 import { PromptsWorkspacePage, ChatPage } from '../../utils/page-objects';
-import { waitForStreamComplete } from '../../utils/journey-helpers';
+import { captureStreamedResponseBody, waitForStreamComplete } from '../../utils/journey-helpers';
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from '../../utils/helpers';
 import { assertSavedTurn, readSavedMessages } from './uat390-grounding';
 import { readStore } from '../../../../extension/tests/e2e/utils/history-selection';
@@ -46,6 +47,14 @@ test.describe('Prompts -> Chat journey', () => {
     let promptRowId = '';
     const prompts = new PromptsWorkspacePage(page);
     const inspector = page.getByTestId('prompts-inspector-panel-scaffold');
+    let browserMessageWrites = 0;
+    let completionRequests = 0;
+    const observeChatWrites = (request: Request) => {
+      if (request.method() !== 'POST') return;
+      const path = new URL(request.url()).pathname;
+      if (/^\/api\/v1\/chats\/[^/]+\/messages$/.test(path)) browserMessageWrites++;
+      if (path === '/api/v1/chat/completions') completionRequests++;
+    };
     try {
       await test.step('Save and reopen the exact synced prompt through the UI', async () => {
         await prompts.goto();
@@ -86,6 +95,7 @@ test.describe('Prompts -> Chat journey', () => {
       });
       const chat = new ChatPage(page);
       await test.step('Use the saved prompt as the actual Chat system instruction', async () => {
+        page.on('request', observeChatWrites);
         await inspector.getByRole('button', { name: 'Use', exact: true }).click();
         const choice = page.getByTestId('prompt-insert-system');
         await expect(choice).toContainText(SYSTEM);
@@ -97,20 +107,13 @@ test.describe('Prompts -> Chat journey', () => {
         const createdChat = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chats\/?$/.test(response.url())
         );
-        const admittedUser = page.waitForResponse(response =>
-          response.request().method() === 'POST' && /\/api\/v1\/chats\/[^/]+\/messages(?:\?|$)/.test(response.url()) &&
-          response.request().postDataJSON().role === 'user'
-        );
-        const settledAssistant = page.waitForResponse(response =>
-          response.request().method() === 'POST' && /\/api\/v1\/chats\/[^/]+\/messages(?:\?|$)/.test(response.url()) &&
-          response.request().postDataJSON().role === 'assistant',
-          { timeout: 90_000 }
-        );
+        const readCompletionBody = await captureStreamedResponseBody(page, '/api/v1/chat/completions');
+        const initialCompletionRequests = completionRequests;
         const completed = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chat\/completions(?:\?|$)/.test(response.url())
         );
-        const [creation, userWrite, completion, assistantWrite] = await Promise.all([
-          createdChat, admittedUser, completed, settledAssistant, chat.sendMessage(QUESTION),
+        const [creation, completion] = await Promise.all([
+          createdChat, completed, chat.sendMessage(QUESTION),
         ]);
         expect(creation.status()).toBe(201);
         const chatId = (await creation.json()).id;
@@ -118,8 +121,7 @@ test.describe('Prompts -> Chat journey', () => {
         expect(chatId).not.toMatch(/^(?:local[-_]|$)/);
         expect(completion.status()).toBe(200);
         const sent = completion.request().postDataJSON();
-        expect(sent).toMatchObject({ model, save_to_db: false });
-        expect(sent).not.toHaveProperty('conversation_id');
+        expect(sent).toMatchObject({ model, stream: true, save_to_db: true, conversation_id: chatId });
         expect(sent.provider ?? sent.api_provider).toBe(provider);
         expect(sent.messages.map(({ role, content }: { role: string; content: unknown }) => ({ role, content })))
           .toEqual([{ role: 'system', content: SYSTEM }, { role: 'user', content: QUESTION }]);
@@ -128,38 +130,50 @@ test.describe('Prompts -> Chat journey', () => {
         await chat.waitForResponse();
         const visible = (await chat.getMessages()).filter(message => message.role === 'assistant');
         expect(visible.map(message => message.content)).toEqual([ANSWER]);
-        expect(userWrite.status()).toBe(201);
-        expect(assistantWrite.status()).toBe(201);
-        for (const write of [userWrite, assistantWrite])
-          expect(new URL(write.url()).pathname).toBe(`/api/v1/chats/${chatId}/messages`);
-        const userReceipt = await userWrite.json();
-        const assistantReceipt = await assistantWrite.json();
-        const userRequest = userWrite.request().postDataJSON();
-        const selection = userRequest.tldw_history_selection_v1;
+        const events = (await readCompletionBody()).replace(/\r\n/g, '\n').split('\n\n')
+          .map(block => ({ event: block.split('\n').find(line => line.startsWith('event: '))?.slice(7),
+            data: block.split('\n').find(line => line.startsWith('data: '))?.slice(6) }))
+          .filter(entry => entry.data && entry.data !== '[DONE]')
+          .map(entry => ({ event: entry.event, data: JSON.parse(entry.data!) }));
+        const frames = events.map(entry => entry.data);
+        const admissionFrames = frames.filter(frame => frame.tldw_history_admission_v1);
+        expect(admissionFrames).toHaveLength(1);
+        const admission = admissionFrames[0].tldw_history_admission_v1;
+        const settlementFrames = frames.filter(frame => frame.tldw_message_id);
+        const successfulEnd = events.filter(entry => entry.event === 'stream_end');
+        expect(successfulEnd).toHaveLength(1);
+        expect(successfulEnd[0].data).toMatchObject({ conversation_id: chatId, success: true });
+        const settlement = frames.find(frame => frame.tldw_message_id && frame.choices?.[0]?.finish_reason === 'stop');
+        expect(settlement).toBeDefined();
+        const selection = sent.tldw_history_selection_v1;
         expect(selection).toMatchObject({ version: 1, conversation_id: chatId,
           owner_key: expect.stringMatching(/^native-history-v1:sha256:/), cursor: { kind: 'empty' }, messages: [] });
-        const admission = userReceipt.tldw_history_admission_v1;
         expect(admission).toMatchObject({ version: 1, conversation_id: chatId,
-          owner_key: selection.owner_key, input_message_id: userReceipt.id,
-          selection_digest: selection.selection_digest, messages: selection.messages,
-          originating_selection_revision: selection.selection_revision });
+          owner_key: selection.owner_key, selection_digest: selection.selection_digest,
+          messages: selection.messages, originating_selection_revision: selection.selection_revision });
+        expect(admission.input_message_id).toEqual(expect.any(String));
+        expect(admission.input_message_id).not.toBe('');
         expect(admission.input_message_revision).toEqual(expect.any(String));
         expect(admission.input_message_revision).not.toBe('');
-        expect(userRequest).toMatchObject({ id: userReceipt.id, role: 'user', content: QUESTION });
-        expect(userRequest.parent_message_id ?? null).toBeNull();
-        const assistantRequest = assistantWrite.request().postDataJSON();
-        expect(assistantRequest).toMatchObject({ id: assistantReceipt.id, role: 'assistant',
-          content: ANSWER, parent_message_id: userReceipt.id });
-        expect(assistantRequest.tldw_history_admission_v1).toEqual({ version: 1,
-          owner_key: admission.owner_key, conversation_id: chatId, input_message_id: userReceipt.id,
-          input_message_revision: admission.input_message_revision, selection_digest: admission.selection_digest });
+        expect(settlement).toMatchObject({ tldw_conversation_id: chatId,
+          tldw_user_message_id: admission.input_message_id, tldw_message_id: expect.any(String) });
+        expect(settlement.tldw_message_id).not.toBe('');
+        expect(settlement.tldw_message_id).not.toBe(admission.input_message_id);
+        expect(successfulEnd[0].data).toMatchObject({ tldw_conversation_id: chatId,
+          tldw_user_message_id: admission.input_message_id, tldw_message_id: settlement.tldw_message_id });
+        for (const receipt of settlementFrames)
+          expect(receipt).toMatchObject({ tldw_conversation_id: chatId,
+            tldw_user_message_id: admission.input_message_id, tldw_message_id: settlement.tldw_message_id });
+        expect(frames.map(frame => frame.choices?.[0]?.delta?.content ?? '').join('')).toBe(ANSWER);
+        expect(completionRequests - initialCompletionRequests).toBe(1);
+        expect(browserMessageWrites).toBe(0);
         let saved: CanonicalTurnMessage[] = [];
         await expect.poll(async () => {
           saved = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages;
           return saved.length;
         }).toBe(2);
-        const user = saved.find(row => row.id === userReceipt.id)!;
-        const assistant = saved.find(row => row.id === assistantReceipt.id)!;
+        const user = saved.find(row => row.id === admission.input_message_id)!;
+        const assistant = saved.find(row => row.id === settlement.tldw_message_id)!;
         expect(user).toMatchObject({ sender: 'user', content: QUESTION, conversation_id: chatId, parent_message_id: null });
         expect(assistant).toMatchObject({ sender: 'assistant', content: ANSWER, conversation_id: chatId, parent_message_id: user.id });
         assertSavedTurn(readSavedMessages(saved, chatId), QUESTION, ANSWER);
@@ -178,7 +192,7 @@ test.describe('Prompts -> Chat journey', () => {
           owner_key: bookmark.owner_key, conversation_id: chatId, owner_kind: 'native' };
         evidence.chatConversationId = chatId;
         evidence.chatAdmission = admission;
-        evidence.chatSettlement = assistantReceipt;
+        evidence.chatSettlement = settlement;
         evidence.chatMessages = saved;
         evidence.chatSelection = reference;
         const visiblePair = [{ role: 'user', content: QUESTION }, { role: 'assistant', content: ANSWER }];
@@ -194,6 +208,8 @@ test.describe('Prompts -> Chat journey', () => {
         await expect.poll(async () => (await chat.getMessages())
           .map(({ role, content }) => ({ role, content }))).toEqual(visiblePair);
         expect((await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages).toEqual(saved);
+        expect(completionRequests - initialCompletionRequests).toBe(1);
+        expect(browserMessageWrites).toBe(0);
       });
       await test.step('The source Prompt still exists with the same identity and instructions', async () => {
         await prompts.goto();
@@ -205,6 +221,7 @@ test.describe('Prompts -> Chat journey', () => {
         expect(savedPrompt.data).toMatchObject({ id: promptId, name: promptName, system_prompt: SYSTEM });
       });
     } finally {
+      page.off('request', observeChatWrites);
       await testInfo.attach('c01-prompt-chat-evidence.json', {
         body: JSON.stringify(evidence, null, 2), contentType: 'application/json',
       });
