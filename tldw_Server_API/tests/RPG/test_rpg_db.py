@@ -494,3 +494,59 @@ def test_list_proposals_and_get_snapshot_by_version():
     assert record.snapshot_version == 0  # nosec B101
     with pytest.raises(RPGNotFoundError):
         repo.get_snapshot_by_version(owner_user_id=42, session_id=session.id, snapshot_version=99)
+
+
+def test_update_campaign_metadata_with_cas_and_replay():
+    repo = _repo()
+    campaign = _campaign(repo)
+    result = repo.update_campaign(
+        owner_user_id=42, campaign_id=campaign.id,
+        title="Renamed", description="Now with words", status="archived",
+        expected_version=campaign.version, idempotency_key="upd-1", request_payload_hash="h-upd-1",
+        source_type="user",
+    )
+    assert result.replayed is False  # nosec B101
+    assert result.campaign.title == "Renamed" and result.campaign.status == "archived"  # nosec B101
+    assert result.campaign.version == campaign.version + 1  # nosec B101
+    replay = repo.update_campaign(
+        owner_user_id=42, campaign_id=campaign.id,
+        title="Renamed", description="Now with words", status="archived",
+        expected_version=campaign.version, idempotency_key="upd-1", request_payload_hash="h-upd-1",
+        source_type="user",
+    )
+    assert replay.replayed is True and replay.campaign.id == campaign.id  # nosec B101
+    with pytest.raises(RPGConflictError):
+        repo.update_campaign(
+            owner_user_id=42, campaign_id=campaign.id, title="X",
+            expected_version=campaign.version, idempotency_key="upd-2",
+            request_payload_hash="h-upd-2", source_type="user",
+        )
+    with pytest.raises(RPGConflictError):  # same key, different payload
+        repo.update_campaign(
+            owner_user_id=42, campaign_id=campaign.id, title="Y",
+            expected_version=campaign.version, idempotency_key="upd-1",
+            request_payload_hash="h-DIFFERENT", source_type="user",
+        )
+    with pytest.raises(RPGNotFoundError):
+        repo.update_campaign(
+            owner_user_id=7, campaign_id=campaign.id, title="Z",
+            expected_version=1, idempotency_key="upd-3", request_payload_hash="h-3", source_type="user",
+        )
+
+
+def test_update_session_metadata_partial_and_cas():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    result = repo.update_session(
+        owner_user_id=42, session_id=session.id, title="Act II", status="archived",
+        expected_version=session.version, idempotency_key="s-upd-1",
+        request_payload_hash="h-s-1", source_type="user",
+    )
+    assert result.session.title == "Act II" and result.session.status == "archived"  # nosec B101
+    untouched = repo.update_session(
+        owner_user_id=42, session_id=session.id,
+        expected_version=result.session.version, idempotency_key="s-upd-2",
+        request_payload_hash="h-s-2", source_type="user",
+    )
+    assert untouched.session.title == "Act II"  # nosec B101  (COALESCE keeps omitted fields)

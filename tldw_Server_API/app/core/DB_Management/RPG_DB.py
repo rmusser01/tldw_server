@@ -42,6 +42,18 @@ class CommitEventsResult:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CampaignUpdateResult:
+    campaign: RPGCampaign
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SessionUpdateResult:
+    session: RPGSession
+    replayed: bool
+
+
 # Every table ensure_schema() creates, so a partially built database fails
 # verification instead of being accepted from the memo.
 _RPG_REQUIRED_TABLES = (
@@ -800,6 +812,101 @@ class RPGRepository:
         if row is None:
             raise RPGNotFoundError("snapshot_not_found")
         return self._snapshot_from_row(row)
+
+    def update_campaign(
+        self,
+        owner_user_id: int,
+        campaign_id: int,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+        expected_version: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> CampaignUpdateResult:
+        self._validate_source_type(source_type)
+        operation_scope = f"campaign:{campaign_id}:update"
+        now = self._now()
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn, owner_user_id=owner_user_id, session_id=None, source_type=source_type,
+                operation_scope=operation_scope, idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                replayed_id = int(self._from_json(self._row_value(replay, "response_json"))["campaign_id"])
+                return CampaignUpdateResult(campaign=self._get_campaign_with_conn(conn, owner_user_id, replayed_id), replayed=True)
+
+            campaign = self._get_campaign_with_conn(conn, owner_user_id, campaign_id)
+            if campaign.version != expected_version:
+                raise RPGConflictError("stale_version")
+            cursor = conn.execute(
+                """
+                UPDATE rpg_campaigns
+                SET title = COALESCE(?, title), description = COALESCE(?, description),
+                    status = COALESCE(?, status), version = version + 1, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND version = ?
+                """,
+                (title, description, status, now, campaign_id, owner_user_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("stale_version")
+            self._insert_idempotency_record(
+                conn, owner_user_id=owner_user_id, session_id=None, source_type=source_type,
+                operation_scope=operation_scope, idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash, event_ids=[],
+                response={"campaign_id": campaign_id}, created_at=now,
+            )
+            return CampaignUpdateResult(campaign=self._get_campaign_with_conn(conn, owner_user_id, campaign_id), replayed=False)
+
+    def update_session(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        *,
+        title: str | None = None,
+        status: str | None = None,
+        expected_version: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> SessionUpdateResult:
+        self._validate_source_type(source_type)
+        operation_scope = f"session:{session_id}:update"
+        now = self._now()
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn, owner_user_id=owner_user_id, session_id=session_id, source_type=source_type,
+                operation_scope=operation_scope, idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                replayed_id = int(self._from_json(self._row_value(replay, "response_json"))["session_id"])
+                return SessionUpdateResult(session=self._get_session_with_conn(conn, owner_user_id, replayed_id), replayed=True)
+
+            session = self._get_session_with_conn(conn, owner_user_id, session_id)
+            if session.version != expected_version:
+                raise RPGConflictError("stale_version")
+            cursor = conn.execute(
+                """
+                UPDATE rpg_sessions
+                SET title = COALESCE(?, title), status = COALESCE(?, status),
+                    version = version + 1, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND version = ?
+                """,
+                (title, status, now, session_id, owner_user_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("stale_version")
+            self._insert_idempotency_record(
+                conn, owner_user_id=owner_user_id, session_id=session_id, source_type=source_type,
+                operation_scope=operation_scope, idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash, event_ids=[],
+                response={"session_id": session_id}, created_at=now,
+            )
+            return SessionUpdateResult(session=self._get_session_with_conn(conn, owner_user_id, session_id), replayed=False)
 
     def mark_proposal_applied(
         self,
