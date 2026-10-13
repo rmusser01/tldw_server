@@ -77,6 +77,35 @@ describe(
       await resetPlaygroundHarness()
     })
 
+    it("keeps edited text and canonical originals when protected edit support is absent", async () => {
+      const server = createFakeTldwServer()
+      seedSavedChat(server)
+      const originals = structuredClone(server.chats.get("saved-chat")!.messages)
+      const fetch = server.fetch
+      server.fetch = async (...args: Parameters<typeof fetch>) => {
+        const response = await fetch(...args)
+        const input = args[0]
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url)
+        if (url.pathname !== "/openapi.json") return response
+        const spec = await response.json()
+        for (const path of ["/api/v1/chat/completions", "/api/v1/chats/{chat_id}/messages"])
+          delete spec.paths[path].post.requestBody.content["application/json"].schema.properties.tldw_history_edit_v1
+        return new Response(JSON.stringify(spec), { headers: { "Content-Type": "application/json" } })
+      }
+      const view = await renderPlayground({ server, extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" /> })
+      await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
+      await view.user.click(screen.getAllByRole("button", { name: "Edit" })[0])
+      const editor = document.querySelector<HTMLTextAreaElement>("form[data-chat-message-editor] textarea")!
+      await view.user.clear(editor)
+      await view.user.type(editor, "Keep this private edit")
+      await view.user.click(screen.getByRole("button", { name: "Save & Send" }))
+      await screen.findByText(/does not support this edit action/i, {}, HARNESS_WAIT)
+      expect(editor).toHaveValue("Keep this private edit")
+      expect(server.completionRequests()).toHaveLength(0)
+      expect(server.find("POST", /\/chats\/saved-chat\/messages$/)).toHaveLength(0)
+      expect(server.chats.get("saved-chat")!.messages).toEqual(originals)
+    })
+
     it("a held edited reply keeps the original assistant passive and the composer Stop active", async () => {
       const view = await renderWithSavedChat()
       const hold = deferred()

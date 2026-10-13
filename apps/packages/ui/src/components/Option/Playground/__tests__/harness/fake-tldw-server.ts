@@ -5,6 +5,7 @@
  * bgStream code paths run unchanged and every request the UI makes is recorded
  * with its method, path, query and JSON body.
  */
+import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import { resolveHistorySelection, selectionDigest } from "@/utils/history-selection"
 
@@ -18,6 +19,7 @@ export const FAKE_SELECTED_MODEL = `${FAKE_PROVIDER}:${FAKE_MODEL}`
 /** A parsed JSON request body. The fake reads arbitrary client payloads defensively. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- request bodies are schemaless JSON
 export type JsonBody = Record<string, any>
+type HistoryCanonical = Pick<typeof import("@/db/dexie/history-selection"), "canonicalHistoryJson" | "historyDigest">
 
 export type RecordedRequest = {
   method: string
@@ -170,7 +172,8 @@ const OPENAPI_SPEC = {
                   messages: { type: "array" },
                   stream: { type: "boolean" },
                   save_to_db: { type: "boolean" },
-                  conversation_id: { type: "string" }
+                  conversation_id: { type: "string" },
+                  ...protectedEditRequestSchema().properties
                 }
               }
             }
@@ -180,7 +183,9 @@ const OPENAPI_SPEC = {
     },
     "/api/v1/chats/": { get: {}, post: {} },
     "/api/v1/chats/{chat_id}": { get: {}, put: {}, delete: {} },
-    "/api/v1/chats/{chat_id}/messages": { get: {}, post: {} },
+    "/api/v1/chats/{chat_id}/messages": { get: {}, post: {
+      requestBody: { content: { "application/json": { schema: protectedEditRequestSchema() } } }
+    } },
     "/api/v1/chats/{chat_id}/settings": { get: {}, put: {} },
     "/api/v1/chat/conversations/{conversation_id}/history/selection": { post: {} },
     "/api/v1/llm/providers": { get: {} },
@@ -270,18 +275,68 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     return chat
   }
 
+  const validateHistoryEdit = (body: JsonBody | undefined, chat: FakeChat | undefined, operation: "completion" | "append", { canonicalHistoryJson, historyDigest }: HistoryCanonical) => {
+    if (chat && chats.get(chat.id) !== chat) throw new Error("stale_selection")
+    const edit = body?.tldw_history_edit_v1
+    if (edit == null) return
+    const selection = body!.tldw_history_selection_v1
+    if (typeof edit !== "object" || Array.isArray(edit) || edit.version !== 1 ||
+        typeof edit.message_id !== "string" || !edit.message_id.length ||
+        typeof edit.message_revision !== "string" || !edit.message_revision.length ||
+        Object.keys(edit).length !== 3 || !["version", "message_id", "message_revision"].every(key => Object.hasOwn(edit, key)) ||
+        body!.tldw_history_branch !== true || selection?.version !== 1 || selection.purpose !== "send" ||
+        selection.interpretation?.kind !== "parent_graph_v1" || selection.cursor?.kind !== "before_message" ||
+        selection.cursor.message_id !== edit.message_id || Object.keys(selection.cursor).length !== 2 ||
+        !Array.isArray(selection.messages) || selection.messages.some((row: JsonBody) => !row || typeof row.id !== "string" || !row.id.length || typeof row.revision !== "string" || !row.revision.length) ||
+        (operation === "completion" ? body!.save_to_db !== true || !Array.isArray(body!.messages) || body!.messages.at(-1)?.role !== "user" : body!.role !== "user"))
+      throw new Error("invalid_history_edit")
+    const target = chat?.messages.find(row => row.id === edit.message_id)
+    if (!chat || target?.role !== "user" || String(target.version) !== edit.message_revision)
+      throw new Error("history_edit_target_changed")
+    const captured = captureSelection(chat, { purpose: "send", view: selection })
+    if (selection.owner_key !== captured.view.owner_key || selection.conversation_id !== chat.id ||
+        captured.status !== "captured" ||
+        canonicalHistoryJson(selection.messages) !== canonicalHistoryJson(captured.rows.map(row => ({ id: row.id, revision: row.revision }))) ||
+        selection.storage_context_digest !== captured.snapshot.storage_context_digest || selectionDigest(selection) !== selection.selection_digest)
+      throw new Error("stale_selection")
+    if (operation === "completion") {
+      const { tldw_history_selection_v1: _selection, tldw_history_branch: _branch, tldw_history_edit_v1: _edit, ...context } = body!
+      if (historyDigest(context) !== selection.request_context_digest) throw new Error("stale_selection")
+    }
+  }
+  const admitEditedCompletion = (body: JsonBody | undefined, canonical: HistoryCanonical, chat: FakeChat | undefined) => {
+    if (body?.tldw_history_edit_v1 == null) return null
+    // Check and append synchronously, before consuming a provider plan or awaiting its gate.
+    validateHistoryEdit(body, chat, "completion", canonical)
+    const selection = body.tldw_history_selection_v1
+    const lastUser = body.messages.at(-1)
+    const user = appendMessage(chat!, { role: "user", content: typeof lastUser.content === "string" ? lastUser.content : JSON.stringify(lastUser.content),
+      parent_message_id: selection.messages.at(-1)?.id ?? null })
+    const admission: HistoryAdmissionV1 = { version: 1, owner_key: selection.owner_key, conversation_id: chat!.id,
+      input_message_id: user.id, input_message_revision: String(user.version), selection_digest: selection.selection_digest,
+      messages: structuredClone(selection.messages), originating_selection_revision: selection.selection_revision }
+    inputAdmissions.set(user.id, admission)
+    return { chat: chat!, user, admission }
+  }
+  const editRefusal = (error: unknown) => json({ detail: { code: error instanceof Error ? error.message : "invalid_history_edit" } }, 409)
+
   /**
    * `save_to_db: true` on /chat/completions persists the turn server side, into
    * `conversation_id` or a new conversation, like the real endpoint.
    */
-  const persistCompletionTurn = async (body: JsonBody | undefined, reply: string) => {
+  const persistCompletionTurn = (body: JsonBody | undefined, reply: string, edited: ReturnType<typeof admitEditedCompletion>, { canonicalHistoryJson, historyDigest }: HistoryCanonical) => {
     if (body?.save_to_db !== true) return null
     const existing = body.conversation_id ? chats.get(String(body.conversation_id)) : undefined
     const selection = body.tldw_history_selection_v1
     const regenerateId = body.metadata?.tldw_regenerate_from_message_id
     let chat: FakeChat, user: FakeChatMessage, admission: HistoryAdmissionV1 | undefined
-    if (regenerateId !== undefined) {
-      const { canonicalHistoryJson, historyDigest } = await import("@/db/dexie/history-selection")
+    if (edited) {
+      chat = edited.chat
+      admission = edited.admission
+      user = chat.messages.find(row => row.id === admission!.input_message_id)!
+      if (chats.get(chat.id) !== chat || user?.role !== "user" || String(user.version) !== admission.input_message_revision)
+        throw new Error("stale_admission")
+    } else if (regenerateId !== undefined) {
       if (!existing || typeof regenerateId !== "string" || body.tldw_history_branch !== true ||
           selection?.version !== 1 || selection.purpose !== "send" || selection.interpretation?.kind !== "parent_graph_v1" ||
           selection.cursor?.kind !== "after_message" || selection.cursor.message_id !== regenerateId)
@@ -371,6 +426,11 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
   }
 
   const completionResponse = async (body: JsonBody | undefined, signal?: AbortSignal | null) => {
+    const originalEditChat = body?.tldw_history_edit_v1 == null ? undefined : chats.get(String(body.conversation_id))
+    const canonical = await import("@/db/dexie/history-selection")
+    let edited: ReturnType<typeof admitEditedCompletion>
+    try { edited = admitEditedCompletion(body, canonical, originalEditChat) }
+    catch (error) { return editRefusal(error) }
     const plan = completionPlans.shift() ?? {}
     if (plan.gate) await plan.gate
     if (plan.status && plan.status >= 400) {
@@ -379,8 +439,8 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     const reply = plan.chunks ? plan.chunks.join("") : (plan.reply ?? defaultReply)
     const model = body?.model ?? FAKE_MODEL
     let persisted: Awaited<ReturnType<typeof persistCompletionTurn>>
-    try { persisted = await persistCompletionTurn(body, reply) }
-    catch { return json({ detail: { code: "unsupported_history_regeneration" } }, 409) }
+    try { persisted = persistCompletionTurn(body, reply, edited, canonical) }
+    catch (error) { return edited ? editRefusal(error) : json({ detail: { code: "unsupported_history_regeneration" } }, 409) }
     if (!body?.stream) {
       return json({
         ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId,
@@ -538,6 +598,11 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       if (!chat) return json({ detail: "Chat not found" }, 404)
       if (method === "GET") return json({ messages: chat.messages.map(messageRow) })
       if (method === "POST") {
+        const canonical = await import("@/db/dexie/history-selection")
+        try {
+          validateHistoryEdit(body, chat, "append", canonical)
+          if (body?.tldw_history_edit_v1 && body.id && chat.messages.some(row => row.id === body.id)) throw new Error("invalid_history_edit")
+        } catch (error) { return editRefusal(error) }
         const selection = body?.tldw_history_selection_v1
         const admission = body?.tldw_history_admission_v1
         // Like append_selected_history_input: the input follows the last
