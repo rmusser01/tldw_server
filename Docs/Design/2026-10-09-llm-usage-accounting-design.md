@@ -1,7 +1,7 @@
 # LLM usage accounting: record and gate every LLM call at one point
 
 - **Date:** 2026-10-09 (revised 2026-10-10 after an independent review against the code; see [Review changes](#review-changes))
-- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a in progress.
+- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a (#3230) merged; PR 2b in progress.
 - **Backlog:** TASK-13437 (gate LLM tokens/month at every LLM entry point) and TASK-13436 (evaluation cost caps per user, re-scoped below). Both are follow-ups of spec 2, TASK-13434.
 - **Builds on:** `Docs/Design/2026-10-02-usage-quota-posture-design.md` (spec 2) and ADR-064. Quotas are per-user `limits.*` values, resolved by `quota_resolver.user_quota`. Nothing is enforced unless `USAGE_QUOTAS_ENABLED` is on, `0` blocks, and errors fail open.
 
@@ -214,11 +214,12 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | Flashcards and quizzes study assistants | Always, as a dependency. |
 | `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality` | Always. |
 | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
+| Evaluation runs (`POST /evaluations/{eval_id}/runs`) | Always. The run is a task the request starts, so it is admitted with the request; checked at the call, a refused sample would be scored 0.0 and the run would complete. |
 | The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
 
 Simple search (`/rag/simple`) no longer generates an answer it then discarded, so it makes no LLM call and needs no check.
 
-- **A RAG search with answer generation off is not checked here and not marked.** The pipeline's optional LLM stages (query rewriting, expansion, HyDE, LLM reranking, gap analysis, critique, suggestions) are governed by §4b. For a user over quota they degrade as they do for any provider failure, and the response's stage metadata says so. Until PR 2b they are unchecked, as today.
+- **A RAG search with answer generation off is not checked here and not marked.** The pipeline's optional LLM stages (query rewriting, expansion, HyDE, LLM reranking, gap analysis, critique, suggestions) are governed by §4b. For a user over quota they degrade as they do for any provider failure, and the response's stage metadata says so. Gap analysis and the agentic planner were the two stages that let a refusal escape; PR 2b made them degrade, and the three convenience handlers (`/rag/simple`, `/rag/advanced`, `/rag/ablate`) pass a 402 through.
 - **An endpoint that enqueues a job has no boundary check:** `/media/ingest-jobs` and evaluation recipe runs. The job is checked by §4b when it runs.
 - **Left to §4b:** these HTTP endpoints are not in the table: `/media/ingest-web-content` with analysis, `/media/process-web-scraping` with summarization, `/media/{id}/insights`, the writing and manuscript analysis endpoints, prompt improvement and Prompt Studio, reading, study suggestions, paper search, chunking, sharing, and `/translate`. So are background jobs (`/media/ingest-jobs`, evaluation recipe runs, audio jobs), workflow runs, WebSocket sessions (audio, realtime) and MCP tools. The operator page names both groups.
 
@@ -246,15 +247,18 @@ Rules:
   - One that catches it in a broad tuple reports its own error.
   - A workflow step fails, and the run records the error.
   - A job fails as its handler decides. A media ingestion job reports the item as failed.
-  - A WebSocket session reports it as it reports any failed reply. PR 2b's plan names the frame for the operator page.
+  - A WebSocket session reports it as it reports any failed reply: `/audio/chat/stream` sends a `provider_unavailable` error for that turn, and the realtime sockets send an `internal_error` and a failed `response.done`. Both stay open.
 - **It must not look like a provider outage to shared machinery:**
   - the Evaluations circuit breaker (`Evaluations/circuit_breaker.py`) does not count it. The breaker is shared by all users per provider and opens after 3 to 5 failures, so one user's refusals would otherwise stop evaluations for everyone for 30 to 60 seconds;
   - retry loops do not retry it: G-Eval's, and the LLM extraction strategy's (`Web_Scraping/extraction/strategies/llm.py:164-198`).
+  - a job worker does not retry it: the error carries `retryable = False` and `failure_code = "llm_quota_exceeded"`;
+  - the chat pipeline neither rewrites it as a provider error nor records a provider failure for it, and neither does the `/chat/completions` auto-router, whose LLM call runs before that endpoint's boundary check;
+  - the RAG answer generator does not replace it with a fallback answer.
 - **What it costs.**
   - With quotas off, nothing: `usage_quotas_enabled()` is read in the calling thread and the check returns.
   - With quotas on and no LLM limit for the user: nothing, once the user's limits are cached. `quota_resolver` gains a synchronous read of its cache for this. A cold or expired cache entry costs one hand-off to the accounting loop (§5) and the resolver's queries, once per user per minute.
   - With a limit set: one hand-off and the counter queries, for each call. A sync caller waits at most 2 seconds for the answer, then fails open with a warning.
-- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). Seven code paths do this today by calling the sync `analyze` straight from a coroutine, which also blocks the server while the provider answers: `/translate`, web search aggregation, the article extractor, enhanced web scraping, two scraping services and a RAG custom metric. PR 2b moves each one off the loop with `asyncio.to_thread`. Any that cannot be moved is named on the operator page as unchecked.
+- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). PR 2b moved seven code paths off the loop with `asyncio.to_thread`: `/translate`, web search aggregation (`WebSearch_APIs.aggregate_results`, the live `/research/websearch` path; the legacy `WebSearch/Web_Search.py` has no caller in the app), the article extractor, enhanced web scraping, web content ingestion, the web scraping service, and the Explainer job. The RAG custom metric named in an earlier draft makes no provider call: its `analyze` call is missing an argument and falls back to a heuristic (TASK-13635).
 
 ### 5. Accounting runs on one event loop
 
@@ -422,7 +426,7 @@ Five PRs, so recording can be checked before anything new is refused.
 
 - **An admitted request can pass a limit.** The boundary check admits a request when the user is under the limit, and the request then runs to completion. Some requests fan out into many calls: a media batch with chunked analysis, an evaluation batch, a RAG request with every optional stage on. The overshoot is bounded by one request, not one call. An operator who needs a hard ceiling sets the limit with that headroom.
 - **Each checked call costs a query.** With a limit set, §4b reads the counters for every call that was not admitted at a boundary. A job that makes hundreds of calls makes hundreds of small indexed reads.
-- **Fail-open cases.** A sync adapter call made on the event loop's own thread is recorded but not checked; PR 2b moves the known ones off the loop. A timed-out check lets the call through. Both are logged.
+- **Fail-open cases.** A sync adapter call made on the event loop's own thread is recorded but not checked; PR 2b moved the known ones off the loop, and the first such call logs a warning. A timed-out check lets the call through. Both are logged.
 - **Lost rows on abandoned streams.** The stream recorder runs when the iterator closes. A process kill mid-stream loses the row, as today.
 - **Wider attribution than before.** Calls that recorded nothing now write rows. On an install with quotas on and token limits set, users reach their limits sooner. The hosted billing plan and admin reports also see more usage. The operator page says so.
 - **Metaprogramming in the base class.** `__init_subclass__` wrapping is less obvious than an explicit call. It is confined to one function in `providers/base.py`, with the re-entrancy guard and the tests in §Testing 3 and 9.
@@ -462,3 +466,12 @@ Revision of 2026-10-12, before planning PR 2. A survey of the code, and then an 
 - **Local providers.** They are not in the pricing catalog, so their calls were costed at the unknown-model rate. §6 gives each a zero default price in the catalog. The owner approved this and the revision on 2026-10-12.
 - **Reporting.** The profile response model needs an `llm` field, and unset limits are absent, not `null`.
 - **Delivery.** PR 2 is split into PR 2a (the boundary check, keys and counters) and PR 2b (the check at the call).
+
+Revision of 2026-10-13, while planning PR 2b:
+
+- **The check at the call** lives in `core/Usage/llm_quota_gate.py`. It runs the same decision as §4a on the accounting loop, and a sync caller waits at most two seconds for it.
+- **The seven sync calls** are the ones in §4b's last bullet. Web search aggregation is the live module, not the legacy one, and the Explainer job replaces the RAG custom metric, which never reaches a provider.
+- **The `/chat/completions` auto-router** makes its LLM call before the endpoint's boundary check, so its refusal must not count as a failure of the router's provider.
+- **Evaluation runs** join the §4a table: their samples run in a task the request starts.
+- **Jobs** do not retry a refusal; a workflow `llm` step is retried once by the engine's default policy and refused again without a provider call.
+- **Roots** are never admitted by the request that started them.
