@@ -213,6 +213,8 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
 from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
@@ -2623,6 +2625,8 @@ async def _await_with_call_policy_deadline(
 
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
+    # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
+    checked = check_llm_call_sync()
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
@@ -2632,8 +2636,10 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     timeout = internal.get("timeout")
     timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
     privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
+    # A checked call's adapter method is not checked again; one that could not be checked here is.
+    admitted = llm_call_context(prechecked=True) if checked else contextlib.nullcontext()
     try:
-        with provider_error_privacy_scope(privacy_safe_errors):
+        with provider_error_privacy_scope(privacy_safe_errors), admitted:
             _validate_audited_call_policy_transport(registry, provider, request)
             if request.get("stream"):
                 return _map_sync_stream_egress_errors(
@@ -2651,6 +2657,8 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
 
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async."""
+    # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
+    await check_llm_call_async()
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
@@ -2662,7 +2670,7 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
 
     try:
-        with provider_error_privacy_scope(privacy_safe_errors):
+        with provider_error_privacy_scope(privacy_safe_errors), llm_call_context(prechecked=True):
             strict_policy = _validate_audited_call_policy_transport(
                 registry, provider, request
             )
