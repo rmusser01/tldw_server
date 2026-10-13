@@ -1,0 +1,46 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "strict": false,
+    "baseUrl": ".",
+    "paths": {
+      "@": [
+        "../packages/ui/src"
+      ],
+      "@/*": [
+        "../packages/ui/src/*"
+      ],
+      "~": [
+        "../packages/ui/src"
+      ],
+      "~/*": [
+        "../packages/ui/src/*"
+      ],
+      "@tldw/ui": [
+        "../packages/ui/src"
+      ],
+      "@tldw/ui/*": [
+        "../packages/ui/src/*"
+      ]
+    }
+  },
+  "include": [
+    "../packages/ui/src/**/*",
+    "scripts/**/*",
+    "wxt.config.ts",
+    ".wxt/wxt.d.ts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "tests",
+    "playwright.config.ts",
+    ".output",
+    "build",
+    "chrome"
+  ]
+}

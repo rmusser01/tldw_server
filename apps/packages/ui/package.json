@@ -23,14 +23,6 @@
     "verify:openapi": "node ../../extension/scripts/verify-openapi-client-paths.mjs",
     "verify:design-system-state": "node scripts/verify-design-system-product-state.mjs"
   },
-  "exports": {
-    ".": "./index.ts",
-    "./components/ui/state": "./src/components/ui/state/index.ts",
-    "./assets/tailwind.css": {
-      "style": "./src/assets/tailwind.css",
-      "default": "./src/assets/tailwind.css"
-    }
-  },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
