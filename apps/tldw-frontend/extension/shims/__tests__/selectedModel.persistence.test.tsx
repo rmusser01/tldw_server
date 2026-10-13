@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Storage } from "@web/extension/shims/plasmo-storage";
 import { useStorage } from "@web/extension/shims/plasmo-storage-hook";
 import { useStoreMessageOption } from "@/store/option";
-import { captureSelectedModelGuard, useSelectedModel } from "../useSelectedModel";
+import { captureSelectedModelGuard, useSelectedModel } from "@/hooks/chat/useSelectedModel";
 
 // Two deployed model-hook owners, the option store, and the WebUI storage hook
 // and Storage implementation are real. Only the localStorage write failure or
@@ -475,3 +475,42 @@ describe("explicit model persistence with multiple actual hook owners", () => {
   })
 
 });
+
+describe("model preference failure recovery", () => {
+  it("exposes current failure and retries the original revision", async () => {
+    const view = mount()
+    await ready(view)
+    let failed = true
+    const { writes, error } = recordWrites(() => failed)
+    await act(async () => {
+      await expect(view.result.current.first.setSelectedModel(nextModel)).rejects.toBe(error)
+    })
+    expect(view.result.current.first.selectedModelSaveFailed).toBe(true)
+    const revision = useStoreMessageOption.getState().selectedModelRevision
+    failed = false
+    await act(async () => {
+      expect(await view.result.current.first.retrySelectedModelSave()).toBe(true)
+    })
+    expect(view.result.current.first.selectedModelSaveFailed).toBe(false)
+    expect(useStoreMessageOption.getState().selectedModelRevision).toBe(revision)
+    expect(writes).toEqual([JSON.stringify(nextModel), JSON.stringify(nextModel)])
+  })
+  it("retires a failed warning after another owner selects even the same model", async () => {
+    const view = mount()
+    await ready(view)
+    let failed = true
+    const { error } = recordWrites(() => failed)
+    await act(async () => {
+      await expect(view.result.current.first.setSelectedModel(nextModel)).rejects.toBe(error)
+    })
+    expect(view.result.current.first.selectedModelSaveFailed).toBe(true)
+    failed = false
+    await act(async () => {
+      expect(await view.result.current.second.setSelectedModel(nextModel)).toBe(true)
+    })
+    expect(view.result.current.first.selectedModelSaveFailed).toBe(false)
+    await act(async () => {
+      expect(await view.result.current.first.retrySelectedModelSave()).toBe(false)
+    })
+  })
+})

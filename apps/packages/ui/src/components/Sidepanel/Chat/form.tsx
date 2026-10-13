@@ -3811,10 +3811,12 @@ export const SidepanelForm = ({
 
                       const composerInlineMessagesNode = (
                         <>
-                          {isConnectionReady && !isProMode && (
-                            !normalizeChatModelId(selectedModel) ||
-                            findUnavailableChatModel([selectedModel], availableChatModelIds)
-                          ) && <ModelSelect iconClassName="size-4" showSelectedName />}
+                          {isConnectionReady && !isProMode && <ModelSelect
+                            iconClassName="size-4"
+                            showSelectedName
+                            showPicker={Boolean(!normalizeChatModelId(selectedModel) ||
+                              findUnavailableChatModel([selectedModel], availableChatModelIds))}
+                          />}
                           {form.errors.message && (
                             <div
                               role="alert"

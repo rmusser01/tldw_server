@@ -563,7 +563,7 @@ export function useModelSelector({
         ),
         onClick: () => {
           recordModelUsage(model)
-          setSelectedModel(modelKey)
+          void Promise.resolve(setSelectedModel(modelKey)).catch(() => undefined)
         }
       }
     }

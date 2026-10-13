@@ -76,7 +76,7 @@ describe("wxt-browser storage shim", () => {
 
     // Force the write to throw (simulate quota exceeded / serialization error).
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(Object.getPrototypeOf(window.localStorage), "setItem")
       .mockImplementation(() => {
         throw new Error("QuotaExceededError")
       })
@@ -97,9 +97,9 @@ describe("wxt-browser storage shim", () => {
     // First key serializes/writes fine; the second throws mid-set. The earlier
     // (committed) key must still emit onChanged, the failed key must not, and
     // the overall promise must reject.
-    const realSetItem = Storage.prototype.setItem
+    const realSetItem = Object.getPrototypeOf(window.localStorage).setItem
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(Object.getPrototypeOf(window.localStorage), "setItem")
       .mockImplementation(function (
         this: globalThis.Storage,
         key: string,

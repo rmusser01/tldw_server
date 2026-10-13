@@ -29,7 +29,9 @@
       "az": "A-Z",
       "provider": "Provider",
       "localFirst": "Local-first"
-    }
+    },
+    "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
+    "retrySave": "Retry saving model"
   },
   "save": "Save",
   "saved": "Saved",

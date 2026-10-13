@@ -4,7 +4,8 @@ import { LucideBrain, Star } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { useMessage } from "@/hooks/useMessage"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
+import { SelectedModelSaveFeedback } from "./SelectedModelSaveFeedback"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
@@ -14,6 +15,7 @@ import { getCanonicalModelKey, resolveModelSelectorSelection } from "@/hooks/pla
 export type Props = {
   iconClassName?: string
   showSelectedName?: boolean
+  showPicker?: boolean
 }
 
 export type ModelSelectHandle = {
@@ -47,11 +49,11 @@ const LOCAL_PROVIDERS = new Set([
 ])
 
 const ModelSelectBase = (
-  { iconClassName = "size-5", showSelectedName = false }: Props,
+  { iconClassName = "size-5", showSelectedName = false, showPicker = true }: Props,
   ref: React.ForwardedRef<ModelSelectHandle>
 ) => {
   const { t } = useTranslation("common")
-  const { setSelectedModel, selectedModel } = useMessage()
+  const { setSelectedModel, selectedModel, selectedModelSaveFailed, retrySelectedModelSave } = useSelectedModel()
   const apiProvider = useStoreChatModelSettings(state => state.apiProvider)
   const selectedModelValue =
     typeof selectedModel === "string" ? selectedModel : null
@@ -227,7 +229,7 @@ const ModelSelectBase = (
           </div>
         ),
         onClick: () => {
-          setSelectedModel(getCanonicalModelKey(model))
+          void setSelectedModel(getCanonicalModelKey(model)).catch(() => undefined)
         }
       }
     }
@@ -330,9 +332,13 @@ const ModelSelectBase = (
     return shortName.length > 20 ? shortName.substring(0, 18) + '…' : shortName
   }, [selectedModelValue, data, selectedSelection.model])
 
+  const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
+  // Keep the failed-write owner mounted when a valid selection hides the trigger.
+  if (!showPicker) return saveFeedback
+
   if (isError) {
     return (
-      <IconButton
+      <>{saveFeedback}<IconButton
         ariaLabel={`${t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}. ${t("playground:characterChatReadiness.model.retryAction", "Try again")}`}
         onClick={() => { void refetch() }}
         dataTestId="chat-model-retry"
@@ -340,13 +346,13 @@ const ModelSelectBase = (
       >
         <LucideBrain className={iconClassName} />
         <span className="ml-1 text-xs">{t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>
-      </IconButton>
+      </IconButton></>
     )
   }
 
   if (isLoading && !data) {
     return (
-      <Tooltip title={t("modelSelect.loading", "Loading models...")}>
+      <>{saveFeedback}<Tooltip title={t("modelSelect.loading", "Loading models...")}>
         <IconButton
           ariaLabel={t("selectAModel") as string}
           disabled
@@ -358,12 +364,13 @@ const ModelSelectBase = (
             {t("modelSelect.loading", "Loading models...")}
           </span>
         </IconButton>
-      </Tooltip>
+      </Tooltip></>
     )
   }
 
   return (
     <>
+      {saveFeedback}
       {data && data.length > 0 && (
         <Dropdown
           open={dropdownOpen}

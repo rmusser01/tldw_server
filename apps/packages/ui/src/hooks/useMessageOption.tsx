@@ -344,6 +344,7 @@ export const useMessageOption = (
     setSelectedModel,
     beginSelectedModelSave,
     retrySelectedModelSave,
+    selectedModelSaveFailed,
     selectedModelIsLoading
   } = useSelectedModel()
   const [selectedAssistant, setSelectedAssistant, assistantSelectionMeta] = useSelectedAssistant(null);
@@ -759,6 +760,7 @@ export const useMessageOption = (
     setSelectedModel,
     beginSelectedModelSave,
     retrySelectedModelSave,
+    selectedModelSaveFailed,
     chatMode,
     setChatMode,
     isEmbedding,

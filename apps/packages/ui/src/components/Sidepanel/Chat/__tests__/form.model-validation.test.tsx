@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import React from "react"
@@ -29,6 +30,13 @@ const mocks = vi.hoisted(() => ({
 const models = [{ model: "ready-model", provider: "llamacpp" }]
 const t = (key: string, fallback?: string) => fallback ?? key
 vi.mock("@/hooks/useMessage", () => ({ useMessage: mocks.useMessage }))
+vi.mock("@/hooks/chat/useSelectedModel", () => ({
+  useSelectedModel: () => ({
+    ...mocks.useMessage(),
+    selectedModelSaveFailed: false,
+    retrySelectedModelSave: async () => false
+  })
+}))
 vi.mock("@/services/tldw-server", () => ({
   fetchChatModels: mocks.fetchChatModels
 }))
@@ -93,7 +101,7 @@ const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
     const { form, selectedModel, isSending, isConnectionReady, isProMode, draftReady } = scope;
-    const audioHealthEnabled = false;
+    const audioHealthEnabled = false, greetingHistorySelection = null;
     const fetchChatModels = mocks.fetchChatModels;
     const ${catalogQuery.getText(ast)};
     const availableChatModelIds = ${initializer("availableChatModelIds")};
@@ -125,6 +133,7 @@ const useSidebarValidation = new Function(
   "buildAvailableChatModelIds",
   "findUnavailableChatModel",
   "normalizeChatModelId",
+  "isSavedRoleplayConversation",
   compiled
 )(
   React,
@@ -136,7 +145,8 @@ const useSidebarValidation = new Function(
   mocks,
   buildAvailableChatModelIds,
   findUnavailableChatModel,
-  normalizeChatModelId
+  normalizeChatModelId,
+  isSavedRoleplayConversation
 ) as (scope: {
   form: ReturnType<typeof useSimpleForm<{ message: string; image: string }>>
   selectedModel: string
@@ -161,7 +171,7 @@ function Harness({
 }) {
   const form = useSimpleForm({ initialValues: { message: text, image } })
   const [selectedModel, setSelectedModel] = React.useState(model)
-  mocks.useMessage.mockReturnValue({ selectedModel, setSelectedModel })
+  mocks.useMessage.mockReturnValue({ selectedModel, setSelectedModel: async (next: string) => { setSelectedModel(next); return true } })
   const { submit, inline, catalogReady } = useSidebarValidation({
     form,
     selectedModel,

@@ -2058,5 +2058,9 @@
   },
   "chatSidebar_tabs_foldersChats": {
     "message": "Folders ({count, plural, one {# chat} other {# chats}})"
+  },
+  "modelSelect": {
+    "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
+    "retrySave": "Retry saving model"
   }
 }

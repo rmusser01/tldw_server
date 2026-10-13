@@ -85,7 +85,7 @@ export type SelectedModelSaveOperation = {
  */
 export const useSelectedModel = () => {
   const selectedModelFromStore = useStoreMessageOption((s) => s.selectedModel);
-  const selectedModelRevision = useStoreMessageOption((s) => s.selectedModelRevision);
+  useStoreMessageOption((s) => s.selectedModelRevision);
   const selectedModelStorageHandled = useStoreMessageOption(
     (s) => s.selectedModelStorageHandled,
   );
@@ -107,6 +107,8 @@ export const useSelectedModel = () => {
     [selectedModelFromStore, storedSelectedModel, selectedModelStorageHandled],
   );
 
+  const [failedModelSave, setFailedModelSave] = React.useState<SelectedModelSaveOperation | null>(null)
+
   const beginSelectedModelSave = React.useCallback(
     (
       nextOrUpdater: string | null | ((current: string | null) => string | null)
@@ -119,16 +121,24 @@ export const useSelectedModel = () => {
       const revision = useStoreMessageOption.getState().selectedModelRevision + 1
       const isCurrent = createSelectedModelGuard(normalized, revision)
       setSelectedModelInStore(normalized, { storageHandled: true })
-      return {
-        completion: persistSelectedModel(
-          normalized,
-          revision,
-          setStoredSelectedModel
-        ),
+      const operation: SelectedModelSaveOperation = {
+        completion: persistSelectedModel(normalized, revision, setStoredSelectedModel),
         isCurrent,
-        retry: () =>
-          persistSelectedModel(normalized, revision, setStoredSelectedModel)
-      } satisfies SelectedModelSaveOperation
+        retry: () => observe(persistSelectedModel(normalized, revision, setStoredSelectedModel))
+      }
+      const observe = (pending: Promise<boolean>): Promise<boolean> => {
+        void pending.then(
+          (acknowledged) => {
+            if (acknowledged && isCurrent()) setFailedModelSave(null)
+          },
+          () => {
+            if (isCurrent()) setFailedModelSave(operation)
+          }
+        )
+        return pending
+      }
+      observe(operation.completion)
+      return operation
     },
     [selectedModel, setSelectedModelInStore, setStoredSelectedModel]
   )
@@ -140,9 +150,11 @@ export const useSelectedModel = () => {
   )
 
   const retrySelectedModelSave = React.useCallback(
-    () => persistSelectedModel(selectedModel, selectedModelRevision, setStoredSelectedModel),
-    [selectedModel, selectedModelRevision, setStoredSelectedModel],
+    () => failedModelSave?.isCurrent() ? failedModelSave.retry() : Promise.resolve(false),
+    [failedModelSave],
   );
+  const selectedModelSaveFailed = Boolean(failedModelSave?.isCurrent())
+
 
   // Sync effect: hydrate store from storage or push store to storage
   React.useEffect(() => {
@@ -183,6 +195,7 @@ export const useSelectedModel = () => {
     setSelectedModel,
     beginSelectedModelSave,
     retrySelectedModelSave,
+    selectedModelSaveFailed,
     selectedModelIsLoading: selectedModelStorageMeta.isLoading,
   };
 };

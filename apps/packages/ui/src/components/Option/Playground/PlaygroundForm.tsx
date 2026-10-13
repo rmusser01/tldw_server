@@ -1,3 +1,4 @@
+import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSaveFeedback";
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition";
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
@@ -591,6 +592,8 @@ export const PlaygroundForm = ({
     setMessages,
     selectedModel,
     selectedModelIsLoading,
+    selectedModelSaveFailed,
+    retrySelectedModelSave,
     selectedAssistant: resolvedAssistantSelection,
     effectiveAssistantState,
     setSelectedModel,
@@ -3412,6 +3415,8 @@ export const PlaygroundForm = ({
   );
 
   const modelSelectButton = (
+    <>
+    <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
     <ChatModelSelectorDropdown
       apiModelLabel={apiModelLabel}
       catalogControls={modelCatalogControls}
@@ -3435,6 +3440,7 @@ export const PlaygroundForm = ({
       setModelSearchQuery={setModelSearchQuery}
       setModelSortMode={setModelSortMode}
     />
+    </>
   );
 
   const modelUsageBadge = wrapComposerProfile(

@@ -20,8 +20,8 @@ vi.mock("react-i18next", () => ({
     t: (key: string, fallback?: string) => fallback ?? key
   })
 }))
-vi.mock("@/hooks/useMessage", () => ({
-  useMessage: () => {
+vi.mock("@/hooks/chat/useSelectedModel", () => ({
+  useSelectedModel: () => {
     const [selectedModel, setSelectedModel] = React.useState<string | null>(
       "tldw:Gemma:Q4"
     )
@@ -30,7 +30,10 @@ vi.mock("@/hooks/useMessage", () => ({
       setSelectedModel: (value: string | null) => {
         selection(value)
         setSelectedModel(value)
-      }
+        return Promise.resolve(true)
+      },
+      selectedModelSaveFailed: false,
+      retrySelectedModelSave: () => Promise.resolve(false)
     }
   }
 }))
