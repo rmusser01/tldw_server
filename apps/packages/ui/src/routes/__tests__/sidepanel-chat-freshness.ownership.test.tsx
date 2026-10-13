@@ -11,13 +11,14 @@ vi.mock("@/services/chat-history-selection", async original => ({
 }))
 
 const manifest = { status: "captured", snapshot: { nodes: [{ id: "tip", parent_id: null }] } }
-const mount = () => {
+const mount = (nodes: Array<{ id: string; parent_id: string | null }> = manifest.snapshot.nodes) => {
+  const capture = { ...manifest, snapshot: { nodes } }
   let tab = "source"
   let epoch = 0
   let owner = { kind: "native", conversation_id: "source-chat", validate_lease: () => true }
   const view = { cursor: { kind: "after_message", message_id: "tip" } }
   const controller = {
-    getCurrent: () => ({ status: "ready", owner, view, capture: manifest }),
+    getCurrent: () => ({ status: "ready", owner, view, capture }),
     fence: () => { const source = epoch; return () => epoch === source },
     getSignal: () => new AbortController().signal,
     choose: vi.fn()
@@ -117,4 +118,40 @@ it("focus and send checks preserve an armed explicit branch without fetching or 
   })
   expect(io.capture).not.toHaveBeenCalled()
   expect(hook.controller.choose).not.toHaveBeenCalled()
+})
+
+
+it("warns through the original H1 choice when a reopened native bookmark is behind its admitted manifest", async () => {
+  const hook = mount([{ id: "tip", parent_id: null }, { id: "new-tip", parent_id: "tip" }])
+  const hold = vi.fn((_view: unknown, _current: () => boolean, _reason: string) => true)
+  Object.assign(hook.controller, { checkFreshness: vi.fn(), holdStaleSend: hold })
+  const originalView = hook.controller.getCurrent().view
+  await act(async () => {
+    hook.result.current.showTab("tip")
+    hook.result.current.checkShownTab()
+  })
+  expect(hold).toHaveBeenCalledWith(originalView, expect.any(Function), "freshness")
+  expect(hook.controller.choose).not.toHaveBeenCalled()
+  expect(io.capture).not.toHaveBeenCalled()
+  const current = hold.mock.calls[0][1] as () => boolean
+  expect(current()).toBe(true)
+  hook.depart()
+  expect(current()).toBe(false)
+})
+
+it.each(["known latest", "explicit branch"])("preserves a native restored view with %s without a new choice", async reason => {
+  const hook = mount([{ id: "tip", parent_id: null }, { id: "new-tip", parent_id: "tip" }])
+  const hold = vi.fn((_view: unknown, _current: () => boolean, _reason: string) => true)
+  Object.assign(hook.controller, {
+    checkFreshness: vi.fn(),
+    holdStaleSend: hold,
+    branchPending: reason === "explicit branch"
+  })
+  await act(async () => {
+    hook.result.current.showTab(reason === "known latest" ? "new-tip" : "tip")
+    hook.result.current.checkShownTab()
+  })
+  expect(hold).not.toHaveBeenCalled()
+  expect(hook.controller.choose).not.toHaveBeenCalled()
+  expect(io.capture).not.toHaveBeenCalled()
 })

@@ -8,9 +8,9 @@
  * silently fork the chat. The panel therefore checks the server's message
  * manifest when it shows a tab, when it regains focus and before a send. When
  * the server has newer turns, it moves the tab's history selection to the
- * latest message (which reloads the transcript and re-parents the next send),
- * or shows an "updated elsewhere" notice when moving would discard messages
- * that exist only in this tab.
+ * latest message for legacy controllers, or shows an "updated elsewhere"
+ * notice when moving would discard local messages. Native H1 instead preserves
+ * the restored view and offers its guarded Load latest or Branch here choice.
  */
 import React from "react"
 import { useChatHistoryFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/hooks/chat/useChatHistoryFreshness"
@@ -161,7 +161,7 @@ export const useSidepanelChatFreshness = ({
       const tabId = checkableRef.current()
       if (!tabId) return PROCEED
       const selection = selectionRef.current
-      if (selection.branchPending || (selection.checkFreshness && (mode === "show" || mode === "focus"))) return PROCEED
+      if (selection.branchPending || (selection.checkFreshness && mode === "focus")) return PROCEED
       const current = selection.getCurrent()
       const { owner, view, capture } = current
       if (
@@ -217,6 +217,11 @@ export const useSidepanelChatFreshness = ({
       }
 
       const { latestId, newCount } = comparison
+      if (mode === "show" && selection.checkFreshness) {
+        // A fresh capture can still restore an older bookmark; keep its parent until the user chooses.
+        selection.holdStaleSend(view, () => onTab() && sameView(), "freshness")
+        return PROCEED
+      }
       if ((mode === "show" || mode === "focus") && hasUnsentLocalMessages(messages, nodes)) {
         publish({ tabId, kind: "stale", newCount })
         return PROCEED

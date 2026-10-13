@@ -2451,6 +2451,37 @@ describe("shared proactive native freshness", () => {
       hook.unmount()
     }
   )
+  it("a restored old native tip exposes the existing freshness choice even when its capture version is current", async () => {
+    const { useStoreMessageOption } = await import("@/store/option")
+    useStoreMessageOption.setState({
+      isLoading: false, isProcessing: false, streaming: false, messages: [],
+      chatDraftAddress: { kind: "native", id: "chat", ownerKey: "owner", scope: { type: "global" } }
+    })
+    const hook = renderHook(() => {
+      const selection = useHistorySelection()
+      const freshness = useSidepanelChatFreshness({ historySelection: selection, checkableTabId: () => "active" })
+      return { selection, freshness }
+    })
+    try {
+      await act(async () => {
+        await hook.result.current.selection.open(nativeOwner)
+        await hook.result.current.selection.choose({ kind: "after_message", message_id: "a" })
+      })
+      const origin = hook.result.current.selection.getCurrent().view!
+      const capture = hook.result.current.selection.getCurrent().capture
+      const reads = mocks.capture.mock.calls.length
+      await act(async () => {
+        hook.result.current.freshness.showTab("a")
+        hook.result.current.freshness.checkShownTab()
+      })
+      expect(hook.result.current.selection.freshnessConflict).toBe(true)
+      expect(hook.result.current.selection.getCurrent().view).toBe(origin)
+      expect(hook.result.current.selection.getCurrent().capture).toBe(capture)
+      expect(mocks.capture).toHaveBeenCalledTimes(reads)
+      expect(hook.result.current.freshness.notice).toBeNull()
+    } finally { hook.unmount() }
+  })
+
   it("compact focus cannot automatically choose a new parent", async () => {
     vi.useFakeTimers()
     const hook = renderHook(() => {
