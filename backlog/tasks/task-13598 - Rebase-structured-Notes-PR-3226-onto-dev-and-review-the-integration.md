@@ -12,7 +12,7 @@ labels:
 priority: high
 references:
 - https://github.com/rmusser01/tldw_server/pull/3226
-updated_date: 2026-10-12 21:46
+updated_date: 2026-10-13 01:09
 ---
 
 ## Description
@@ -24,10 +24,10 @@ Integrate the already reviewed local structured-document checks and reversible f
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The PR branch is rebased onto the recorded current dev base, resolves its conflicts and retains the intended structured-Notes changes without deleting unrelated upstream behavior or documentation.
-- [x] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
-- [x] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
-- [x] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
-- [x] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
+- [ ] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
+- [ ] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
+- [ ] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
+- [ ] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,6 +42,10 @@ ADR required: no new ADR for rebase/direct existing-owner integration; ADR path:
 6. Current-owner disposition (Root, 2026-10-12): retain the single current wait/flush navigation owner from G01/PR3164, documented in Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md and Docs/Development/2026-10-04-ux-remediation-integration-log.md (NS-01/02/03/05/06). No distinct canonical save/navigation ADR exists in current Docs/ADR; ADR070/071 still govern structured source/recovery/native boundaries. The old immediate source-navigation expectation is obsolete; preserve its RED evidence. Revised controls must retain newest exact source/mode/revision/base durably while the old request is pending, forbid navigation until settlement, then verify newer accepted source or explicit Stay/Discard/Continue recovery and restart. Do not add a source-only bypass or indefinite wait policy; preserve current transport timeout/authority cancellation controls.
 7. Independent review fixes: settle active save promise and reducer on local storage failure; verify repaired-storage Save and navigation retries without loss/bypass. Preserve canonical, legacy, deleted and unsupported Knowledge head precedence through existing ordinary Markdown and portable export/import, while source downloads and structured bodies stay exact. Regenerate canonical API-types path union/fingerprint under repository-equivalent route policy with the supported generator and backend-required drift check. Correct bounds E2E to assert unavailable Format and unchanged source. Focused actual-owner regressions, scoped checks, additive evidence and independent scoped re-review are required before Root expected-head lease publication; no new carrier/transport or qualification waiver.
 8. Additional confirmed integration defect from real active-Sync export/import control: the immutable compound response projection omits content_language from the durable note-step payload, so POST ACK returns null although GET returns the persisted structured mode. ADR required: no new ADR; ADR070 and the existing durable compound-response owner apply. Preserve payload field presence, explicit null and known/future language exactly in that owner; do not read the current row, infer language or weaken replay/receipt authority. Before/after real active compound POST/update/idempotent-replay controls must retain exact source/language/head including newer-row changes and legacy omission. Preserve initial RED evidence, run focused touched-owner Ruff/Bandit/format checks, and include this finding and fix in the independent scoped re-review before Root publication. Existing source/language/currentness ACs cover this regression; no new carrier, schema, transport or policy.
+9. Current-head CI follow-up under the user's continuing approval: retain complete failed GitHub job logs and reports s-backend-ci-diagnosis.md / s-frontend-ci-diagnosis.md. Preserve prior source reviews and failures; reopen verification/review/publication accounting. ADR required: no new ADR for restoring existing contracts/fixtures and idle-query admission; ADR paths: 031,034,070-074. The capability-query activation signal remains ephemeral within the existing page/editor interface and preserves authenticated scope, currentness and write-time negotiation; no new durable rule, API, schema, dependency or cache.
+10. Correct obsolete source-bound save mocks and known Markdown/capability fixtures, held-ACK and encoded-ID settlement expectations, module-relative raw fixture binding, unknown-mode duplicate affordance and precise Export-submenu selector. Add real idle/active editor query controls and activate the existing display capability lookup only for actual draft/selection/restored content, preserving immediate Create-before-typing and current write/offline guards. Never weaken ACK/version/language/source/authority checks, budgets, first-attempt E2E ratchets or unknown-mode protection.
+11. Seed deliberate historical SQLite58/59/60 and PostgreSQL64 fixtures with schema-specific real SQL as existing tests do; preserve all old catalogs, graph/constraint/rollback/concurrency assertions and current constructor upgrades. Update exact-title/error, supported DB signatures, current PostgreSQL83 and Sync-v2 capability/readiness/safety-query expectations. Retain no-secret refusal, v1 shape, immutable replay and cursor/append fences. No production old-schema fallback or new migration is justified. Repair isolated PDF/Monaco dependency fixtures using real preparation owner, not mocked helper or skipped copy checks.
+12. Regenerate Published docs through the canonical refresh script; retain exact source/private boundaries, commit generated mirrors for revision-date history and verify deterministic refresh/strict build without suppressions. Use isolated current-source private environments and serialized focused RED/GREEN checks, selected real PostgreSQL fixtures and targeted hosted Notes print/request-budget controls where practical; no local full sweep or physical IME/spoken claim. Run scoped formatting/lint/type/security, independently review actual changed range, and update existing draft PR with exact expected-head lease and truthful residual limits; no merge/auto-merge.
 <!-- SECTION:PLAN:END -->
 ## Implementation Notes
 
@@ -57,6 +61,7 @@ Independent scoped re-review of 5733e139 to f0fa621d3e4cd8be5b293a867520e539fed5
 Published the reviewed source head to existing draft PR https://github.com/rmusser01/tldw_server/pull/3226 with exact force-with-lease against original head 3cfe8fc8d622c501e1f5ad1dacda2242b71673dc. Updated its description with actual checks and limitations. GitHub confirmed dev base, exact head, MERGEABLE, draft and no auto-merge. Subsequent task-only bookkeeping preserves reviewed source/tests.
 
 All integration acceptance criteria are accounted for, but status remains In Progress under repository DoD: broader recovery attempts remain 184 pass / 14 fail and 9 pass / 5 fail; four controls passed unchanged in isolation, while the Studio uninstrumented timeout remains unqualified. Matched pre-fix/current diagnostics passed original assertions/deadlines with exact source restoration; they do not establish a load-only cause or a clean recovery-suite result. Bounds discovery predates the final title and is not frozen-head/hosted proof. Whole-file formatting debt, physical IME/spoken output, current-head human Change summary/CI/review gates and separately deferred Chatbook durable Notes sync remain open. No full suite or gate waiver. Reports, raw failed attempts, scoped confirmation and immutable manifests are retained under /private/tmp/structured-notes-pr-rebase-2026-10-12. Existing physical tasks TASK-13587 and TASK-13597 remain open.
+Current-head CI follow-up is in progress after the user requested continuation. Previous source reviews/publication remain historical; current failed-job evidence and root-cause reports are under /private/tmp/structured-notes-pr-followup-2026-10-13. Verification, review and publication are reopened. The repository-local Python CLI lacks --plan; the installed Python backlog-py CLI supplies this field, followed by the repository canonical-format check. No Node CLI, MCP or hand-edit was used.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
@@ -65,7 +70,7 @@ Reviewed rebase and four Important source corrections published to draft PR3226 
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
