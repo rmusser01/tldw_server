@@ -152,7 +152,7 @@ describe("native plaintext Save authority", () => {
     expect(io.capture).toHaveBeenCalledExactlyOnceWith(
       "chat",
       { view: source.view, purpose: "send" },
-      { requestScope: native.request_scope, scope: native.scope, signal }
+      { requestScope: native.request_scope, scope: native.scope, signal, includeNativeCompletion: true }
     )
     expect(io.write).toHaveBeenCalledExactlyOnceWith("u", edited, 1, "chat", {
       requestScope: native.request_scope,

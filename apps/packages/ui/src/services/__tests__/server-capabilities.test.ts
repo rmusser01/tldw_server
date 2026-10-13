@@ -1577,8 +1577,10 @@ describe("server capabilities docs-info merge", () => {
   it("keeps strict client path metadata aligned with Chatterbox voice conversion", () => {
     const source = readFileSync(resolve(process.cwd(), openApiGuardSourcePath), "utf8")
 
-    expect(source).toContain('| "/api/v1/audio/voice-conversion"')
-    expect(source).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
+    expect(source).toContain('export type ClientPath = ApiPath')
+    const canonical = readFileSync(resolve(__dirname, "../../../../api-types/paths.d.ts"), "utf8")
+    expect(canonical).toContain('| "/api/v1/audio/voice-conversion"')
+    expect(canonical).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
   })
 })
 

@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import React from "react"
@@ -86,8 +87,9 @@ const useCompactQueue = new Function(
   "captureChatDispatchSource",
   "useStoreChatModelSettings",
   "resolveModelSelectorSelection",
+  "isSavedRoleplayConversation",
   code
-)(React, useQueuedRequests, throwIfChatSubmitUnsuccessful, captureActorSceneSend, captureChatDraftSource, greetingHistorySelection, captureChatDispatchSource, useStoreChatModelSettings, resolveModelSelectorSelection) as (scope: {
+)(React, useQueuedRequests, throwIfChatSubmitUnsuccessful, captureActorSceneSend, captureChatDraftSource, greetingHistorySelection, captureChatDispatchSource, useStoreChatModelSettings, resolveModelSelectorSelection, isSavedRoleplayConversation) as (scope: {
   sendMessage: (payload: unknown) => Promise<ChatSubmitResult>
   isConnectionReady?: boolean
   stopListening?: () => Promise<void>

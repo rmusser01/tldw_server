@@ -1,3 +1,5 @@
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
+import { browser } from "../../../../../tldw-frontend/extension/shims/wxt-browser"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Storage } from "@plasmohq/storage"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
@@ -76,11 +78,14 @@ describe("actual private first-create record contract", () => {
     expect(localStorage.getItem(key)).toBe(before)
   })
   it("cancellation during reservation makes zero POST and allows a safe later attempt", async () => {
-    const original = Storage.prototype.set
+    const original = browser.storage.local.set
     let enter!: () => void, release!: () => void, current = true
     const started = new Promise<void>(resolve => { enter = resolve })
     const held = new Promise<void>(resolve => { release = resolve })
-    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) { await original.call(this, key, value); enter(); await held; return null })
+    vi.spyOn(browser.storage.local, "set").mockImplementation(async (items, callback) => {
+      await original(items, callback)
+      if (Object.keys(items).some(key => key.startsWith("registry:chat-creation:"))) { enter(); await held }
+    })
     const create = vi.fn()
     const operation = createChatWithRecovery({ ...args(), isCurrent: () => current, create }).catch(error => error)
     await started; current = false; release()

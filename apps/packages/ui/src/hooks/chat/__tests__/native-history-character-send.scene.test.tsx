@@ -1,3 +1,4 @@
+import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"

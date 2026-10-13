@@ -1,3 +1,4 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -59,8 +60,8 @@ const code = ts.transpileModule(`return function useDirect(scope) {
   ${command.getText(ast)}
   return sendCurrentFormMessage;
 }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-const useDirect = new Function("React", "useStoreMessageOption", "captureActorSceneSend", "nativeCharacterPreflightMessage", "normalizeChatSubmitResult", "isChatSubmitSuccess", "captureChatDispatchSource", "documentProcessingSelectionKey", code)(
-  React, useStoreMessageOption, captureActorSceneSend, () => null, normalizeChatSubmitResult, isChatSubmitSuccess, captureChatDispatchSource, documentProcessingSelectionKey) as (scope: Record<string, unknown>) => (message: string, image: string) => Promise<void>
+const useDirect = new Function("React", "useStoreMessageOption", "captureActorSceneSend", "nativeCharacterPreflightMessage", "normalizeChatSubmitResult", "isChatSubmitSuccess", "captureChatDispatchSource", "documentProcessingSelectionKey", "isSavedRoleplayConversation", code)(
+  React, useStoreMessageOption, captureActorSceneSend, () => null, normalizeChatSubmitResult, isChatSubmitSuccess, captureChatDispatchSource, documentProcessingSelectionKey, isSavedRoleplayConversation) as (scope: Record<string, unknown>) => (message: string, image: string) => Promise<void>
 const requestScope = { config: { serverUrl: "https://compact-outer-scene.example", authMode: "single-user" as const }, userId: 1 }
 const controller = { getCurrent: () => ({ status: "idle", owner: null, view: null }), fence: () => () => true,
   draftAccount: { requestScope, isCurrent: () => true } } as unknown as HistorySelectionController
