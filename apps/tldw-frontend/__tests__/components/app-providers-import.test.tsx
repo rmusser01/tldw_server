@@ -118,24 +118,11 @@ describe('AppProviders', () => {
     });
   });
 
-  it('imports and renders with the web notification bridge path', async () => {
+  it('renders children without an out-of-context notification bridge', async () => {
     const { AppProviders } = await import('@web/components/AppProviders');
 
     render(
       <AppProviders>
-        <div>child content</div>
-      </AppProviders>
-    );
-
-    expect(screen.getByText('child content')).toBeInTheDocument();
-    expect(screen.getByTestId('notification-toast-bridge')).toBeInTheDocument();
-  });
-
-  it('keeps the notification bridge unmounted when notifications are disabled', async () => {
-    const { AppProviders } = await import('@web/components/AppProviders');
-
-    render(
-      <AppProviders enableNotifications={false}>
         <div>child content</div>
       </AppProviders>
     );

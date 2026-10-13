@@ -532,9 +532,6 @@ export default function App({ Component, pageProps }: AppProps) {
     }),
     [hideShellNav, isSettingsRoute, isSetupRoute, isSidepanelDebugRoute]
   )
-  const enableNotifications =
-    authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
-
   const enableIndependentBuddy =
     authResolved &&
     isAuthenticated &&
@@ -582,7 +579,7 @@ export default function App({ Component, pageProps }: AppProps) {
   )
 
   return (
-    <AppProviders enableNotifications={enableNotifications}>
+    <AppProviders>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           {enableIndependentBuddy ? (

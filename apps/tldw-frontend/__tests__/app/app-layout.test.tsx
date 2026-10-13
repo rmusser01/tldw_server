@@ -135,15 +135,12 @@ vi.mock("next/dynamic", () => ({
 
 vi.mock("@web/components/AppProviders", () => ({
   AppProviders: ({
-    children,
-    enableNotifications
+    children
   }: {
     children: React.ReactNode
-    enableNotifications?: boolean
   }) => (
     <div
       data-testid="app-providers"
-      data-enable-notifications={String(Boolean(enableNotifications))}
     >
       {children}
     </div>
@@ -535,10 +532,7 @@ describe("App layout routing", () => {
         })
         expect((await cachedClient.getConfig())?.accessToken).toBeUndefined()
         await expectHeader(false)
-        expect(screen.getByTestId("app-providers")).toHaveAttribute(
-          "data-enable-notifications",
-          "true"
-        )
+
         expect(screen.getByLabelText("Settings draft")).toHaveValue(
           "unsaved timeout and server settings"
         )
@@ -569,10 +563,7 @@ describe("App layout routing", () => {
       })
       await expectHeader(true)
       expect(screen.queryByTestId("persistent-buddy")).toBeNull()
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "false"
-      )
+
       await act(async () =>
         nativeConfigWrite({
           ...signedIn,
@@ -605,10 +596,7 @@ describe("App layout routing", () => {
         await act(async () => finish())
         await expectHeader(true)
         expect(mockLogout).not.toHaveBeenCalled()
-        expect(screen.getByTestId("app-providers")).toHaveAttribute(
-          "data-enable-notifications",
-          "false"
-        )
+
       }
     )
 
@@ -650,10 +638,7 @@ describe("App layout routing", () => {
 
       await expectHeader(false)
       expect(mockLogout).not.toHaveBeenCalled()
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "true"
-      )
+
       expect(
         (await storage.get<typeof signedIn>("tldwConfig"))?.accessToken
       ).toBe("bob-new-access")
@@ -693,10 +678,7 @@ describe("App layout routing", () => {
 
         await expectHeader(true)
         expect(mockGetCurrentUser).not.toHaveBeenCalled()
-        expect(screen.getByTestId("app-providers")).toHaveAttribute(
-          "data-enable-notifications",
-          "false"
-        )
+
       } finally {
         getSpy.mockRestore()
       }
@@ -719,10 +701,7 @@ describe("App layout routing", () => {
       await act(async () => storage.remove(COOKIE_SESSION_CONFIG_KEY))
       await expectHeader(true)
       expect(mockGetCurrentUser).not.toHaveBeenCalled()
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "false"
-      )
+
     })
   })
 
@@ -1109,23 +1088,13 @@ describe("App layout routing", () => {
       expect(layout).toHaveAttribute("data-hide-header", "true")
     })
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
-    expect(screen.getByTestId("app-providers")).toHaveAttribute(
-      "data-enable-notifications",
-      "false"
-    )
+
   })
 
-  it("enables notification startup after auth resolves on app routes", async () => {
+  it("enables the authenticated layout after auth resolves on app routes", async () => {
     process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
-
     renderApp("/media")
-
-    await waitFor(() => {
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "true"
-      )
-    })
+    await waitFor(() => expect(screen.getByTestId("option-layout")).toHaveAttribute("data-hide-header", "false"))
   })
 
   it("refreshes nav visibility when auth config updates", async () => {

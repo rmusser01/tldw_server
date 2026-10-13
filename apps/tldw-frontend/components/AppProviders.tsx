@@ -9,7 +9,6 @@ import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
 import { FontSizeProvider } from "@/context/FontSizeProvider"
 import { DemoModeProvider } from "@/context/demo-mode"
 import { getQueryClient } from "@/services/query-client"
-import { NotificationToastBridge } from "@web/components/notifications/NotificationToastBridge"
 import { useSplashScreen } from "@/hooks/useSplashScreen"
 import { SPLASH_TRIGGER_EVENT } from "@/services/splash-events"
 import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
@@ -17,7 +16,6 @@ import { ToastProvider } from "@web/components/ui/ToastProvider"
 
 type AppProvidersProps = {
   children: React.ReactNode
-  enableNotifications?: boolean
 }
 
 const SplashOverlay = dynamic(
@@ -34,8 +32,7 @@ const EMPTY_STYLES = { image: { height: 60 } }
 patchStaticAntdNotificationCompat()
 
 export const AppProviders: React.FC<AppProvidersProps> = ({
-  children,
-  enableNotifications = true
+  children
 }) => {
   const { antdTheme } = useTheme()
   const { i18n, t } = useTranslation("common")
@@ -97,7 +94,6 @@ export const AppProviders: React.FC<AppProvidersProps> = ({
                 direction={direction}
               >
                 <ToastProvider>
-                  {enableNotifications ? <NotificationToastBridge /> : null}
                   <AntdApp>{children}</AntdApp>
                   {splash.visible && splash.card && (
                     <SplashOverlay
