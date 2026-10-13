@@ -12,7 +12,7 @@ labels:
 priority: high
 references:
 - https://github.com/rmusser01/tldw_server/pull/3226
-updated_date: 2026-10-13 01:09
+updated_date: 2026-10-13 04:11
 ---
 
 ## Description
@@ -24,10 +24,10 @@ Integrate the already reviewed local structured-document checks and reversible f
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The PR branch is rebased onto the recorded current dev base, resolves its conflicts and retains the intended structured-Notes changes without deleting unrelated upstream behavior or documentation.
-- [x] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
-- [x] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
-- [x] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
-- [x] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
+- [ ] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
+- [ ] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
+- [ ] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
+- [ ] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,6 +46,7 @@ ADR required: no new ADR for rebase/direct existing-owner integration; ADR path:
 10. Correct obsolete source-bound save mocks and known Markdown/capability fixtures, held-ACK and encoded-ID settlement expectations, module-relative raw fixture binding, unknown-mode duplicate affordance and precise Export-submenu selector. Add real idle/active editor query controls and activate the existing display capability lookup only for actual draft/selection/restored content, preserving immediate Create-before-typing and current write/offline guards. Never weaken ACK/version/language/source/authority checks, budgets, first-attempt E2E ratchets or unknown-mode protection.
 11. Seed deliberate historical SQLite58/59/60 and PostgreSQL64 fixtures with schema-specific real SQL as existing tests do; preserve all old catalogs, graph/constraint/rollback/concurrency assertions and current constructor upgrades. Update exact-title/error, supported DB signatures, current PostgreSQL83 and Sync-v2 capability/readiness/safety-query expectations. Retain no-secret refusal, v1 shape, immutable replay and cursor/append fences. No production old-schema fallback or new migration is justified. Repair isolated PDF/Monaco dependency fixtures using real preparation owner, not mocked helper or skipped copy checks.
 12. Regenerate Published docs through the canonical refresh script; retain exact source/private boundaries, commit generated mirrors for revision-date history and verify deterministic refresh/strict build without suppressions. Use isolated current-source private environments and serialized focused RED/GREEN checks, selected real PostgreSQL fixtures and targeted hosted Notes print/request-budget controls where practical; no local full sweep or physical IME/spoken claim. Run scoped formatting/lint/type/security, independently review actual changed range, and update existing draft PR with exact expected-head lease and truthful residual limits; no merge/auto-merge.
+13. Published-head CI b8d8e298 revealed two feature-related verification defects (logs and read-only proposals retained under new-head-failures). ADR required: no new ADR; existing ADR070 durable recovery and unchanged CI partition ownership apply. Bind the canonical quota-failure spy to Object.getPrototypeOf(window.localStorage), the existing house pattern, and prove actual native JSDOM plus MemoryStorage receiver interception while preserving every source/selection/no-navigation/notice/finally assertion and original deadlines. Verify the owning deterministic CI config and focused canonical/authority storage controls without production or setup changes. Allocate test_historical_note_seed.py explicitly to chacha-content-persona in all five existing platform matrices; keep baseline44/ignore4, required Linux PostgreSQL and all markers/fixtures unchanged. Run the canonical coverage checker without baseline writes, scoped static checks and independent two-path review before exact-lease publication. No full sweep, host repetition, gate waiver or unrelated CI repair.
 <!-- SECTION:PLAN:END -->
 ## Implementation Notes
 
@@ -60,6 +61,7 @@ Independent CI-delta review accepted33 paths against a39fe39b with no new Critic
 
 Status remains In Progress under repository DoD: inherited whole-file static/formatting debt, original broader recovery aggregates and current-head GitHub/human/merge gates remain separate. Physical tasks13587/13597 stay open; Chatbook durable Notes sync34818 stays deferred. No full sweep, physical waiver, merge or auto-merge. Immutable reports/manifests retain actual execution heads, format equivalence and failed attempts under /private/tmp/structured-notes-pr-followup-2026-10-13. Reviewed source is ready for lease-protected publication; publication accounting remains pending.
 Published the reviewed source606616eb and accounting head0974c8dc to existing draft PR3226 using the exact expected-head lease against a39fe39b. GitHub confirmed exact head, dev base, draft, no auto-merge and matching truthful validation notes. This final task-only accounting preserves all reviewed source/tests; status remains In Progress for the documented repository DoD limits.
+Published-head CI follow-up reopened: unit shard7/8 returned174pass/1native-storage-spy failure; coverage guard reports the one new historical seeder module unassigned. The dependent frontend-required failure is an aggregate. Prior review/host/source receipts remain historical and immutable; this plan is recorded before the two corrections.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
@@ -68,7 +70,7 @@ Reviewed CI corrections published to draft PR3226 against dev2a8ffa78. Targeted 
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
