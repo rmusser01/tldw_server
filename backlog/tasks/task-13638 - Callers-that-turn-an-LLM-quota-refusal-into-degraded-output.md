@@ -22,6 +22,7 @@ After LLM usage accounting PR 2b (TASK-13437) an LLM call for an over-quota user
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the PR 2b final review: a media item that reuses a transcript calls analyze per chunk inside _PERSISTENCE_NONCRITICAL_EXCEPTIONS (Ingestion_Media_Processing/persistence.py near lines 1701-1710), so every chunk after the first refusal is attempted and refused (one hand-off and counter read each); stop at the first refusal. The Explainer node stores generation_failed for a refusal (Explainer/jobs.py near line 451) while the job's error code says llm_quota_exceeded; carry the exception's failure_code into the node's error metadata.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

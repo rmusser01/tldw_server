@@ -17,6 +17,7 @@ outputs_service._summarize_single_article (app/services/outputs_service.py, near
 <!-- AC:BEGIN -->
 - [ ] #1 _summarize_single_article and _summarize_text_block call analyze with custom_prompt_arg and model_override and return the model's summary
 - [ ] #2 A test drives each through the real analyze signature
+- [ ] #3 Once the call works, an LLM quota refusal is let through or recorded in the output's status, not swallowed by the except Exception fallbacks (outputs_service.py near lines 688 and 892), so watchlist enrichment does not record a refused summary as completed
 <!-- AC:END -->
 
 ## Implementation Notes
