@@ -263,6 +263,21 @@ export class ChatPage {
     }
   }
 
+  async openConversationControls(): Promise<void> {
+    const casual = this.page.getByTestId("composer-casual-advanced-chip")
+    const pro = this.page.getByTestId("composer-options-toggle")
+    await expect(casual.or(pro).filter({ visible: true }).first()).toBeVisible()
+    if (await casual.isVisible()) {
+      await expect(casual).toBeEnabled()
+      if ((await casual.getAttribute("aria-expanded")) !== "true") await casual.click()
+      await expect(this.page.getByTestId("composer-casual-advanced-controls-row")).toBeVisible()
+      return
+    }
+    await expect(pro).toBeVisible()
+    if ((await pro.getAttribute("aria-expanded")) !== "true") await pro.click()
+    await expect(pro).toHaveAttribute("aria-expanded", "true")
+  }
+
   async selectCharacter(name: string): Promise<void> {
     const triggerCandidates = [
       this.page.getByTestId("character-select").first(),
@@ -270,6 +285,10 @@ export class ChatPage {
       this.page.getByRole("button", { name: /select character or persona/i }).first(),
       this.page.locator(".character-select").first(),
     ]
+
+    if (!(await Promise.all(triggerCandidates.map(candidate => candidate.isVisible().catch(() => false)))).some(Boolean)) {
+      await this.openConversationControls()
+    }
 
     let trigger: Locator | null = null
     await expect

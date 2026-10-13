@@ -1,0 +1,16 @@
+# Character journey navigation checkpoint — TASK-13662
+
+PR: https://github.com/rmusser01/tldw_server/pull/3229. Base:2f36e7ea17.
+ADR required:no; E2E navigation contracts only. No product, account, capability or persistence change.
+
+Critical job115425762846 reports7navigation failures: desktop setup falls back to a missing Buddy & Persona entry; tablet/mobile context is queried as a tab although the current control is a button; four character journeys search for a hidden trigger while Casual Customize is collapsed. Two additional ordinary-save receipt failures are separate work.
+
+The existing ChatPage now reveals current conversation controls only when no character trigger is visible. It waits for either public Casual Customize or Pro Options before branching, preserving delayed mounting, and expands only a closed disclosure. Character picker, option selection and selected-name checks remain unchanged. Phase6 uses the shared disclosure helper before direct Role-play setup; mobile Pro uses the actual More options/Role-play setup buttons. Context uses the current button role. Original readiness/session/overflow/drawer geometry and diagnostics assertions remain in the spec; no forced Pro state, storage injection, reload or deadline change.
+
+Source-derived old class execution on the actual owned collapsed Casual page reproduces the10-second missing-trigger failure. Repaired actual class opens Customize and selects the separate synthetic character through its real menu. The final actual phase6 helper functions, extracted/transpiled from current source and executed with a declared locator assertion adapter, qualify visible sessions and viewport-contained Role-play setup at1440x900,768x1024 and390x844. This is helper-level real browser/API evidence, not execution of complete Playwright cases. All work uses one existing page and no new browser contexts/windows/tabs.
+
+DOM browser-boundary unit checks cover collapsed/open Casual and Pro plus delayed Casual mounting; existing readiness tests preserve dialogs/handoff and refuse missing chat without reloading.7checks across2suites pass. Critical discovery lists7cases in3files without running or creating servers/browsers. Independent source review has no remaining findings after its delayed-disclosure Minor was resolved. Scoped lint is recorded separately before commit. E2E-only TS: no product compiler/build claim; Vitest transpilation and Playwright discovery validate these helpers. Bandit is not applicable.
+
+Original9conversations/28rows remain deep-equal without rewriting their baseline. The synthetic TASK13659four-row canonical response also remains unchanged. No message send occurred in navigation qualification. Evidence:/private/tmp/chat-pr3229-character-nav-13662-{old-check,new-check,viewport-final}.json and sibling unit/list/static/preservation reports. The broader character save/provider-error journeys and full critical runner still require qualification after the separate native-save fixture migration and integration.
+
+TASK13662 remains In Progress; Stage3 and final acceptance are open. This checkpoint may be committed for review. It is not whole-PR approval or merge readiness. Original master/H2 and other scope remain open, as do final fresh independent reviews, latest-dev rebase and required statuses.
