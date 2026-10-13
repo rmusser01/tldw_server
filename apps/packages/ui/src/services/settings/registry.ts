@@ -131,11 +131,17 @@ export const normalizeSettingValue = <T>(
 }
 
 /** Opt in to read failures when absence must not authorize overwriting stored data. */
-export const getSetting = async <T>(setting: SettingDef<T>, options?: { throwOnError?: boolean }): Promise<T> => {
+export const getSetting = async <T,>(
+  setting: SettingDef<T>,
+  options?: { throwOnError?: boolean; isCurrent?: () => boolean }
+): Promise<T> => {
   try {
     await setting.beforeGet?.()
+    if (options?.isCurrent?.() === false) return setting.defaultValue
     const storage = getStorageForSetting(setting)
     const raw = await storage.get(setting.key)
+    // An old read must not migrate or mirror over a newer explicit choice.
+    if (options?.isCurrent?.() === false) return setting.defaultValue
     if (isUnset(raw)) {
       const legacy = readLocalStorageValue(setting)
       if (!isUnset(legacy)) {
