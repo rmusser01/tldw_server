@@ -15,8 +15,8 @@
 - **Quotas are off unless an admin turns them on.** Nothing is refused unless `USAGE_QUOTAS_ENABLED` is on and the user has a limit. `0` blocks, an unset limit is unlimited, and a lookup or counter failure admits, with a warning.
 - **The public refusal is exactly PR 2a's:** `LLMQuotaExceededError`, an `HTTPException` 402 with a `Retry-After` header and the body `{"detail": {"error": "limit_exceeded", "category": ..., "current": ..., "limit": ..., "message": ...}}`. It is never a `ChatAPIError`, and nothing in this PR catches it and raises something else in its place.
 - **A call is not checked** when it has no user, when its context is `exempt` or `prechecked`, when it is nested inside an accounted provider call, when quotas are off, or when the user's cached limits set none of the three LLM keys.
-- **The decision runs on the accounting loop only** (spec §5): awaited directly there, handed off with `asyncio.run_coroutine_threadsafe` from anywhere else, never through `asyncio.run` and never on another loop. A check that waits more than `CHECK_TIMEOUT_SECONDS = 2.0`, or fails, admits the call with a warning. A sync call on the accounting loop's own thread is not checked (waiting would deadlock); a stream started there is checked at its first item.
-- **Before the provider runs.** `chat` and `achat` check before calling the provider method; `stream` checks when it is called; `astream` checks before an async generator's body runs and before an awaitable result is awaited. A refused call records no usage row.
+- **The decision runs on the accounting loop only** (spec §5): awaited directly there, handed off with `asyncio.run_coroutine_threadsafe` from anywhere else, never through `asyncio.run` and never on another loop. A check handed to the accounting loop that gets no answer within `CHECK_TIMEOUT_SECONDS = 2.0`, or that fails, admits the call with a warning (a check awaited directly on the accounting loop has no timeout, as §5 says). A sync call on the accounting loop's own thread is not checked (waiting would deadlock); a stream started there is checked at its first item.
+- **Before the provider runs.** `chat` and `achat` check before calling the provider method; `stream` checks when it is called; `astream` checks before an async generator's body runs and before an awaitable result is awaited. A refused call records no usage row. A call is decided once: a nested provider method (an `achat` that calls its own `chat`) is not checked again, also when the call records itself.
 - **The shared call layer checks above its `try`.** Inside it, `privacy_safe_chat_error` rebuilds any exception as a provider error.
 - **An admitted request is never refused part-way.** The `prechecked` mark from PR 2a is honoured everywhere; a job or workflow root is never admitted by the request that started it.
 - **Test-first.** Each task's tests are written and seen failing before its code, except tests the plan calls guards.
@@ -26,18 +26,19 @@
 - **Backlog:** `tools/backlog-py` only, `--append-notes`, explicit ids, `git add -A backlog/tasks`.
 - **Commits** end with exactly `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. Never `git stash`. Never `--no-verify`.
 - **Python:** `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python` (written `$PY` below). Tests run with `TLDW_TEST_NO_DOCKER=1`; the Evaluations tests also need `RUN_EVALUATIONS=1`.
-- **Known failures on `dev` in this environment:** `tests/Services/test_router_groups_contract.py` (10 tests), `tests/Audio/test_nemo_streaming_error_sentinel.py` (no `pyaudio`), `tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py::test_initialize_psycopg_connect_fallback_log_omits_raw_exception_and_uses_psycopg2`, and one flashrank test in `tests/RAG_NEW/unit/test_rag_profiles.py` (`TestSlidesSourceLocalRerankers`). **Under `-n 4` across many directories,** order-dependent 404s and 401s on the `/media` routes and four `test_chat_closes_runtime_*` tests fail on `dev` too. Re-run any failure alone, and at `origin/dev`, before reporting it.
+- **Known failures on `dev` in this environment:** `tests/Services/test_router_groups_contract.py` (10 tests), `tests/Audio/test_nemo_streaming_error_sentinel.py` (no `pyaudio`), `tests/RAG_NEW/unit/test_pgvector_adapter_sanitizers.py::test_initialize_psycopg_connect_fallback_log_omits_raw_exception_and_uses_psycopg2`, and one flashrank test in `tests/RAG_NEW/unit/test_rag_profiles.py` (`TestSlidesSourceLocalRerankers`). **Under `-n 4` across many directories,** order-dependent 404s and 401s on the `/media` routes and four `test_chat_closes_runtime_*` tests fail on `dev` too, and so do five tests in `tests/RAG/test_knowledge_qa_live_regressions.py` and `tests/RAG/test_restricted_postgres_media_retrieval.py::test_owner_retrieves_chunked_media_through_standard_pipeline[sqlite]` under `-n 4`. Re-run any failure alone, and at `origin/dev`, before reporting it.
 
 ## Review Focus
 
 Inputs a person would hit that the spec implies. Each has a test in the task named.
 
 1. **The default: quotas off, on a busy server.** Expected: every LLM call costs one switch read, with no hand-off and no query. (Task 1)
-2. **A user over a cost limit whose background job or workflow makes LLM calls.** Expected: the call is refused before the provider is called; the workflow run fails and records the 402; the job fails once with `llm_quota_exceeded` and is not retried. (Tasks 3, 6)
+2. **A user over a cost limit whose background job or workflow makes LLM calls.** Expected: the call is refused before the provider is called; a workflow `llm` step fails the run, which records the 402; a WorkerSDK job fails once with `llm_quota_exceeded` and is not retried. (Tasks 3, 6)
 3. **A streaming call from a direct adapter caller, on an adapter that sends its request inside `stream()`.** Expected: refused before the request is sent, and no usage row. (Task 2)
-4. **An admitted request that crosses its limit part-way** (a long chat, a media batch). Expected: it is never refused part-way. (Tasks 2, 3)
+4. **An admitted request that crosses its limit part-way** (a long chat, a media batch, an evaluation run). Expected: it is never refused part-way. (Tasks 2, 3, 5)
+7. **An over-quota user whose `/chat/completions` request is auto-routed.** Expected: the 402, and the router's provider is not counted as failing for anyone. (Task 6)
 5. **A slow or stuck accounting loop.** Expected: the call waits at most two seconds, then goes ahead, with a warning. (Task 1)
-6. **A sync LLM call made on the server loop's thread by code this PR missed.** Expected: the call goes ahead, recorded but not checked, and a warning is logged. (Task 2)
+6. **A sync LLM call made on the server loop's thread by code this PR missed.** Expected: the call goes ahead, recorded but not checked, and a warning is logged the first time. (Task 2)
 
 ## File Structure
 
@@ -48,11 +49,13 @@ Inputs a person would hit that the spec implies. Each has a test in the task nam
 | `tldw_Server_API/app/core/Usage/llm_roots.py` | A root is never admitted. |
 | `tldw_Server_API/app/core/LLM_Calls/usage_accounting.py` | The check in the four wrapped provider methods. |
 | `tldw_Server_API/app/core/Chat/chat_service.py` | The check at the top of the shared call layer; the chat pipeline lets a refusal through. |
+| `tldw_Server_API/app/api/v1/endpoints/chat.py` | The auto-router call does not record a provider failure for a refusal. |
 | `tldw_Server_API/app/core/exceptions.py` | `LLMQuotaExceededError.retryable` and `.failure_code` for job workers. |
 | The modules in Task 4 | Seven sync LLM calls move off the loop. |
-| `core/Infrastructure/circuit_breaker.py`, `core/Evaluations/*` | The breaker ignores a refusal; evaluators and G-Eval let it through. |
-| `core/Web_Scraping/extraction/strategies/llm.py`, `core/RAG/rag_service/generation.py`, `endpoints/media/document_insights.py` | No retry, no silent fallback, no 500. |
+| `core/Infrastructure/circuit_breaker.py`, `core/Evaluations/*`, `endpoints/evaluations/evaluations_crud.py` | The breaker ignores a refusal; evaluators and G-Eval let it through; an evaluation run is checked when it is created. |
+| `core/Web_Scraping/extraction/strategies/llm.py`, `core/RAG/rag_service/generation.py`, `endpoints/media/document_insights.py`, `core/Writing/manuscript_analysis.py` | No retry, no silent fallback, no 500, no stored failure. |
 | `core/RAG/rag_service/unified_pipeline.py`, `agentic_execution.py`, `endpoints/rag_unified.py` | Optional RAG stages degrade; three handlers pass the 402 through. |
+| `Helper_Scripts/ci/scope_predicate_baseline.txt`, `Docs/Design/web_scraping_refactor_import_inventory.json`, `Docs/Design/WebScraping_Refactor_Import_Inventory.md` | Line-number baselines, regenerated after Task 7 moves lines in `unified_pipeline.py`. |
 | `tldw_Server_API/tests/helpers/llm_quota.py` | `refuse_llm_calls`, for tests of the check at the call. |
 | `Docs/Operations/Usage_Quotas.md`, the spec, backlog | What each caller sees; TASK-13437 closes. |
 
@@ -64,10 +67,15 @@ These depart from the spec's wording or settle what it left open. Each is record
 - **The RAG custom metric is dropped from the list.** `rag_custom_metrics.py:233` calls `analyze(prompt, "...")` without `custom_prompt_arg`, so it raises `TypeError` before any provider call and falls back to a heuristic. It spends nothing. Fixing the call needs a choice of grading provider; Task 8 files a follow-up.
 - **Two more sync calls on the loop move too:** the Explainer job's `adapter.chat` (`core/Explainer/jobs.py`), and the article extractor, which has no caller in the app but is public and costs one line.
 - **The workflow web-search step and cohere's `astream` stay.** The first runs on the workflow engine's own loop, where a sync check hands off and waits safely. The second is nested inside the checked `astream` call.
-- **Jobs are not retried on a refusal.** A quota window does not reset in seconds, so `LLMQuotaExceededError` carries `retryable = False` and `failure_code = "llm_quota_exceeded"`, which WorkerSDK and the other job workers already read.
-- **A workflow `llm` step is retried once** by the engine's default policy, and is refused again without a provider call. That costs about a second and is left as is.
-- **The chat pipeline changes are defence in depth.** Only `/chat/completions` reaches it, and that request is admitted at its boundary. The pipeline still must not rewrite a refusal as a provider outage or record a provider failure for it.
-- **`/media/{id}/insights`** turns any exception into a 500. It gains `except HTTPException: raise`, so it returns the 402. Other §4b endpoints that catch broadly report their own error, as the spec allows; the operator page says so.
+- **Jobs are not retried on a refusal.** A quota window does not reset in seconds, so `LLMQuotaExceededError` carries `retryable = False` and `failure_code = "llm_quota_exceeded"`, which WorkerSDK and the job workers that read `retryable` already honour. A worker that wraps every exception in its own type keeps its own retry (the recurring-question RAG adapter wraps it as retryable); the operator page says "job workers that read it".
+- **Audio jobs are not changed.** Their `audio_analyze` stage calls `analyze(text, api_name)` without the required `custom_prompt_arg`, so it raises `TypeError` before any provider call and can never be refused. Task 8 files TASK-13637 to fix the call and honour `retryable` when it does.
+- **A workflow `llm` step is retried once** by the engine's default policy, and is refused again without a provider call. That costs about a second and is left as is. Other workflow steps that make LLM calls (content generation, NLP, bibliography, image, summarize, translate) catch broadly and return an error output, so the run goes on; the operator page says so, and TASK-13638 lists them with the other callers below.
+- **The `/chat/completions` auto-router call runs before the boundary check** (`chat.py`, routing at about line 3575, the check at about line 4288), so it is not admitted and can be refused at the call. Its `except Exception` would record a failure of the router's provider in the shared `ProviderManager`, which marks it unhealthy for every user after three. Task 6 lets the refusal through that clause; the routing runtime then falls back to rules routing (it treats any router error that way), and the boundary check returns the 402. Moving the boundary check ahead of routing was considered and not done: it would reorder it against the rate limiter and the billing pre-check PR 2a placed it after.
+- **The chat pipeline changes are defence in depth.** Only `/chat/completions` reaches the pipeline, and its generation call is admitted at the boundary. The pipeline still must not rewrite a refusal as a provider outage or record a provider failure for it.
+- **Evaluation runs are checked when they are created.** `POST /evaluations/{eval_id}/runs` starts the run in a task from the request (`EvaluationRunner`, `asyncio.create_task`), so it inherits the admitted mark. Checked at the call instead, a refused sample would be scored 0.0 and the run would complete. Task 5 adds the boundary check; the §4a table gains a row.
+- **Manuscript analysis** stored a refusal as an `analysis_failed` result with a 200. Task 6 lets it through; the writing endpoints' catch tuple holds no `HTTPException`, so they answer 402.
+- **`/media/{id}/insights`** turns any exception into a 500. It gains `except HTTPException: raise`, so it returns the 402. Other §4b paths that catch broadly report their own error or go on with degraded output, as the spec allows: claims verification (`claims_service.py` catches `HTTPException` and falls back to heuristic verdicts), Prompt Studio test runs and benchmarks (error outputs, 0.0 scores), character memory extraction (an empty result). The operator page names them and TASK-13638 tracks them.
+- **Standalone worker processes** (a worker module run with `python -m`) never set the accounting loop, so their sync LLM calls are neither checked nor recorded. The check logs that once per process; the operator page says to run workers in the server process (the default).
 - **The three RAG handlers** (`/rag/simple`, `/rag/advanced`, `/rag/ablate`) gain `except HTTPException: raise`. Gap analysis and the agentic planner stop letting a refusal escape the pipeline. This settles the open note from PR 2a's final review.
 - **WebSocket frames.** `/audio/chat/stream` sends `{"type":"error","code":"provider_unavailable",...}` and the socket stays open; the realtime sockets send `{"type":"error","error":{"type":"server_error","code":"internal_error",...}}` then `response.done` with status `failed`. Both are documented, not changed.
 
@@ -87,7 +95,7 @@ These depart from the spec's wording or settle what it left open. Each is record
 - Produces, in `llm_quota_gate`:
   - `CHECK_TIMEOUT_SECONDS: float = 2.0`
   - `user_to_check() -> int | None`: the user to check this call for, or None when it is not checked.
-  - `check_user_sync(user_id: int) -> bool`: raises `LLMQuotaExceededError` on a refusal; returns False when the check cannot run here (on the accounting loop's thread, or with no accounting loop), True otherwise.
+  - `check_user_sync(user_id: int) -> bool`: raises `LLMQuotaExceededError` on a refusal; returns False when the check cannot run here (on the accounting loop's thread, or with no accounting loop), True otherwise. Each of those two cases logs a warning the first time it happens in the process, and at debug after that.
   - `async check_user_async(user_id: int) -> None`: raises `LLMQuotaExceededError` on a refusal.
   - `check_llm_call_sync() -> bool` and `async check_llm_call_async() -> None`: the two above for the current context.
 - Produces `quota_resolver.cached_limits(user_id: int) -> dict[str, int | float] | None`.
@@ -266,7 +274,7 @@ async def test_with_quotas_off_nothing_is_handed_off_or_queried(monkeypatch: pyt
     monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
     monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
     monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
-    monkeypatch.setattr(llm_quota_gate.asyncio, "run_coroutine_threadsafe", _no_hand_off)
+    monkeypatch.setattr(llm_quota_gate, "get_accounting_loop", _no_hand_off)
     monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _no_hand_off)
     with llm_call_context(user_id=7):
         assert await asyncio.to_thread(llm_quota_gate.check_llm_call_sync) is True
@@ -300,7 +308,7 @@ async def test_a_root_is_never_admitted_by_the_request_that_started_it(decisions
 - [ ] **Step 2: Run the tests to see them fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Usage/test_llm_quota_gate.py`
-Expected: collection error, `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Usage.llm_quota_gate'`.
+Expected: collection error, `ImportError: cannot import name 'llm_quota_gate' from 'tldw_Server_API.app.core.Usage'`.
 
 - [ ] **Step 3: Add `cached_limits` to the resolver**
 
@@ -355,9 +363,19 @@ from tldw_Server_API.app.core.Usage.quota_checks import (
 )
 from tldw_Server_API.app.core.Usage.quota_resolver import cached_limits
 
-# How long a check waits for the accounting loop before admitting the call.
+# How long a check handed to the accounting loop waits for its answer before admitting the call.
 CHECK_TIMEOUT_SECONDS = 2.0
 _LLM_LIMIT_KEYS = (LLM_TOKENS_PER_MONTH_KEY, LLM_COST_PER_DAY_KEY, LLM_COST_PER_MONTH_KEY)
+_WARNED: set[str] = set()
+
+
+def _warn_once(key: str, message: str) -> None:
+    """Log a warning the first time ``key`` happens in this process, and at debug after that."""
+    if key in _WARNED:
+        logger.debug(message)
+        return
+    _WARNED.add(key)
+    logger.warning(message)
 
 
 def user_to_check() -> int | None:
@@ -409,18 +427,28 @@ def check_user_sync(user_id: int) -> bool:
     """
     loop = get_accounting_loop()
     if loop is None:
+        _warn_once(
+            "no_loop",
+            "No accounting loop is set, so synchronous LLM calls are not quota-checked "
+            "(a standalone worker process must call set_accounting_loop)",
+        )
         return False
     if _running_loop() is loop:
-        logger.warning("A synchronous LLM call on the event loop's thread is not quota-checked")
+        _warn_once("on_loop", "A synchronous LLM call on the event loop's thread is not quota-checked")
         return False
+    coro = llm_quota_refusal(user_id)
     try:
-        future = asyncio.run_coroutine_threadsafe(llm_quota_refusal(user_id), loop)
-        try:
-            refusal = future.result(timeout=CHECK_TIMEOUT_SECONDS)
-        except TimeoutError:
-            future.cancel()
-            logger.warning("LLM quota check timed out after {}s; call admitted", CHECK_TIMEOUT_SECONDS)
-            return True
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+    except Exception as error:  # noqa: BLE001 - the loop closed between the two lines above
+        coro.close()
+        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call admitted")
+        return True
+    try:
+        refusal = future.result(timeout=CHECK_TIMEOUT_SECONDS)
+    except TimeoutError:
+        future.cancel()
+        logger.warning("LLM quota check timed out after {}s; call admitted", CHECK_TIMEOUT_SECONDS)
+        return True
     except Exception as error:  # noqa: BLE001 - a check must never break an LLM call
         logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call admitted")
         return True
@@ -441,7 +469,12 @@ async def check_user_async(user_id: int) -> None:
         if target is running:
             refusal = await llm_quota_refusal(user_id)
         else:
-            future = asyncio.run_coroutine_threadsafe(llm_quota_refusal(user_id), target)
+            coro = llm_quota_refusal(user_id)
+            try:
+                future = asyncio.run_coroutine_threadsafe(coro, target)
+            except Exception:
+                coro.close()
+                raise
             try:
                 refusal = await asyncio.wait_for(asyncio.wrap_future(future), CHECK_TIMEOUT_SECONDS)
             except TimeoutError:
@@ -695,12 +728,39 @@ async def test_an_awaitable_astream_is_checked_before_it_is_awaited(rows, refuse
     with pytest.raises(LLMQuotaExceededError):
         await pending
     assert await _settled(rows) == []
+
+
+async def test_a_self_recorded_call_is_decided_once_even_when_achat_calls_chat(rows, refused) -> None:
+    """The claims engine's calls record themselves; the nested sync chat is not checked a second time."""
+    with llm_call_context(user_id=8, records_itself=True):
+        await _FakeProvider().achat(REQUEST)
+    assert refused == [8]
+    assert await _settled(rows) == []
+
+
+async def test_with_quotas_off_a_provider_call_hands_nothing_off(rows, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default costs a switch read: no hand-off to the accounting loop and no decision."""
+    from tldw_Server_API.app.core.Usage import llm_quota_gate
+
+    def _no_hand_off(*args: Any, **kwargs: Any) -> None:
+        """Fail the test if the check hands anything to the loop."""
+        raise AssertionError("handed off")
+
+    monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
+    monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
+    monkeypatch.setattr(llm_quota_gate, "get_accounting_loop", _no_hand_off)
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _no_hand_off)
+    with llm_call_context(user_id=7):
+        assert (await asyncio.to_thread(_FakeProvider().chat, REQUEST))["usage"] == USAGE
+        await _FakeProvider().achat(REQUEST)
+    assert len(await _settled(rows)) == 2
 ```
 
 - [ ] **Step 2: Run the tests to see them fail**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/LLM_Calls/test_usage_accounting.py`
-Expected: 5 failed, 26 passed. The failures: `test_a_refused_call_never_reaches_the_provider_and_records_nothing`, `test_an_admitted_user_is_checked_once_per_call_and_recorded`, `test_a_call_that_records_itself_is_still_checked`, `test_a_stream_started_on_the_loop_thread_is_checked_at_its_first_item` and `test_an_awaitable_astream_is_checked_before_it_is_awaited` (no refusal is raised, or no decision runs). `test_an_admitted_request_is_not_refused_part_way` and `test_a_sync_call_on_the_loop_thread_is_recorded_but_not_checked` are guards and pass.
+Expected: 6 failed, 27 passed. The failures: `test_a_refused_call_never_reaches_the_provider_and_records_nothing`, `test_an_admitted_user_is_checked_once_per_call_and_recorded`, `test_a_call_that_records_itself_is_still_checked`, `test_a_stream_started_on_the_loop_thread_is_checked_at_its_first_item`, `test_an_awaitable_astream_is_checked_before_it_is_awaited` and `test_a_self_recorded_call_is_decided_once_even_when_achat_calls_chat` (no refusal is raised, or no decision runs). `test_an_admitted_request_is_not_refused_part_way`, `test_a_sync_call_on_the_loop_thread_is_recorded_but_not_checked` and `test_with_quotas_off_a_provider_call_hands_nothing_off` are guards and pass.
 
 - [ ] **Step 3: Update the module docstring and imports**
 
@@ -790,6 +850,8 @@ In `_wrap_chat`, replace:
     @functools.wraps(fn)
     def chat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
         plan = _plan_call()
+        if plan is None:
+            return fn(self, request, *args, **kwargs)
 ```
 
 with:
@@ -801,6 +863,11 @@ with:
         if user_id is not None:
             check_user_sync(user_id)
         plan = _plan_call()
+        if plan is None:
+            if user_id is None:
+                return fn(self, request, *args, **kwargs)
+            with accounted_call():  # checked here, so a nested provider method is not checked again
+                return fn(self, request, *args, **kwargs)
 ```
 
 In `_wrap_achat`, replace:
@@ -809,6 +876,8 @@ In `_wrap_achat`, replace:
     @functools.wraps(fn)
     async def achat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
         plan = _plan_call()
+        if plan is None:
+            return await fn(self, request, *args, **kwargs)
 ```
 
 with:
@@ -820,7 +889,14 @@ with:
         if user_id is not None:
             await check_user_async(user_id)
         plan = _plan_call()
+        if plan is None:
+            if user_id is None:
+                return await fn(self, request, *args, **kwargs)
+            with accounted_call():  # checked here, so a nested provider method is not checked again
+                return await fn(self, request, *args, **kwargs)
 ```
+
+A call that records itself (the claims engine) has no recording plan, so without the `accounted_call()` block its `achat` would be checked, and then the `chat` it calls checked again: two hand-offs and two counter reads per call.
 
 - [ ] **Step 6: Check in `stream`**
 
@@ -949,7 +1025,7 @@ Calling an async generator function runs none of its body, so checking at the fi
 - [ ] **Step 8: Run the tests to see them pass**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/LLM_Calls/test_usage_accounting.py tldw_Server_API/tests/Usage -W error::RuntimeWarning`
-Expected: all pass; 31 in `test_usage_accounting.py`. No `RuntimeWarning`.
+Expected: all pass; 33 in `test_usage_accounting.py`. No `RuntimeWarning`.
 
 - [ ] **Step 9: Run the neighbours**
 
@@ -1846,7 +1922,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ### Task 5: Evaluations never count, retry or score a refusal
 
-The Evaluations circuit breaker is shared by all users per provider and opens after 3 to 5 failures; one user's refusals must not stop evaluations for everyone. G-Eval retries a failed call up to 10 times with waits of up to 120 seconds, and its catch-all rewrites any other exception as `ValueError("Unsupported API endpoint")`. The response-quality evaluator scores any failed metric 0.0, so a refused evaluation would be stored as a real score. The RAG evaluator's first-metric probe would keep a refusal as a per-metric error and go on.
+The Evaluations circuit breaker is shared by all users per provider and opens after 3 to 5 failures; one user's refusals must not stop evaluations for everyone. G-Eval retries a failed call up to 10 times with waits of up to 120 seconds, and its catch-all rewrites any other exception as `ValueError("Unsupported API endpoint")`. The response-quality evaluator scores any failed metric 0.0, so a refused evaluation would be stored as a real score. The RAG evaluator's first-metric probe would keep a refusal as a per-metric error and go on. And `POST /evaluations/{eval_id}/runs` has no boundary check: its run is a task started from the request, so checked at the call a refused sample would be scored 0.0 and the run would complete. It gets the boundary check the other evaluation endpoints have.
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Infrastructure/circuit_breaker.py` (`CircuitBreakerConfig`, near line 128; `CircuitBreaker.call` and `call_async`, the two `except BaseException as exc:` clauses near lines 822 and 867)
@@ -1854,6 +1930,8 @@ The Evaluations circuit breaker is shared by all users per provider and opens af
 - Modify: `tldw_Server_API/app/core/Evaluations/ms_g_eval.py` (imports; the `Retrying` predicate near line 483; the catch-all near line 537)
 - Modify: `tldw_Server_API/app/core/Evaluations/response_quality_evaluator.py` (imports; six re-raise clauses)
 - Modify: `tldw_Server_API/app/core/Evaluations/rag_evaluator.py` (imports; the probe's re-raise clause near line 363)
+- Modify: `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_crud.py` (imports; `create_run`, near line 324)
+- Test: `tldw_Server_API/tests/Evaluations/test_evaluations_crud_create_run_api.py` (append)
 - Test: `tldw_Server_API/tests/Evaluations/unit/test_circuit_breaker.py` (append)
 - Test: `tldw_Server_API/tests/Evaluations/unit/test_specialized_provider_auth_failures.py` (append)
 
@@ -2017,10 +2095,38 @@ async def test_rag_quota_refusal_stops_the_evaluation_at_the_first_metric(monkey
     assert calls == 1
 ```
 
+Append to `tldw_Server_API/tests/Evaluations/test_evaluations_crud_create_run_api.py` (it imports `pytest` and defines the `evals_crud_client` fixture):
+
+```python
+@pytest.mark.integration
+def test_create_run_refuses_an_over_quota_user_before_the_run_starts(evals_crud_client, monkeypatch):
+    """A run's samples are LLM calls made in a task the request starts, so the run is checked at creation (§4a)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    client, headers = evals_crud_client
+    started: list[str] = []
+
+    class _SvcStub:
+        async def create_run(self, eval_id, target_model, **_kwargs):
+            started.append(eval_id)
+            return {"id": "run_1", "object": "run", "eval_id": eval_id, "status": "pending",
+                    "target_model": target_model, "created": 1700000000}
+
+    import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_crud as crud
+
+    monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    refuse_llm_work(monkeypatch)
+
+    r = client.post("/api/v1/evaluations/eval_abc/runs", json={"target_model": "gpt-4o-mini", "config": {}}, headers=headers)
+
+    assert_llm_quota_402(r)
+    assert started == []
+```
+
 - [ ] **Step 2: Run the tests to see them fail**
 
-Run: `TLDW_TEST_NO_DOCKER=1 RUN_EVALUATIONS=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Evaluations/unit/test_circuit_breaker.py tldw_Server_API/tests/Evaluations/unit/test_specialized_provider_auth_failures.py -k quota`
-Expected: 4 failed. The breaker opens; G-Eval raises `ValueError` after 10 attempts; the response-quality evaluator returns 0.0 scores instead of raising; the RAG evaluator calls the provider twice.
+Run: `TLDW_TEST_NO_DOCKER=1 RUN_EVALUATIONS=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Evaluations/unit/test_circuit_breaker.py tldw_Server_API/tests/Evaluations/unit/test_specialized_provider_auth_failures.py tldw_Server_API/tests/Evaluations/test_evaluations_crud_create_run_api.py -k quota`
+Expected: 5 failed. The breaker opens; G-Eval raises `ValueError` after 10 attempts; the response-quality evaluator returns 0.0 scores instead of raising; the RAG evaluator calls the provider twice; the run is created (202).
 
 - [ ] **Step 3: The breaker's ignore list**
 
@@ -2249,9 +2355,46 @@ with:
 
 The RAG evaluator's other clauses catch `_RAG_EVAL_NONCRITICAL_EXCEPTIONS`, which holds no `HTTPException`, so a refusal already passes them.
 
+- [ ] **Step 6b: Evaluation runs are checked when they are created**
+
+In `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_crud.py`:
+
+Replace:
+
+```python
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, TokenScopeGuard, User
+```
+
+with:
+
+```python
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+```
+
+Replace:
+
+```python
+        target_model = request.target_model
+        # Allow free-form config; convert Pydantic models if provided in future
+```
+
+with:
+
+```python
+        # Usage quotas (LLM usage accounting spec §4a): a run's samples are LLM calls, made in a task
+        # started from this request, so the run is checked here and then runs to completion.
+        await enforce_llm_quota(getattr(current_user, "id", None))
+        target_model = request.target_model
+        # Allow free-form config; convert Pydantic models if provided in future
+```
+
+The check comes after the idempotent-replay branch, which returns an existing run without new work, and inside the handler's `try`, which already has `except HTTPException: raise`.
+
 - [ ] **Step 7: Run the tests to see them pass**
 
 Run the Step 2 command without `-k quota`, and add `tldw_Server_API/tests/Evaluations/test_circuit_breaker.py`.
+Expected: all pass.
 Expected: all pass.
 
 - [ ] **Step 8: Run the neighbours**
@@ -2261,20 +2404,20 @@ Expected: all pass apart from the known failures. If `tldw_Server_API/tests/Infr
 
 - [ ] **Step 9: Lint and commit**
 
-Compare ruff finding counts with `origin/dev` as in Task 4. On `dev`: `Infrastructure/circuit_breaker.py` 0, `Evaluations/circuit_breaker.py` 3, `ms_g_eval.py` 0, `response_quality_evaluator.py` 0, `rag_evaluator.py` 1, `tests/Evaluations/unit/test_circuit_breaker.py` 9, `test_specialized_provider_auth_failures.py` 0.
+Compare ruff finding counts with `origin/dev` as in Task 4. On `dev`: `Infrastructure/circuit_breaker.py` 0, `Evaluations/circuit_breaker.py` 3, `ms_g_eval.py` 0, `response_quality_evaluator.py` 0, `rag_evaluator.py` 1, `evaluations_crud.py` 1, `tests/Evaluations/unit/test_circuit_breaker.py` 9, `test_specialized_provider_auth_failures.py` 0, `test_evaluations_crud_create_run_api.py` 3.
 
 ```bash
-git add tldw_Server_API/app/core/Infrastructure/circuit_breaker.py tldw_Server_API/app/core/Evaluations/circuit_breaker.py tldw_Server_API/app/core/Evaluations/ms_g_eval.py tldw_Server_API/app/core/Evaluations/response_quality_evaluator.py tldw_Server_API/app/core/Evaluations/rag_evaluator.py tldw_Server_API/tests/Evaluations/unit/test_circuit_breaker.py tldw_Server_API/tests/Evaluations/unit/test_specialized_provider_auth_failures.py
-git commit -m "fix(usage): evaluations never count, retry or score an LLM quota refusal (TASK-13437)
+git add tldw_Server_API/app/core/Infrastructure/circuit_breaker.py tldw_Server_API/app/core/Evaluations/circuit_breaker.py tldw_Server_API/app/core/Evaluations/ms_g_eval.py tldw_Server_API/app/core/Evaluations/response_quality_evaluator.py tldw_Server_API/app/core/Evaluations/rag_evaluator.py tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_crud.py tldw_Server_API/tests/Evaluations/unit/test_circuit_breaker.py tldw_Server_API/tests/Evaluations/unit/test_specialized_provider_auth_failures.py tldw_Server_API/tests/Evaluations/test_evaluations_crud_create_run_api.py
+git commit -m "fix(usage): evaluations never count, retry or score an LLM quota refusal; runs are checked at creation (TASK-13437)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 6: The chat pipeline, jobs, extraction, the RAG answer fallback and insights let a refusal through
+### Task 6: The chat pipeline and auto-router, jobs, extraction, the RAG answer fallback, insights and manuscript analysis let a refusal through
 
-Five small changes, each so that a refusal is not mistaken for a provider failure.
+Seven small changes, each so that a refusal is not mistaken for a provider failure. One of them fixes a regression the check at the call would otherwise cause: the `/chat/completions` auto-router makes its LLM call before the boundary check, so for an over-quota user that call is refused at the call, and its broad `except` would record a failure of the router's provider for every user.
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py` (the `core.exceptions` import near line 171; `_is_trusted_local_chat_http_exception` near line 3480; the two queued processors near lines 5290 and 6896)
@@ -2282,7 +2425,9 @@ Five small changes, each so that a refusal is not mistaken for a provider failur
 - Modify: `tldw_Server_API/app/core/Web_Scraping/extraction/strategies/llm.py` (imports; `call_llm_provider`, near line 181)
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/generation.py` (imports; `AnswerGenerator.generate`, near line 480)
 - Modify: `tldw_Server_API/app/api/v1/endpoints/media/document_insights.py` (the LLM call's handlers, near line 331)
-- Test (append to each): `tests/Chat/unit/test_chat_service_fallback.py`, `tests/Jobs/test_worker_sdk_llm_user.py`, `tests/Web_Scraping/test_phase4_extraction_failures.py`, `tests/RAG_NEW/unit/test_generation_executor.py`, `tests/Media/test_document_insights.py` (all under `tldw_Server_API/`)
+- Modify: `tldw_Server_API/app/api/v1/endpoints/chat.py` (the `core.exceptions` import near line 242; `_execute_router_call` in `_select_auto_chat_llm_router_choice`, near line 1641)
+- Modify: `tldw_Server_API/app/core/Writing/manuscript_analysis.py` (imports; `_run_structured_analysis`, near line 148)
+- Test (append to each): `tests/Chat/unit/test_chat_service_fallback.py`, `tests/Chat/integration/test_chat_endpoint_auto_routing.py`, `tests/Jobs/test_worker_sdk_llm_user.py`, `tests/Web_Scraping/test_phase4_extraction_failures.py`, `tests/RAG_NEW/unit/test_generation_executor.py`, `tests/Media/test_document_insights.py`, `tests/Writing/test_manuscript_analysis_service.py` (all under `tldw_Server_API/`)
 
 **Interfaces:**
 - Consumes: `refuse_llm_calls` (Task 1), `check_llm_call_async` (Task 1).
@@ -2324,6 +2469,111 @@ async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(m
     assert captured.value.detail["error"] == "limit_exceeded"
     assert provider_manager.failure_records == []
     assert provider_manager.fallback_requests == []
+```
+
+Append to `tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py` (it imports `patch`, `pytest`, `ChatCompletionRequest`, `ChatCompletionUserMessageParam`, `RoutingDecision`, and loads the `persona_chat_client`, `persona_chat_db` and `execution_scoped_provider_credentials` fixtures):
+
+```python
+@pytest.mark.integration
+def test_a_refused_router_call_is_not_a_provider_failure_and_the_request_gets_the_402(
+    persona_chat_client,
+    persona_chat_db,
+    execution_scoped_provider_credentials,
+    monkeypatch,
+):
+    """The auto-router's LLM call runs before the boundary check; its refusal must not mark the provider unhealthy."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    authenticated_client, headers, _ = persona_chat_client
+    refuse_llm_work(monkeypatch)
+    request_data = ChatCompletionRequest(
+        model="auto",
+        api_provider="openrouter",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Summarize this")],
+    )
+
+    class _RecordingProviderManager:
+        def __init__(self) -> None:
+            self.failures: list[str] = []
+
+        def record_failure(self, provider, error) -> None:
+            self.failures.append(provider)
+
+        def record_success(self, provider, latency) -> None:
+            pass
+
+        def get_available_provider(self, exclude=None):
+            return None
+
+    provider_manager = _RecordingProviderManager()
+    dispatched: list[dict] = []
+
+    async def refused_router_call(**kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    def rules_route_model(**kwargs):
+        return RoutingDecision(
+            provider="openrouter",
+            model="anthropic/claude-4.5-sonnet",
+            canonical=True,
+            decision_source="rules",
+        )
+
+    async def must_not_dispatch(**kwargs):
+        dispatched.append(kwargs)
+        raise AssertionError("dispatched")
+
+    with (
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={
+                "providers": [
+                    {
+                        "name": "openrouter",
+                        "default_model": "anthropic/claude-4.5-sonnet",
+                        "models_info": [
+                            {"name": "anthropic/claude-4.5-sonnet", "tool_support": True, "vision_support": True, "quality_rank": 20},
+                            {"name": "openai/gpt-4.1-mini", "tool_support": True, "vision_support": True, "quality_rank": 10},
+                        ],
+                    }
+                ],
+                "default_provider": "openrouter",
+            },
+        ),
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call_async",
+            side_effect=refused_router_call,
+            create=True,
+        ),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.route_model", side_effect=rules_route_model),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=must_not_dispatch),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", headers=headers, json=request_data.model_dump())
+
+    assert_llm_quota_402(response)
+    assert provider_manager.failures == []
+    assert dispatched == []
+```
+
+Append to `tldw_Server_API/tests/Writing/test_manuscript_analysis_service.py` (it imports `pytest`, `AsyncMock`, `patch` and defines `MODULE`):
+
+```python
+@pytest.mark.asyncio
+async def test_an_llm_quota_refusal_is_raised_not_stored_as_a_failed_analysis():
+    """The refusal reaches the endpoint, which answers 402, instead of becoming an analysis_failed result (§4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.app.core.Writing.manuscript_analysis import analyze_pacing
+
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+    with patch(f"{MODULE}.perform_chat_api_call_async", new_callable=AsyncMock, side_effect=refusal):
+        with pytest.raises(LLMQuotaExceededError):
+            await analyze_pacing("Some scene text.")
 ```
 
 Append to `tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py` (it imports `asyncio`, `JobManager`, `ensure_jobs_tables` and defines `_sdk`):
@@ -2447,8 +2697,8 @@ async def test_generate_document_insights_passes_an_llm_quota_refusal_through(mo
 
 - [ ] **Step 2: Run the tests to see them fail**
 
-Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_failures.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/Media/test_document_insights.py -k quota`
-Expected: 6 failed. The pipeline raises `SanitizedProviderStreamError` and records a provider failure (both parametrized cases); the job is scheduled for a retry with error code `worker_exception`; the extraction retries four times; the generator returns a fallback answer; insights returns 500.
+Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_failures.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/Media/test_document_insights.py tldw_Server_API/tests/Writing/test_manuscript_analysis_service.py -k "quota or refused_router_call or refusal_is_raised_not_stored"`
+Expected: 8 failed. The pipeline raises `SanitizedProviderStreamError` and records a provider failure (both parametrized cases); the auto-router records a failure for `openrouter` (the request still gets its 402, from the boundary check); the job is scheduled for a retry with error code `worker_exception`; the extraction retries four times; the generator returns a fallback answer; insights returns 500; manuscript analysis returns `analysis_failed` instead of raising.
 
 - [ ] **Step 3: The chat pipeline**
 
@@ -2530,6 +2780,48 @@ with:
 
 Those two record a provider failure before rebinding, so they need their own guard. Only `/chat/completions` reaches this pipeline, and it is admitted at its boundary, so none of this fires today; it keeps the pipeline honest if that ever changes.
 
+- [ ] **Step 3b: The auto-router does not record a refusal as a provider failure**
+
+In `tldw_Server_API/app/api/v1/endpoints/chat.py`:
+
+Replace:
+
+```python
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+```
+
+with:
+
+```python
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
+```
+
+and in `_execute_router_call` (inside `_select_auto_chat_llm_router_choice`):
+
+Replace:
+
+```python
+        except asyncio.CancelledError:
+            raise
+        except Exception as router_error:  # noqa: BLE001 - provider trust boundary
+            latency = time.time() - router_started_at
+```
+
+with:
+
+```python
+        except asyncio.CancelledError:
+            raise
+        except LLMQuotaExceededError:
+            # The user's limit, not the router provider's health: no failure recorded. The routing
+            # runtime falls back to rules routing, and the boundary check below returns the 402.
+            raise
+        except Exception as router_error:  # noqa: BLE001 - provider trust boundary
+            latency = time.time() - router_started_at
+```
+
+The routing runtime (`core/LLM_Calls/routing/runtime.py`, `select_llm_router_choice`) treats any router error as "no LLM choice" and falls back to rules routing, so the request goes on to the boundary check, which refuses it with the 402 before any generation.
+
 - [ ] **Step 4: Jobs do not retry a refusal**
 
 In `tldw_Server_API/app/core/exceptions.py`, in `class LLMQuotaExceededError(HTTPException):`, replace:
@@ -2563,7 +2855,7 @@ Replace:
 ```python
 from loguru import logger
 
-from ...observability import
+from ...observability import bounded_code, bounded_stage, sanitized_host
 ```
 
 with:
@@ -2573,7 +2865,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 
-from ...observability import
+from ...observability import bounded_code, bounded_stage, sanitized_host
 ```
 
 Replace:
@@ -2661,24 +2953,66 @@ with:
         logger.error("LLM call failed for document insights")
 ```
 
+- [ ] **Step 7b: Manuscript analysis lets a refusal through**
+
+In `tldw_Server_API/app/core/Writing/manuscript_analysis.py`:
+
+Replace:
+
+```python
+from loguru import logger
+```
+
+with:
+
+```python
+from loguru import logger
+
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+```
+
+Replace:
+
+```python
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse analysis JSON response")
+        return {"error": "Failed to parse LLM response", "raw": content[:500] if content else ""}
+    except Exception:
+        logger.exception("Analysis LLM call failed")
+```
+
+with:
+
+```python
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse analysis JSON response")
+        return {"error": "Failed to parse LLM response", "raw": content[:500] if content else ""}
+    except LLMQuotaExceededError:
+        raise  # the user's limit: the endpoint answers 402 instead of storing a failed analysis
+    except Exception:
+        logger.exception("Analysis LLM call failed")
+```
+
+The writing endpoints catch `_MANUSCRIPT_NONCRITICAL_EXCEPTIONS`, which holds no `HTTPException`, so they answer 402 instead of storing an `analysis_failed` analysis.
+
 - [ ] **Step 8: Run the tests to see them pass**
 
-Run the Step 2 command without `-k quota`.
+Run the Step 2 command without `-k`.
 Expected: all pass. The existing `test_execute_non_stream_call_untrusted_failures_never_fallback_or_leak[http_exception]` still passes: a plain `HTTPException` is still untrusted.
 
 - [ ] **Step 9: Run the neighbours**
 
-Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider -n 4 tldw_Server_API/tests/Chat tldw_Server_API/tests/Web_Scraping tldw_Server_API/tests/RAG_NEW/unit tldw_Server_API/tests/Media/test_document_insights.py tldw_Server_API/tests/Usage`
+Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider -n 4 tldw_Server_API/tests/Chat tldw_Server_API/tests/Web_Scraping tldw_Server_API/tests/RAG_NEW/unit tldw_Server_API/tests/Media/test_document_insights.py tldw_Server_API/tests/Writing tldw_Server_API/tests/Usage`
 and, alone (two Jobs files in that directory use random ids that collide under xdist): `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py`
 Expected: all pass apart from the known failures and load flakes.
 
 - [ ] **Step 10: Lint and commit**
 
-Compare ruff finding counts with `origin/dev` as in Task 4. On `dev`: `chat_service.py` 1, `exceptions.py` 0, `strategies/llm.py` 0, `generation.py` 1, `document_insights.py` 0, and each test file 0.
+Compare ruff finding counts with `origin/dev` as in Task 4. On `dev`: `chat_service.py` 1, `chat.py` 0, `exceptions.py` 0, `strategies/llm.py` 0, `generation.py` 1, `document_insights.py` 0, `manuscript_analysis.py` 1, `test_manuscript_analysis_service.py` 1, and each other test file 0.
 
 ```bash
-git add tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/Web_Scraping/extraction/strategies/llm.py tldw_Server_API/app/core/RAG/rag_service/generation.py tldw_Server_API/app/api/v1/endpoints/media/document_insights.py tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_failures.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/Media/test_document_insights.py
-git commit -m "fix(usage): the chat pipeline, jobs, extraction, the RAG answer fallback and insights pass a quota refusal through (TASK-13437)
+git add tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/Web_Scraping/extraction/strategies/llm.py tldw_Server_API/app/core/RAG/rag_service/generation.py tldw_Server_API/app/api/v1/endpoints/media/document_insights.py tldw_Server_API/app/core/Writing/manuscript_analysis.py tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py tldw_Server_API/tests/Jobs/test_worker_sdk_llm_user.py tldw_Server_API/tests/Web_Scraping/test_phase4_extraction_failures.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/Media/test_document_insights.py tldw_Server_API/tests/Writing/test_manuscript_analysis_service.py
+git commit -m "fix(usage): the chat pipeline and auto-router, jobs, extraction, the RAG answer fallback, insights and manuscript analysis pass a quota refusal through (TASK-13437)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
@@ -2693,6 +3027,7 @@ A RAG search with generation off is not checked at its boundary, so its optional
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` (imports near line 52; gap analysis near line 5197)
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py` (imports near line 29; the planner near line 858)
 - Modify: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` (`rag_ablate` near line 932, `simple_search_endpoint` near line 1930, `advanced_search_endpoint` near line 2426)
+- Regenerate: `Helper_Scripts/ci/scope_predicate_baseline.txt`, `Docs/Design/web_scraping_refactor_import_inventory.json`, `Docs/Design/WebScraping_Refactor_Import_Inventory.md` (line-number baselines that record lines in `unified_pipeline.py`)
 - Test (append to each): `tests/RAG_NEW/unit/test_generation_executor.py`, `tests/RAG_NEW/unit/test_agentic_failures_and_fallbacks.py`, `tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py`, `tests/RAG_NEW/integration/test_rag_ablate_api.py` (all under `tldw_Server_API/`)
 
 **Interfaces:** none new.
@@ -2994,17 +3329,32 @@ The `finally` that closes the credential runtime is unchanged, so it still runs.
 Run the Step 2 command.
 Expected: 6 passed.
 
+- [ ] **Step 6b: Regenerate the two line-number baselines**
+
+The new import moves every later line of `unified_pipeline.py` down by one, and two checked-in baselines record lines in that file: the scope-predicate ratchet (`tests/lint/test_scope_predicate_ratchet.py`) and the web scraping import inventory (`tests/WebScraping/test_refactor_import_inventory.py`). Regenerate both:
+
+```bash
+$PY Helper_Scripts/ci/scope_predicate_ratchet.py --write-baseline
+$PY Helper_Scripts/web_scraping_refactor_inventory.py --json Docs/Design/web_scraping_refactor_import_inventory.json --markdown Docs/Design/WebScraping_Refactor_Import_Inventory.md
+git diff --stat -- Helper_Scripts/ci/scope_predicate_baseline.txt Docs/Design/web_scraping_refactor_import_inventory.json Docs/Design/WebScraping_Refactor_Import_Inventory.md
+```
+
+Expected: the ratchet prints `Recorded 29 conditional scope predicates.`; the diff shows only line numbers in `unified_pipeline.py` moving by one (`unified_pipeline.py:3818 if user_id` becomes `:3819`, and three inventory rows `3313`/`3342` become `3314`/`3343`). Anything else in the diff means another change moved lines: stop and report it.
+
+Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py`
+Expected: all pass.
+
 - [ ] **Step 7: Run the neighbours**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -q -p no:cacheprovider -n 4 tldw_Server_API/tests/RAG_NEW tldw_Server_API/tests/RAG`
-Expected: all pass apart from the two known `RAG_NEW` failures in Global Constraints.
+Expected: all pass apart from the two known `RAG_NEW` failures and the six `tests/RAG` load flakes named in Global Constraints (re-run those alone; they pass).
 
 - [ ] **Step 8: Lint and commit**
 
 Compare ruff finding counts with `origin/dev` as in Task 4. On `dev`: `unified_pipeline.py` 0, `agentic_execution.py` 0, `rag_unified.py` 1 (a pre-existing `I001`), `test_agentic_failures_and_fallbacks.py` 1, the other test files 0.
 
 ```bash
-git add tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_failures_and_fallbacks.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_ablate_api.py
+git add tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py tldw_Server_API/app/api/v1/endpoints/rag_unified.py Helper_Scripts/ci/scope_predicate_baseline.txt Docs/Design/web_scraping_refactor_import_inventory.json Docs/Design/WebScraping_Refactor_Import_Inventory.md tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_failures_and_fallbacks.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_ablate_api.py
 git commit -m "fix(usage): RAG's optional LLM stages degrade on a quota refusal, and three handlers keep the 402 (TASK-13437)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
@@ -3015,62 +3365,103 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ### Task 8: The operator page, the spec and the backlog
 
 **Files:**
-- Modify: `Docs/Operations/Usage_Quotas.md` (the `limits.llm_tokens_per_month` row, line 68; the bullets at lines 91 and 97)
+- Modify: `Docs/Operations/Usage_Quotas.md` (the `limits.llm_tokens_per_month` row, line 68; the bullets at lines 90, 91 and 97)
 - Modify: `Docs/Operations/Rate_Limits_Troubleshooting.md` (line 19)
-- Modify: `Docs/Design/2026-10-09-llm-usage-accounting-design.md` (Status; §4a; §4b; §5; Risks; Review changes)
+- Modify: `Docs/Design/2026-10-09-llm-usage-accounting-design.md` (Status; §4a table and RAG bullet; §4b; Risks; Review changes)
 - Modify: `backlog/tasks/task-13437 - Gate-LLM-tokens-month-at-every-LLM-entry-point.md` (through backlog-py only)
-- Create, through backlog-py: TASK-13635 and TASK-13636
+- Create, through backlog-py: TASK-13635, TASK-13636, TASK-13637 and TASK-13638
 
-Write plainly and match each document's style. Use the Edit tool. Neither operations page has a `Docs/Published` mirror.
+Write plainly and match each document's style. Use the Edit tool. Neither operations page has a `Docs/Published` mirror. Every replacement below is given as a fenced block: copy its contents, not the fence.
 
 - [ ] **Step 1: The operator page**
 
-In `Docs/Operations/Usage_Quotas.md`, in the `limits.llm_tokens_per_month` row, replace `checked before LLM work at the entry points listed below` with `checked before every LLM call (see below)`.
+In `Docs/Operations/Usage_Quotas.md`:
 
-Replace the whole `- **Not checked yet** (a later change refuses them at the call): ...` bullet (line 91) with:
+1. In the `limits.llm_tokens_per_month` row, replace `checked before LLM work at the entry points listed below` with `checked before every LLM call (see below)`.
+2. In the `- **Where a refusal happens.** ...` bullet (line 90), replace `` `/evaluations/batch` of type `geval`, `rag` or `response_quality`; `` with `` `/evaluations/batch` of type `geval`, `rag` or `response_quality`; evaluation runs (`POST /evaluations/{eval_id}/runs`); ``.
+3. Replace the whole `- **Not checked yet** (a later change refuses them at the call): ...` bullet (line 91) with:
 
 ```markdown
-- **Everything else is checked at the call.** Background jobs (`/media/ingest-jobs`, evaluation recipe runs, audio jobs), workflow runs, WebSocket sessions (audio, realtime) and every HTTP endpoint not listed above check each LLM call just before the provider is called, and a call for a user over a limit is refused without reaching the provider. What the caller sees:
-  - **An HTTP endpoint** that passes errors through, as most do, returns the same 402: `/translate`, `/media/ingest-web-content` with analysis, `/media/process-web-scraping` with summarization, and `/media/{id}/insights` among them. The web scraping endpoints discard that request's results. An endpoint that catches errors broadly reports its own error, usually a 500.
-  - **A workflow:** the step fails, and so does the run, with `error` set to `402: {'error': 'limit_exceeded', ...}`. An `llm` step is retried once, and refused again without a provider call.
-  - **A job** fails at once with the error code `llm_quota_exceeded` and is not retried. A media ingest job marks the item `Error` (`Processing error: LLMQuotaExceededError: ...`); an audio or video batch marks every item in the batch. A media item that reuses an earlier transcript gets no summary.
+- **Everything else is checked at the call.** Background jobs (`/media/ingest-jobs`, evaluation recipe runs), workflow runs, WebSocket sessions (audio, realtime) and every HTTP endpoint not listed above check each LLM call just before the provider is called, and a call for a user over a limit is refused without reaching the provider. What the caller gets back depends on the caller:
+  - **An HTTP endpoint** that passes errors through, as most do, returns the same 402: `/translate`, `/media/ingest-web-content` with analysis, `/media/process-web-scraping` with summarization, `/media/{id}/insights` and the manuscript analysis endpoints among them. The web scraping endpoints discard that request's results. An endpoint that catches errors broadly reports its own error, usually a 500.
+  - **A workflow:** an `llm` step fails, and so does the run, with `error` set to `402: {'error': 'limit_exceeded', ...}`; the step is retried once and refused again without a provider call. Other steps that make LLM calls (content generation, NLP, bibliography, image, summarize, translate) report the refusal in their outputs, and the run goes on.
+  - **A job** whose worker reads the error's `retryable` flag (WorkerSDK workers and most others) fails at once with the error code `llm_quota_exceeded` and is not retried. A media ingest job marks the item `Error` (`Processing error: LLMQuotaExceededError: ...`); an audio or video batch marks every item in the batch. A media item that reuses an earlier transcript gets no summary.
   - **A WebSocket:** `/audio/chat/stream` sends `{"type":"error","code":"provider_unavailable",...}` for that turn and stays open. The realtime sockets send `{"type":"error","error":{"type":"server_error","code":"internal_error",...}}` and `response.done` with status `failed`, and stay open.
   - **A RAG search with generation off** still returns its results. The optional LLM stages it asked for (query classification, HyDE, gap analysis, LLM reranking and others) are skipped, and their entries in the response metadata say `"failure_code": "provider_unavailable"`.
-  - **Evaluations** run as jobs fail; a refused metric is never scored 0.0. A refusal never opens the evaluations circuit breaker or marks a chat provider unhealthy.
+  - **Shared machinery is not affected.** A refusal never opens the evaluations circuit breaker, is never scored 0.0 by an evaluator, and never marks a chat provider unhealthy, including the auto-router's call on `/chat/completions`, which runs before that endpoint's own check.
+  - **Degraded, not refused:** claims verification falls back to heuristic verdicts; Prompt Studio test runs and benchmarks record error outputs or 0.0 scores; character memory extraction finds nothing. TASK-13638 tracks them.
   - **MCP tools** are neither recorded nor checked: they carry no user.
 ```
 
-Replace the `- **Failures let requests through.** ...` bullet (line 97) with:
+4. Replace the `- **Failures let requests through.** ...` bullet (line 97) with:
 
 ```markdown
-- **Failures let requests through.** If a limit cannot be read or a counter fails, the request or call is admitted and a warning is logged. A check at the call that gets no answer within two seconds lets the call through, with a warning. A synchronous LLM call made on the server's event loop thread cannot be checked (waiting there would stall the server); it goes through, recorded, with the warning `A synchronous LLM call on the event loop's thread is not quota-checked`. A stream started there is checked when its first item is read.
-- **What the check costs.** With quotas off, nothing. With quotas on and no LLM limit for the user, nothing once the user's limits are cached (for a minute). With a limit set, the counters are read for each call that a request boundary did not already admit, so a job that makes hundreds of calls makes hundreds of small indexed reads.
+- **Failures let requests through.** If a limit cannot be read or a counter fails, the request or call is admitted and a warning is logged. A check at the call that gets no answer within two seconds lets the call through, with a warning. A synchronous LLM call made on the server's event loop thread cannot be checked (waiting there would stall the server); it goes through, recorded, and the first one logs `A synchronous LLM call on the event loop's thread is not quota-checked`. A stream started there is checked when its first item is read.
+- **Run workers inside the server.** A job worker started as its own process (`python -m ...`) has no accounting loop, so its synchronous LLM calls are neither checked nor recorded; the first one logs a warning. Workers run inside the server process by default.
+- **What the check costs.** With quotas off, nothing. With quotas on and no LLM limit for the user, nothing once the user's limits are cached (for a minute). With a limit set, the counters are read for each call that a request boundary did not already admit, so a job that makes hundreds of calls makes hundreds of small indexed reads. While the user's limits cannot be read (the AuthNZ database is down), every call tries again and logs a warning.
 ```
 
 - [ ] **Step 2: The troubleshooting row**
 
-In `Docs/Operations/Rate_Limits_Troubleshooting.md`, line 19, replace `raised at the entry points listed in `Usage_Quotas.md` (`/chat/completions`, the Messages API, character chat, RAG with generation, and others)` with `raised before any LLM call: at the request boundary for the entry points listed in `Usage_Quotas.md`, and at the call (`core/Usage/llm_quota_gate.py`) for jobs, workflows, WebSockets and every other endpoint`.
+In `Docs/Operations/Rate_Limits_Troubleshooting.md`, line 19, replace:
+
+```markdown
+raised at the entry points listed in `Usage_Quotas.md` (`/chat/completions`, the Messages API, character chat, RAG with generation, and others)
+```
+
+with:
+
+```markdown
+raised before any LLM call: at the request boundary for the entry points listed in `Usage_Quotas.md`, and at the call (`core/Usage/llm_quota_gate.py`) for jobs, workflows, WebSockets and every other endpoint
+```
 
 - [ ] **Step 3: The spec**
 
 In `Docs/Design/2026-10-09-llm-usage-accounting-design.md`:
 
 1. **Status** (line 4): replace `PR 2a in progress.` with `PR 2a (#3230) merged; PR 2b in progress.`
-2. **§4a**, the bullet `- **A RAG search with answer generation off is not checked here and not marked.** ...`: replace its last sentence, `Until PR 2b they are unchecked, as today.`, with `Gap analysis and the agentic planner were the two stages that let a refusal escape; PR 2b made them degrade, and the three convenience handlers (`/rag/simple`, `/rag/advanced`, `/rag/ablate`) pass a 402 through.`
-3. **§4b**, the bullet `- A WebSocket session reports it as it reports any failed reply. PR 2b's plan names the frame for the operator page.`: replace with `- A WebSocket session reports it as it reports any failed reply: `/audio/chat/stream` sends a `provider_unavailable` error for that turn, and the realtime sockets send an `internal_error` and a failed `response.done`. Both stay open.`
-4. **§4b**, under "It must not look like a provider outage to shared machinery", after the retry-loops bullet, add:
-   `  - a job worker does not retry it: the error carries `retryable = False` and `failure_code = "llm_quota_exceeded"`;`
-   `  - the chat pipeline neither rewrites it as a provider error nor records a provider failure for it, and the RAG answer generator does not replace it with a fallback answer.`
-5. **§4b**, the last bullet (`- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). Seven code paths ...`): replace it with:
-   `- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). PR 2b moved seven code paths off the loop with `asyncio.to_thread`: `/translate`, web search aggregation (`WebSearch_APIs.aggregate_results`, the live `/research/websearch` path; the legacy `WebSearch/Web_Search.py` has no caller in the app), the article extractor, enhanced web scraping, web content ingestion, the web scraping service, and the Explainer job. The RAG custom metric named in an earlier draft makes no provider call: its `analyze` call is missing an argument and falls back to a heuristic (TASK-13635).`
-6. **Risks**, the `- **Fail-open cases.**` bullet: replace `PR 2b moves the known ones off the loop.` with `PR 2b moved the known ones off the loop, and the call is logged.`
-7. **Review changes**: append a new paragraph and list at the end of the file:
+2. **§4a table:** after the row `` | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. | `` add:
+
+```markdown
+| Evaluation runs (`POST /evaluations/{eval_id}/runs`) | Always. The run is a task the request starts, so it is admitted with the request; checked at the call, a refused sample would be scored 0.0 and the run would complete. |
+```
+
+3. **§4a**, the bullet that starts `- **A RAG search with answer generation off is not checked here and not marked.**`: replace its last sentence, `Until PR 2b they are unchecked, as today.`, with:
+
+```markdown
+Gap analysis and the agentic planner were the two stages that let a refusal escape; PR 2b made them degrade, and the three convenience handlers (`/rag/simple`, `/rag/advanced`, `/rag/ablate`) pass a 402 through.
+```
+
+4. **§4b**, replace the bullet `  - A WebSocket session reports it as it reports any failed reply. PR 2b's plan names the frame for the operator page.` with:
+
+```markdown
+  - A WebSocket session reports it as it reports any failed reply: `/audio/chat/stream` sends a `provider_unavailable` error for that turn, and the realtime sockets send an `internal_error` and a failed `response.done`. Both stay open.
+```
+
+5. **§4b**, under "It must not look like a provider outage to shared machinery", after the bullet that starts `  - retry loops do not retry it`, add:
+
+```markdown
+  - a job worker does not retry it: the error carries `retryable = False` and `failure_code = "llm_quota_exceeded"`;
+  - the chat pipeline neither rewrites it as a provider error nor records a provider failure for it, and neither does the `/chat/completions` auto-router, whose LLM call runs before that endpoint's boundary check;
+  - the RAG answer generator does not replace it with a fallback answer.
+```
+
+6. **§4b**, replace the last bullet (the one that starts `- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). Seven code paths`) with:
+
+```markdown
+- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). PR 2b moved seven code paths off the loop with `asyncio.to_thread`: `/translate`, web search aggregation (`WebSearch_APIs.aggregate_results`, the live `/research/websearch` path; the legacy `WebSearch/Web_Search.py` has no caller in the app), the article extractor, enhanced web scraping, web content ingestion, the web scraping service, and the Explainer job. The RAG custom metric named in an earlier draft makes no provider call: its `analyze` call is missing an argument and falls back to a heuristic (TASK-13635).
+```
+
+7. **Risks**, in the `- **Fail-open cases.**` bullet, replace `PR 2b moves the known ones off the loop.` with `PR 2b moved the known ones off the loop, and the first such call logs a warning.`
+8. **Review changes**: append at the end of the file:
 
 ```markdown
 Revision of 2026-10-13, while planning PR 2b:
 
-- **The check at the call** lives in `core/Usage/llm_quota_gate.py`. It runs the same decision as §4a, on the accounting loop, and waits at most two seconds from a sync caller.
+- **The check at the call** lives in `core/Usage/llm_quota_gate.py`. It runs the same decision as §4a on the accounting loop, and a sync caller waits at most two seconds for it.
 - **The seven sync calls** are the ones in §4b's last bullet. Web search aggregation is the live module, not the legacy one, and the Explainer job replaces the RAG custom metric, which never reaches a provider.
+- **The `/chat/completions` auto-router** makes its LLM call before the endpoint's boundary check, so its refusal must not count as a failure of the router's provider.
+- **Evaluation runs** join the §4a table: their samples run in a task the request starts.
 - **Jobs** do not retry a refusal; a workflow `llm` step is retried once by the engine's default policy and refused again without a provider call.
 - **Roots** are never admitted by the request that started them.
 ```
@@ -3080,22 +3471,30 @@ Revision of 2026-10-13, while planning PR 2b:
 Run each command from the worktree root, one at a time:
 
 ```bash
-PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit TASK-13437 --append-notes "PR 2b: the check at the call (core/Usage/llm_quota_gate.py). The wrapped provider methods and the shared call layer refuse an over-quota user before the provider runs, deciding on the accounting loop; a sync caller waits at most 2 s, and a sync call on the loop's thread is recorded but not checked. Seven sync LLM calls moved off the loop (/translate, web search aggregation, the article extractor, enhanced web scraping, web content ingestion, the web scraping service, the Explainer job). A refusal never opens the evaluations circuit breaker, is never retried by G-Eval, the extraction strategy or a job worker, never marks a chat provider unhealthy and never becomes a fallback RAG answer; RAG's gap analysis and agentic planner degrade, and /rag/simple, /rag/advanced, /rag/ablate and /media/{id}/insights keep the 402. Follow-ups: TASK-13635 (RAG custom metric), TASK-13636 (outputs summaries)." --check-ac 1 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 6
+PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit TASK-13437 --append-notes "PR 2b: the check at the call (core/Usage/llm_quota_gate.py). The wrapped provider methods and the shared call layer refuse an over-quota user before the provider runs, deciding on the accounting loop; a sync caller waits at most 2 s, and a sync call on the loop's thread is recorded but not checked. Seven sync LLM calls moved off the loop (/translate, web search aggregation, the article extractor, enhanced web scraping, web content ingestion, the web scraping service, the Explainer job). Evaluation runs are checked at creation. A refusal never opens the evaluations circuit breaker, is never retried by G-Eval, the extraction strategy or a job worker, never marks a chat provider unhealthy (the /chat/completions auto-router included) and never becomes a fallback RAG answer or a stored manuscript analysis; RAG's gap analysis and agentic planner degrade, and /rag/simple, /rag/advanced, /rag/ablate and /media/{id}/insights keep the 402. Follow-ups: TASK-13635, TASK-13636, TASK-13637, TASK-13638." --check-ac 1 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 6
 ```
 
 ```bash
-PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "RAG custom completeness metric never calls a provider" --id TASK-13635 --labels rag,evaluations,bug --description "RAGCustomMetrics.evaluate_response_completeness (core/RAG/rag_custom_metrics.py, near line 233) awaits analyze(prompt, \"...\"), which is a sync function that needs api_name, input_data and custom_prompt_arg. The call raises TypeError before any provider call, and the except clause falls back to the heuristic score, so the LLM path is dead code. Fixing it needs a choice of grading provider and model, and moves the call off the event loop (asyncio.to_thread), so it can be quota-checked. Found while planning LLM usage accounting PR 2b (TASK-13437)." --ac "The completeness metric calls a configured provider through analyze with the right arguments, off the event loop" --ac "With no provider configured it keeps the heuristic, and says so in the result"
+PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "RAG custom completeness metric never calls a provider" --id TASK-13635 --labels rag,evaluations,bug --description "RAGCustomMetrics.evaluate_response_completeness (core/RAG/rag_custom_metrics.py, near line 233) awaits analyze(prompt, \"...\"), but analyze is a sync function that needs api_name, input_data and custom_prompt_arg. The call raises TypeError before any provider call, and the except clause falls back to the heuristic score, so the LLM path is dead code. Fixing it needs a choice of grading provider and model, and the call must run off the event loop (asyncio.to_thread) so it can be quota-checked. Found while planning LLM usage accounting PR 2b (TASK-13437)." --ac "The completeness metric calls a configured provider through analyze with the right arguments, off the event loop" --ac "With no provider configured it keeps the heuristic, and says so in the result"
 ```
 
 ```bash
-PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "Output item summaries pass arguments analyze does not accept" --id TASK-13636 --labels outputs,bug --description "outputs_service._summarize_one (app/services/outputs_service.py, near line 679) calls analyze(input_data=..., custom_prompt=..., api_name=..., api_key=None, model=...). analyze takes custom_prompt_arg and model_override, so the call raises TypeError, the except clause logs a warning, and every item summary is the first 300 characters of the source text. Found while planning LLM usage accounting PR 2b (TASK-13437)." --ac "Output item summaries call analyze with custom_prompt_arg and model_override and return the model's summary" --ac "A test drives _summarize_one through the real analyze signature"
+PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "Output summaries pass arguments analyze does not accept" --id TASK-13636 --labels outputs,bug --description "outputs_service._summarize_single_article (app/services/outputs_service.py, near line 666; the call near line 679) and _summarize_text_block (near line 869; the call near line 883) call analyze(input_data=..., custom_prompt=..., api_name=..., api_key=None, model=...). analyze takes custom_prompt_arg and model_override, so the call raises TypeError, the except clause logs a warning, and every summary falls back to the first 300 characters of the source text. Found while planning LLM usage accounting PR 2b (TASK-13437)." --ac "_summarize_single_article and _summarize_text_block call analyze with custom_prompt_arg and model_override and return the model's summary" --ac "A test drives each through the real analyze signature"
 ```
 
 ```bash
-PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task normalize --check "backlog/tasks/task-13437 - Gate-LLM-tokens-month-at-every-LLM-entry-point.md" backlog/tasks/task-13635*.md backlog/tasks/task-13636*.md
+PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "Audio analyze job stage calls analyze with the wrong arguments" --id TASK-13637 --labels audio,jobs,bug --description "The audio_analyze stage in app/services/audio_jobs_worker.py (near line 354) calls analyze(text, api_name) under asyncio.to_thread. analyze's signature is (api_name, input_data, custom_prompt_arg, ...), so the call passes the transcript as the provider name and raises TypeError before any provider call; the stage fails and is retried until its attempts run out. When the call is fixed, the stage's failure path (fail_job with retryable=True, near line 384) should honour the exception's retryable flag and failure_code, so an LLM quota refusal (LLMQuotaExceededError, retryable = False, failure_code llm_quota_exceeded) fails the job at once. Found while planning LLM usage accounting PR 2b (TASK-13437)." --ac "audio_analyze calls analyze with the provider, the transcript and a prompt, and stores the analysis" --ac "A failure's retryable flag and failure_code reach fail_job"
 ```
 
-Expected: the edit and the two creates succeed; `normalize --check` lists no file. DoD #4 (bandit), #5 (final summary) and the status change are made when the PR is opened, with the ship checks' results.
+```bash
+PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "Callers that turn an LLM quota refusal into degraded output" --id TASK-13638 --labels quotas,backend --description "After LLM usage accounting PR 2b (TASK-13437) an LLM call for an over-quota user raises LLMQuotaExceededError at the call. These callers catch it broadly and go on with degraded output instead of reporting it: workflow adapters that return an error output (Workflows/adapters/content/generation.py, text/nlp.py, research/bibliography.py, content/image.py, content/summarize.py, llm/translate.py, which returns the input as a fallback translation; control/flow.py parallel drops it; control/state.py retry retries it); claims verification (Claims_Extraction/claims_service.py, whose _CLAIMS_NONCRITICAL_EXCEPTIONS holds HTTPException, falls back to heuristic verdicts); Prompt Studio test runs and evaluation (test_runner.py, evaluation_manager.py save error outputs and 0.0 scores) and benchmarks (evaluation_manager.py returns score 0.0); character memory extraction (character_memory_extraction.py returns an empty result). Decide for each whether to let the refusal through (except LLMQuotaExceededError: raise) or keep the degraded output and say so." --ac "Each listed caller either lets the refusal through or records that it was refused" --ac "The operator page lists what each one does"
+```
+
+```bash
+PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task normalize --check "backlog/tasks/task-13437 - Gate-LLM-tokens-month-at-every-LLM-entry-point.md" backlog/tasks/task-13635*.md backlog/tasks/task-13636*.md backlog/tasks/task-13637*.md backlog/tasks/task-13638*.md
+```
+
+Expected: the edit and the four creates succeed; `normalize --check` lists no file. DoD #4 (bandit), #5 (final summary) and the status change are made when the PR is opened, with the ship checks' results.
 
 - [ ] **Step 5: Run the docs tests**
 
@@ -3108,9 +3507,9 @@ Expected: all pass.
 git add Docs/Operations/Usage_Quotas.md Docs/Operations/Rate_Limits_Troubleshooting.md Docs/Design/2026-10-09-llm-usage-accounting-design.md
 git add -A backlog/tasks
 git status --short
-git commit -m "docs(usage): what each caller sees when an LLM call is refused at the call; two follow-ups (TASK-13437)
+git commit -m "docs(usage): what each caller sees when an LLM call is refused at the call; four follow-ups (TASK-13437)
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
-`git status --short` before the commit must show only the three docs and the three backlog files.
+`git status --short` before the commit must show only the three docs and the five backlog files.
