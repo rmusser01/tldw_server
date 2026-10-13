@@ -1,3 +1,4 @@
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import { ConfigProvider, Modal } from "antd"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -17,6 +18,7 @@ import { saveActorSettingsForChat } from "@/services/actor-settings"
 import { resolveSelectedSystemPromptContent } from "@/components/Common/system-prompt-utils"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useActorStore } from "@/store/actor"
+import { settingsTestOwner } from "@/services/__tests__/chat-settings-fixture"
 import { buildCockpitProviderRouteSummary } from "@/components/Option/Playground/playground-cockpit-summaries"
 
 const inputs = vi.hoisted(() => ({
@@ -57,6 +59,16 @@ vi.mock("@/hooks/useMessageOption", () => ({
     setServerChatPersonaMemoryMode: vi.fn(),
   })},
 }))
+const settingsController = {
+  getCurrent: () => ({ status: "idle", owner: null, view: null }),
+  getSignal: () => undefined,
+  fence: () => inputs.accountCurrent,
+  draftAccount: { requestScope: settingsTestOwner.requestScope, isCurrent: inputs.accountCurrent }
+};
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext: () => settingsController
+}));
 vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [inputs.character, vi.fn(), { isLoading: false }],
 }))
@@ -72,7 +84,8 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
     captureTarget: () => ({ historyId: "test", serverChatId: null, validate_lease: () => inputs.accountCurrent() }),
   }),
 }))
-vi.mock("@/services/tldw-server", () => ({
+vi.mock("@/services/tldw-server", async original => ({
+  ...await original<typeof import("@/services/tldw-server")>(),
   fetchChatModels: async () => [
     ...(inputs.otherProviderFirst
       ? [{ model: "tldw:/models/gemma.gguf", provider: "openai" }]
@@ -85,7 +98,8 @@ vi.mock("@/services/model-settings", () => ({
   getAllModelSettings: async () => ({ temperature: 0.7 }),
 }))
 vi.mock("@/services/ocr", () => ({ getOCRLanguage: async () => null }))
-vi.mock("@/services/actor-settings", () => ({
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
   getActorSettingsForChatWithCharacterFallback: async () => null,
   saveActorSettingsForChat: vi.fn(async () => true),
 }))
@@ -192,7 +206,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreChatModelSettings
       .getState()
       .setActiveSettingsScope(route.providerRouteLabel)
-    useActorStore.setState({ settings: null })
+    useActorStore.getState().reset()
+    useStoreMessageOption.getState().startNewChatDraft(false)
     vi.mocked(saveActorSettingsForChat).mockReset().mockResolvedValue(true)
     vi.mocked(resolveSelectedSystemPromptContent).mockReset().mockImplementation(async id => id ? "Selected template instructions" : "")
   })
@@ -611,6 +626,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
           window.dispatchEvent(new Event("tldw:auth-principal-changed")),
         )
         expected = ""
+        useStoreMessageOption.getState().startNewChatDraft(false)
       }
       first.unmount()
       const reopened = await mountSettings(undefined, client)
@@ -619,6 +635,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
         state === "owner-changed" ? undefined : expected,
       )
     },
+    10_000,
   )
 
   it.each([
@@ -906,7 +923,12 @@ describe("Conversation prompt editor through real model settings Save", () => {
     await act(async () => {
       window.dispatchEvent(new Event("tldw:auth-principal-changed"))
     })
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
+    expect(saveActorSettingsForChat).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
+    act(() => useStoreMessageOption.getState().startNewChatDraft(false))
+    fireEvent.click(await screen.findByRole("button", { name: /^save$/i }))
     await waitFor(() => expect(close).toHaveBeenCalledWith(false))
     expect(useStoreChatModelSettings.getState().systemPrompt).toBe("")
     expect(

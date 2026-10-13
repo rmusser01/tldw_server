@@ -1,3 +1,4 @@
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
