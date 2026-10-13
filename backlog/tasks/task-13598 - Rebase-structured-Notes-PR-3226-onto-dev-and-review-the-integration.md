@@ -27,7 +27,7 @@ Integrate the already reviewed local structured-document checks and reversible f
 - [x] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
 - [x] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
 - [x] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
-- [ ] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
+- [x] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -63,15 +63,16 @@ Status remains In Progress under repository DoD: inherited whole-file static/for
 Published the reviewed source606616eb and accounting head0974c8dc to existing draft PR3226 using the exact expected-head lease against a39fe39b. GitHub confirmed exact head, dev base, draft, no auto-merge and matching truthful validation notes. This final task-only accounting preserves all reviewed source/tests; status remains In Progress for the documented repository DoD limits.
 Published-head CI follow-up reopened: unit shard7/8 returned174pass/1native-storage-spy failure; coverage guard reports the one new historical seeder module unassigned. The dependent frontend-required failure is an aggregate. Prior review/host/source receipts remain historical and immutable; this plan is recorded before the two corrections.
 Final published-head CI correction sourcec89272e0 is independently accepted with0newCritical/Important/Minor findings. The native JSDOM proxy absorbed the prior instance spy; using its actual defining prototype preserves every quota/source/selection/no-navigation/notice/finally/deadline assertion. NativeRED reproduced with byte-identical deterministicCI config on installedNode20.19.5; genuineNative and actualMemory exactcases pass, fullnativecanonical48 and relatedstorage5 pass, scopedformat/parse/lint and changed-expression types pass. ExactCI20.20.2/Ubuntu equivalence remains unclaimed. All5existingplatform shards now explicitly include the unchanged4-case historical seeder, preserving requiredLinuxPG18. Canonicalcoverageguard0:844patterns/5070files/ignored4/baseline44/newuncovered0, protectedinputsunchanged. OriginalGitHub174/1 and coverageRED, initialtypedprobe failure and all earlier reports remain immutable. Root fully read both final reports and review and verified exact source/receipt hashes; no production/setup/guard/budget/dependency changes, no host/fullsuite repetition. Reports under new-head-failures and s-storage-proxy-fix-evidence record actualcheckheads. Next expected-head publication lease isb8d8e298; status remainsInProgress under existingDoD limits.
+Published independently reviewed correction sourcec89272e0 plus accounting headb69031f1 to draft PR3226 using the exact expected-head lease againstb8d8e298. GitHub confirmed exacthead/dev/draft/noauto and updated validation notes. This final task-only accounting preserves all reviewed source and assertions; current-head CI remains separate and status staysInProgress for documentedDoD limits.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Reviewed native-storage fixture and CI allocation correctionsc89272e0 are ready for publication. Nativecanonical48/storage5 and coverageguard pass without assertion/baseline/PG changes; prior production/host proof unchanged, current-head CI and inherited qualification limits remain separate.
+Structured Notes fixes and reviewed native-storage/shard-allocation corrections published to draftPR3226. Actualnativecanonical48/storage5, coverageguard, earlierrealPG/strictdocs and23-requesthostedbudget pass; knownprint/inheritedstatic/physical and current-headCI/merge gates remain open.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
