@@ -526,6 +526,7 @@ const seedRealServerConfig = async (
     selectedModel?: RealChatModelSelection;
     persistedServerChatId?: string | null;
     cockpitLayout?: CockpitLayoutSeed | null;
+    uiMode?: 'casual' | 'pro';
   } = {}
 ) => {
   await page.addInitScript(
@@ -535,6 +536,7 @@ const seedRealServerConfig = async (
       configuredSelectedModel,
       configuredPersistedServerChatId,
       configuredCockpitLayout,
+      configuredUiMode,
     }) => {
       const fnv1a36 = (value: string) => {
         let hash = 2166136261;
@@ -603,6 +605,7 @@ const seedRealServerConfig = async (
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
       localStorage.setItem('playgroundComposerOptionsExpanded', 'true');
+      writeJsonStorageValue('tldw-ui-mode', { state: { mode: configuredUiMode }, version: 1 });
       if (configuredCockpitLayout) {
         if (configuredCockpitLayout.mode) {
           writeJsonStorageValue('playgroundChatLayoutMode', configuredCockpitLayout.mode);
@@ -671,6 +674,7 @@ const seedRealServerConfig = async (
       configuredSelectedModel: options.selectedModel || null,
       configuredPersistedServerChatId: options.persistedServerChatId ?? null,
       configuredCockpitLayout: options.cockpitLayout ?? null,
+      configuredUiMode: options.uiMode ?? 'casual',
     }
   );
 };
@@ -787,13 +791,20 @@ const trackRealApiHits = (page: Page) => {
 };
 
 const ensureComposerOptionsVisible = async (page: Page) => {
-  const toggle = page.getByTestId('composer-options-toggle');
-  if (await toggle.isVisible().catch(() => false)) {
-    const label = await toggle.getAttribute('aria-label').catch(() => '');
-    if (/show composer options/i.test(label || '')) {
-      await toggle.click();
-    }
+  const mode = page.locator('[data-ui-mode]').first();
+  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
+  const casual = page.getByTestId('composer-casual-advanced-chip');
+  if ((await mode.getAttribute('data-ui-mode')) === 'casual') {
+    await expect(casual).toBeEnabled();
+    if ((await casual.getAttribute('aria-expanded')) !== 'true') await casual.click();
+    await expect(casual).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('composer-casual-advanced-controls-row')).toBeVisible();
+    return;
   }
+  const toggle = page.getByTestId('composer-options-toggle');
+  await expect(toggle).toBeVisible();
+  const label = await toggle.getAttribute('aria-label');
+  if (/show composer options/i.test(label || '')) await toggle.click();
 };
 
 const closeSearchContextIfOpen = async (page: Page) => {
@@ -858,27 +869,43 @@ const assertCoreComposerControls = async (
   page: Page,
   options: { mobile?: boolean; composerOnly?: boolean } = {}
 ) => {
-  await ensureComposerOptionsVisible(page);
-  await expect(page.getByTestId('composer-options-toggle')).toBeVisible();
+  const mode = page.locator('[data-ui-mode]').first();
+  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
+  const casual = page.getByTestId('composer-casual-advanced-chip');
+  const isCasual = (await mode.getAttribute('data-ui-mode')) === 'casual';
+  await expect(isCasual ? casual : page.getByTestId('composer-options-toggle')).toBeVisible();
   await expect(page.getByTestId('chat-input')).toBeVisible();
   await expect(page.getByRole('button', { name: /send message/i })).toBeVisible();
-
-  if (options.composerOnly) {
+  if (options.composerOnly) return;
+  await ensureComposerOptionsVisible(page);
+  await expect(page.getByTestId('model-selector').first()).toBeVisible();
+  await expect(page.getByTestId('attachment-button')).toBeVisible();
+  if (isCasual) {
+    const customize = page.getByTestId('composer-casual-advanced-controls-row');
+    const research = customize.getByRole('group', { name: 'Research & context' });
+    const character = customize.getByRole('group', { name: 'Character & your role' });
+    const response = customize.getByRole('group', { name: 'Response settings' });
+    await expect(research).toBeVisible();
+    await expect(character).toBeVisible();
+    await expect(response).toBeVisible();
+    await expect(character.getByTestId('character-select')).toBeVisible();
+    await expect(response.getByTestId('chat-prompt-select')).toBeVisible();
+    await expect(research.getByTestId('tools-button')).toBeVisible();
+    await expect(research.getByTestId('mcp-tools-toggle')).toBeVisible();
+    if (options.mobile)
+      await expect(
+        research.getByRole('button', { name: /Health & diagnostics|Server:/i })
+      ).toBeVisible();
     return;
   }
-
-  await expect(page.getByTestId('model-selector').first()).toBeVisible();
   await expect(page.getByTestId('chat-prompt-select')).toBeVisible();
   await expect(page.getByTestId('character-select')).toBeVisible();
-  await expect(page.getByTestId('attachment-button')).toBeVisible();
   await expect(page.getByTestId('tools-button')).toBeVisible();
-
   if (options.mobile) {
     await expect(page.getByRole('button', { name: /More options/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /Health & diagnostics|Server:/i })).toBeVisible();
     return;
   }
-
   await expect(page.getByTestId('mcp-tools-toggle')).toBeVisible();
   await expect(page.getByRole('button', { name: /Advanced controls/i })).toBeVisible();
 };
@@ -1784,6 +1811,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await seedRealServerConfig(page, {
       selectedModel: chatModelSelection,
       cockpitLayout: desktopCockpitLayoutSeed,
+      uiMode: 'pro',
     });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
@@ -1906,8 +1934,12 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.keyboard.press('Escape');
     }
 
-    await page.getByRole('button', { name: /Advanced controls/i }).click();
+    const advanced = page.getByTestId('composer-advanced-toggle');
+    await expect(advanced).toBeEnabled();
+    if (await advanced.getAttribute('aria-expanded') !== 'true') await advanced.click();
     await expect(page.getByTestId('composer-options-panel')).toBeVisible();
+    await expect(page.getByTestId('composer-advanced-toggle')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#composer-pro-advanced-controls-row')).toBeVisible();
 
     const modelSelector = page.getByTestId('model-selector').first();
     await modelSelector.focus();
