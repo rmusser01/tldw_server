@@ -27,7 +27,7 @@ Integrate the already reviewed local structured-document checks and reversible f
 - [x] #2 Targeted verification of affected real storage, source and language preservation, recovery, native editor and import/export paths qualifies the integrated source; conflict resolutions do not weaken authority, exact-source or undo safeguards.
 - [x] #3 Schema and migration allocations are compatible with current dev and scoped lint, formatting, type and security checks introduce no unexplained findings; real upgrade/bootstrap controls cover migration conflicts.
 - [x] #4 An independent requesting-code-review review of the rebased PR range is recorded; Critical and Important findings are fixed or explicitly reconciled with technical evidence before publication.
-- [ ] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
+- [x] #5 The existing PR is updated with the reviewed rebased head using an exact expected-head force-with-lease, retains dev as its base and documents actual checks and remaining qualification limits without enabling merge or claiming unverified physical coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,15 +59,16 @@ Fresh frontend selections passed56 owner/39 remediation/182 document/24 alternat
 Independent CI-delta review accepted33 paths against a39fe39b with no new Critical/Important/Minor finding. Root verified current review/source/evidence hashes; source606616eb contains the exact25 reviewed paths after generated-only9480bfe. Actual hosted606616eb diagnostics collected two cases, both first-attempt with0retry/skip: Notes held23 requests in the unchanged15s window with0idle capability requests; NE04 reached Export but reproduced its known blank-print-window defect. This establishes menu traversal, not functional printing. Real backend/readiness/auth, fresh extension build/current shared-source binding and complete service/private-runtime cleanup are recorded.
 
 Status remains In Progress under repository DoD: inherited whole-file static/formatting debt, original broader recovery aggregates and current-head GitHub/human/merge gates remain separate. Physical tasks13587/13597 stay open; Chatbook durable Notes sync34818 stays deferred. No full sweep, physical waiver, merge or auto-merge. Immutable reports/manifests retain actual execution heads, format equivalence and failed attempts under /private/tmp/structured-notes-pr-followup-2026-10-13. Reviewed source is ready for lease-protected publication; publication accounting remains pending.
+Published the reviewed source606616eb and accounting head0974c8dc to existing draft PR3226 using the exact expected-head lease against a39fe39b. GitHub confirmed exact head, dev base, draft, no auto-merge and matching truthful validation notes. This final task-only accounting preserves all reviewed source/tests; status remains In Progress for the documented repository DoD limits.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-CI delta source606616eb independently accepted with no new findings. Targeted frontend/backend/PostgreSQL/strict docs controls and hosted23-request budget passed. Known print defect, inherited formatting, physical and current publication/merge gates remain separate.
+Reviewed CI corrections published to draft PR3226 against dev2a8ffa78. Targeted frontend/backend/PostgreSQL/strict docs and first-attempt hosted23-request budget passed; known print defect, inherited static/formatting debt, physical and current-head GitHub/merge gates remain open.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
