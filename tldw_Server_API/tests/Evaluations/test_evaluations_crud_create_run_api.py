@@ -104,3 +104,28 @@ def test_create_run_returns_503_on_mandatory_audit_failure(evals_crud_client, mo
     assert body["detail"]["error"]["message"] == "Mandatory audit persistence unavailable"
     assert body["detail"]["error"]["type"] == "service_unavailable"
     assert body["detail"]["error"]["code"] == "audit_persistence_failure"
+
+
+@pytest.mark.integration
+def test_create_run_refuses_an_over_quota_user_before_the_run_starts(evals_crud_client, monkeypatch):
+    """A run's samples are LLM calls made in a task the request starts, so the run is checked at creation (§4a)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    client, headers = evals_crud_client
+    started: list[str] = []
+
+    class _SvcStub:
+        async def create_run(self, eval_id, target_model, **_kwargs):
+            started.append(eval_id)
+            return {"id": "run_1", "object": "run", "eval_id": eval_id, "status": "pending",
+                    "target_model": target_model, "created": 1700000000}
+
+    import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_crud as crud
+
+    monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    refuse_llm_work(monkeypatch)
+
+    r = client.post("/api/v1/evaluations/eval_abc/runs", json={"target_model": "gpt-4o-mini", "config": {}}, headers=headers)
+
+    assert_llm_quota_402(r)
+    assert started == []

@@ -242,7 +242,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -1649,6 +1649,10 @@ async def _select_auto_chat_llm_router_choice(
             terminal_credential_error = exc
             raise
         except asyncio.CancelledError:
+            raise
+        except LLMQuotaExceededError:
+            # The user's limit, not the router provider's health: no failure recorded. The routing
+            # runtime falls back to rules routing, and the boundary check below returns the 402.
             raise
         except Exception as router_error:  # noqa: BLE001 - provider trust boundary
             latency = time.time() - router_started_at

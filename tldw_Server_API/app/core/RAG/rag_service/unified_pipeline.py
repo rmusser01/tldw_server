@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.DB_Management.scope_context import (
     content_authorization_cache_scope,
     get_scope,
 )
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -5194,7 +5195,7 @@ async def unified_rag_pipeline(
                                     followups = [q for q in wrapped_followups if isinstance(q, str) and q.strip()]
                         except (StructuredOutputParseError, TypeError, ValueError):
                             followups = [s.strip("- ") for s in llm_out.splitlines() if s.strip()]
-                except (ByokResolutionError, SummaryProviderError) as exc:
+                except (ByokResolutionError, SummaryProviderError, LLMQuotaExceededError) as exc:
                     result.metadata["gap_analysis"] = {
                         "failure_code": (
                             exc.code

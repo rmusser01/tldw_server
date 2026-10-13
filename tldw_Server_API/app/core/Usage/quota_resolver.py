@@ -103,6 +103,14 @@ async def uncached_user_quota(user_id: int, key: str, *, db_pool: DatabasePool) 
     return (await _load_limits(user_id, db_pool=db_pool)).get(key)
 
 
+def cached_limits(user_id: int) -> dict[str, int | float] | None:
+    """The user's cached limits, read without I/O; None when not cached or expired (LLM usage accounting spec §4b)."""
+    hit = _cache.get(user_id)
+    if hit is None or hit[0] <= time.monotonic():
+        return None
+    return hit[1]
+
+
 def invalidate_user(user_id: int) -> None:
     """Forget one user's cached limits (after a write to their own overrides)."""
     _cache.pop(int(user_id), None)

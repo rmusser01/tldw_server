@@ -4,6 +4,7 @@ import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import { isExplicitRequestCancellation } from '@/services/request-events';
+import { deriveRequestTimeout, parseRetryAfter } from '@/services/tldw/request-core';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
 import { asVNGenerationRejectionCode, VN_GENERATION_REJECTION_MESSAGES, type VNGenerationRejectionCode } from '@web/lib/api/vnGenerationErrors';
 
@@ -23,40 +24,12 @@ type ApiDefaults = {
 
 type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-// Custom error type that preserves HTTP status and retry hints while remaining compatible with Error
-export class ApiError extends Error {
-  status?: number;
-  statusCode?: number;
-  detail?: string;
-  errorCode?: string;
-  retryAfter?: number;
-
-  constructor(
-    message: string,
-    options?: {
-      status?: number;
-      detail?: string;
-      errorCode?: string;
-      retryAfter?: number;
-    },
-  ) {
-    super(message);
-    this.name = 'ApiError';
-    if (options?.status !== undefined) {
-      this.status = options.status;
-      this.statusCode = options.status;
-    }
-    if (options?.detail !== undefined) {
-      this.detail = options.detail;
-    }
-    if (options?.errorCode !== undefined) {
-      this.errorCode = options.errorCode;
-    }
-    if (options?.retryAfter !== undefined) {
-      this.retryAfter = options.retryAfter;
-    }
-  }
-}
+// Canonical shared error model since TASK-13526 stage 2 (ADR-065): the class
+// definition lives in packages/ui's api-error module so both clients share
+// one shape; re-exported here so every existing `ApiError` import keeps
+// working unchanged.
+export { ApiError } from '@tldw/ui/services/tldw/api-error';
+import { ApiError } from '@tldw/ui/services/tldw/api-error';
 
 const deploymentEnv = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -363,7 +336,14 @@ function createAbortSignal(config: ApiRequestConfig): {
   cleanup: () => void;
   didTimeout: () => boolean;
 } {
-  const timeout = config.timeout ?? api.defaults.timeout;
+  // Shared timeout policy (TASK-13526 transport Stage A): per-path floors
+  // and overrides match the extension; the web 30s default seeds
+  // requestTimeoutMs so generic paths keep today's behavior.
+  const timeout = deriveRequestTimeout(
+    { requestTimeoutMs: api.defaults.timeout },
+    (config.url ?? '') as Parameters<typeof deriveRequestTimeout>[1],
+    config.timeout
+  );
   const callerSignal = config.signal;
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -470,8 +450,11 @@ async function parseErrorBody(response: Response): Promise<ApiErrorResponse> {
 }
 
 function retryAfterFromHeaders(headers: Headers): number | undefined {
-  const retryAfterHeader = headers.get('retry-after');
-  return retryAfterHeader ? parseInt(retryAfterHeader, 10) || undefined : undefined;
+  // Shared parser (TASK-13526 transport Stage A) handles both delta-seconds
+  // and HTTP-date forms and returns MILLISECONDS; the web ApiError.retryAfter
+  // field keeps its axios-convention SECONDS semantics, so convert here.
+  const ms = parseRetryAfter(headers.get('retry-after'));
+  return ms == null ? undefined : Math.ceil(ms / 1000);
 }
 
 function buildRequestHistoryConfig(

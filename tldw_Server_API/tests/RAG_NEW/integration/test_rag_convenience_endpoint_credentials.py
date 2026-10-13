@@ -253,3 +253,35 @@ async def test_simple_search_does_not_generate_an_answer(monkeypatch: pytest.Mon
     await unified_pipeline.simple_search("q")
 
     assert seen["enable_generation"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint_name", ["simple", "advanced"])
+async def test_convenience_endpoint_passes_an_llm_quota_refusal_through(
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint_name: str,
+) -> None:
+    """A refusal raised inside the search keeps its 402; it is not turned into a 500 (spec §4b)."""
+    runtime = _CountingRuntime()
+    _install_endpoint_fakes(monkeypatch, runtime)
+
+    async def refused(*_args: Any, **_kwargs: Any) -> Any:
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(rag_endpoint, f"{endpoint_name}_search", refused)
+    endpoint = rag_endpoint.simple_search_endpoint if endpoint_name == "simple" else rag_endpoint.advanced_search_endpoint
+
+    kwargs = {} if endpoint_name == "simple" else {"with_answer": False}
+    with pytest.raises(LLMQuotaExceededError):
+        await endpoint(
+            request=_request(f"/api/v1/rag/{endpoint_name}"),
+            query="q",
+            current_user=_user(),
+            media_db=_db("media.db"),
+            chacha_db=_db("notes.db"),
+            **kwargs,
+        )
+
+    assert runtime.close_calls == 1  # nosec B101

@@ -74,6 +74,10 @@ EXPECTED_SPLIT_ADMIN_OPERATIONS: set[tuple[str, str]] = {
     ("GET", "/api/v1/admin/monitoring/alerts/history"),
     ("GET", "/api/v1/admin/errors/breakdown"),
     ("GET", "/api/v1/admin/rate-limits/summary"),
+    # Billing dashboard (admin billing mount; legacy public mount removed)
+    ("GET", "/api/v1/admin/billing/overview"),
+    ("GET", "/api/v1/admin/billing/subscriptions"),
+    ("GET", "/api/v1/admin/billing/events"),
 }
 
 

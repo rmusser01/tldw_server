@@ -17,7 +17,7 @@ interface LlamacppReadinessPanelProps {
 const formatValue = (value: string | number | boolean | null | undefined) =>
   value === undefined || value === null || value === "" ? "Not set" : String(value)
 
-export const LlamacppReadinessPanel: React.FC<LlamacppReadinessPanelProps> = ({
+const LlamacppReadinessPanelImpl: React.FC<LlamacppReadinessPanelProps> = ({
   config,
   loading = false
 }) => {
@@ -124,5 +124,7 @@ export const LlamacppReadinessPanel: React.FC<LlamacppReadinessPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppReadinessPanel = React.memo(LlamacppReadinessPanelImpl)
 
 export default LlamacppReadinessPanel

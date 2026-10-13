@@ -929,3 +929,45 @@ async def test_configured_generator_parses_json_response(monkeypatch: pytest.Mon
 
     assert result["children"][0]["title"] == "Configured child"
     assert result["generation_metadata"]["provider"] == "fake"
+
+
+@pytest.mark.asyncio()
+async def test_configured_generator_calls_the_provider_off_the_event_loop_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sync provider call runs on a worker thread, where it can be quota-checked (spec §4b)."""
+    import threading
+
+    seen: list[int] = []
+
+    class FakeAdapter:
+        def chat(self, request, *, timeout=None):
+            """Record the thread and answer with one child."""
+            seen.append(threading.get_ident())
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"children":[{"title":"Child","body":"Body",'
+                                '"kind":"explanation","intent":"explain","outside_knowledge_used":true}]}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "fake-provider")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "fake-model")
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+
+    monkeypatch.setattr(adapter_utils, "get_adapter_or_raise", lambda _provider: FakeAdapter())
+    monkeypatch.setattr(adapter_utils, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda *_args, **_kwargs: {})
+
+    generator = make_configured_explainer_generator()
+    result = await generator(type("Prompt", (), {"as_messages": lambda self: [{"role": "user", "content": "Expand"}]})())
+
+    assert result["children"][0]["title"] == "Child"
+    assert seen and seen[0] != threading.get_ident()

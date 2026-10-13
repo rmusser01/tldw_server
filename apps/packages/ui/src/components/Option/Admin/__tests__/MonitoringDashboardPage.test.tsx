@@ -3,7 +3,8 @@
 import React from "react"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   getSystemStats: vi.fn(),
@@ -73,6 +74,24 @@ vi.mock("@/design-system", async (importActual) => {
 })
 
 import MonitoringDashboardPage from "../MonitoringDashboardPage"
+import { createAdminQueryClient } from "../AdminQueryProvider"
+
+/**
+ * Render the page under a fresh admin query client so each test owns its
+ * cache (B-S4): reference-data queries now flow through react-query.
+ */
+const adminQueryClients: QueryClient[] = []
+const renderPage = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
+}
+
+afterEach(() => {
+  adminQueryClients.splice(0).forEach((client) => client.clear())
+})
 
 const expectDesignSystemAlertForText = async (text: string | RegExp) => {
   const title = await screen.findByText(text)
@@ -137,7 +156,7 @@ describe("MonitoringDashboardPage", () => {
   })
 
   it("renders the intro text and page title", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     expect(screen.getByText("Monitoring & Alerting")).toBeTruthy()
     await waitFor(() => {
@@ -150,7 +169,7 @@ describe("MonitoringDashboardPage", () => {
   it("renders forbidden guard feedback through the design-system Alert primitive", async () => {
     mocks.getSystemStats.mockRejectedValueOnce({ status: 403 })
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const alert = await expectDesignSystemAlertForText("Access Denied")
     expect(alert).toHaveAttribute("role", "alert")
@@ -162,7 +181,7 @@ describe("MonitoringDashboardPage", () => {
   it("renders missing-endpoint guard feedback through the design-system Alert primitive", async () => {
     mocks.getSystemStats.mockRejectedValueOnce({ status: 404 })
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const alert = await expectDesignSystemAlertForText("Not Available")
     expect(alert).toHaveAttribute("role", "alert")
@@ -175,14 +194,14 @@ describe("MonitoringDashboardPage", () => {
     mocks.getSystemStats.mockResolvedValueOnce(null)
     mocks.getSecurityAlertStatus.mockResolvedValueOnce(null)
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const alert = await expectDesignSystemAlertForText("No system data available yet.")
     expect(alert).toHaveAttribute("role", "status")
   })
 
   it("shows empty state with starter rules when no alert rules exist", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const alert = await expectDesignSystemAlertForText("No alert rules configured")
     expect(alert).toHaveAttribute("role", "status")
@@ -197,7 +216,7 @@ describe("MonitoringDashboardPage", () => {
       { id: 1, metric: "cpu_usage", operator: ">", threshold: 80, duration_minutes: 5, severity: "high", enabled: true }
     ])
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     await waitFor(() => {
       expect(screen.queryByText("No alert rules configured")).toBeNull()
@@ -257,7 +276,7 @@ describe("MonitoringDashboardPage", () => {
       startup_warning_summary: null
     })
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     await waitFor(() => {
       expect(screen.getByText("Sandbox Runtime Isolation")).toBeTruthy()
@@ -272,7 +291,7 @@ describe("MonitoringDashboardPage", () => {
   })
 
   it("renders empty sandbox diagnostics feedback through the design-system Alert primitive", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const alert = await expectDesignSystemAlertForText(
       "No sandbox runtime diagnostics available yet."
@@ -296,7 +315,7 @@ describe("MonitoringDashboardPage", () => {
       startup_warning_summary: null
     })
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     await waitFor(() => {
       expect(screen.getByText(designSystemLabels.ready)).toBeTruthy()
@@ -338,7 +357,7 @@ describe("MonitoringDashboardPage", () => {
       startup_warning_summary: null
     })
 
-    render(<FallbackMonitoringDashboardPage />)
+    renderPage(<FallbackMonitoringDashboardPage />)
 
     await waitFor(() => {
       expect(screen.getByText("ready")).toBeTruthy()
@@ -356,7 +375,7 @@ describe("MonitoringDashboardPage", () => {
       )
     )
 
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const callout = await expectRecoveryCalloutForText(
       "Sandbox diagnostics access denied"
@@ -381,7 +400,7 @@ describe("MonitoringDashboardPage", () => {
   })
 
   it("renders empty activity feedback through the design-system Alert primitive", async () => {
-    render(<MonitoringDashboardPage />)
+    renderPage(<MonitoringDashboardPage />)
 
     const alert = await expectDesignSystemAlertForText(
       "No recent activity data available."
@@ -391,7 +410,7 @@ describe("MonitoringDashboardPage", () => {
 
   describe("MON-001: alert assignment uses correct user ID and field name", () => {
     it("fetches current user profile on mount", async () => {
-      render(<MonitoringDashboardPage />)
+      renderPage(<MonitoringDashboardPage />)
 
       await waitFor(() => {
         expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(1)
@@ -403,7 +422,7 @@ describe("MonitoringDashboardPage", () => {
         { id: "alert-1", alert: "High CPU Alert", severity: "high", status: "active", triggered_at: "2026-01-01T00:00:00Z" }
       ])
 
-      render(<MonitoringDashboardPage />)
+      renderPage(<MonitoringDashboardPage />)
 
       // Wait for alert history to load
       await waitFor(() => {
@@ -421,7 +440,7 @@ describe("MonitoringDashboardPage", () => {
   describe("MON-BUG-002: duration and severity are required fields", () => {
     it("validates duration_minutes and severity as required before submission", async () => {
       const user = userEvent.setup()
-      render(<MonitoringDashboardPage />)
+      renderPage(<MonitoringDashboardPage />)
 
       // Wait for page to load
       await waitFor(() => {

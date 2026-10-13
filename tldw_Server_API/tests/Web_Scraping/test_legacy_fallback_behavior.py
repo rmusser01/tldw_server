@@ -147,3 +147,33 @@ def test_process_web_scraping_endpoint_returns_500_when_enhanced_service_fails(
     response = client_user_only.post("/api/v1/media/process-web-scraping", json=payload)
     assert response.status_code == 500
     assert response.json().get("detail") == "Web scraping failed due to an internal error."
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ingest_web_content_analysis_runs_off_the_event_loop_thread(monkeypatch):
+    """The analysis runs on a worker thread, where it can be quota-checked (spec §4b)."""
+    import threading
+
+    seen = []
+
+    async def fake_scrape_article(url, custom_cookies=None, *, allow_llm_extraction=None):
+        """One extracted article."""
+        return {"url": url, "title": "Example", "content": "article body", "extraction_successful": True}
+
+    def fake_analyze(**kwargs):
+        """Record the thread."""
+        seen.append(threading.get_ident())
+        return "summary"
+
+    monkeypatch.setattr(ws_service, "scrape_article", fake_scrape_article, raising=True)
+    monkeypatch.setattr(ws_service, "analyze", fake_analyze, raising=True)
+
+    result = await ws_service.ingest_web_content_orchestrate(
+        request=IngestWebContentRequest(urls=["https://example.com/a"], perform_analysis=True, api_name="openai"),
+        db=object(),
+        usage_log=_UsageLog(),
+    )
+
+    assert result[0]["analysis"] == "summary"
+    assert seen and seen[0] != threading.get_ident()

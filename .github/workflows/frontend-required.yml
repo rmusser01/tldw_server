@@ -561,11 +561,9 @@ jobs:
           fi
 
   frontend-required:
-    # A dispatch started by hand publishes a diagnostic name, so it can never satisfy the
-    # protected check. The one exemption is a dispatch made with GITHUB_TOKEN, whose actor is
-    # github-actions[bot]: that is how the merge queue starts this gate on the head it just
-    # rebased (TASK-13462, spec 4.8).
-    name: ${{ github.event_name == 'workflow_dispatch' && github.actor != 'github-actions[bot]' && 'frontend-required-diagnostic' || 'frontend-required' }}
+    # A dispatch publishes a diagnostic name, so it can never satisfy the protected check (D2 of the
+    # 2026-10-11 merge-queue redesign: the queue no longer dispatches this gate, so no actor is exempt).
+    name: ${{ github.event_name == 'workflow_dispatch' && 'frontend-required-diagnostic' || 'frontend-required' }}
     runs-on: ubuntu-latest
     needs: [changes, admission, frontend-unit-tests, await_license]
     # Same condition as the changes job, and deliberately no test of its result: GitHub counts
@@ -997,15 +995,12 @@ jobs:
         working-directory: admin-ui
         run: bun run build
 
-  # Wakes the merge queue after a failed gate (TASK-13462, spec 4.6). A red required check
-  # produces no event that merge-queue.yml listens to, so without this the front PR would sit
-  # in the line until an unrelated push to dev.
-  #
-  # It runs only when the gate job failed and the queue is enabled: a green run spends no
-  # runner on it, and with MERGE_QUEUE unset it is skipped on every run. Nothing needs it, so
-  # it can never delay the required check or turn it red. It never runs on workflow_run or for
-  # a fork, and it checks out dev, never the PR, so the code that runs with these write
-  # permissions is always dev's.
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
   queue-tick:
     name: Merge queue tick
     needs: [frontend-required]
@@ -1013,27 +1008,16 @@ jobs:
       always() && !cancelled() &&
       needs.frontend-required.result == 'failure' &&
       (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'pull_request' &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
-      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
-      contents: write
-      pull-requests: write
       actions: write
-      # read: the six required check runs and the license commit status on the front PR's head.
-      checks: read
-      statuses: read
     steps:
-      - name: Checkout dev
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: dev
-          persist-credentials: false
-      - name: Advance the queue
+      - name: Wake the merge queue
         env:
           GH_TOKEN: ${{ github.token }}
-          MERGE_QUEUE: ${{ vars.MERGE_QUEUE }}
-        run: python3 -m Helper_Scripts.ci.merge_queue
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"

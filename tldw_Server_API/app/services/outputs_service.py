@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     normalize_output_storage_filename,
 )
-from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, LLMQuotaExceededError
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
@@ -636,6 +636,10 @@ def delete_outputs_by_ids(cdb, user_id: int, ids: list[int]) -> int:
 
 _SUMMARIZE_MAX_CHARS = 12_000
 _SUMMARIZE_DEFAULT_PROMPT = "Summarize the following article in 2-3 concise sentences:\n\n{text}"
+# analyze's own default system prompt asks for bulleted notes; these prompts say what they want.
+_OUTPUTS_SYSTEM_PROMPT = (
+    "You are a concise assistant. Follow the instructions in the message exactly and return only what they ask for."
+)
 
 
 def _content_cache_key(content: str) -> str:
@@ -663,6 +667,13 @@ def _get_cached_summary(metadata_json: str | None, content_hash: str) -> str | N
     return None
 
 
+def _fill_prompt(template: str, text: str) -> str:
+    """Put ``text`` at the template's ``{text}``, or after the template when it has none."""
+    if "{text}" in template:
+        return template.replace("{text}", text, 1)
+    return f"{template}\n\n{text}"
+
+
 def _summarize_single_article(
     text: str,
     *,
@@ -670,21 +681,25 @@ def _summarize_single_article(
     model_override: str | None = None,
     custom_prompt: str | None = None,
 ) -> str:
-    """Synchronously call LLM to summarize a single article."""
+    """Synchronously call LLM to summarize a single article. A quota refusal propagates."""
     from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
     truncated = text[:_SUMMARIZE_MAX_CHARS]
-    prompt = (custom_prompt or _SUMMARIZE_DEFAULT_PROMPT).format(text=truncated)
+    prompt = _fill_prompt(custom_prompt or _SUMMARIZE_DEFAULT_PROMPT, truncated)
     try:
         result = analyze(
-            input_data=truncated,
-            custom_prompt=prompt,
-            api_name=api_name,
-            api_key=None,
-            model=model_override,
+            api_name,
+            prompt,
+            None,
+            system_message=_OUTPUTS_SYSTEM_PROMPT,
+            model_override=model_override,
+            input_is_literal_text=True,
         )
-        if isinstance(result, str) and result.strip():
-            return result.strip()
+        summary = result.strip() if isinstance(result, str) else ""
+        if summary and not summary.startswith("Error:"):
+            return summary
+    except LLMQuotaExceededError:
+        raise
     except Exception as exc:
         logger.warning(f"outputs_service: LLM summarize failed: {exc}")
     return text[:300]
@@ -874,21 +889,25 @@ def _summarize_text_block(
     custom_prompt: str | None = None,
     max_chars: int = 20_000,
 ) -> str:
-    """Shared helper to summarize a block of text via LLM. Synchronous."""
+    """Shared helper to summarize a block of text via LLM. Synchronous. A quota refusal propagates."""
     from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
     truncated = text[:max_chars]
-    prompt = (custom_prompt or _BRIEFING_SUMMARY_DEFAULT_PROMPT).format(text=truncated)
+    prompt = _fill_prompt(custom_prompt or _BRIEFING_SUMMARY_DEFAULT_PROMPT, truncated)
     try:
         result = analyze(
-            input_data=truncated,
-            custom_prompt=prompt,
-            api_name=api_name,
-            api_key=None,
-            model=model_override,
+            api_name,
+            prompt,
+            None,
+            system_message=_OUTPUTS_SYSTEM_PROMPT,
+            model_override=model_override,
+            input_is_literal_text=True,
         )
-        if isinstance(result, str) and result.strip():
-            return result.strip()
+        summary = result.strip() if isinstance(result, str) else ""
+        if summary and not summary.startswith("Error:"):
+            return summary
+    except LLMQuotaExceededError:
+        raise
     except Exception as exc:
         logger.warning(f"outputs_service: LLM summarize_text_block failed: {exc}")
     return ""
@@ -915,15 +934,19 @@ async def generate_group_summaries(
             if title:
                 texts.append(f"- {title}: {summary}" if summary else f"- {title}")
         combined = "\n".join(texts)
-        prompt = (custom_prompt or _GROUP_SUMMARY_DEFAULT_PROMPT).format(text=combined)
         try:
             result = await loop.run_in_executor(
                 None,
-                lambda t=combined, p=prompt: _summarize_text_block(
-                    t, api_name=api_name, model_override=model_override, custom_prompt=p,
+                lambda t=combined: _summarize_text_block(
+                    t,
+                    api_name=api_name,
+                    model_override=model_override,
+                    custom_prompt=custom_prompt or _GROUP_SUMMARY_DEFAULT_PROMPT,
                 ),
             )
             group["summary"] = result
+        except LLMQuotaExceededError:
+            raise
         except Exception as exc:
             logger.warning(f"outputs_service: group summary failed for '{group.get('name')}': {exc}")
             group["summary"] = ""
@@ -1022,7 +1045,7 @@ async def classify_items_by_topic(
         summary = item.get("llm_summary") or item.get("summary", "")
         texts.append(f"[{idx}] {title}: {summary[:200]}" if summary else f"[{idx}] {title}")
     combined = "\n".join(texts)
-    prompt = _TOPIC_CLASSIFY_PROMPT.format(max_groups=max_groups, text=combined)
+    prompt = _TOPIC_CLASSIFY_PROMPT.replace("{max_groups}", str(max_groups))
 
     try:
         result = await loop.run_in_executor(
@@ -1072,6 +1095,8 @@ async def classify_items_by_topic(
                 "summary": None,
             })
         return groups if groups else None
+    except LLMQuotaExceededError:
+        raise
     except Exception as exc:
         logger.warning(f"outputs_service: topic classification failed: {exc}")
         return None

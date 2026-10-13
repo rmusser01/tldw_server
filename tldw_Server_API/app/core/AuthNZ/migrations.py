@@ -128,6 +128,9 @@ def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_access_jti ON sessions(access_jti)")
+    # Admin activity summaries filter sessions by a created_at time window
+    # (admin perf plan A, stage 3); keep it an index range scan.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)")
 
     conn.commit()
     logger.info("Migration 002: Created sessions table")
@@ -2715,6 +2718,9 @@ def migration_016_create_orgs_teams(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)")
+    # Org-scoped admin joins filter org_members by org_id and join on user_id
+    # (admin perf plan A, stage 3); the composite index covers both.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_org_members_org_user ON org_members(org_id, user_id)")
 
     # teams
     conn.execute(
@@ -6514,7 +6520,12 @@ def get_authnz_migrations() -> list[Migration]:
             "Copy users.storage_quota_mb into limits.storage_quota_mb overrides",
             migration_100_copy_storage_quotas_to_user_overrides,
         ),
-        Migration(101, "Add native retained chat quota reservations", migration_101_native_chat_quota_reservations),
+        Migration(
+            101,
+            "Add sessions.created_at and org_members(org_id, user_id) admin indexes",
+            migration_101_add_admin_perf_indexes,
+        ),
+        Migration(102, "Add native retained chat quota reservations", migration_102_native_chat_quota_reservations),
     ]
 
 
@@ -6631,6 +6642,31 @@ def migration_099_add_llm_usage_log_user_ts_index(conn: sqlite3.Connection) -> N
         "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
     )
     logger.info("Migration 099: Added llm_usage_log user_id + ts index")
+
+
+def migration_101_add_admin_perf_indexes(conn: sqlite3.Connection) -> None:
+    """Add the admin perf indexes on sessions and org_members for legacy databases.
+
+    Migrations 002 and 016 (already applied on existing databases) did not
+    index ``sessions(created_at)`` or ``org_members(org_id, user_id)``; admin
+    activity summaries and org-scoped joins need them (admin perf plan A,
+    stage 3). The statements are also present in migrations 002/016 so fresh
+    databases gain the indexes at table creation; this versioned step
+    delivers them to databases upgraded from an earlier version.
+
+    Synthetic/legacy fixtures may reach this migration without the tables
+    (cf. migration 099); skip rather than error for those, instead of
+    suppressing a real failure.
+    """
+    for table, index_sql in (
+        ("sessions", "CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)"),
+        ("org_members", "CREATE INDEX IF NOT EXISTS idx_org_members_org_user ON org_members(org_id, user_id)"),
+    ):
+        if not _sqlite_table_exists(conn, table):
+            logger.info(f"Migration 101: {table} table not present; skipping index")
+            continue
+        conn.execute(index_sql)
+    logger.info("Migration 101: Added admin perf indexes (sessions.created_at, org_members org_id+user_id)")
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
@@ -6760,7 +6796,7 @@ def ensure_authnz_tables(db_path: Path) -> None:
 #######################################################################################################################
 
 
-def migration_101_native_chat_quota_reservations(conn: sqlite3.Connection) -> None:
+def migration_102_native_chat_quota_reservations(conn: sqlite3.Connection) -> None:
     """Retain same-key native accounting separately from legacy storage counters."""
     from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import native_quota_schema_statements
     for statement in native_quota_schema_statements(postgres=False):

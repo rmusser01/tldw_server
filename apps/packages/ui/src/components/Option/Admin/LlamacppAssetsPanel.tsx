@@ -1,4 +1,5 @@
 import React from "react"
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
 import { Button, Card, Input, Space, Spin, Tag, Typography } from "antd"
 import { RefreshCw } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
@@ -17,6 +18,15 @@ const passiveAlertProps = {
   role: "status",
   "aria-live": "polite"
 } as const
+
+// ── Virtualization (admin perf C-S4 / F17) ──
+// Filesystem-derived asset groups can reach hundreds of entries; past the
+// threshold each group renders a windowed subset inside its own bounded
+// scroll container (per group, not across groups).
+export const ASSET_VIRTUALIZE_THRESHOLD = 30
+/** Estimated `<li>` height from the current row layout (tags + ids + paths). */
+export const ASSET_ROW_ESTIMATE = 96
+export const ASSET_OVERSCAN = 8
 
 interface LlamacppAssetsPanelProps {
   assets: LlamacppAssetsResponse | null
@@ -69,6 +79,120 @@ const toAssetGroups = (assetList: LlamacppAsset[]) =>
       items: assetList.filter((asset) => asset.kind === kind)
     }))
     .filter((group) => group.items.length > 0)
+
+interface AssetGroup {
+  kind: LlamacppAssetKind
+  label: string
+  items: LlamacppAsset[]
+}
+
+/**
+ * One asset kind group. Large groups virtualize their own list (hooks live
+ * here so each group instance owns its virtualizer); small groups keep the
+ * plain `<ul>` rendering.
+ */
+const AssetGroupSection: React.FC<{ group: AssetGroup }> = ({ group }) => {
+  const { label, items } = group
+  const shouldVirtualize = items.length >= ASSET_VIRTUALIZE_THRESHOLD
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? items.length : 0,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => ASSET_ROW_ESTIMATE,
+    overscan: ASSET_OVERSCAN,
+    getItemKey: (index) => items[index]?.asset_id ?? index,
+    // jsdom reports zero-height rows; fall back to the estimate so window
+    // math stays deterministic in tests (same idiom as Sidepanel/Chat body).
+    measureElement: (el) => el?.getBoundingClientRect().height || ASSET_ROW_ESTIMATE
+  })
+
+  const renderAssetRow = (asset: LlamacppAsset, virtualRow?: VirtualItem) => {
+    const size = formatBytes(asset.size_bytes)
+    return (
+      <li
+        key={virtualRow ? virtualRow.key : asset.asset_id}
+        data-index={virtualRow?.index}
+        data-asset-id={virtualRow ? asset.asset_id : undefined}
+        ref={virtualRow ? virtualizer.measureElement : undefined}
+        className="px-4 py-2"
+        style={
+          virtualRow
+            ? {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`
+              }
+            : undefined
+        }
+      >
+        <Space orientation="vertical" size={4} className="w-full">
+          <Space wrap size="small">
+            <Text strong>{asset.display_name}</Text>
+            <Tag>{asset.source}</Tag>
+            {size && <Tag>{size}</Tag>}
+            {renderMetadataTags(asset)}
+            {asset.capabilities.map((capability) => (
+              <Tag key={capability}>{capability}</Tag>
+            ))}
+          </Space>
+          <Space wrap size="small">
+            <Text code>{asset.asset_id}</Text>
+            <Text type="secondary" className="break-all">
+              {asset.path}
+            </Text>
+          </Space>
+          <CandidateLabels asset={asset} />
+          {asset.warnings.length > 0 && (
+            <Space wrap size="small">
+              {asset.warnings.map((warning, index) => (
+                <Tag key={`${asset.asset_id}-warning-${index}`} color="orange">
+                  {warning}
+                </Tag>
+              ))}
+            </Space>
+          )}
+        </Space>
+      </li>
+    )
+  }
+
+  return (
+    <section aria-label={label}>
+      <Title level={5}>{label}</Title>
+      {shouldVirtualize ? (
+        <div
+          ref={scrollContainerRef}
+          className="h-96 overflow-y-auto rounded-lg border border-border"
+        >
+          <ul
+            role="list"
+            aria-label={label}
+            className="m-0 list-none divide-y divide-border p-0 [&_.ant-space-item]:max-w-full [&_.ant-tag]:max-w-full [&_.ant-tag]:whitespace-normal [&_.ant-tag]:break-words"
+            style={{
+              height: virtualizer.getTotalSize(),
+              position: "relative",
+              width: "100%"
+            }}
+          >
+            {virtualizer
+              .getVirtualItems()
+              .map((virtualRow) => renderAssetRow(items[virtualRow.index]!, virtualRow))}
+          </ul>
+        </div>
+      ) : (
+        <ul
+          role="list"
+          aria-label={label}
+          className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0 [&_.ant-space-item]:max-w-full [&_.ant-tag]:max-w-full [&_.ant-tag]:whitespace-normal [&_.ant-tag]:break-words"
+        >
+          {items.map((asset) => renderAssetRow(asset))}
+        </ul>
+      )}
+    </section>
+  )
+}
 
 const acquisitionStatusColors: Record<string, string> = {
   queued: "blue",
@@ -136,7 +260,7 @@ const CandidateLabels: React.FC<{ asset: LlamacppAsset }> = ({ asset }) => (
   </Space>
 )
 
-export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
+const LlamacppAssetsPanelImpl: React.FC<LlamacppAssetsPanelProps> = ({
   assets,
   loading = false,
   registeringPath = false,
@@ -164,7 +288,10 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
   const [downloadDestinationDir, setDownloadDestinationDir] = React.useState("")
   const [downloadFilename, setDownloadFilename] = React.useState("")
   const assetList = assets?.assets || []
-  const assetGroups = toAssetGroups(assetList)
+  // Group the catalog (4 kind-filter passes) only when the list reference
+  // changes (admin perf C-S3 / F18): typing in this panel's own inputs
+  // re-renders it without rebuilding the groups.
+  const assetGroups = React.useMemo(() => toAssetGroups(assetList), [assetList])
   const downloadJobs = downloads?.jobs || []
   const showDownloadWorkflow = Boolean(onStartDownload) || downloadJobs.length > 0
   const importUsesPreview = Boolean(onPreviewImportFolder)
@@ -461,52 +588,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
         {assetGroups.length > 0 ? (
           <Space orientation="vertical" size="middle" className="w-full">
             {assetGroups.map((group) => (
-              <section key={group.kind} aria-label={group.label}>
-                <Title level={5}>{group.label}</Title>
-                <ul
-                  role="list"
-                  aria-label={group.label}
-                  className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0 [&_.ant-space-item]:max-w-full [&_.ant-tag]:max-w-full [&_.ant-tag]:whitespace-normal [&_.ant-tag]:break-words"
-                >
-                  {group.items.map((asset) => {
-                    const size = formatBytes(asset.size_bytes)
-                    return (
-                      <li
-                        key={asset.asset_id}
-                        className="px-4 py-2"
-                      >
-                        <Space orientation="vertical" size={4} className="w-full">
-                          <Space wrap size="small">
-                            <Text strong>{asset.display_name}</Text>
-                            <Tag>{asset.source}</Tag>
-                            {size && <Tag>{size}</Tag>}
-                            {renderMetadataTags(asset)}
-                            {asset.capabilities.map((capability) => (
-                              <Tag key={capability}>{capability}</Tag>
-                            ))}
-                          </Space>
-                          <Space wrap size="small">
-                            <Text code>{asset.asset_id}</Text>
-                            <Text type="secondary" className="break-all">
-                              {asset.path}
-                            </Text>
-                          </Space>
-                          <CandidateLabels asset={asset} />
-                          {asset.warnings.length > 0 && (
-                            <Space wrap size="small">
-                              {asset.warnings.map((warning, index) => (
-                                <Tag key={`${asset.asset_id}-warning-${index}`} color="orange">
-                                  {warning}
-                                </Tag>
-                              ))}
-                            </Space>
-                          )}
-                        </Space>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </section>
+              <AssetGroupSection key={group.kind} group={group} />
             ))}
           </Space>
         ) : (
@@ -518,5 +600,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppAssetsPanel = React.memo(LlamacppAssetsPanelImpl)
 
 export default LlamacppAssetsPanel

@@ -33,8 +33,6 @@ def test_get_rate_limits_shape():
         "evaluations_per_minute",
         "evaluations_per_day",
         "tokens_per_day",
-        "cost_per_day",
-        "cost_per_month",
     ]:
         assert k in lim, f"Missing limits key: {k}"
         if k in ("evaluations_per_day", "tokens_per_day"):
@@ -47,8 +45,6 @@ def test_get_rate_limits_shape():
     for k in [
         "evaluations_today",
         "tokens_today",
-        "cost_today",
-        "cost_month",
     ]:
         assert k in usage, f"Missing usage key: {k}"
         assert isinstance(usage[k], int)
@@ -58,14 +54,14 @@ def test_get_rate_limits_shape():
     for k in [
         "daily_evaluations",
         "daily_tokens",
-        "daily_cost",
-        "monthly_cost",
     ]:
         assert k in rem, f"Missing remaining key: {k}"
-        if k in ("daily_evaluations", "daily_tokens"):
-            assert rem[k] is None or isinstance(rem[k], int)  # None is unlimited
-        else:
-            assert isinstance(rem[k], int)
+        assert rem[k] is None or isinstance(rem[k], int)  # None is unlimited
+
+    # Evaluation cost caps were removed (TASK-13436): no cost fields anywhere.
+    assert set(lim) == {"evaluations_per_minute", "evaluations_per_day", "tokens_per_day"}
+    assert set(usage) == {"evaluations_today", "tokens_today"}
+    assert set(rem) == {"daily_evaluations", "daily_tokens"}
 
 
 def test_rate_limits_daily_caps_are_null_when_unlimited(monkeypatch):

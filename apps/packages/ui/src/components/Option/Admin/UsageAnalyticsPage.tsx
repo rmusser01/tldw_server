@@ -72,7 +72,9 @@ const UsageAnalyticsPage: React.FC = () => {
     if (guardState) setAdminGuard(guardState)
   }, [])
 
-  // Compute date params from range selection
+  // Compute date params from range selection. /usage/daily and /usage/top
+  // take YYYY-MM-DD dates; the llm-usage* endpoints take ISO timestamps
+  // (both shapes are documented in admin_usage.py).
   const getDateParams = useCallback(() => {
     const end = new Date()
     const start = new Date()
@@ -82,6 +84,14 @@ const UsageAnalyticsPage: React.FC = () => {
       start_date: start.toISOString().split("T")[0],
       end_date: end.toISOString().split("T")[0]
     }
+  }, [dateRange])
+
+  const getLlmDateParams = useCallback(() => {
+    const end = new Date()
+    const start = new Date()
+    const days = dateRange === "30d" ? 30 : 7
+    start.setDate(start.getDate() - days)
+    return { start: start.toISOString(), end: end.toISOString() }
   }, [dateRange])
 
   // ── Daily Usage ──
@@ -116,14 +126,19 @@ const UsageAnalyticsPage: React.FC = () => {
   const loadTopUsage = useCallback(async () => {
     setTopLoading(true)
     try {
-      const result = await tldwClient.getTopUsage({ limit: 20 })
+      const { start_date, end_date } = getDateParams()
+      const result = await tldwClient.getTopUsage({
+        limit: 20,
+        start: start_date,
+        end: end_date
+      })
       setTopUsage(Array.isArray(result) ? result : result?.data ?? [])
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
       setTopLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [getDateParams, markAdminGuardFromError])
 
   const handleExportTopCsv = async () => {
     setTopExporting(true)
@@ -143,38 +158,38 @@ const UsageAnalyticsPage: React.FC = () => {
   const loadLlmUsage = useCallback(async () => {
     setLlmLoading(true)
     try {
-      const result = await tldwClient.getLlmUsage({ limit: 50 })
+      const result = await tldwClient.getLlmUsage({ limit: 50, ...getLlmDateParams() })
       setLlmUsage(Array.isArray(result) ? result : result?.data ?? [])
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
       setLlmLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [getLlmDateParams, markAdminGuardFromError])
 
   const loadLlmSummary = useCallback(async () => {
     setLlmSummaryLoading(true)
     try {
-      const result = await tldwClient.getLlmUsageSummary()
+      const result = await tldwClient.getLlmUsageSummary(getLlmDateParams())
       setLlmSummary(result)
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
       setLlmSummaryLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [getLlmDateParams, markAdminGuardFromError])
 
   const loadTopSpenders = useCallback(async () => {
     setTopSpendersLoading(true)
     try {
-      const result = await tldwClient.getLlmTopSpenders({ limit: 10 })
+      const result = await tldwClient.getLlmTopSpenders({ limit: 10, ...getLlmDateParams() })
       setTopSpenders(Array.isArray(result) ? result : result?.data ?? [])
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
       setTopSpendersLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [getLlmDateParams, markAdminGuardFromError])
 
   // ── Provider Analytics ──
 
@@ -203,13 +218,30 @@ const UsageAnalyticsPage: React.FC = () => {
     void loadProviderAnalytics()
   }, [loadDailyUsage, loadTopUsage, loadLlmUsage, loadLlmSummary, loadTopSpenders, loadProviderAnalytics])
 
-  // Reload when date range changes (after initial load)
+  // Reload every dataset when the range selection actually changes. The
+  // previous mount-run guard leaked a duplicate daily/provider fetch on
+  // mount because the initial-load effect had already flipped
+  // initialLoadRef; comparing against the last-seen range skips the mount
+  // run entirely and fans the reload out to all six datasets.
+  const prevDateRangeRef = useRef(dateRange)
   useEffect(() => {
-    if (!initialLoadRef.current) return
+    if (prevDateRangeRef.current === dateRange) return
+    prevDateRangeRef.current = dateRange
     void loadDailyUsage()
+    void loadTopUsage()
+    void loadLlmUsage()
+    void loadLlmSummary()
+    void loadTopSpenders()
     void loadProviderAnalytics()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange])
+  }, [
+    dateRange,
+    loadDailyUsage,
+    loadTopUsage,
+    loadLlmUsage,
+    loadLlmSummary,
+    loadTopSpenders,
+    loadProviderAnalytics
+  ])
 
   // ── Table Columns ──
 

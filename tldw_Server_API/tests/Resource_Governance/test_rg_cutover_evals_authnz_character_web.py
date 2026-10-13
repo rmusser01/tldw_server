@@ -71,7 +71,6 @@ async def test_evaluations_rg_allows_bypasses_legacy(monkeypatch):
         user_id="user-123",
         endpoint="/api/v1/evaluations",
         tokens_requested=123,
-        estimated_cost=0.0,
     )
 
     assert allowed is True
@@ -81,7 +80,7 @@ async def test_evaluations_rg_allows_bypasses_legacy(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_evaluations_rg_unavailable_fail_open(monkeypatch):
-    """Phase 2: RG returns None → fail-open for eval/token caps, cost-only enforcement."""
+    """Phase 2: RG returns None → fail-open for RG's eval/token caps; the local daily caps still apply."""
     monkeypatch.setenv("RG_ENABLED", "1")
     monkeypatch.setattr(evals_rl, "_rg_evals_fallback_logged", False)
     monkeypatch.setattr(evals_rl, "_EVALS_DEPRECATION_WARNED", False)
@@ -100,7 +99,6 @@ async def test_evaluations_rg_unavailable_fail_open(monkeypatch):
             user_id="user-123",
             endpoint="/api/v1/evaluations",
             tokens_requested=123,
-            estimated_cost=0.0,
         )
 
         assert allowed is True
@@ -217,10 +215,10 @@ async def test_web_scraping_rg_unavailable_fail_open(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_evaluations_rg_allows_still_enforces_cost_caps(monkeypatch):
+async def test_evaluations_rg_allows_still_enforces_local_daily_caps(monkeypatch):
     """
     When RG allows a request, the Evaluations limiter must still enforce
-    cost caps locally (since RG does not handle cost limits).
+    the per-user daily evaluations/tokens quotas locally.
     """
     monkeypatch.setenv("RG_ENABLED", "1")
     fake = _FakeGovernor(allowed=True, retry_after=None)
@@ -235,46 +233,20 @@ async def test_evaluations_rg_allows_still_enforces_cost_caps(monkeypatch):
         nonlocal usage_denied
         usage_denied = True
         return False, {
-            "error": "Daily cost limit exceeded",
-            "limit": 1.0,
-            "used": 1.0,
-            "requested": 0.5,
+            "error": "Daily evaluation limit exceeded",
+            "limit": 1,
+            "used": 1,
             "retry_after": 3600,
         }
 
     monkeypatch.setattr(limiter, "_reserve_request_usage", _deny_usage)
 
     allowed, meta = await limiter.check_rate_limit(
-        user_id="user-cost-test",
+        user_id="user-cap-test",
         endpoint="/api/v1/evaluations",
         tokens_requested=0,
-        estimated_cost=0.5,
     )
 
     assert usage_denied is True
     assert allowed is False
-    assert "cost" in meta.get("error", "").lower()
-
-
-@pytest.mark.asyncio
-async def test_evaluations_rg_allows_with_zero_cost_skips_cost_check(monkeypatch):
-    """
-    Unified eval endpoints pass estimated_cost=0.0. When RG allows and
-    cost is zero, the cost check should pass (no denial).
-    """
-    monkeypatch.setenv("RG_ENABLED", "1")
-    fake = _FakeGovernor(allowed=True, retry_after=None)
-    monkeypatch.setattr(evals_rl, "_rg_evals_governor", fake)
-    monkeypatch.setattr(evals_rl, "_rg_evals_loader", None)
-
-    limiter = evals_rl.UserRateLimiter()
-
-    allowed, meta = await limiter.check_rate_limit(
-        user_id="user-zero-cost",
-        endpoint="/api/v1/evaluations",
-        tokens_requested=100,
-        estimated_cost=0.0,
-    )
-
-    assert allowed is True
-    assert meta.get("rate_limit_source") == "resource_governor"
+    assert meta.get("error") == "Daily evaluation limit exceeded"

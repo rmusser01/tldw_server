@@ -70,7 +70,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import TemplateValidationError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, TemplateValidationError
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     build_watchlist_source_bulk_import_activity,
     record_companion_activity_events_bulk,
@@ -7214,6 +7214,8 @@ async def create_output(
                 item_id = entry.get("id")
                 if item_id is not None and entry.get("llm_summary"):
                     llm_summaries[int(item_id)] = entry["llm_summary"]
+        except LLMQuotaExceededError:
+            raise  # a 402, not a non-critical summarization failure
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"Watchlists output summarization failed (non-critical): {exc}")
 

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       base_sha:
-        description: Exact base commit for change detection (the merge queue passes dev's tip)
+        description: Exact base commit for change detection (manual diagnostic dispatches)
         required: false
         type: string
 
@@ -426,15 +426,12 @@ jobs:
             --check apps/packages/api-types/openapi.fingerprint.json \
             --check-paths apps/packages/api-types/paths.d.ts
 
-  # Wakes the merge queue when the gate above fails (TASK-13462, section 4.6 of
-  # Docs/superpowers/specs/2026-10-04-merge-queue-design.md). A red gate causes
-  # none of the events merge-queue.yml listens for, so without this a failed
-  # front PR would never be retried or removed from the line.
-  #
-  # Not required and in no job's `needs`, so it cannot turn the required check
-  # red. Skipped on every run while the repository variable MERGE_QUEUE is unset
-  # or off, and for fork PRs. It checks out dev, never the PR, so the queue
-  # script that runs with these write permissions is dev's copy.
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
   queue-tick:
     name: Merge queue tick
     needs: [backend-required]
@@ -442,31 +439,16 @@ jobs:
       always() && !cancelled() &&
       needs.backend-required.result == 'failure' &&
       (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        )
-      )
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
-      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
-      contents: write
-      pull-requests: write
       actions: write
-      # read: the six required check runs and the license commit status on the front PR's head.
-      checks: read
-      statuses: read
     steps:
-      - name: Checkout dev
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: dev
-          persist-credentials: false
-      - name: Advance the queue
+      - name: Wake the merge queue
         env:
           GH_TOKEN: ${{ github.token }}
-          MERGE_QUEUE: ${{ vars.MERGE_QUEUE }}
-        run: python3 -m Helper_Scripts.ci.merge_queue
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"

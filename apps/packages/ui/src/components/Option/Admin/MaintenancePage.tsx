@@ -18,20 +18,80 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { Alert } from "@/components/ui/primitives"
 
 const { TextArea } = Input
+
+// Draft state for the maintenance banner lives here, not in MaintenancePage,
+// so typing in the message/allowlist inputs (or flipping the toggle)
+// re-renders this form only - the flags/incidents/rotation tables below keep
+// their props untouched (C-S5). Commit is explicit via the existing Save
+// Changes button, matching the page's pre-existing apply pattern.
+const MaintenanceBannerForm: React.FC<{
+  initialEnabled: boolean
+  initialMessage: string
+  initialAllowlist: string
+  saving: boolean
+  onSave: (values: { enabled: boolean; message: string; allowlist: string }) => void
+}> = ({ initialEnabled, initialMessage, initialAllowlist, saving, onSave }) => {
+  const { t } = useTranslation(["settings", "common"])
+  const [enabled, setEnabled] = useState(initialEnabled)
+  const [message, setMessage] = useState(initialMessage)
+  const [allowlist, setAllowlist] = useState(initialAllowlist)
+
+  return (
+    <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+      <Space>
+        <span>{t("settings:adminMaintenance.maintToggleLabel", "Maintenance Mode:")}</span>
+        <Switch
+          checked={enabled}
+          onChange={(checked) => setEnabled(checked)}
+          checkedChildren={t("settings:adminMaintenance.maintOn", "ON")}
+          unCheckedChildren={t("settings:adminMaintenance.maintOff", "OFF")}
+        />
+      </Space>
+      <div>
+        <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintMessageLabel", "Message:")}</label>
+        <TextArea
+          rows={2}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder={t("settings:adminMaintenance.maintMessagePlaceholder", "Maintenance message displayed to users...")}
+        />
+      </div>
+      <div>
+        <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintAllowlistLabel", "Allowlist (comma-separated IPs or usernames):")}</label>
+        <Input
+          value={allowlist}
+          onChange={(e) => setAllowlist(e.target.value)}
+          placeholder={t("settings:adminMaintenance.maintAllowlistPlaceholder", "e.g. 192.168.1.1, admin")}
+        />
+      </div>
+      <Button
+        type="primary"
+        loading={saving}
+        onClick={() => onSave({ enabled, message, allowlist })}
+      >
+        {t("settings:adminMaintenance.saveChanges", "Save Changes")}
+      </Button>
+    </Space>
+  )
+}
 
 const MaintenancePage: React.FC = () => {
   const { t } = useTranslation(["settings", "common"])
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
 
-  // Maintenance mode state
+  // Maintenance mode state. The message/allowlist/enabled values here are
+  // the last-loaded server snapshot: they seed MaintenanceBannerForm (via
+  // the revision-keyed remount below) and no longer change on keystrokes.
   const [maintEnabled, setMaintEnabled] = useState(false)
   const [maintMessage, setMaintMessage] = useState("")
   const [maintAllowlist, setMaintAllowlist] = useState("")
+  const [maintStateRevision, setMaintStateRevision] = useState(0)
   const [maintLoading, setMaintLoading] = useState(false)
   const [maintSaving, setMaintSaving] = useState(false)
 
@@ -66,6 +126,8 @@ const MaintenancePage: React.FC = () => {
       setMaintEnabled(!!state?.enabled)
       setMaintMessage(state?.message || "")
       setMaintAllowlist((state?.allowlist || []).join(", "))
+      // Re-seed the banner form with the freshly loaded snapshot.
+      setMaintStateRevision((n) => n + 1)
     } catch (err) {
       markAdminGuardFromError(err)
     } finally {
@@ -73,16 +135,20 @@ const MaintenancePage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
-  const handleSaveMaintenanceState = async () => {
+  const handleSaveMaintenanceState = async (values: {
+    enabled: boolean
+    message: string
+    allowlist: string
+  }) => {
     setMaintSaving(true)
     try {
-      const allowlistArr = maintAllowlist
+      const allowlistArr = values.allowlist
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
       await tldwClient.updateMaintenanceState({
-        enabled: maintEnabled,
-        message: maintMessage || undefined,
+        enabled: values.enabled,
+        message: values.message || undefined,
         allowlist: allowlistArr.length > 0 ? allowlistArr : undefined
       })
       message.success(t("settings:adminMaintenance.maintUpdated", "Maintenance state updated"))
@@ -299,7 +365,7 @@ const MaintenancePage: React.FC = () => {
       title: t("settings:adminMaintenance.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014"
+      render: (val: string) => val ? formatAdminDateTime(val) : "\u2014"
     },
     {
       title: t("settings:adminMaintenance.colActions", "Actions"),
@@ -350,13 +416,13 @@ const MaintenancePage: React.FC = () => {
       title: t("settings:adminMaintenance.colStarted", "Started"),
       dataIndex: "started_at",
       key: "started_at",
-      render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014"
+      render: (val: string) => val ? formatAdminDateTime(val) : "\u2014"
     },
     {
       title: t("settings:adminMaintenance.colCompleted", "Completed"),
       dataIndex: "completed_at",
       key: "completed_at",
-      render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014"
+      render: (val: string) => val ? formatAdminDateTime(val) : "\u2014"
     }
   ]
 
@@ -387,39 +453,17 @@ const MaintenancePage: React.FC = () => {
     <div style={{ padding: "24px", maxWidth: 1200 }}>
       <h1 style={{ marginBottom: 16, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminMaintenance.title", "Maintenance Console")}</h1>
 
-      {/* Maintenance Mode Card */}
+      {/* Maintenance Mode Card — banner drafts live in MaintenanceBannerForm
+          so banner keystrokes never re-render the tables below (C-S5). */}
       <Card title={t("settings:adminMaintenance.maintCardTitle", "Maintenance Mode")} loading={maintLoading} style={{ marginBottom: 16 }}>
-        <Space orientation="vertical" style={{ width: "100%" }} size="middle">
-          <Space>
-            <span>{t("settings:adminMaintenance.maintToggleLabel", "Maintenance Mode:")}</span>
-            <Switch
-              checked={maintEnabled}
-              onChange={(checked) => setMaintEnabled(checked)}
-              checkedChildren={t("settings:adminMaintenance.maintOn", "ON")}
-              unCheckedChildren={t("settings:adminMaintenance.maintOff", "OFF")}
-            />
-          </Space>
-          <div>
-            <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintMessageLabel", "Message:")}</label>
-            <TextArea
-              rows={2}
-              value={maintMessage}
-              onChange={(e) => setMaintMessage(e.target.value)}
-              placeholder={t("settings:adminMaintenance.maintMessagePlaceholder", "Maintenance message displayed to users...")}
-            />
-          </div>
-          <div>
-            <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintAllowlistLabel", "Allowlist (comma-separated IPs or usernames):")}</label>
-            <Input
-              value={maintAllowlist}
-              onChange={(e) => setMaintAllowlist(e.target.value)}
-              placeholder={t("settings:adminMaintenance.maintAllowlistPlaceholder", "e.g. 192.168.1.1, admin")}
-            />
-          </div>
-          <Button type="primary" onClick={handleSaveMaintenanceState} loading={maintSaving}>
-            {t("settings:adminMaintenance.saveChanges", "Save Changes")}
-          </Button>
-        </Space>
+        <MaintenanceBannerForm
+          key={maintStateRevision}
+          initialEnabled={maintEnabled}
+          initialMessage={maintMessage}
+          initialAllowlist={maintAllowlist}
+          saving={maintSaving}
+          onSave={handleSaveMaintenanceState}
+        />
       </Card>
 
       {/* Feature Flags Card */}

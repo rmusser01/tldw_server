@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -139,7 +140,8 @@ def make_configured_explainer_generator() -> ExplainerGenerator:
             "stream": False,
             "app_config": app_config,
         }
-        response = adapter.chat(request, timeout=timeout)
+        # Off the event loop: a sync provider call blocks the server and cannot be quota-checked there (spec §4b).
+        response = await asyncio.to_thread(adapter.chat, request, timeout=timeout)
         if inspect.isawaitable(response):
             response = await response
         parsed = _parse_generation_response(response)

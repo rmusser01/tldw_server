@@ -1064,3 +1064,42 @@ async def test_search_discussions_uses_preprocessed_results_without_reprocessing
     assert len(docs) == 1
     assert docs[0]["source"] == "discussion"
     assert docs[0]["platform"] == "reddit"
+
+
+@pytest.mark.asyncio
+async def test_analyze_and_aggregate_runs_aggregation_off_the_event_loop_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The summaries and the final report run on a worker thread, where they can be quota-checked (spec §4b)."""
+    import threading
+
+    seen: dict[str, int] = {}
+
+    async def fake_relevance(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        """One relevant result."""
+        return {"0": {"content": "Summary content", "reasoning": "Contains the answer"}}
+
+    def fake_summarize(**_: Any) -> str:
+        """Record the thread."""
+        seen["summarize"] = threading.get_ident()
+        return "Chunk summary"
+
+    def fake_chat_api_call(**_: Any) -> str:
+        """Record the thread."""
+        seen["chat"] = threading.get_ident()
+        return "Aggregated answer text."
+
+    monkeypatch.setattr(web_search, "search_result_relevance", fake_relevance)
+    monkeypatch.setattr(web_search, "summarize", fake_summarize)
+    monkeypatch.setattr(web_search, "chat_api_call", fake_chat_api_call)
+
+    result = await web_search.analyze_and_aggregate(
+        {"results": []},
+        {"main_goal": "q", "sub_questions": []},
+        {"final_answer_llm": "fake-llm"},
+    )
+
+    assert result["final_answer"]["text"] == "Aggregated answer text."
+    loop_thread = threading.get_ident()
+    assert seen["summarize"] != loop_thread
+    assert seen["chat"] != loop_thread

@@ -733,7 +733,8 @@ class WebScrapingService:
                 system_prompt or load_prompt("webscraping", "article_summary_system")
                 or "You are a professional summarizer."
             )
-            summary = analyze(
+            summary = await asyncio.to_thread(
+                analyze,
                 input_data=content,
                 custom_prompt_arg=custom_prompt,
                 api_name=api_name or "openai",

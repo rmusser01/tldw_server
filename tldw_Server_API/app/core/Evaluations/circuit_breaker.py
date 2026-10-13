@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (  # noqa: F401
     CircuitBreaker as _UnifiedCB,
 )
@@ -66,6 +67,8 @@ class CircuitBreakerConfig:
             success_threshold=self.success_threshold,
             recovery_timeout=self.recovery_timeout,
             expected_exception=self.expected_exception,
+            # A quota refusal is the user's limit, not the provider's health (LLM usage accounting spec §4b).
+            ignored_exceptions=(LLMQuotaExceededError,),
             half_open_max_calls=1,
             category="evaluations",
         )
@@ -218,6 +221,9 @@ class CircuitBreaker:
                 f"Call through circuit breaker {self.name} timed out "
                 f"after {self.config.timeout}s"
             ) from None
+
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not the provider's health: no stats change
 
         except self.config.expected_exception:
             self.stats.failed_calls += 1
