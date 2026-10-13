@@ -508,8 +508,10 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
     and finishes the run ``approval_required`` (terminal, health-neutral)
     instead of ``failed``. A ``succeeded`` envelope result carrying a
     ``note`` (truncation / not-presented) returns the text WITH the note
-    appended as a trailing ``[automation note: ...]`` line so it reaches
-    the run summary and notification (user-visible by design).
+    prepended as a leading ``[automation note: ...]`` line so it reaches
+    the run summary and notification (user-visible by design) and SURVIVES
+    the head-bounded summary truncation a long answer would clip a tail
+    note with.
     """
     source = definition.input if isinstance(definition.input, dict) else {}
     message_ref = str(source.get("message_ref") or "").strip()
@@ -544,7 +546,10 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
                 # as a trailing bracketed line — the consumer's
                 # ``_bound_summary`` carries it through to the run row and
                 # the notification (bounded at 1000 chars).
-                return f"{result.text}\n[automation note: {result.note}]"
+                # PREPENDED, not appended: _bound_summary is head-bounded
+                # (1000 chars), so a tail note on a long answer would be
+                # clipped — the truncation disclosure must survive bounding.
+                return f"[automation note: {result.note}]\n{result.text}"
             return result.text
     return await _run_generation(definition, raw_message)
 

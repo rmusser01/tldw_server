@@ -677,7 +677,10 @@ async def test_agent_task_bounds_exhausted_note_reaches_summary(monkeypatch) -> 
     )
     text = await em._execute_agent_task(definition, {})
 
-    assert text.startswith("fallback answer")
+    # Ruling (owner, 2026-10-12): the note is PREPENDED so head-bounded
+    # summaries cannot clip it — the body follows the note line.
+    assert text.startswith("[automation note:")
+    assert "fallback answer" in text
     assert "[automation note:" in text
     assert "truncated" in text
     summary = atj._bound_summary(text)
@@ -1053,3 +1056,45 @@ async def test_agent_ref_entry_without_persona_names_the_agent(monkeypatch) -> N
     )
     assert prompt.startswith("You are the scheduled agent 'agent:triage'. ")
     assert "scheduled automation" in prompt
+
+
+@pytest.mark.asyncio
+async def test_executor_prepends_note_so_bounding_cannot_clip_it(monkeypatch) -> None:
+    """Ruling pin: the [automation note] line LEADS the returned text, so the
+    head-bounded summary can never clip the truncation disclosure."""
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+    from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
+        _bound_summary,
+    )
+
+    class _FakeStore:
+        def resolve_message(self, owner_id, message_ref):
+            return "do it"
+
+    monkeypatch.setattr(
+        em.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _FakeStore()),
+    )
+
+    async def _envelope(definition, raw_message, eligible, **kwargs):
+        return em.EnvelopeResult(
+            "succeeded", "y" * 2000, "tool rounds truncated after 5"
+        )
+
+    monkeypatch.setattr(em, "run_read_only_envelope", _envelope)
+    _fake_agent_registry(monkeypatch)
+
+    async def _eligible(owner_id):
+        return [{"name": "media_search", "module": "media"}]
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _eligible)
+
+    definition = _definition(
+        {"agent_ref": "agent:triage", "message_ref": "ref-9",
+         "tools": ["media_search"]},
+        family="agent_task",
+    )
+    text = await em._execute_agent_task(definition, {})
+    summary = _bound_summary(text)
+    assert summary.startswith("[automation note: tool rounds truncated")
