@@ -7,7 +7,7 @@
 - [101/General](#general)
 - [Model Evaluation](#model-evaluation)
 - [Search Evaluations](#search-eval)
-- [Abstractive Summarization Evaluations](#abstract_summ_evals)
+- [Abstractive Summarization Evaluations](#abstract-summ-evals)
 - [RAG Evaluation](#rag-eval)
 - [Embeddings Retrieval Evaluation](#embeddings-retrieval-eval)
 - [VLM Evaluations](#vlm-evals)

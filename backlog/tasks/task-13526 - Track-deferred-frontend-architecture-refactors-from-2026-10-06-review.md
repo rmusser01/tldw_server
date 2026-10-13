@@ -36,6 +36,7 @@ NOTE: created manually because the backlog CLI installation was removed from thi
 ADR check (2026-10-09, per .agents/skills/adr-assessment): ADR required: yes — Docs/ADR/065-frontend-api-contract-package.md (Proposed). Reason: establishes the durable rule that one neutral workspace package (@tldw/api-types) owns the frontend API contract artifacts and no second contract source may be introduced.
 
 Stage 1 started 2026-10-09 (branch codex/api-client-unification-13526, plan Docs/Plans/2026-10-09-api-contract-package-13526-implementation-plan.md): shared api-types package, web-shell migration, ClientPath derivation. Deconfliction note: sibling WebUI perf program TASK-13520-13525 (W0-W5) covers perf mechanics only; W1 additionally lists ChatPane virtualization which is therefore left to that program. Overlap warning for that program: W1/W2/W4/W5 scopes partially shipped already by TASK-13511 (PR #3210).
+Stage 1 MERGED 2026-10-11 via PR #3219 (merge commit 590e7e579): @tldw/api-types package shipped with committed paths.d.ts (2,113 paths) + derived ClientPath; carried fixes for the blanket *.json gitignore, Dockerfile.webui workspace enumeration, and the pre-existing TASK-13510 mypy breakage in admin_audit_service.py. Stage 2 (lib/api.ts onto shared request core, one ApiError) and Stage 3 (TldwApiClient domain split) remain.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Acceptance Criteria

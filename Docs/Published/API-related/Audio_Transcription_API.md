@@ -25,7 +25,7 @@ The tldw_server provides a comprehensive audio transcription API that is fully c
 - [Live Transcription](#live-transcription)
 - [Usage Examples](#usage-examples)
 - [Performance Comparison](#performance-comparison)
-- [Notes & Limitations](#notes--limitations)
+- [Notes & Limitations](#notes-limitations)
 
 ## Features
 
