@@ -177,7 +177,8 @@ class NativeQuotaReservationStore:
         """Allocate once after the caller has checked its serialized current budget."""
         await self.db_pool.execute(
             "INSERT INTO native_chat_quota_reservations "
-            "(user_id,user_uuid,owner_key,candidate_key,scope_type,workspace_id,org_id,team_id,size_bytes,state) VALUES (?,?,?,?,?,?,?,?,?,'active')",
+            "(user_id,user_uuid,owner_key,candidate_key,scope_type,workspace_id,org_id,team_id,size_bytes,state) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')",
             owner.user_id,
             owner.user_uuid,
             owner.owner_key,

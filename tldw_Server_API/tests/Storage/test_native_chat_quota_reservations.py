@@ -292,10 +292,10 @@ async def main():
             from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
             from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaReservationStore, NativeQuotaUnavailableError
             from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-            await pool.execute('INSERT INTO organizations (id,name) VALUES (?,?)', 51, 'native-ledger-failure-org')
-            await pool.execute('INSERT INTO teams (id,org_id,name) VALUES (?,?,?)', 52, 51, 'native-ledger-failure-team')
-            await pool.execute('INSERT INTO org_members (org_id,user_id) VALUES (?,?)', 51, user)
-            await pool.execute('INSERT INTO team_members (team_id,user_id) VALUES (?,?)', 52, user)
+            await pool.execute('INSERT INTO organizations (id,name) VALUES (?, ?)', 51, 'native-ledger-failure-org')
+            await pool.execute('INSERT INTO teams (id,org_id,name) VALUES (?, ?, ?)', 52, 51, 'native-ledger-failure-team')
+            await pool.execute('INSERT INTO org_members (org_id,user_id) VALUES (?, ?)', 51, user)
+            await pool.execute('INSERT INTO team_members (team_id,user_id) VALUES (?, ?)', 52, user)
             quotas = AuthnzStorageQuotasRepo(pool)
             await quotas.upsert_org_quota(51, quota_mb=10)
             await quotas.upsert_team_quota(52, quota_mb=10)
@@ -446,13 +446,14 @@ async def main():
             await service.reserve_native_bytes(owner, 'retained-admin', 2 * 1048576)
             async with pool.acquire() as conn:
                 normal = await get_system_stats(conn)
-                original_execute = conn.execute
-                async def missing_sessions(query, *args):
-                    if 'FROM sessions' in query:
-                        return await original_execute('SELECT COUNT(*) FROM missing_sessions')
-                    return await original_execute(query, *args)
+                method = 'fetchrow' if pool.pool is not None else 'execute'
+                original_query = getattr(type(conn), method)
+                async def missing_sessions(connection, query, *args):
+                    if connection is conn and 'FROM sessions' in query:
+                        return await original_query(connection, 'SELECT COUNT(*) FROM missing_sessions')
+                    return await original_query(connection, query, *args)
                 unavailable = False
-                with patch.object(conn, 'execute', missing_sessions):
+                with patch.object(type(conn), method, missing_sessions):
                     try:
                         await get_system_stats(conn)
                     except HTTPException as exc:
@@ -492,11 +493,11 @@ async def main():
             from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _to_quota_status
             for member in members:
                 await service.set_user_quota(member, 100)
-            await pool.execute('INSERT INTO organizations (id,name) VALUES (?,?)', 51, 'native-quota-org')
-            await pool.execute('INSERT INTO teams (id,org_id,name) VALUES (?,?,?)', 52, 51, 'native-quota-team')
+            await pool.execute('INSERT INTO organizations (id,name) VALUES (?, ?)', 51, 'native-quota-org')
+            await pool.execute('INSERT INTO teams (id,org_id,name) VALUES (?, ?, ?)', 52, 51, 'native-quota-team')
             for member in members:
-                await pool.execute('INSERT INTO org_members (org_id,user_id) VALUES (?,?)', 51, member)
-                await pool.execute('INSERT INTO team_members (team_id,user_id) VALUES (?,?)', 52, member)
+                await pool.execute('INSERT INTO org_members (org_id,user_id) VALUES (?, ?)', 51, member)
+                await pool.execute('INSERT INTO team_members (team_id,user_id) VALUES (?, ?)', 52, member)
             owners = [NativeQuotaOwner(member, 'native:fixture', str((await pool.fetchone('SELECT uuid FROM users WHERE id = ?', member))['uuid']), org_id=51, team_id=52) for member in members]
             await service.reserve_native_bytes(owners[0], 'before-pool', 2 * 1048576)
             quotas = AuthnzStorageQuotasRepo(pool)
