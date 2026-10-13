@@ -8,7 +8,10 @@ import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useStoreMessageOption } from "@/store/option"
 import { ModelsBody } from "../index"
 
-const discovery = vi.hoisted(() => ({ fetch: vi.fn(), success: vi.fn(), error: vi.fn() }))
+const discovery = vi.hoisted(() => ({ fetch: vi.fn(), refresh: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock("wxt/browser", () => ({ browser: { runtime: {
+  sendMessage: (...args: unknown[]) => discovery.refresh(...args)
+} } }))
 const models = [
   { id: "old.gguf", model: "tldw:old.gguf", provider: "llama", is_configured: true },
   { id: "ready.gguf", model: "tldw:ready.gguf", provider: "llama", is_configured: true }
@@ -78,6 +81,7 @@ const installSyncStorage = () => {
 
 describe("Settings model selection with a live Chat owner", () => {
   beforeEach(async () => {
+    discovery.refresh.mockReset().mockResolvedValue(null)
     discovery.fetch.mockReset().mockResolvedValue(models)
     discovery.success.mockClear()
     discovery.error.mockClear()
@@ -97,7 +101,8 @@ describe("Settings model selection with a live Chat owner", () => {
     vi.unstubAllGlobals()
   })
 
-  it.each([true, false])("retries failed shared discovery without reporting false success (recovers=%s)", async recovers => {
+  it.each([[true, false], [false, false], [true, true], [false, true]])("retries failed shared discovery without false success (recovers=%s, runtime rejects=%s)", async (recovers, runtimeRejects) => {
+    if (runtimeRejects) discovery.refresh.mockRejectedValueOnce(new Error("Background unavailable"));
     discovery.fetch.mockRejectedValueOnce(new Error("Metadata unavailable"));
     if (!recovers) discovery.fetch.mockRejectedValue(new Error("Metadata unavailable"));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -116,6 +121,8 @@ describe("Settings model selection with a live Chat owner", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Could not check chat models");
     }
     expect(discovery.fetch).toHaveBeenLastCalledWith({ requireFresh: true });
+    expect(discovery.refresh).toHaveBeenCalledOnce();
+    expect(discovery.refresh).toHaveBeenCalledWith({ type: "tldw:models:refresh" });
   })
 
   it("commits a deliberate Settings selection to the live owner and survives remount", async () => {

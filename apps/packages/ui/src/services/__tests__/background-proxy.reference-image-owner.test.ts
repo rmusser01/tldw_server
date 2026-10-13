@@ -194,8 +194,8 @@ describe("managed reference-image catalog through its real media method and tran
     await expect(list(controller.signal)).rejects.toMatchObject({
       name: "AbortError",
     });
-    expect(boundary.fetch).toHaveBeenCalledTimes(1);
-    expect(boundary.fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(boundary.fetch).not.toHaveBeenCalled();
+    expect(boundary.sendMessage).not.toHaveBeenCalled();
   });
 
   it("passes cancellation to an already dispatched catalog request", async () => {
