@@ -118,7 +118,7 @@ export const MentionsDropdown: React.FC<MentionsDropdownProps> = ({
 
   const handleRefreshTabs = async () => {
     if (isRefreshing) return
-    
+
     setIsRefreshing(true)
     try {
       await refetchTabs()

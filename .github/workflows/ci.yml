@@ -1364,6 +1364,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -3022,6 +3023,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -4517,6 +4519,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -5923,6 +5926,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -7320,6 +7324,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py

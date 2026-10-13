@@ -489,7 +489,7 @@ async def get_audit_log(
                 pagination=build_offset_pagination_meta(total=0, limit=limit, offset=offset, count=0),
             )
 
-        if user_id:
+        if user_id is not None:
             await admin_scope_service.enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
             param_count += 1
             conditions.append(f"a.user_id = ${param_count}" if is_pg else "a.user_id = ?")

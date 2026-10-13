@@ -30,6 +30,10 @@ Stored and cached legacy counters exclude the managed chat_assets tree. Native a
 
 Existing non-native check-then-write races and temporary peak disk space remain outside this guarantee. Public H2 capability stays disabled until its remaining typed projection, lifecycle, client and runtime gates qualify. This proposed record does not claim PostgreSQL, installed extension, assistive technology or participant-study acceptance.
 
+## Accounting isolation boundary
+
+The AuthNZ native_chat_quota_reservations ledger is a trusted accounting authority, separate from ADR050's tenant-owned ChaCha native_chat_quota_intents. AuthNZ connections do not establish app.current_user_id sessions. Organization/team admission, active-member Billing and system administration must count several users' live reservations; an ordinary forced owner policy would hide those rows or deny all normal AuthNZ calls. The ledger therefore has an explicit reviewed coverage exemption, rather than an uncovered-table baseline entry. Reservation/release writes use existing quota-owner locks; exact-key resolution is a committed read that checks frozen authenticated identity. Pool totals preserve original org/team attribution; Billing applies active membership and user/admin totals match account UUID. Authenticated service/route authorization governs aggregate access. This clarification does not promote this proposed ADR or exempt chat intents.
+
 ## Follow-up
 
 TASK-13589 records actual qualification and review. Later H2 projection/read/send/adoption work must preserve this accounting boundary.

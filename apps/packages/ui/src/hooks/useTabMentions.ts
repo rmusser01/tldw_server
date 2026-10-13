@@ -32,7 +32,7 @@ export const useTabMentions = (
       const tabInfos: TabInfo[] = tabs
         .filter(tab => tab.id && tab.title && tab.url)
         .filter(tab => includeActive || !tab.active)
-        .filter(tab => tab?.status === 'complete') 
+        .filter(tab => tab?.status === 'complete')
         .filter(tab => {
           const url = tab.url!.toLowerCase()
           return !url.startsWith('chrome://') &&
@@ -184,6 +184,6 @@ export const useTabMentions = (
     clearSelectedDocuments,
     clearSubmittedDocuments,
     reloadTabs: fetchTabs,
-    handleMentionsOpen  
+    handleMentionsOpen
   }
 }
