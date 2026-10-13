@@ -300,6 +300,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
 from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryRequest,
@@ -363,12 +364,6 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, with_llm_call_context
-from tldw_Server_API.app.core.Usage.quota_checks import (
-    as_quota_user_id,
-    check_usage,
-    llm_tokens_this_month,
-    seconds_until_utc_month_start,
-)
 from tldw_Server_API.app.core.Usage.usage_tracker import backfill_legacy_tokens_to_ledger
 
 from . import chat_dictionaries, chat_documents, chat_grammars
@@ -4315,26 +4310,8 @@ async def create_chat_completion(
                     logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
                     _billing_enforcer = None
 
-            # Usage quotas (spec 2 §4): the user's monthly LLM token allowance.
-            _quota_uid = as_quota_user_id(getattr(current_user, "id", None))
-            _llm_decision = await check_usage(
-                _quota_uid,
-                "limits.llm_tokens_per_month",
-                max(1, _estimated_request_tokens),
-                lambda: llm_tokens_this_month(_quota_uid),
-            )
-            if not _llm_decision.allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail={
-                        "error": "limit_exceeded",
-                        "category": "llm_tokens_month",
-                        "current": int(_llm_decision.used),
-                        "limit": _llm_decision.limit,
-                        "message": "Monthly LLM token limit reached",
-                    },
-                    headers={"Retry-After": str(seconds_until_utc_month_start())},
-                )
+            # Usage quotas (LLM usage accounting spec §4a): monthly LLM tokens, and daily and monthly LLM spend.
+            await enforce_llm_quota(getattr(current_user, "id", None), max(1, _estimated_request_tokens))
 
             # Resolve one effective model before either durable macro creation or direct dispatch.
             provider = selected_provider

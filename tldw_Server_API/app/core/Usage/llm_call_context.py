@@ -115,3 +115,13 @@ def bind_llm_call_user(user_id: int | None) -> None:
     """
     if user_id is not None:
         _CTX.set(replace(_CTX.get(), user_id=user_id))
+
+
+def mark_llm_quota_prechecked() -> None:
+    """Mark the rest of the current task as admitted by a boundary quota check (LLM usage accounting spec §4a).
+
+    A plain set, not ``llm_call_context``: a ``with`` block is reset before the
+    endpoint runs when the check is a dependency, and before a streaming
+    response body runs. Tasks and threads started after this inherit the mark.
+    """
+    _CTX.set(replace(_CTX.get(), prechecked=True))

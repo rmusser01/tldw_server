@@ -787,3 +787,90 @@ def test_docs_info_resume_overlay_survives_missing_public_config(
         assert response.json()["capabilities"]["roleplay_resume_contract_version"] == 1
     finally:
         config_mod._route_toggle_policy.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("quota_key", "category"),
+    [
+        ("limits.llm_tokens_per_month", "llm_tokens_month"),
+        ("limits.llm_cost_per_day_usd", "llm_cost_day"),
+        ("limits.llm_cost_per_month_usd", "llm_cost_month"),
+    ],
+)
+def test_protected_resume_generation_enforces_llm_quota(resume_api, monkeypatch, quota_key, category) -> None:
+    """Every LLM cap refuses generation without changing the admitted source."""
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+    from tldw_Server_API.app.core.Usage import quota_checks
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    before = db.get_roleplay_resume_state(cid)
+    provider = Mock(return_value="Unexpected provider work")
+    persist = Mock(wraps=db.commit_roleplay_resume_generation)
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr(db, "commit_roleplay_resume_generation", persist)
+
+    async def limit(_uid: object, key: str) -> int | None:
+        """Expose only the configured synthetic cap."""
+        return 1 if key == quota_key else None
+
+    async def used(_uid: object) -> float:
+        """Return the exhausted synthetic usage counter."""
+        return 1.0
+
+    monkeypatch.setattr(quota_checks, "user_quota", limit)
+    for counter in ("llm_tokens_this_month", "llm_cost_today", "llm_cost_this_month"):
+        monkeypatch.setattr(quota_checks, counter, used)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 402, response.text
+    assert response.json()["detail"]["error"] == "limit_exceeded"
+    assert response.json()["detail"]["category"] == category
+    assert int(response.headers["Retry-After"]) >= 1
+    provider.assert_not_called()
+    persist.assert_not_called()
+    assert db.get_roleplay_resume_state(cid) == before
+
+
+@pytest.mark.parametrize(
+    "quota_key",
+    ["limits.llm_tokens_per_month", "limits.llm_cost_per_day_usd", "limits.llm_cost_per_month_usd"],
+)
+def test_completed_resume_replay_ignores_new_llm_quota(resume_api, monkeypatch, quota_key) -> None:
+    """Stored reply readback remains available after any LLM cap is exhausted."""
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+    from tldw_Server_API.app.core.Usage import quota_checks
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    provider = Mock(return_value="Saved reply before quota exhaustion")
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    limits = {}
+    reads = []
+
+    async def limit(_uid: object, key: str) -> int | None:
+        """Expose only the configured synthetic cap."""
+        reads.append(key)
+        return limits.get(key)
+
+    async def used(_uid: object) -> float:
+        """Return the exhausted synthetic usage counter."""
+        return 1.0
+
+    monkeypatch.setattr(quota_checks, "user_quota", limit)
+    for counter in ("llm_tokens_this_month", "llm_cost_today", "llm_cost_this_month"):
+        monkeypatch.setattr(quota_checks, counter, used)
+    completed = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert completed.status_code == 200, completed.text
+    limits[quota_key] = 1
+    reads.clear()
+    before = db.get_roleplay_resume_state(cid)
+    replay = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == completed.json()
+    assert reads == []
+    assert provider.call_count == 1
+    assert db.get_roleplay_resume_state(cid) == before

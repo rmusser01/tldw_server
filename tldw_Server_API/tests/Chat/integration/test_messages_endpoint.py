@@ -132,6 +132,33 @@ def test_messages_endpoint_streaming(client_user_only, monkeypatch):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("model", ["openai/gpt-4", "llama.cpp/test-model"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_refuses_an_over_quota_user_before_any_provider_call(client_user_only, monkeypatch, model, stream):
+    """An over-quota user gets the 402 on the adapter path and the native path, streaming or not."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls: list[str] = []
+
+    async def _adapter_call(**kwargs):
+        calls.append("adapter")
+        return _build_openai_response("unused")
+
+    async def _native_post(url, headers, payload, **_kwargs):
+        calls.append("native")
+        return _build_native_response()
+
+    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_post)
+    refuse_llm_work(monkeypatch)
+    payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10, "stream": stream}
+    response = client_user_only.post("/api/v1/messages", json=payload)
+    assert_llm_quota_402(response)
+    assert calls == []
+
+
+@pytest.mark.integration
 def test_messages_count_tokens_unsupported_provider(client_user_only, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     payload = {

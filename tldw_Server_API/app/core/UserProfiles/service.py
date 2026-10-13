@@ -546,6 +546,13 @@ class UserProfileService:
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Prompt Studio quotas unavailable for user {}: {}", user_id, exc)
 
+        try:
+            from tldw_Server_API.app.core.Usage.quota_checks import llm_quota_summary
+
+            quotas["llm"] = await llm_quota_summary(user_id)
+        except Exception as exc:  # noqa: BLE001 - one unavailable block must not fail the quotas section
+            logger.debug("LLM quotas unavailable for user {}: {}", user_id, exc)
+
         return quotas
 
     async def _build_preferences(

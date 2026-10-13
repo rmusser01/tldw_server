@@ -9499,6 +9499,8 @@ async def simple_search(
         "expand_query": False,
         "enable_cache": True,
         "enable_reranking": True,
+        # Simple search returns documents only; generating an answer would spend LLM tokens for nothing.
+        "enable_generation": False,
         "sources": sources,
         "media_db": media_db,
         "chacha_db": chacha_db,

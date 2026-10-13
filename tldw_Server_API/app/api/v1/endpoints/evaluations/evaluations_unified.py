@@ -19,6 +19,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_auth_principal, rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Import unified schemas
@@ -994,6 +995,8 @@ async def evaluate_geval(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
+        await enforce_llm_quota(current_user.id)
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1209,6 +1212,8 @@ async def evaluate_rag(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
+        await enforce_llm_quota(current_user.id)
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1405,6 +1410,8 @@ async def evaluate_response_quality(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
+        await enforce_llm_quota(current_user.id)
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1693,6 +1700,9 @@ async def batch_evaluate(
     try:
         start_time = time.time()
         service = get_unified_evaluation_service_for_user(current_user.id)
+        if request.evaluation_type in {"geval", "rag", "response_quality"}:
+            # Usage quotas (LLM usage accounting spec §4a): these types make LLM calls inside the request.
+            await enforce_llm_quota(current_user.id)
         if request.evaluation_type in {"geval", "rag", "response_quality"}:
             credential_runtime = _build_eval_credential_runtime(
                 current_user=current_user,

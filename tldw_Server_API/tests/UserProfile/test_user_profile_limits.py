@@ -25,6 +25,8 @@ pytestmark = pytest.mark.unit
 NEW_KEYS = {
     "limits.transcription_minutes_per_month",
     "limits.llm_tokens_per_month",
+    "limits.llm_cost_per_day_usd",
+    "limits.llm_cost_per_month_usd",
     "limits.rag_queries_per_day",
     "limits.media_ingest_mb_per_day",
     "limits.workflows_runs_per_day",
@@ -66,6 +68,15 @@ def test_catalog_has_every_limit_key_platform_admin_only() -> None:
     for entry in entries.values():
         assert entry.default is None
         assert list(entry.editable_by) == ["platform_admin"]
+
+
+def test_llm_cost_keys_take_decimal_dollars() -> None:
+    """The LLM cost keys are numbers with a floor of zero, so an admin can set $2.50."""
+    entries = {entry.key: entry for entry in load_user_profile_catalog().entries}
+    for key in ("limits.llm_cost_per_day_usd", "limits.llm_cost_per_month_usd"):
+        assert entries[key].type == "number"
+        assert entries[key].minimum == 0
+    assert "/chat/completions" not in entries["limits.llm_tokens_per_month"].description
 
 
 def test_org_admin_cannot_edit_limits() -> None:
