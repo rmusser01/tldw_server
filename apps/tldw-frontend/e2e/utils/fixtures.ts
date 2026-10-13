@@ -1,9 +1,10 @@
 /**
  * Extended Playwright test fixtures for workflow tests
  */
-import { test as base, expect, type Page } from "@playwright/test"
-import { readFileSync } from "node:fs"
+import { test as base, expect, type Page, type CDPSession, type TestInfo } from "@playwright/test"
+import { readFileSync, realpathSync, statSync } from "node:fs"
 import path from "node:path"
+import { createHash } from "node:crypto"
 import {
   seedAuth,
   TEST_CONFIG,
@@ -11,6 +12,148 @@ import {
   fetchWithApiKey
 } from "./helpers"
 import { startApiCapture, getCapturedApiCalls } from "./api-assertions"
+
+const deferred43Marker = "16377700f81b700f459d05c3134ed3e23e440cdb588a74b062c2e3ceb4b01337"
+const deferred43MeasuredTitles = new Map([
+  ["e2e/ux-regression/notes-p0.spec.ts", "NE-04: 'Print / Save as PDF' prints the note without a pop-up error"],
+  ["e2e/workflows/notes-studio-derived-note.spec.ts", "selects markdown, derives a Cornell studio note, and prints it"],
+])
+type Deferred43Payload = {
+  schema: number; realm: number; source: string; timeOrigin: number
+  count: number; faults: number; first: number; counts: number[]; rows: number[][]; order: number
+}
+const deferred43Keys = "count,counts,faults,first,order,realm,rows,schema,source,timeOrigin"
+function validateDeferred43Payload(value: unknown, realm: number): value is Deferred43Payload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const data = value as Deferred43Payload
+  return Object.keys(value).sort().join(",") === deferred43Keys && data.schema === 43 && data.realm === realm && data.source === deferred43Marker && Number.isFinite(data.timeOrigin) && Number.isSafeInteger(data.count) && data.count > 0 && data.count <= (realm === 1 ? 4096 : 2048) && Number.isSafeInteger(data.faults) && data.faults >= 0 && Number.isSafeInteger(data.first) && data.first >= 0 && data.first <= data.count && data.order === 0 && Array.isArray(data.counts) && data.counts.length === 4 && data.counts.every(value => Number.isSafeInteger(value) && value >= 0 && value <= 512) && Array.isArray(data.rows) && data.rows.length === data.count && data.rows.every((row, index) => [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,27,28,29,30,31,40,41,42,43,44,45,46,50,51,52,53,54,55,56].includes(row[0]) && Array.isArray(row) && row.length === 24 && row[1] === index + 1 && row.every(value => typeof value === "number" && Number.isFinite(value)))
+}
+async function deferred43Bound<T>(operation: Promise<T>, deadline = Date.now() + 4000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("DEFERRED43_OBSERVATION_DEADLINE")), Math.max(1, deadline - Date.now()))
+  })
+  try { return await Promise.race([operation, timeout]) }
+  finally { if (timer) clearTimeout(timer) }
+}
+async function prepareDeferred43(page: Page, testInfo: TestInfo): Promise<null | (() => Promise<void>)> {
+  if (process.env.TLDW_DEFERRED43_SOURCE !== deferred43Marker) return null
+  const relative = path.relative(process.cwd(), testInfo.file).split(path.sep).join("/")
+  if (deferred43MeasuredTitles.get(relative) !== testInfo.title) return null
+  let faults = 0
+  let session: CDPSession | undefined
+  let frameId = ""
+  let documents = 0
+  let setupExpired = false
+  const setupDeadline = Date.now() + 4000
+  const guardSetup = () => { if (setupExpired || Date.now() >= setupDeadline) throw new Error("DEFERRED43_SETUP_DEADLINE") }
+  let contextLost = false
+  type Context = { id: number; frameId: string; uniqueId: string; default: boolean; isolated: boolean; destroyed: boolean }
+  const contexts = new Map<number, Context>()
+  let app: Deferred43Payload | undefined, utility: Deferred43Payload | undefined
+  let calibration: { before: number; after: number; local: number; origin: number } | undefined
+  const setup = async () => {
+    const reporter = process.env.PLAYWRIGHT_JSON_OUTPUT_NAME
+    if (!reporter || path.basename(reporter) !== "playwright-results.json") { faults |= 1024; return }
+    const frontend = realpathSync(process.cwd())
+    const artifacts = realpathSync(path.dirname(reporter))
+    if (!artifacts.startsWith(`${path.join(frontend, "test-results/live-tier-uat")}${path.sep}`)) { faults |= 1024; return }
+    const receiptPath = path.join(artifacts, "deferred43-source-receipt.json")
+    if (statSync(receiptPath).size > 1048576) { faults |= 1; return }
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { source?: unknown; installed?: unknown; appSource?: unknown; records?: Array<{ candidateHash: string; target: string }> }
+    if (receipt.source !== deferred43Marker || typeof receipt.appSource !== "string" || createHash("sha256").update(receipt.appSource).digest("hex") !== "64ac2ff634022084d76c70e1435699351387052b6daa90cb4aab2e04651deb46" || receipt.installed !== true || typeof receipt.appSource !== "string" || Buffer.byteLength(receipt.appSource) > 65536 || !Array.isArray(receipt.records) || receipt.records.length !== 13 || receipt.records.some(record => typeof record.target !== "string" || !realpathSync(record.target).startsWith(`${path.dirname(frontend)}${path.sep}`) || createHash("sha256").update(readFileSync(record.target)).digest("hex") !== record.candidateHash)) { faults |= 1024; return }
+    session = await page.context().newCDPSession(page)
+    guardSetup()
+    session.on("Runtime.executionContextCreated", (event: { context: { id: number; uniqueId?: string; auxData?: { frameId?: string; isDefault?: boolean; type?: string } } }) => {
+      const context = event.context
+      if (frameId && context.auxData?.frameId !== frameId) return
+      if (contexts.has(context.id) && contexts.get(context.id)?.uniqueId !== context.uniqueId) { faults |= 256; return }
+      if (!Number.isSafeInteger(context.id) || !context.auxData?.frameId || Buffer.byteLength(context.auxData.frameId) > 128 || typeof context.uniqueId !== "string" || Buffer.byteLength(context.uniqueId) > 128 || contexts.size >= 8) { faults |= 256; return }
+      contexts.set(context.id, { id: context.id, frameId: context.auxData.frameId, uniqueId: context.uniqueId, default: context.auxData.isDefault === true, isolated: context.auxData.type === "isolated", destroyed: false })
+      if (frameId && context.auxData.frameId === frameId && context.auxData.isDefault === true && ++documents > 2) faults |= 512
+    })
+    session.on("Runtime.executionContextDestroyed", (event: { executionContextId: number }) => {
+      const context = contexts.get(event.executionContextId)
+      if (context) { context.destroyed = true; if (documents >= 2 && context.frameId === frameId && context.isolated) { contextLost = true; faults |= 256 } }
+    })
+    session.on("Runtime.executionContextsCleared", () => {
+      for (const context of contexts.values()) { context.destroyed = true; if (documents >= 2 && context.frameId === frameId && context.isolated) { contextLost = true; faults |= 256 } }
+    })
+    await session.send("Page.enable")
+    guardSetup()
+    const tree = await session.send("Page.getFrameTree") as { frameTree: { frame: { id: string } } }
+    guardSetup()
+    frameId = tree.frameTree.frame.id
+    if (typeof frameId !== "string" || frameId.length > 128) { faults |= 256; return }
+    await session.send("Runtime.enable")
+    guardSetup()
+    documents = Array.from(contexts.values()).filter(context => context.frameId === frameId && context.default).length
+    if (documents > 2) faults |= 512
+    if (faults) return
+    await page.addInitScript({ content: receipt.appSource })
+    guardSetup()
+    const before = Date.now()
+    const clock = await page.evaluate(() => ({ local: performance.now(), origin: performance.timeOrigin }))
+    guardSetup()
+    calibration = { before, after: Date.now(), local: clock.local, origin: clock.origin }
+  }
+  try { await deferred43Bound(setup(), setupDeadline) } catch { setupExpired = true; faults |= 4 }
+  return async () => {
+    const deadline = Date.now() + 4000
+    const selected: Context[] = []
+    const clocks: Array<{ realm: number; before: number; after: number; origin: number; local: number }> = []
+    const drain = async () => {
+      if (!session || !frameId) { faults |= 256; return }
+      const candidates = Array.from(contexts.values()).filter(context => context.frameId === frameId && !context.destroyed && (context.default || context.isolated))
+      for (const context of candidates) {
+        if (Date.now() >= deadline) throw new Error("DEFERRED43_OBSERVATION_DEADLINE")
+        const response = await session.send("Runtime.evaluate", { contextId: context.id, expression: `(() => { const available = []; for (const [key, realm] of [["__df43App", 1], ["__df43Utility", 2]]) { const entry = Object.getOwnPropertyDescriptor(globalThis, key), observer = entry?.value, shape = observer && Object.getOwnPropertyDescriptors(observer); if (!entry || entry.writable !== false || entry.configurable !== false || !Object.isFrozen(observer) || shape?.source?.value !== ${JSON.stringify(deferred43Marker)} || shape.realm?.value !== realm || !Object.values(shape).every(field => Object.hasOwn(field, "value")) || typeof shape.drain?.value !== "function" || typeof shape.fault?.value !== "function") { available.push(false); continue; } available.push(true); } return { app: available[0], utility: available[1] }; })()`, returnByValue: true }) as { result?: { value?: { app?: boolean; utility?: boolean } }; exceptionDetails?: unknown }
+        if (response.exceptionDetails) { faults |= 256; continue }
+        if (context.default && response.result?.value?.app === true || context.isolated && response.result?.value?.utility === true) selected.push(context)
+      }
+      if (selected.length !== 2 || selected.filter(context => context.default).length !== 1 || selected.filter(context => context.isolated).length !== 1) { faults |= 256; return }
+      for (const context of selected) {
+        if (Date.now() >= deadline) throw new Error("DEFERRED43_OBSERVATION_DEADLINE")
+        if (context.destroyed) { contextLost = true; faults |= 256; continue }
+        const key = context.default ? "__df43App" : "__df43Utility"
+        const before = Date.now()
+        const response = await session.send("Runtime.evaluate", { contextId: context.id, expression: `(() => { const key = ${JSON.stringify(key)}, realm = ${context.default ? 1 : 2}; const entry = Object.getOwnPropertyDescriptor(globalThis, key), observer = entry?.value, shape = observer && Object.getOwnPropertyDescriptors(observer); if (!entry || entry.writable !== false || entry.configurable !== false || !Object.isFrozen(observer) || shape?.source?.value !== ${JSON.stringify(deferred43Marker)} || shape.realm?.value !== realm || !Object.values(shape).every(field => Object.hasOwn(field, "value")) || typeof shape.drain?.value !== "function" || typeof shape.fault?.value !== "function") return null; return {payload: observer.drain(), clock: {origin: performance.timeOrigin, local: performance.now()}}; })()`, returnByValue: true }) as { result?: { value?: { payload?: unknown; clock?: { origin: number; local: number } } }; exceptionDetails?: unknown }
+        if (Date.now() >= deadline) throw new Error("DEFERRED43_OBSERVATION_DEADLINE")
+        const clock = response.result?.value?.clock
+        if (!clock || !Number.isFinite(clock.origin) || !Number.isFinite(clock.local)) { faults |= 256; continue }
+        clocks.push({ realm: context.default ? 1 : 2, before, after: Date.now(), origin: clock.origin, local: clock.local })
+        if (context.destroyed || response.exceptionDetails || !validateDeferred43Payload(response.result?.value?.payload, context.default ? 1 : 2)) { contextLost = context.destroyed; faults |= 256; continue }
+        if (context.default) app = response.result.value.payload as Deferred43Payload
+        else utility = response.result.value.payload as Deferred43Payload
+      }
+    }
+    try { await deferred43Bound(drain(), deadline) } catch { faults |= 256 }
+    try { if (session) await deferred43Bound(session.detach(), deadline) } catch { faults |= 256 }
+    try {
+      const metadata = { schema: 43, frameId, documents, contextLost, faults, calibration, clocks, contexts: selected.map(context => ({ id: context.id, frameId: context.frameId, uniqueId: context.uniqueId, default: context.default, isolated: context.isolated, destroyed: context.destroyed })), ordering: "ORDER_UNBOUND" }
+      if (Buffer.byteLength(JSON.stringify(metadata)) > 65536) faults |= 1
+      for (const [name, payload, bound] of [["app", app, 1048576], ["utility", utility, 524288]] as const) {
+        if (!payload) { faults |= 256; continue }
+        const bytes = JSON.stringify(payload)
+        if (Buffer.byteLength(bytes) > bound) { faults |= 1; continue }
+        faults |= payload.faults
+        await deferred43Bound(testInfo.attach(`deferred43-${name}.json`, { body: bytes, contentType: "application/json" }), deadline)
+      }
+      await deferred43Bound(testInfo.attach("deferred43-contexts.json", { body: JSON.stringify({ ...metadata, faults }), contentType: "application/json" }), deadline)
+    } catch { faults |= 4 }
+    const owners = new Map<number, number[]>()
+    for (const row of app?.rows ?? []) if (row[0] === 1) owners.set(row[3], row)
+    const roots = Array.from(owners.values()).filter(row => row[6] > 0 && (row[4] === 1 || row[4] === 2))
+    const dropdown = roots.filter(row => row[4] === 1), tooltip = roots.filter(row => row[4] === 2)
+    const exported = Array.from(owners.values()).filter(row => row[4] === 3 && row[6] > 0 && row[11] === dropdown[0]?.[3])
+    const rolesBound = dropdown.length === 1 && tooltip.length === 1 && dropdown[0][6] === tooltip[0][6] && dropdown[0][7] !== tooltip[0][7] && exported.length === 1
+    if (!rolesBound) faults |= 8
+    const summary = { schema: 43, rolesBound, available: faults === 0 && !!app && !!utility, faults, appRows: app?.count ?? 0, utilityRows: utility?.count ?? 0, first: utility?.first ?? 0, appDigest: app ? createHash("sha256").update(JSON.stringify(app)).digest("hex") : null, utilityDigest: utility ? createHash("sha256").update(JSON.stringify(utility)).digest("hex") : null, order: 0 }
+    const line = `DEFERRED43 ${JSON.stringify(summary)}\n`
+    if (Buffer.byteLength(line) <= 4096) process.stdout.write(line)
+  }
+}
+
 
 /**
  * Diagnostics data collected during page visits
@@ -89,7 +232,13 @@ export const test = base.extend<WorkflowFixtures>({
     })
     await seedAuth(page)
     startApiCapture(page)
-    await use(page)
+    const deferred43Eligible = process.env.TLDW_DEFERRED43_SOURCE === deferred43Marker && deferred43MeasuredTitles.get(path.relative(process.cwd(), testInfo.file).split(path.sep).join("/")) === testInfo.title
+    const deferred43Drain = deferred43Eligible ? await prepareDeferred43(page, testInfo) : null
+    try {
+      await use(page)
+    } finally {
+      if (deferred43Drain) try { await deferred43Drain() } catch { /* Diagnostics cannot mask the original fixture outcome. */ }
+    }
     // Teardown: attach API call log on test failure for debugging
     if (testInfo.status !== "passed") {
       const apiLog = getCapturedApiCalls(page)
