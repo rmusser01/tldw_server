@@ -8,13 +8,20 @@ the working directory. Resolving it from the test module preserved the same
 SHA-256 and passed all 24 cases in both consumers. A separate recovery control
 spied on `Storage.prototype`, while the UI setup supplied a `MemoryStorage` that
 implements the interface without inheriting that prototype. The intended quota
-failure never reached the actual write. A probe confirmed that binding; targeting
-`window.localStorage` restored the original failure, source and selection checks.
+failure never reached the actual write. Targeting `window.localStorage` passed
+locally with MemoryStorage, but CI's JSDOM Storage proxy absorbed the spy as a
+string key while leaving the inherited method callable. The same failure
+reproduced on installed Node20 with CI's deterministic configuration. Spying on
+`Object.getPrototypeOf(window.localStorage)`, the pattern used by existing
+storage tests, intercepted both real JSDOM and MemoryStorage writes; native and
+fallback probes verified the defining method owner and restoration.
 
 **Evidence and rule.** Keep the same fixture bytes and assertions while binding
-filesystem fixtures and injected failures to the actual module or runtime owner.
-A passing sibling working directory or a native prototype spy does not establish
-that the consuming test exercised the intended data or failure.
+filesystem fixtures and injected failures to the actual module or defining
+method owner. An exotic receiver can report successful property replacement
+without changing the callable method. A passing sibling working directory or
+one storage implementation does not prove the consuming test exercised the
+intended data or failure.
 
 
 ## Hash navigation does not replay browser initialization (TASK-13227, 2026-10-11)

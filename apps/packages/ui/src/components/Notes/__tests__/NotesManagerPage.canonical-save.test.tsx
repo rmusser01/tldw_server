@@ -443,7 +443,7 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     await waitFor(() => expect(input).toHaveValue("Saved body"));
     fireEvent.change(input, { target: { value: "Keep my unsaved edit" } });
     const storage = vi
-      .spyOn(window.localStorage, "setItem")
+      .spyOn(Object.getPrototypeOf(window.localStorage), "setItem")
       .mockImplementation(() => {
         throw new Error("Quota exceeded");
       });
