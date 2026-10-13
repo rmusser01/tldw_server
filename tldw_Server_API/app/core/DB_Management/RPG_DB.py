@@ -680,12 +680,14 @@ class RPGRepository:
             clauses.append("status = ?")
             params.append(status)
         where = " AND ".join(clauses)
+        # Interpolated SQL fragments are static clause strings built from fixed literals;
+        # all user values are bound via ? parameters (safe dynamic SQL, hence nosec B608).
         with self.db.transaction() as conn:
             rows = conn.execute(
-                f"SELECT * FROM rpg_campaigns WHERE {where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM rpg_campaigns WHERE {where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
                 (*params, limit, offset),
             ).fetchall()
-            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_campaigns WHERE {where}", params).fetchone()[0])
+            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_campaigns WHERE {where}", params).fetchone()[0])  # nosec B608
         return [self._campaign_from_row(row) for row in rows], total
 
     def list_sessions(
@@ -706,12 +708,14 @@ class RPGRepository:
             clauses.append("status = ?")
             params.append(status)
         where = " AND ".join(clauses)
+        # Interpolated SQL fragments are static clause strings built from fixed literals;
+        # all user values are bound via ? parameters (safe dynamic SQL, hence nosec B608).
         with self.db.transaction() as conn:
             rows = conn.execute(
-                f"SELECT * FROM rpg_sessions WHERE {where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM rpg_sessions WHERE {where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
                 (*params, limit, offset),
             ).fetchall()
-            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_sessions WHERE {where}", params).fetchone()[0])
+            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_sessions WHERE {where}", params).fetchone()[0])  # nosec B608
         return [self._session_from_row(row) for row in rows], total
 
     def count_campaign_sessions(self, owner_user_id: int, campaign_id: int) -> int:
@@ -748,9 +752,11 @@ class RPGRepository:
         if event_type is not None:
             clauses.append("event_type = ?")
             params.append(event_type)
+        # Interpolated SQL fragments are static clause strings built from fixed literals;
+        # all user values are bound via ? parameters (safe dynamic SQL, hence nosec B608).
         with self.db.transaction() as conn:
             rows = conn.execute(
-                f"SELECT * FROM rpg_session_events WHERE {' AND '.join(clauses)} ORDER BY sequence_number ASC LIMIT ?",
+                f"SELECT * FROM rpg_session_events WHERE {' AND '.join(clauses)} ORDER BY sequence_number ASC LIMIT ?",  # nosec B608
                 (*params, limit),
             ).fetchall()
         return [self._event_from_row(row) for row in rows]
@@ -770,12 +776,14 @@ class RPGRepository:
             clauses.append("status = ?")
             params.append(status)
         where = " AND ".join(clauses)
+        # Interpolated SQL fragments are static clause strings built from fixed literals;
+        # all user values are bound via ? parameters (safe dynamic SQL, hence nosec B608).
         with self.db.transaction() as conn:
             rows = conn.execute(
-                f"SELECT * FROM rpg_session_proposals WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM rpg_session_proposals WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
                 (*params, limit, offset),
             ).fetchall()
-            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_session_proposals WHERE {where}", params).fetchone()[0])
+            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_session_proposals WHERE {where}", params).fetchone()[0])  # nosec B608
         return [self._proposal_from_row(row) for row in rows], total
 
     def get_snapshot_by_version(
