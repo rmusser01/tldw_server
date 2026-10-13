@@ -189,7 +189,7 @@ def test_postgres_v80_upgrade_and_reopen(pg_database_config):
             ":memory:", client_id="alice", backend=DatabaseBackendFactory.create_backend(pg_database_config)
         )
         try:
-            assert migrated._runtime_schema_version == 82
+            assert migrated._runtime_schema_version == 83
             assert migrated.note_provenance_store.get("own") is None
         finally:
             migrated.close_all_connections()
@@ -266,7 +266,7 @@ def test_postgres_receipt_upgrade_reopen_and_rls(pg_restricted_backend):
         conn.execute("DROP TABLE notes_provenance_receipts")
         conn.execute("UPDATE db_schema_version SET version = 81 WHERE schema_name = ?", (database._SCHEMA_NAME,))
     database = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
-    assert database._runtime_schema_version == 82
+    assert database._runtime_schema_version == 83
     store = database.note_provenance_store
     with database.transaction() as conn:
         store.claim_receipt("same", "fingerprint", conn)

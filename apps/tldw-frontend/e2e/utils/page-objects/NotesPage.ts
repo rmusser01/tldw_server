@@ -260,8 +260,9 @@ export class NotesPage extends BasePage {
   async triggerPrintExport(): Promise<void> {
     await this.overflowMenuButton.click()
 
-    // The submenu's accessible name includes its expand icon ("Export right").
-    const exportMenuItem = this.page.getByRole("menuitem", { name: /^export\b/i })
+    const exportMenuItem = this.page
+      .getByRole('menuitem', { name: /^export/i })
+      .and(this.page.locator('[aria-haspopup="true"]'));
     await expect(exportMenuItem).toBeVisible({ timeout: 10_000 })
     await exportMenuItem.hover()
 

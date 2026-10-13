@@ -319,6 +319,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [kw.keywordTokens])
 
   // ---- Editor hook (use actual deps now that list and kw are available) ----
+  const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const ed = useNotesEditorState({
     connectionConfig: canonicalConnectionConfig,
     authorityScope: notesGraphAuthorityScope,
@@ -344,9 +345,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
     editorDisabled,
+    hasActiveDraft,
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
-  const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const resetEditorToEmptyState = React.useCallback(() => {
     setHasActiveDraft(false)
     ed.resetEditor()

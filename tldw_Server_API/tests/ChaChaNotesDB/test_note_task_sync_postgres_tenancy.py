@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     SchemaError,
 )
+from tldw_Server_API.tests.ChaChaNotesDB.historical_note_seed import seed_pre_language_note
 
 pytestmark = pytest.mark.integration
 
@@ -946,7 +947,7 @@ def _populate_reviewed_postgres_v59_source(
     task_id = str(uuid4())
     event_id = str(uuid4())
     timestamp = "2026-08-14T00:00:00+00:00"
-    db.add_note("Legacy task", "- [ ] Migrate this task\n", note_id=note_id)
+    seed_pre_language_note(db, "Legacy task", "- [ ] Migrate this task\n", note_id=note_id)
     with db.transaction() as conn:
         conn.execute(
             """

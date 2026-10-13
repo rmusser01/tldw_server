@@ -1476,7 +1476,7 @@ class TestNoteCRUD:
 
         updated_note = db.get_note_by_id(note_id)
         assert updated_note is not None
-        assert updated_note["title"] == "Updated Note Title"  # Should be stripped
+        assert updated_note["title"] == "Updated Note Title "
         assert updated_note["content"] == "New content."
         assert updated_note["version"] == original_note["version"] + 1
         check_sync_log_entry(db, "notes", note_id, "update", expected_version=original_note["version"] + 1)

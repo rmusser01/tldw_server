@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   createCheckResult,
@@ -165,7 +167,10 @@ describe("document contracts", () => {
   });
   it("validates shared fixture schema without parsing source", () => {
     const raw = readFileSync(
-      "../packages/ui/src/services/document-editing/__tests__/fixtures/v1/cases.json",
+      resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        "fixtures/v1/cases.json",
+      ),
     );
     expect(createHash("sha256").update(raw).digest("hex")).toBe(
       "fcf516e4c0bb8ff7a19748a4d5f7deb8a30ad0078ea0ce2af0e1e81af50fb0d7",

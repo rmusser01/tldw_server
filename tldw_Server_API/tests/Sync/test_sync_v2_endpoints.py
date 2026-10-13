@@ -324,11 +324,20 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
         "activation_epoch": None,
         "continuity_token": None,
     }
+    assert body["domain_schemas"]["notes.note"]["schema_version"] == 2
+    assert body["domain_schemas"]["notes.note"]["upsert"]["required"] == [
+        "title",
+        "content",
+        "conversation_id",
+        "message_id",
+        "content_language",
+    ]
     assert body["domain_schemas"]["notes.note"]["upsert"]["properties"] == {
         "title": {"type": "string", "max_length": 255},
         "content": {"type": "string", "max_length": 5_000_000},
         "conversation_id": {"type": ["string", "null"]},
         "message_id": {"type": ["string", "null"]},
+        "content_language": {"type": ["string", "null"], "min_length": 1, "max_length": 100},
     }
     assert body["domain_schemas"]["notes.note"]["restore"] == {
         "operation": "upsert",

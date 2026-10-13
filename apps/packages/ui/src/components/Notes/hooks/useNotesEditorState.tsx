@@ -138,6 +138,8 @@ export interface UseNotesEditorStateDeps {
   setKeywordSuggestionSelection: React.Dispatch<React.SetStateAction<string[]>>
   /** Capability */
   editorDisabled: boolean
+  /** A blank draft opened by the page; omitted by existing hook consumers. */
+  hasActiveDraft?: boolean
   /** Called after a save changed an existing note's title on the server. */
   onNoteRenamed?: (event: NoteRenamedEvent) => void
 }
@@ -229,6 +231,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setKeywordSuggestionOptions,
     setKeywordSuggestionSelection,
     editorDisabled,
+    hasActiveDraft = true,
   } = deps
   const callerCapabilities = useCallerCapabilities()
   const callerCapabilitiesRef = React.useRef(callerCapabilities)
@@ -316,7 +319,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       languageOwnerEpoch,
     ],
     enabled: Boolean(
-      isOnline && authorityScope && connectionConfig && !editorDisabled,
+      isOnline &&
+        authorityScope &&
+        connectionConfig &&
+        !editorDisabled &&
+        (hasActiveDraft ||
+          selectedId != null ||
+          title.trim().length > 0 ||
+          content.length > 0 ||
+          editorKeywords.length > 0),
     ),
     retry: false,
     queryFn: async ({

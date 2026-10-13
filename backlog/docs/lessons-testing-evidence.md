@@ -1,5 +1,21 @@
 # Testing Evidence Lessons
 
+## Bind fixtures to the owner that actually consumes them (TASK-13598, PR #3226)
+
+**Incident (2026-10-13).** The structured-document contract passed from the UI
+package but failed in the frontend shard because its raw fixture path depended on
+the working directory. Resolving it from the test module preserved the same
+SHA-256 and passed all 24 cases in both consumers. A separate recovery control
+spied on `Storage.prototype`, while the UI setup supplied a `MemoryStorage` that
+implements the interface without inheriting that prototype. The intended quota
+failure never reached the actual write. A probe confirmed that binding; targeting
+`window.localStorage` restored the original failure, source and selection checks.
+
+**Evidence and rule.** Keep the same fixture bytes and assertions while binding
+filesystem fixtures and injected failures to the actual module or runtime owner.
+A passing sibling working directory or a native prototype spy does not establish
+that the consuming test exercised the intended data or failure.
+
 
 ## Hash navigation does not replay browser initialization (TASK-13227, 2026-10-11)
 

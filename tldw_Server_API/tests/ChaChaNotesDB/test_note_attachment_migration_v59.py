@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     SchemaError,
 )
+from tldw_Server_API.tests.ChaChaNotesDB.historical_note_seed import seed_pre_language_note
 
 pytestmark = pytest.mark.unit
 
@@ -45,7 +46,7 @@ def _prepare_v58_database(db_path: Path) -> None:
         db = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         if db.get_note_by_id(NOTE_ID) is None:
-            db.add_note("Attachment parent", "Body", note_id=NOTE_ID)
+            seed_pre_language_note(db, "Attachment parent", "Body", note_id=NOTE_ID)
     finally:
         db.close_all_connections()
 
@@ -224,7 +225,7 @@ def test_sqlite_v59_rejects_noncanonical_registry_rows(
 ) -> None:
     db = CharactersRAGDB(str(tmp_path / f"invalid-{uuid4()}.sqlite"), client_id=OWNER)
     try:
-        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        seed_pre_language_note(db, "Parent", "Body", note_id=NOTE_ID)
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
             _raw_insert(conn, **overrides)
     finally:
@@ -246,7 +247,7 @@ def test_sqlite_v59_rejects_noninteger_storage_classes(
 ) -> None:
     db = CharactersRAGDB(str(tmp_path / f"storage-class-{uuid4()}.sqlite"), client_id=OWNER)
     try:
-        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        seed_pre_language_note(db, "Parent", "Body", note_id=NOTE_ID)
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
             _raw_insert(conn, **overrides)
     finally:
@@ -256,7 +257,7 @@ def test_sqlite_v59_rejects_noninteger_storage_classes(
 def test_sqlite_v59_restricts_hard_note_delete(tmp_path: Path) -> None:
     db = CharactersRAGDB(str(tmp_path / "restrict-note-delete.sqlite"), client_id=OWNER)
     try:
-        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        seed_pre_language_note(db, "Parent", "Body", note_id=NOTE_ID)
         with db.transaction() as conn:
             _raw_insert(conn)
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:

@@ -32,7 +32,7 @@ vi.mock("@/services/settings/registry", async (original) => ({
   clearSetting: vi.fn(),
 }));
 const noop = () => undefined;
-function editor() {
+function editor(activeDraft = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -71,9 +71,23 @@ function editor() {
     editorDisabled: false,
   };
   return renderHook(
-    ({ scope }) => useNotesEditorState({ ...deps, authorityScope: scope }),
+    ({
+      scope,
+      activeDraft = true,
+      serverUrl = "https://notes.test",
+    }: {
+      scope: string;
+      activeDraft?: boolean;
+      serverUrl?: string;
+    }) =>
+      useNotesEditorState({
+        ...deps,
+        authorityScope: scope,
+        hasActiveDraft: activeDraft,
+        connectionConfig: { ...deps.connectionConfig!, serverUrl },
+      }),
     {
-      initialProps: { scope: "alice" },
+      initialProps: { scope: "alice", activeDraft },
       wrapper: ({ children }) => (
         <QueryClientProvider client={queryClient}>
           {children}
@@ -88,6 +102,135 @@ describe("temporary language at the actual canonical owner", () => {
     mocks.activity.mockResolvedValue({ events: [] });
     localStorage.clear();
   });
+  it.each([null, "future", undefined])(
+    "negotiates for a selected note even when no new draft is active (%s)",
+    async (language) => {
+      mocks.request.mockImplementation(async ({ path }) =>
+        path.endsWith("/capabilities")
+          ? { content_language: true }
+          : {
+              id: "a",
+              title: "Selected",
+              content: "{}",
+              version: 1,
+              ...(language === undefined ? {} : { content_language: language }),
+            },
+      );
+      const view = editor(false);
+      await act(async () => {});
+      expect(
+        mocks.request.mock.calls.filter(([request]) =>
+          request.path.endsWith("/capabilities"),
+        ),
+      ).toHaveLength(0);
+      await act(async () => {
+        await view.result.current.loadDetail("a");
+      });
+      await waitFor(() =>
+        expect(view.result.current.languagePersistence).toBe("portable"),
+      );
+      expect(view.result.current.contentLanguage).toBe(language);
+      expect(view.result.current.content).toBe("{}");
+    },
+  );
+
+  it("negotiates for a recovered structured draft without marking it implicit", async () => {
+    localStorage.setItem(
+      "tldw:notesOfflineDraftQueue:v1:alice",
+      JSON.stringify({
+        "draft:new": {
+          key: "draft:new",
+          noteId: null,
+          baseVersion: null,
+          draftVersion: 3,
+          implicitDefaultLanguage: false,
+          title: "Recovered",
+          content: "a: 1\n",
+          content_language: "yaml",
+          revision: 2,
+          keywords: [],
+          syncState: "conflict",
+        },
+      }),
+    );
+    mocks.request.mockImplementation(async ({ path }) =>
+      path.endsWith("/capabilities") ? { content_language: true } : {},
+    );
+    const view = editor(false);
+    await waitFor(() => {
+      expect(view.result.current.title).toBe("Recovered");
+      expect(view.result.current.languagePersistence).toBe("portable");
+    });
+    expect(view.result.current.content).toBe("a: 1\n");
+    expect(view.result.current.contentLanguage).toBe("yaml");
+    expect(view.result.current.implicitDefaultLanguage).toBe(false);
+    expect(
+      mocks.request.mock.calls.filter(
+        ([request]) => request.method === "POST" || request.method === "PUT",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it.each(["authority", "connection"] as const)(
+    "rejects a late active-session capability reply after %s changes",
+    async (transition) => {
+      let release!: (value: Record<string, unknown>) => void;
+      let signal: AbortSignal | undefined;
+      const held = new Promise<Record<string, unknown>>((resolve) => {
+        release = resolve;
+      });
+      mocks.request.mockImplementation(async (request) => {
+        if (request.path.endsWith("/capabilities")) {
+          signal = request.abortSignal;
+          return held;
+        }
+        return {};
+      });
+      const view = editor(false);
+      try {
+        await act(async () => {});
+        expect(
+          mocks.request.mock.calls.filter(([request]) =>
+            request.path.endsWith("/capabilities"),
+          ),
+        ).toHaveLength(0);
+        view.rerender({ scope: "alice", activeDraft: true });
+        await waitFor(() => expect(signal).toBeDefined());
+        view.rerender({
+          scope: transition === "authority" ? "bob" : "alice",
+          serverUrl:
+            transition === "connection"
+              ? "https://other.test"
+              : "https://notes.test",
+          activeDraft: false,
+        });
+        await act(async () => {
+          release({ content_language: true });
+          await held;
+        });
+        expect(signal!.aborted).toBe(true);
+        expect(view.result.current.languagePersistence).toBe("unavailable");
+        expect(view.result.current.content).toBe("");
+        expect(view.result.current.contentLanguage).toBeNull();
+        view.rerender({
+          scope: "alice",
+          serverUrl: "https://notes.test",
+          activeDraft: false,
+        });
+        await act(async () => {});
+        expect(view.result.current.languagePersistence).toBe("unavailable");
+        expect(
+          mocks.request.mock.calls.filter(([request]) =>
+            request.path.endsWith("/capabilities"),
+          ),
+        ).toHaveLength(1);
+      } finally {
+        release({ content_language: true });
+        view.unmount();
+      }
+    },
+  );
+
   it("keeps temporary structured mode through ordinary old-peer save and same-note reload without publishing metadata", async () => {
     let stored = {
       id: "a",
