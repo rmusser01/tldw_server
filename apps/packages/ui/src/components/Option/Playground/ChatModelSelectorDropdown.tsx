@@ -235,7 +235,7 @@ export const ChatModelSelectorDropdown = React.memo(
             data-testid="model-selector"
             className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
               statusWarning
-                ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
+                ? "border-warn/50 bg-warn/10 text-text hover:bg-warn/20"
                 : "border-border bg-surface hover:bg-surface-hover"
             }`}
           >
@@ -249,8 +249,8 @@ export const ChatModelSelectorDropdown = React.memo(
             <span
               className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[9px] ${
                 statusWarning
-                  ? "bg-warn/10 text-warn"
-                  : "bg-success/10 text-success"
+                  ? "bg-warn/10 text-text"
+                  : "bg-success/10 text-text"
               }`}
               title={
                 t(

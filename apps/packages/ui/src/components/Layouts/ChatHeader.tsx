@@ -400,7 +400,7 @@ export function ChatHeader({
           >
             <Search className="size-4" aria-hidden="true" />
             <span>{commandPaletteTitle}</span>
-            <span className="rounded border border-border px-1.5 py-0.5 text-xs text-text-subtle">
+            <span className="rounded border border-border px-1.5 py-0.5 text-xs text-text-muted">
               {commandKeyLabel}K
             </span>
           </button>

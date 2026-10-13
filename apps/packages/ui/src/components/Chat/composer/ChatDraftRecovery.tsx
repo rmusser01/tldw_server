@@ -285,6 +285,7 @@ export function ChatDraftRecovery({
       <Button
         variant="text"
         size="sm"
+        className="!text-text hover:underline"
         disabled={disabled || !onRestore}
         onClick={() => {
           setOpen(true)
