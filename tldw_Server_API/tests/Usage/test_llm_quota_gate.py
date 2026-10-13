@@ -195,3 +195,26 @@ async def test_a_root_is_never_admitted_by_the_request_that_started_it(decisions
     mark_llm_quota_prechecked()
     with llm_call_root(7), pytest.raises(LLMQuotaExceededError):
         await llm_quota_gate.check_llm_call_async()
+
+
+async def test_a_decision_cancelled_by_the_accounting_loop_admits_the_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At shutdown the accounting loop may cancel a handed-off decision; the caller is admitted, not cancelled."""
+    other_loop = asyncio.new_event_loop()
+    runner = threading.Thread(target=other_loop.run_forever, daemon=True)
+    runner.start()
+
+    async def _cancelled(user_id: Any, requested_tokens: int = 1) -> LLMQuotaRefusal | None:
+        """Behave like a decision cancelled by a loop that is shutting down."""
+        raise asyncio.CancelledError
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+    quota_resolver.invalidate_all()
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _cancelled)
+    monkeypatch.setattr(llm_accounting, "_accounting_loop", other_loop)
+    try:
+        with llm_call_context(user_id=7):
+            await llm_quota_gate.check_llm_call_async()
+    finally:
+        other_loop.call_soon_threadsafe(other_loop.stop)
+        await asyncio.to_thread(runner.join, 5)
+        other_loop.close()

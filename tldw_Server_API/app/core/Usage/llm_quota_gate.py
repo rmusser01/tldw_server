@@ -148,6 +148,12 @@ async def check_user_async(user_id: int) -> None:
             except TimeoutError:
                 logger.warning("LLM quota check timed out after {}s; call admitted", CHECK_TIMEOUT_SECONDS)
                 return
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise  # the caller itself was cancelled
+                logger.warning("LLM quota check was cancelled by the accounting loop; call admitted")
+                return
     except Exception as error:  # noqa: BLE001 - a check must never break an LLM call
         logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call admitted")
         return

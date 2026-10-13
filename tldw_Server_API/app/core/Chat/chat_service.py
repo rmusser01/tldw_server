@@ -5551,6 +5551,8 @@ async def execute_streaming_call(
                 "message": "Prompt cost guardrail blocked request before provider dispatch.",
             }
         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
+        if isinstance(he, LLMQuotaExceededError):
+            raise  # the user's limit: the caller gets the 402, not a provider-style error frame (spec §4b)
         response = StreamingResponse(
             _terminal_stream_error(error_payload),
             media_type="text/event-stream",

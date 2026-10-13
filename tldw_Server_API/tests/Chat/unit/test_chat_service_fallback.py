@@ -7317,3 +7317,72 @@ async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(m
     assert captured.value.detail["error"] == "limit_exceeded"
     assert provider_manager.failure_records == []
     assert provider_manager.fallback_requests == []
+
+
+@pytest.mark.asyncio
+async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame(monkeypatch):
+    """A streamed chat call's LLM quota refusal is the caller's 402, not a provider-style error frame (§4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+    )
+    metrics = _DummyMetrics()
+    provider_manager = _DummyProviderManager()
+    refund_calls = []
+
+    def refused_llm_call():
+        raise refusal
+
+    async def rg_refund_cb(*, cancelled: bool, error: bool):
+        refund_calls.append({"cancelled": cancelled, "error": error})
+
+    async def save_message_fn(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/chat/completions"),
+        headers={},
+        state=SimpleNamespace(user_id=None, api_key_id=None),
+    )
+
+    with pytest.raises(LLMQuotaExceededError) as captured:
+        await execute_streaming_call(
+            current_loop=asyncio.get_running_loop(),
+            cleaned_args={
+                "api_endpoint": "openai",
+                "messages_payload": [],
+                "model": "gpt-test",
+                "streaming": True,
+            },
+            selected_provider="openai",
+            provider="openai",
+            model="gpt-test",
+            request_json="{}",
+            request=request,
+            metrics=metrics,
+            provider_manager=provider_manager,
+            templated_llm_payload=[],
+            should_persist=False,
+            final_conversation_id="conv-test",
+            character_card_for_context={"name": "Test"},
+            chat_db=None,
+            save_message_fn=save_message_fn,
+            audit_service=None,
+            audit_context=None,
+            client_id="client-test",
+            queue_execution_enabled=False,
+            enable_provider_fallback=False,
+            llm_call_func=refused_llm_call,
+            refresh_provider_params=lambda _provider: ({}, None),
+            moderation_getter=lambda: _DummyModeration(),
+            rg_refund_cb=rg_refund_cb,
+        )
+
+    assert captured.value.status_code == 402
+    assert provider_manager.failure_records == []
+    assert provider_manager.fallback_requests == []
+    assert refund_calls == [{"cancelled": False, "error": True}]
