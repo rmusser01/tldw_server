@@ -1,3 +1,4 @@
+import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"

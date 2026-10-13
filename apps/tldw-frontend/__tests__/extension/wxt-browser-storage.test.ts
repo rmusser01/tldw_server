@@ -143,3 +143,11 @@ describe("wxt-browser storage shim", () => {
     storage.onChanged.removeListener(listener)
   })
 })
+
+it.each(["local", "sync", "session"] as const)("omits absent %s keys while preserving stored null and falsy values", async area => {
+  await storage[area].set({ present: null, zero: 0, disabled: false, empty: "" })
+  expect({ missing: await storage[area].get("missing"),
+    mixed: await storage[area].get(["missing", "present", "zero", "disabled", "empty"]) }).toEqual({
+    missing: {}, mixed: { present: null, zero: 0, disabled: false, empty: "" }
+  })
+})

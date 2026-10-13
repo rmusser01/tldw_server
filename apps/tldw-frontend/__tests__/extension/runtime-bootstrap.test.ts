@@ -104,25 +104,24 @@ const stubCookieRuntimeFetch = ({
   return fetchMock
 }
 
+const navigatorLocksDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "locks")
+
 describe("runtime-bootstrap chrome shim", () => {
   beforeEach(() => {
     vi.resetModules()
     localStorage.clear()
     sessionStorage.clear()
     beforeManualSessionCredentialLock = null
-    vi.stubGlobal(
-      "navigator",
-      Object.create(window.navigator, {
-        locks: {
-          value: {
-            request: async (_name: string, work: () => unknown) => {
-              beforeManualSessionCredentialLock?.()
-              return await work()
-            }
-          }
+    Object.defineProperty(window.navigator, "locks", {
+      configurable: true,
+      value: {
+        request: async (_name: string, work: () => unknown) => {
+          beforeManualSessionCredentialLock?.()
+          return await work()
         }
-      })
-    )
+      }
+    })
+    vi.stubGlobal("navigator", window.navigator)
   })
 
   afterEach(() => {
@@ -150,6 +149,8 @@ describe("runtime-bootstrap chrome shim", () => {
       value: originalWindowLocation
     })
     vi.unstubAllGlobals()
+    if (navigatorLocksDescriptor) Object.defineProperty(window.navigator, "locks", navigatorLocksDescriptor)
+    else Reflect.deleteProperty(window.navigator, "locks")
     localStorage.clear()
     sessionStorage.clear()
   })
