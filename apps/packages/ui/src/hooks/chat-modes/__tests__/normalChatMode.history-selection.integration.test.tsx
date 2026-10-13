@@ -1,3 +1,5 @@
+import { browser as nativeBrowser } from "../../../../../../tldw-frontend/extension/shims/wxt-browser"
+import { storageOriginal, spyOnStorageGet, spyOnStorageSet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client"
 import { createElement, useContext, useEffect, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react"
@@ -536,8 +538,8 @@ describe("fresh Compare original scene through real H1 first bind", () => {
     let releaseWrite!: () => void
     const entered = new Promise<void>(resolve => { writeEntered = resolve })
     const held = new Promise<void>(resolve => { releaseWrite = resolve })
-    const originalSet = Storage.prototype.set
-    vi.spyOn(Storage.prototype, "set").mockImplementation(
+    const originalSet = storageOriginal.set
+    spyOnStorageSet().mockImplementation(
       async function (key, value) {
         if (
           key.startsWith("actorSettings:owned:") &&
@@ -934,15 +936,15 @@ describe("normal Chat owned history creation and H1 admission", () => {
       const held = new Promise<void>((resolve) => {
         release = resolve
       })
-      const originalSet = Storage.prototype.set
-      const originalGet = Storage.prototype.get
+      const originalSet = storageOriginal.set
+      const originalGet = storageOriginal.get
       const competing = {
         value: { ...scene, notes: "Independent destination scene" },
         updatedAt: 999
       }
       let destinationKey: string | undefined
       if (boundary === "same-ID reload") {
-        vi.spyOn(Storage.prototype, "set").mockImplementation(
+        spyOnStorageSet().mockImplementation(
           async function (key, value) {
             if (key.startsWith("actorSettings:owned:") && key !== sourceKey) {
               destinationKey = key
@@ -953,7 +955,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
           }
         )
       } else {
-        vi.spyOn(Storage.prototype, "get").mockImplementation(
+        spyOnStorageGet().mockImplementation(
           async function (key) {
             if (
               key.startsWith("actorSettings:owned:") &&
@@ -1478,7 +1480,7 @@ describe("ordinary native creation recovery and preparation", () => {
   it.each(["storage", "locks"])("refuses ordinary %s unavailability before creating", async boundary => {
     const mounted = renderHook(() => useHistorySelection())
     const create = vi.spyOn(tldwClient, "createChat")
-    if (boundary === "storage") vi.spyOn(Storage.prototype, "get").mockRejectedValue(new Error("Unavailable"))
+    if (boundary === "storage") spyOnStorageGet().mockRejectedValue(new Error("Unavailable"))
     else Object.defineProperty(navigator, "locks", { configurable: true, value: undefined })
     await act(async () => { await expect(send(mounted.result.current, { setServerChatId: vi.fn(publishFixtureServerChatId) })).rejects.toMatchObject({ code: "chat_creation_recovery_unavailable" }) })
     expect(create).not.toHaveBeenCalled()
@@ -1551,11 +1553,11 @@ it.each(["same-chat", "newer-server"])("a held ordinary bound-record write canno
   vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (id, request) => {
     return emptyServerCapture(request, id)
   })
-  const original = Storage.prototype.set
+  const original = storageOriginal.set
   let enter!: () => void, release!: () => void
   const entered = new Promise<void>(resolve => { enter = resolve })
   const held = new Promise<void>(resolve => { release = resolve })
-  vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+  spyOnStorageSet().mockImplementation(async function (this: Storage, key, value) {
     const result = await original.call(this, key, value)
     if (key.startsWith("registry:chat-creation:") && value?.value?.state === "bound") { enter(); await held }
     return result
@@ -2257,6 +2259,7 @@ describe("real full and compact Scene consumers across persistence and steering"
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.stubGlobal("chrome", { storage: nativeBrowser.storage })
     useStoreMessageOption.setState(initialCore)
     useActorStore.getState().reset()
   })
@@ -2669,8 +2672,8 @@ describe("real full and compact Scene consumers across persistence and steering"
     const scoped = answerSnapshot()
     vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
     const { rows } = declareNativeMirrorTransport(true)
-    const originalSet = Storage.prototype.set
-    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+    const originalSet = storageOriginal.set
+    spyOnStorageSet().mockImplementation(async function (this: Storage, key, value) {
       if (key.startsWith("registry:chat-creation:") && value?.value?.state === "acknowledged")
         throw new Error("Declared creation ACK journal quota")
       return originalSet.call(this, key, value)
@@ -2952,7 +2955,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           else next.setServerChatId(previous[field])
         }
       )
-      const original = Storage.prototype.set
+      const original = storageOriginal.set
       let enter!: () => void, release!: () => void
       const entered = new Promise<void>((resolve) => {
         enter = resolve
@@ -2960,7 +2963,7 @@ describe("real full and compact Scene consumers across persistence and steering"
       const held = new Promise<void>((resolve) => {
         release = resolve
       })
-      vi.spyOn(Storage.prototype, "set").mockImplementation(async function (
+      spyOnStorageSet().mockImplementation(async function (
         this: Storage,
         key,
         value

@@ -1,3 +1,4 @@
+import { storageOriginal, spyOnStorageGet, spyOnStorageSet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
 import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
@@ -3331,7 +3332,7 @@ it.each(["new", "account"])("native first-create keeps a late ACK as a private l
 it.each(["storage", "locks"])("native first-create refuses %s unavailability before POST", async boundary => {
   const mounted = await mountedNativeOpening()
   const { Storage } = await import("@plasmohq/storage")
-  const unavailable = boundary === "storage" ? vi.spyOn(Storage.prototype, "get").mockRejectedValue(new Error("storage read unavailable")) : null
+  const unavailable = boundary === "storage" ? spyOnStorageGet().mockRejectedValue(new Error("storage read unavailable")) : null
   if (boundary === "locks") Object.defineProperty(navigator, "locks", { configurable: true, value: undefined })
   await act(async () => { await mounted.hook.result.current.onSubmit({ message: "KEPT INPUT", image: "" }) })
   expect(createChatMock).not.toHaveBeenCalled()
@@ -3386,11 +3387,11 @@ it.each(["accept", "new-during-metadata", "foreign-metadata"])("explicit known-I
 it("native first-create does not adopt a newer cancelled load epoch during bound-record persistence", async () => {
   const mounted = await mountedNativeOpening()
   const { Storage } = await import("@plasmohq/storage")
-  const original = Storage.prototype.set
+  const original = storageOriginal.set
   let enter!: () => void, release!: () => void
   const ready = new Promise<void>(resolve => { enter = resolve })
   const held = new Promise<void>(resolve => { release = resolve })
-  const write = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+  const write = spyOnStorageSet().mockImplementation(async function (this: Storage, key, value) {
     await original.call(this, key, value)
     if (key.startsWith("registry:chat-creation:") && value.value?.state === "bound") { enter(); await held }
     return null
@@ -3469,11 +3470,11 @@ it.each(["newer-H1", "source-intent"])("creation Review does not adopt %s during
   await waitFor(() => expect(composer.result.current.creationRecovery.active?.chatId).toBe(nativeChatId))
   act(() => composer.result.current.setMessageValue("NEXT UNSENT INPUT"))
   const { Storage } = await import("@plasmohq/storage")
-  const original = Storage.prototype.set
+  const original = storageOriginal.set
   let release!: () => void, enter!: () => void
   const ready = new Promise<void>(resolve => { enter = resolve })
   const held = new Promise<void>(resolve => { release = resolve })
-  const write = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+  const write = spyOnStorageSet().mockImplementation(async function (this: Storage, key, value) {
     if (key.startsWith("registry:draft:review-retain:") && value.value?.content === "NEXT UNSENT INPUT") { enter(); await held }
     return original.call(this, key, value)
   })
@@ -3669,11 +3670,11 @@ it.each(["newer-H1", "source-intent", "reconnect"])("explicit greeting captures 
   await waitFor(() => expect(composer.result.current.draftReady).toBe(true))
   act(() => composer.result.current.setMessageValue("UNSENT GREETING REVIEW\n  exact  "))
   const { Storage } = await import("@plasmohq/storage")
-  const original = Storage.prototype.set
+  const original = storageOriginal.set
   let release!: () => void, enter!: () => void
   const ready = new Promise<void>(resolve => { enter = resolve })
   const held = new Promise<void>(resolve => { release = resolve })
-  const write = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+  const write = spyOnStorageSet().mockImplementation(async function (this: Storage, key, value) {
     if (key.startsWith("registry:draft:greeting-retain:") && value.value?.content === "UNSENT GREETING REVIEW\n  exact  ") { enter(); await held }
     return original.call(this, key, value)
   })
@@ -3745,8 +3746,8 @@ it.each(["bound-record", "resume-detail", "resume-detail-current"])("private nat
   const held = new Promise<void>(resolve => { release = resolve })
   let write: ReturnType<typeof vi.spyOn> | undefined
   if (stage === "bound-record") {
-    const original = Storage.prototype.set
-    write = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (this: Storage, key, value) {
+    const original = storageOriginal.set
+    write = spyOnStorageSet().mockImplementation(async function (this: Storage, key, value) {
       await original.call(this, key, value)
       if (key.startsWith("registry:chat-creation:") && value.value?.state === "bound") { enter(); await held }
       return null
@@ -4245,11 +4246,11 @@ it.each([false, true])(
       (await import("@/services/actor-settings")).getActorSceneForChat
     )
     reader.mockImplementationOnce(service.getActorSceneForChat)
-    const originalRead = Storage.prototype.get
+    const originalRead = storageOriginal.get
     let enteredRead!: () => void, releaseRead!: () => void
     const entered = new Promise<void>(resolve => { enteredRead = resolve })
     const held = new Promise<void>(resolve => { releaseRead = resolve })
-    const read = vi.spyOn(Storage.prototype, "get").mockImplementation(async function (this: Storage, key) {
+    const read = spyOnStorageGet().mockImplementation(async function (this: Storage, key) {
       if (key.startsWith("actorSettings:owned:")) {
         enteredRead()
         await held
@@ -4512,9 +4513,9 @@ it.each([
     } as Awaited<ReturnType<typeof tldwClient.getChat>>
   })
   const { Storage } = await import("@plasmohq/storage")
-  const originalSet = Storage.prototype.set
+  const originalSet = storageOriginal.set
   if (boundary === "storage")
-    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (
+    spyOnStorageSet().mockImplementation(async function (
       this: Storage,
       key,
       value

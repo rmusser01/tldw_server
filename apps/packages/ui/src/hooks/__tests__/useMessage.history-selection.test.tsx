@@ -1,3 +1,4 @@
+import { spyOnStorageGet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
 import { roleplayDetail, roleplayAppend, roleplayCompletion, captureRoleplayFixtureRows } from "@/hooks/chat/__tests__/roleplay-resume-fixture"
@@ -3296,8 +3297,7 @@ it("workspace H1: keeps a failed actual scene read ahead of compact native admis
   installWorkspaceCharacterFixture()
   const target = captureCurrentActorSceneTarget(h1.controller)
   expect(target).not.toBeNull()
-  const read = vi
-    .spyOn(Storage.prototype, "get")
+  const read = spyOnStorageGet()
     .mockRejectedValueOnce(new Error("scene read unavailable"))
   h1.native = true
   mocks.storeState.serverChatCharacterId = "12"
