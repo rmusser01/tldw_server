@@ -1797,6 +1797,8 @@ describe.each([
     )
 
   it.each(["account", "unmount"])("ignores a failed cold Retry after %s retirement", async ending => {
+    const alice = tabsState()
+    io.data.set(storedKey("alice"), structuredClone(alice))
     io.scope.mockRejectedValueOnce(new Error("offline"))
     const page = render(<Route />)
     const retry = await screen.findByRole("button", { name: "Retry" })
@@ -1806,10 +1808,16 @@ describe.each([
     if (ending === "account") {
       switchAccount("bob")
       await screen.findByRole("button", { name: "Open cached history" })
+      await waitFor(() => expect(io.data.get(storedKey("bob"))).toMatchObject({ ownerKey: ownerKey("bob") }))
     } else page.unmount()
-    const writes = io.write.mock.calls.length
+    const writes = recoveryWrites().length
+    const bob = structuredClone(io.data.get(storedKey("bob")))
+    const revision = useSidepanelChatTabsStore.getState().revision
     await act(async () => { reject(Object.assign(new Error("Expired Alice credentials"), { code: "service_prompt_scope_unresolved" })) })
-    expect(io.write).toHaveBeenCalledTimes(writes)
+    expect(recoveryWrites()).toHaveLength(writes)
+    expect(io.data.get(storedKey("alice"))).toEqual(alice)
+    expect(io.data.get(storedKey("bob"))).toEqual(bob)
+    expect(useSidepanelChatTabsStore.getState().revision).toBe(revision)
     if (ending === "account") expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("bob"))
   })
 
