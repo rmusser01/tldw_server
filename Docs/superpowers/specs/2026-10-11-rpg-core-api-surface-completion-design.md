@@ -55,14 +55,15 @@ All routes are owner-scoped (foreign or missing ids → 404, matching existing b
 
 Notes:
 
-- **Pagination.** Entity lists (campaigns, sessions, proposals) use offset pagination: `limit` 1–100 default 25, `offset` ≥ 0, envelope `items` + `total_count` + echoed paging params (align exact field names with the closest existing envelope in `app/api/v1/schemas/` during implementation). Events use cursor pagination: `after_sequence` ≥ 0 (default 0), `limit` 1–100 **default 50**, ascending by `sequence_number`; the envelope reports `next_after_sequence`. The 50 default reflects that event payloads are bounded at 64 KiB each (100 events ≈ 6.4 MiB worst case).
+- **Pagination.** Entity lists (campaigns, sessions, proposals) use offset pagination: `limit` 1–100 default 25, `offset` ≥ 0, envelope `items` + `total_count` + echoed paging params (align exact field names with the closest existing envelope in `app/api/v1/schemas/` during implementation). Events use cursor pagination: `after_sequence` ≥ 0 (default 0), `limit` 1–100 **default 50**, ascending by `sequence_number`; the envelope reports `next_after_sequence`, and clients stop when a page returns fewer than `limit` items. The 50 default reflects that event payloads are bounded at 64 KiB each (100 events ≈ 6.4 MiB worst case).
+- **Ordering.** Entity lists are ordered `updated_at DESC, id DESC` (proposals: `created_at DESC, id DESC`) for deterministic pagination despite same-second timestamps. Omitting the `status` filter returns both active and archived rows. On `GET /rpg/sessions`, a `campaign_id` that is unknown or owned by another user returns 404, consistent with the module's owner-scoping behavior.
 - **`GET .../proposals` uses `rpg.proposals.review`** (the review-workflow permission) rather than `rpg.sessions.read`, so the permission grant needed to apply/reject also suffices to discover what to review. A `rpg.sessions.read`-only principal can still see `proposal_id` references on events but cannot enumerate proposals; documented behavior.
 - **`pending_proposal_count`** appears on session detail and session list items (filtered `COUNT` served by the existing `idx_rpg_proposals_session(owner, session, status)` index). **`session_count`** appears on campaign detail only, keeping list queries lean.
 - The snapshot response reuses the existing `SnapshotResult` shape (`snapshot_version`, `last_event_sequence`, `snapshot` state, `diagnostics`) — `last_event_sequence` doubles as the natural cursor for subsequent event pagination.
 
 ### Mutations
 
-All mutations below require the `Idempotency-Key` header (8–128 chars, matching existing rules), perform the idempotency replay check **before** any CAS check (retry of a succeeded mutation replays the stored response regardless of subsequent version changes, mirroring `commit_events_and_snapshot`), and execute as single-transaction conditional writes — never read-modify-write across transactions.
+All mutations below require the `Idempotency-Key` header, validated exactly like existing header-style routes: a bare header parameter, with the service raising 409 `idempotency_key_required` when empty. (The 8–128 length bound applies only to the refs-replacement body field, which Phase 1 does not use.) Mutations perform the idempotency replay check **before** any CAS check (retry of a succeeded mutation replays the stored response regardless of subsequent version changes, mirroring `commit_events_and_snapshot`), execute as single-transaction conditional writes — never read-modify-write across transactions — and return the updated entity (including its new `version`) as the response body, which is also what replay serves.
 
 | Route | Purpose | Permission | Idempotency scope |
 |---|---|---|---|
@@ -71,8 +72,8 @@ All mutations below require the `Idempotency-Key` header (8–128 chars, matchin
 | `PUT /rpg/sessions/{id}/authority-settings` | Full-replace authority settings | `rpg.sessions.manage` | `session:{id}:authority_settings` |
 | `POST /rpg/sessions/{id}/snapshot/rebuild` | Replay event log → fresh snapshot | `rpg.sessions.manage` | `session:{id}:snapshot_rebuild` |
 
-- **Status transitions**: `status ∈ {active, archived}`, both directions allowed, no further state machine. Validated at the Pydantic/schema level (the columns carry no SQL CHECK). PATCH bodies are `extra="forbid"`; `owner_user_id`, `version`, and timestamps are never assignable.
-- **Title bounds** mirror the existing create schemas.
+- **Status transitions**: `status ∈ {active, archived}`, both directions allowed, no further state machine. Validated at the Pydantic/schema level (the columns carry no SQL CHECK). PATCH bodies are `extra="forbid"`; `owner_user_id`, `version`, timestamps, and adapter fields (`default_adapter_key`/`adapter_key` and versions — deliberately immutable after creation) are never assignable.
+- **Field bounds**: `title` 1–200 chars, `description` ≤ 4000 chars, matching `RPGCampaignCreateRequest`.
 - **Version semantics (important for clients)**: the session `version` increments on **every event commit** (`RPG_DB.py` `commit_events_and_snapshot`), not only on metadata changes. A PATCH/PUT `expected_version` therefore conflicts (409 `stale_version`) whenever events were recorded since the client last read — correct optimistic behavior already true of refs replacement; clients re-GET and retry.
 - **Authority settings contract**: `PUT` accepts exactly the four fields `decide_authority()` reads — `import_auto_commit`, `mcp_auto_commit`, `model_auto_commit` (strict bools) and `model_auto_commit_event_types` (list of event types validated against the registry in `core/RPG/events.py`; unknown types → 400). Full-object replace, `extra="forbid"`. Absent/empty `model_auto_commit_event_types` means **no** model event type auto-commits (existing semantics preserved verbatim). This is a dedicated route, separate from PATCH, because enabling `model_auto_commit` changes what bypasses human review; it stays behind `rpg.sessions.manage`.
 
@@ -96,7 +97,7 @@ No changes to `models.py` domain dataclasses beyond (if needed) list-item projec
 
 ## Schemas
 
-New Pydantic models in `app/api/v1/schemas/rpg_schemas.py`: list envelopes, detail responses (campaign/session/proposal/event), PATCH request bodies, authority-settings PUT body, rebuild response. All `extra="forbid"` with bounds matching existing models (`Idempotency-Key` 8–128 chars in header; body `expected_version` ≥ 1).
+New Pydantic models in `app/api/v1/schemas/rpg_schemas.py`: list envelopes, detail responses (campaign/session/proposal/event), PATCH request bodies, authority-settings PUT body, rebuild response. All `extra="forbid"` with bounds matching existing models (body `expected_version` ≥ 1; `title` 1–200, `description` ≤ 4000). No `privilege_catalog.yaml` change is required: the catalog sync test only asserts that scope ids exist, and all 12 routes reuse existing scopes — only route-level permission tests are extended.
 
 ## Error handling
 

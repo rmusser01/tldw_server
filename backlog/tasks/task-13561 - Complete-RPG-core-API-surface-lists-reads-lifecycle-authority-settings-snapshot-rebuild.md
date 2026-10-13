@@ -30,6 +30,7 @@ The RPG module backend ships create/record/review mutations but almost no read o
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design decisions (2026-10-11 brainstorm): archive-status-only lifecycle (no delete, status columns already exist on both tables - zero schema change); REST-only scope (MCP parity deferred to the MCP-themed phase); approach A metadata updates - status/authority changes are version-bumped column updates following the rules-pack-refs replacement pattern, NOT new event types. ADR check: ADR required: no - additive endpoints extending established RPG module patterns (Docs/superpowers/specs/2026-06-25-rpg-*-design.md remain governing); no durable cross-module rule changed. Spec: Docs/superpowers/specs/2026-10-11-rpg-core-api-surface-completion-design.md
+Second-pass spec review (2026-10-13): corrected Idempotency-Key header claim (bare header + service 409 idempotency_key_required; 8-128 bound is refs-body-only), pinned deterministic orderings (updated_at DESC, id DESC; proposals created_at DESC, id DESC), specified foreign campaign_id filter -> 404, status-filter omission returns all statuses, events pagination termination rule, mutation responses return updated entity (served by replay), adapter immutability as explicit non-goal, concrete title/description bounds, and confirmed no privilege_catalog.yaml change needed (scope reuse).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
