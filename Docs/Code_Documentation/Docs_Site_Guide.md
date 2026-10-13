@@ -106,6 +106,7 @@ navigation, or publication manifest before merging.
 ## "Last updated" Dates
 
 - The site shows per-page "Last updated" timestamps via the `git-revision-date-localized` plugin, using relative time ("time ago").
+- Optional creation-date footers are disabled: renamed published paths can lack Git creation history, and separate build-date fallbacks can report creation after the last update and fail strict builds. Per-page last-updated timestamps remain enabled.
 - Accurate dates require git history. Locally, ensure your repo has the relevant commits. In CI, we fetch full history (`fetch-depth: 0`).
 - Configuration lives in `Docs/mkdocs.yml` under `plugins.git-revision-date-localized` (with `type: timeago`).
 - If a page has no history (e.g., new file), the plugin falls back to the current build time.

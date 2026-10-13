@@ -98,7 +98,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-067](067-llm-calls-accounted-in-provider-base-class.md) | Accepted | LLM chat calls are accounted in `ChatProvider.__init_subclass__`: each provider's own `chat`, `achat`, `stream` and `astream` record one `llm_usage_log` row for the user the call is for. |
 | [ADR-068](068-native-completion-capture-capability.md) | Proposed | Discover selected native completion persistence ownership through an opt-in on the original scoped H1 capture, retaining primary admission gates and legacy response compatibility. |
 | [ADR-069](069-frontend-api-contract-package.md) | Proposed | One neutral workspace package (`@tldw/api-types`) owns the frontend API contract artifacts (generation script, committed fingerprint and path union, gitignored rich schema); `ClientPath` is derived from the generated paths, and no second contract source may be introduced. |
-
 | [ADR-070](070-native-chat-retained-byte-quota-authority.md) | Proposed | Reserve native retained bytes in existing AuthNZ authority; keep legacy counters separate and report fresh aggregate usage once. |
 | [ADR-071](071-conversation-source-incarnation.md) | Proposed | Bind original conversation records to server-issued incarnation, independently of reused IDs, reset counters and Sync journals. |
 
