@@ -79,9 +79,24 @@ def test_registered_incarnation_upgrade_preserves_rows_and_reopen(backend_name, 
                     assert identities == original
                 original = identities
                 assert [dict(row) for row in db.execute_query("SELECT * FROM messages").fetchall()] == messages
-                with pytest.raises(Exception, match="conversation_incarnation_immutable"):
+                from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+
+                before_forgery = [
+                    dict(row) for row in db.execute_query("SELECT * FROM conversations ORDER BY id").fetchall()
+                ]
+                error_type = BackendDatabaseError if backend_name == "postgres" else Exception
+                error_text = (
+                    "^PostgreSQL query execution failed$"
+                    if backend_name == "postgres"
+                    else "conversation_incarnation_immutable"
+                )
+                with pytest.raises(error_type, match=error_text):
                     with db.transaction() as conn:
                         conn.execute("UPDATE conversations SET source_incarnation_id = 'forged' WHERE id = ?", (first,))
+                assert [
+                    dict(row) for row in db.execute_query("SELECT * FROM conversations ORDER BY id").fetchall()
+                ] == before_forgery
+                assert [dict(row) for row in db.execute_query("SELECT * FROM messages").fetchall()] == messages
             finally:
                 db.close_connection()
     finally:
