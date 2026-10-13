@@ -43,7 +43,9 @@
     "jsdom": "^28.1.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16",
-    "@tldw/api-types": "workspace:*"
+    "@tldw/api-types": "workspace:*",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19"
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",
