@@ -1,3 +1,4 @@
+// This root fixture explicitly exercises the WebUI storage hook alias.
 // @vitest-environment jsdom
 import React from "react";
 import {
@@ -16,7 +17,7 @@ import {
   QuickPromptInsertionReview,
   useQuickPromptInsertion,
 } from "@/components/Chat/composer/QuickPromptInsertionReview";
-import { usePromptPersistence } from "../usePromptPersistence";
+import { usePromptPersistence } from "@/hooks/chat/usePromptPersistence";
 
 // The initial red log ran the exact extracted legacy Form effects. After
 // replacement, these same draft/replay assertions run the actual shared hook,
