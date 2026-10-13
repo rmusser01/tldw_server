@@ -1570,6 +1570,9 @@
     "filteringBy": "Filtering by:",
     "searchError": "Search failed. Please try again."
   },
+  "worldBooks": {
+    "filtersToggle": "Filters"
+  },
   "worldBooksEmpty": {
     "demoTitle": "Explore World Books in demo mode",
     "demoDescription": "This demo shows how World Books can organize structured knowledge about your worlds, settings, or products.",

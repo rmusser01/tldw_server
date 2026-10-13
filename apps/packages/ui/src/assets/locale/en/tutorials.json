@@ -230,9 +230,9 @@
       "searchTitle": "Search World Books",
       "searchContent": "Search by title, metadata, and content to quickly locate the right world book.",
       "filtersTitle": "Status Filters",
-      "filtersContent": "Filter by enabled/disabled state and attachment status before editing or exporting.",
+      "filtersContent": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls.",
       "tableTitle": "World Book Library",
-      "tableContent": "Select a row to manage entries, attachments, and advanced actions for each world book.",
+      "tableContent": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book.",
       "actionsTitle": "Create and Import",
       "actionsContent": "Create a new world book or import an existing JSON bundle to seed your knowledge base."
     }

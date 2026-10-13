@@ -188,7 +188,7 @@ describe("P0/P1 tutorial selector contracts", () => {
   })
 
   it("keeps required characters tutorial anchors in source", () => {
-    const managerContent = readSource("components/Option/Characters/Manager.tsx")
+    const managerContent = ["Manager.tsx", "CharacterListToolbar.tsx", "CharacterListContent.tsx"].map(file => readSource(`components/Option/Characters/${file}`)).join("\n")
     const anchors = [
       'data-testid="characters-new-button"',
       'data-testid="characters-search-input"',
@@ -274,7 +274,7 @@ describe("P0/P1 tutorial selector contracts", () => {
     const reviewContent = readSource("components/Flashcards/tabs/ReviewTab.tsx")
     const manageContent = readSource("components/Flashcards/tabs/ManageTab.tsx")
     const importExportContent = readSource(
-      "components/Flashcards/tabs/ImportExportTab.tsx"
+      "components/Flashcards/tabs/ImportExport/ImportPanel.tsx"
     )
 
     expect(managerContent).toContain('data-testid="flashcards-tabs"')
@@ -293,7 +293,7 @@ describe("P0/P1 tutorial selector contracts", () => {
     const workspaceContent = readSource(
       "components/Option/WorldBooks/WorldBooksWorkspace.tsx"
     )
-    const managerContent = readSource("components/Option/WorldBooks/Manager.tsx")
+    const managerContent = ["Manager.tsx", "WorldBookToolbar.tsx", "WorldBookListPanel.tsx"].map(file => readSource(`components/Option/WorldBooks/${file}`)).join("\n")
 
     expect(workspaceContent).toContain('data-testid="world-books-tutorial-shell"')
     expect(managerContent).toContain('data-testid="world-books-search-input"')
