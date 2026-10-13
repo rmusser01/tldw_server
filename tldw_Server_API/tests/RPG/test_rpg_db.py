@@ -576,3 +576,32 @@ def test_update_session_authority_settings_cas_and_replay():
             expected_version=session.version, idempotency_key="auth-2",
             request_payload_hash="h-auth-2", source_type="user",
         )
+
+
+def test_rebuild_session_snapshot_replays_full_log():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    for seq in (1, 2):
+        repo.commit_events_and_snapshot(
+            owner_user_id=42, session_id=session.id,
+            expected_last_event_sequence=seq - 1, base_snapshot_version=seq - 1,
+            events=[{"event_type": "note.added", "event_payload": {"note_id": f"n{seq}"}, "source_type": "user"}],
+            snapshot={}, diagnostics={}, idempotency_key=f"rb-evt-{seq}", request_payload_hash=f"rh{seq}",
+            adapter_key=session.adapter_key, adapter_version=session.adapter_version, proposal_id=None,
+        )
+    result = repo.rebuild_session_snapshot(
+        owner_user_id=42, session_id=session.id,
+        idempotency_key="rebuild-1", request_payload_hash="h-rebuild-1", source_type="user",
+    )
+    assert result.replayed is False and result.event_count == 2  # nosec B101
+    assert result.snapshot.snapshot_version == 3  # nosec B101  (v0 seed + 2 commits -> rebuild writes v3)
+    assert result.snapshot.last_event_sequence == 2  # nosec B101
+    assert result.snapshot.diagnostics_json["rebuilt"] is True  # nosec B101
+    notes = result.snapshot.snapshot_json["notes"]
+    assert len(notes) == 2  # nosec B101  (full-log fold reproduces appended notes)
+    replay = repo.rebuild_session_snapshot(
+        owner_user_id=42, session_id=session.id,
+        idempotency_key="rebuild-1", request_payload_hash="h-rebuild-1", source_type="user",
+    )
+    assert replay.replayed is True and replay.snapshot.snapshot_version == 3  # nosec B101

@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.RPG.models import (
     RPGSourceType,
 )
 from tldw_Server_API.app.core.RPG.proposals import RPGProposalRecord
+from tldw_Server_API.app.core.RPG.reducer import reduce_events
 from tldw_Server_API.app.core.RPG.rules.refs import (
     RulesPackRef,
     RulesPackRefReplacementResult,
@@ -51,6 +52,13 @@ class CampaignUpdateResult:
 @dataclass(frozen=True, slots=True)
 class SessionUpdateResult:
     session: RPGSession
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotRebuildResult:
+    snapshot: RPGSnapshotRecord
+    event_count: int
     replayed: bool
 
 
@@ -805,13 +813,7 @@ class RPGRepository:
         snapshot_version: int,
     ) -> RPGSnapshotRecord:
         with self.db.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM rpg_session_snapshots WHERE owner_user_id = ? AND session_id = ? AND snapshot_version = ?",
-                (owner_user_id, session_id, snapshot_version),
-            ).fetchone()
-        if row is None:
-            raise RPGNotFoundError("snapshot_not_found")
-        return self._snapshot_from_row(row)
+            return self._snapshot_by_version_with_conn(conn, owner_user_id, session_id, snapshot_version)
 
     def update_campaign(
         self,
@@ -952,6 +954,93 @@ class RPGRepository:
                 response={"session_id": session_id}, created_at=now,
             )
             return SessionUpdateResult(session=self._get_session_with_conn(conn, owner_user_id, session_id), replayed=False)
+
+    def rebuild_session_snapshot(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        *,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> SnapshotRebuildResult:
+        self._validate_source_type(source_type)
+        operation_scope = f"session:{session_id}:snapshot_rebuild"
+        now = self._now()
+        try:
+            with self.db.transaction() as conn:
+                replay = self._find_idempotency_record(
+                    conn, owner_user_id=owner_user_id, session_id=session_id, source_type=source_type,
+                    operation_scope=operation_scope, idempotency_key=idempotency_key,
+                )
+                if replay is not None:
+                    self._ensure_replay_hash(replay, request_payload_hash)
+                    response = self._from_json(self._row_value(replay, "response_json"))
+                    return SnapshotRebuildResult(
+                        snapshot=self._snapshot_by_version_with_conn(
+                            conn, owner_user_id, session_id, int(response["snapshot_version"])
+                        ),
+                        event_count=int(response["event_count"]),
+                        replayed=True,
+                    )
+
+                session = self._get_session_with_conn(conn, owner_user_id, session_id)
+                rows = conn.execute(
+                    "SELECT * FROM rpg_session_events WHERE owner_user_id = ? AND session_id = ? ORDER BY sequence_number ASC",
+                    (owner_user_id, session_id),
+                ).fetchall()
+                events = [self._event_from_row(row) for row in rows]
+                # source_type is included because validate_event_envelope() rejects
+                # envelopes without a valid source_type; persisted rows are CHECK-constrained.
+                reducer_events = [
+                    {"event_type": e.event_type, "event_payload": e.event_payload, "source_type": e.source_type}
+                    for e in events
+                ]
+                state = reduce_events(RPGSnapshotState(), reducer_events)
+                next_version = session.current_snapshot_version + 1
+                last_sequence = events[-1].sequence_number if events else session.last_event_sequence
+                diagnostics = {
+                    "rebuilt": True,
+                    "event_count": len(events),
+                    "previous_snapshot_version": session.current_snapshot_version,
+                }
+                conn.execute(
+                    """
+                    INSERT INTO rpg_session_snapshots (
+                        session_id, owner_user_id, snapshot_version, last_event_sequence,
+                        reducer_version, snapshot_schema_version, snapshot_json, diagnostics_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id, owner_user_id, next_version, last_sequence,
+                        RPG_REDUCER_VERSION, RPG_SNAPSHOT_SCHEMA_VERSION,
+                        self._to_json(asdict(state)), self._to_json(diagnostics), now,
+                    ),
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE rpg_sessions
+                    SET last_event_sequence = MAX(last_event_sequence, ?), current_snapshot_version = ?,
+                        version = version + 1, updated_at = ?
+                    WHERE id = ? AND owner_user_id = ? AND current_snapshot_version = ?
+                    """,
+                    (last_sequence, next_version, now, session_id, owner_user_id, session.current_snapshot_version),
+                )
+                if cursor.rowcount != 1:
+                    raise RPGConflictError("stale_session_cursor")
+                self._insert_idempotency_record(
+                    conn, owner_user_id=owner_user_id, session_id=session_id, source_type=source_type,
+                    operation_scope=operation_scope, idempotency_key=idempotency_key,
+                    request_payload_hash=request_payload_hash, event_ids=[],
+                    response={"snapshot_version": next_version, "event_count": len(events)}, created_at=now,
+                )
+                return SnapshotRebuildResult(
+                    snapshot=self._snapshot_by_version_with_conn(conn, owner_user_id, session_id, next_version),
+                    event_count=len(events),
+                    replayed=False,
+                )
+        except sqlite3.IntegrityError as exc:
+            raise RPGConflictError("snapshot_version_conflict") from exc
 
     def mark_proposal_applied(
         self,
@@ -1360,6 +1449,17 @@ class RPGRepository:
         if row is None:
             raise RPGNotFoundError("rpg_proposal_not_found")
         return self._proposal_from_row(row)
+
+    def _snapshot_by_version_with_conn(
+        self, conn: Any, owner_user_id: int, session_id: int, snapshot_version: int
+    ) -> RPGSnapshotRecord:
+        row = conn.execute(
+            "SELECT * FROM rpg_session_snapshots WHERE owner_user_id = ? AND session_id = ? AND snapshot_version = ?",
+            (owner_user_id, session_id, snapshot_version),
+        ).fetchone()
+        if row is None:
+            raise RPGNotFoundError("snapshot_not_found")
+        return self._snapshot_from_row(row)
 
     def _events_by_ids(self, conn: Any, owner_user_id: int, event_ids: list[int]) -> list[RPGSessionEvent]:
         return [self._get_event_with_conn(conn, owner_user_id, event_id) for event_id in event_ids]
