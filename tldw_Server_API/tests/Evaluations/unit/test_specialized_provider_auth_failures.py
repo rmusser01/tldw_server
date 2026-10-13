@@ -515,3 +515,119 @@ async def test_specialized_service_never_persists_provider_auth_failure(
         await evaluation
 
     forbidden_store.assert_not_awaited()
+
+
+def _quota_refusal():
+    """The refusal a provider call raises for a user over the LLM quota."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    return LLMQuotaExceededError(
+        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+    )
+
+
+def test_geval_quota_refusal_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One adapter request, and the refusal reaches the caller as itself (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    calls = 0
+    refusal = _quota_refusal()
+
+    def refuse(**_kwargs: Any) -> str:
+        """Refuse every call."""
+        nonlocal calls
+        calls += 1
+        raise refusal
+
+    monkeypatch.setattr(ms_g_eval, "_call_adapter_text", refuse)
+    monkeypatch.setattr(ms_g_eval, "wait_random_exponential", lambda **_kwargs: (lambda _retry_state: 0.0))
+
+    with pytest.raises(LLMQuotaExceededError) as exc_info:
+        ms_g_eval.geval_summarization(
+            "judge this summary",
+            5,
+            "openai",
+            "some-key",
+            model="model-a",
+            app_config={"openai_api": {"model": "model-a"}},
+            credentials_resolved=True,
+        )
+
+    assert calls == 1
+    assert exc_info.value is refusal
+
+
+@pytest.mark.asyncio
+async def test_response_quality_quota_refusal_stops_the_evaluation_without_a_zero_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused metric raises the refusal; it is never scored 0.0 as a provider failure (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    calls = 0
+
+    def refuse(api_name: str, *_args: Any, **_kwargs: Any) -> str:
+        """Refuse every call."""
+        nonlocal calls
+        calls += 1
+        raise _quota_refusal()
+
+    async def call_inline(_provider: str, function, *args: Any, **kwargs: Any):
+        """Run the metric without the breaker's thread hop."""
+        return await _run_analyze_inline(function, *args, **kwargs)
+
+    monkeypatch.setattr(response_quality_evaluator, "analyze", refuse)
+    monkeypatch.setattr(response_quality_evaluator.llm_circuit_breaker, "call_with_breaker", call_inline)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await response_quality_evaluator.ResponseQualityEvaluator().evaluate(
+            prompt="prompt",
+            response="response",
+            api_name="openai",
+            api_key="key",
+            model="model-a",
+            app_config={"openai_api": {"model": "model-a"}},
+            credentials_resolved=True,
+        )
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_quota_refusal_stops_the_evaluation_at_the_first_metric(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first refused metric raises the refusal, and no other metric runs (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    calls = 0
+
+    def refuse(api_name: str, *_args: Any, **_kwargs: Any) -> str:
+        """Refuse every call."""
+        nonlocal calls
+        calls += 1
+        raise _quota_refusal()
+
+    async def call_inline(_provider: str, function, *args: Any, **kwargs: Any):
+        """Run the metric without the breaker's thread hop."""
+        return await _run_analyze_inline(function, *args, **kwargs)
+
+    monkeypatch.setattr(rag_evaluator, "analyze", refuse)
+    monkeypatch.setattr(rag_evaluator.llm_circuit_breaker, "call_with_breaker", call_inline)
+
+    evaluator = rag_evaluator.RAGEvaluator(
+        embedding_provider=None,
+        embedding_model=None,
+        api_key="key",
+        app_config={"openai_api": {"model": "model-a"}},
+        credentials_resolved=True,
+    )
+    with pytest.raises(LLMQuotaExceededError):
+        await evaluator.evaluate(
+            query="query",
+            contexts=["context"],
+            response="response",
+            metrics=["relevance", "faithfulness"],
+            api_name="openai",
+            model="model-a",
+        )
+
+    assert calls == 1
