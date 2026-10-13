@@ -12,6 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_AGE_MS } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
+import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { useActorStore } from "@/store/actor"
+import { createDefaultActorSettings } from "@/types/actor"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { ActorSettingsTarget } from "@/utils/actor-settings-target"
 import { SidepanelImportedContextBanner } from "../SidepanelImportedContextBanner"
 import { usePlaygroundQueueManagement } from "../hooks/usePlaygroundQueueManagement"
 import { usePlaygroundSubmit } from "../hooks/usePlaygroundSubmit"
@@ -34,7 +40,10 @@ const serviceMocks = vi.hoisted(() => ({
 }))
 
 const storageMocks = vi.hoisted(() => ({ get: vi.fn(), remove: vi.fn() }))
-vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => storageMocks }))
+vi.mock("@/utils/safe-storage", async original => ({
+  ...await original<typeof import("@/utils/safe-storage")>(),
+  createSafeStorage: () => storageMocks
+}))
 vi.mock("@/services/sidepanel-chat-handoff", () => serviceMocks)
 // Model selector parsing is real; the catalog/client I/O is outside this fixture.
 vi.mock("@/services/tldw", () => ({ tldwModels: {}, tldwClient: {} }))
@@ -81,6 +90,15 @@ vi.mock("lucide-react", async importOriginal => {
   const Icon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} />
   return { ...await importOriginal<typeof import("lucide-react")>(), X: Icon }
 })
+
+
+const sceneIO = vi.hoisted(() => ({ read: vi.fn() }))
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: (...args: unknown[]) => sceneIO.read(...args)
+}))
+let accountAbort: AbortController
+let historySelection: HistorySelectionController
 
 const importedPageContext: SidepanelChatHandoffPageContext = {
   title: "Imported article",
@@ -218,6 +236,7 @@ const baseSubmitDeps = (overrides: Record<string, unknown> = {}) => ({
     reset: vi.fn(),
   },
   draftReady: true,
+  historySelection,
   restorePromptAssistAttempt: vi.fn(),
   beginPromptAssistReset: vi.fn(() => 1),
   markPromptAssistAttemptSaved: vi.fn(),
@@ -309,6 +328,26 @@ const renderWithRoute = (
 
 describe("sidepanel chat handoff import", () => {
   beforeEach(() => {
+    accountAbort = new AbortController()
+    const signal = accountAbort.signal
+    const isCurrent = () => !signal.aborted
+    historySelection = {
+      getCurrent: () => ({ status: "idle", owner: null, view: null }),
+      fence: () => isCurrent,
+      getSignal: () => signal,
+      draftAccount: {
+        requestScope: { config: { serverUrl: "https://handoff-test.example", authMode: "single-user" }, userId: 1 },
+        isCurrent
+      }
+    } as HistorySelectionController
+    useStoreChatModelSettings.getState().reset("openai")
+    useActorStore.getState().reset()
+    useStoreMessageOption.setState({ historyId: null, serverChatId: null, selectedModel: "openai:gpt-4o-mini", chatDraftAddress: null, chatDraftRevision: 0 })
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    sceneIO.read.mockReset().mockImplementation(async ({ target, validate_lease }: { target: ActorSettingsTarget; validate_lease?: () => boolean }) => {
+      if (!target.isCurrent() || validate_lease?.() === false) throw new Error("actor_settings_scope_changed")
+      return { target, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }
+    })
     vi.clearAllMocks()
     storageMocks.get.mockReset()
     storageMocks.remove.mockReset()
@@ -317,7 +356,7 @@ describe("sidepanel chat handoff import", () => {
     serviceMocks.consumeSidepanelChatHandoff.mockResolvedValue(buildPackage())
   })
 
-  afterEach(() => { vi.useRealTimers() })
+  afterEach(() => { accountAbort.abort(); vi.useRealTimers() })
 
   // Actual receiver/simple form/router; package storage and the destination's
   // verified owner predicate are declared boundaries, not source-owner proof.
@@ -1041,6 +1080,7 @@ describe("sidepanel chat handoff import", () => {
         serviceMocks.buildSidepanelHandoffMessageForModel,
       ).toHaveBeenCalledWith("Imported draft", importedPageContext),
     )
+    await waitFor(() => expect(submitHarnessSendMessage).toHaveBeenCalledOnce())
     expect(submitHarnessSendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Imported draft",
@@ -1050,6 +1090,48 @@ describe("sidepanel chat handoff import", () => {
         },
       }),
     )
+  })
+
+  it.each(["read failure", "account retired", "new draft"])("retains imported input and context when Scene preparation meets %s", async reason => {
+    let release!: (value: unknown) => void
+    let reject!: (error: Error) => void
+    const originalRead = sceneIO.read.getMockImplementation()!
+    const held = new Promise((resolve, refuse) => { release = resolve; reject = refuse })
+    sceneIO.read.mockImplementationOnce(() => held)
+    renderWithRoute(<SubmitImportHarness />)
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"))
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(sceneIO.read).toHaveBeenCalledOnce())
+    const args = sceneIO.read.mock.calls[0][0]
+    const receipt = await originalRead(args)
+    await act(async () => {
+      if (reason === "read failure") reject(new Error("Scene storage unavailable"))
+      else {
+        if (reason === "account retired") accountAbort.abort()
+        else useStoreMessageOption.getState().startNewChatDraft(false)
+        release(receipt)
+      }
+      await held.catch(() => undefined)
+    })
+    expect(submitHarnessSendMessage).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft")
+    expect(screen.getByRole("region", { name: "Imported sidepanel context" })).toBeInTheDocument()
+    if (reason === "read failure") expect(notificationApi.error).toHaveBeenCalledOnce()
+    else expect(args.target.isCurrent()).toBe(false)
+  })
+
+  it("keeps a captured Scene receipt retired after a later fresh draft", async () => {
+    renderWithRoute(<SubmitImportHarness />)
+    fireEvent.click(await screen.findByRole("button", { name: "Insert" }))
+    await waitFor(() => expect(screen.getByLabelText("Composer")).toHaveValue("Imported draft"))
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(submitHarnessSendMessage).toHaveBeenCalledOnce())
+    const capture = submitHarnessSendMessage.mock.calls[0][0].actorSceneSend
+    expect(capture.isCurrent()).toBe(true)
+    await act(async () => { accountAbort.abort(); useStoreMessageOption.getState().startNewChatDraft(false) })
+    expect(capture.isCurrent()).toBe(false)
+    expect(capture.scene.target.isCurrent()).toBe(false)
   })
 
   it("merges OpenUI request mode with imported page context request overrides", async () => {
@@ -1070,6 +1152,7 @@ describe("sidepanel chat handoff import", () => {
     )
     await user.click(screen.getByRole("button", { name: "Send" }))
 
+    await waitFor(() => expect(submitHarnessSendMessage).toHaveBeenCalledOnce())
     expect(submitHarnessSendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Imported draft",
@@ -1102,6 +1185,7 @@ describe("sidepanel chat handoff import", () => {
         serviceMocks.buildSidepanelHandoffMessageForModel,
       ).toHaveBeenCalledWith("Summarize this page.", importedPageContext),
     )
+    await waitFor(() => expect(submitHarnessSendMessage).toHaveBeenCalledOnce())
     expect(submitHarnessSendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Summarize this page.",
@@ -1198,7 +1282,8 @@ describe("sidepanel chat handoff import", () => {
     ).toBeInTheDocument()
   })
 
-  it("replays queued sidepanel context into requestOverrides.messageForModel", async () => {
+  it.each([false, true])("replays queued sidepanel context only after a successful Scene read (failure=%s)", async sceneFailure => {
+    if (sceneFailure) sceneIO.read.mockRejectedValueOnce(new Error("Scene storage unavailable"))
     const queued = buildQueuedRequest({
       promptText: "Imported draft",
       sourceContext: {
@@ -1235,6 +1320,7 @@ describe("sidepanel chat handoff import", () => {
 
     renderHook(() =>
       usePlaygroundQueueManagement({
+        historySelection,
         composerModels: [{ id: "openai:gpt-4o-mini", is_configured: true }],
         isConnectionReady: true,
         isSending: false,
@@ -1287,6 +1373,15 @@ describe("sidepanel chat handoff import", () => {
       }),
     )
 
+    if (sceneFailure) {
+      await waitFor(() => expect(queueRef.current[0].status).toBe("blocked"))
+      expect(sendMessage).not.toHaveBeenCalled()
+      expect(queueRef.current).toHaveLength(1)
+      expect(queueRef.current[0].promptText).toBe(queued.promptText)
+      expect(queueRef.current[0].snapshot).toEqual(queued.snapshot)
+      expect(queueRef.current[0].sourceContext).toEqual(queued.sourceContext)
+      return
+    }
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
