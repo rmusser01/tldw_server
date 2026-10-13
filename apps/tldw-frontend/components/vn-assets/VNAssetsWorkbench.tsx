@@ -59,8 +59,11 @@ function plannedAssetLabel(count: number): string {
 }
 
 function isMissingGenerationResource(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404
-    && ['slot_not_found', 'pack_not_found'].includes(error.detail ?? error.message);
+  if (!(error instanceof ApiError) || error.status !== 404) return false
+  // Canonical ApiError.detail is unknown (TASK-13526 stage 2); the VN
+  // rejection envelopes carry the code as a string detail.
+  const detail = typeof error.detail === 'string' ? error.detail : ''
+  return ['slot_not_found', 'pack_not_found'].includes(detail || error.message)
 }
 
 function legacyOperation(scope: VNCommandScope, packId: number): string {
