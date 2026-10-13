@@ -977,5 +977,30 @@
       "fetchingFiles": "Fetching files ({{completed}}/{{total}})...",
       "generated": "Generated output for {{count}} files ({{tokenCount}} tokens)."
     }
+  },
+  "notesDocument": {
+    "language": "語言",
+    "default": "預設 (Markdown)",
+    "text": "純文字",
+    "unknown": "未指定",
+    "future": "不支援：{{language}}",
+    "check": "檢查文件",
+    "format": "格式化文件",
+    "problems": "問題",
+    "idle": "無法檢查",
+    "pending": "等待檢查",
+    "checked": "已檢查，沒有問題",
+    "problemsFound": "檢查完成，請查看問題",
+    "incomplete": "檢查未完成，僅顯示部分問題",
+    "unsupported": "無法檢查此模式或原始文字",
+    "resourceLimited": "達到資源限制，已保留原始文字",
+    "failed": "檢查失敗，請重試",
+    "formatted": "已格式化",
+    "unchanged": "已經格式化",
+    "blocked": "未套用格式，請查看問題或聚焦原始文字後重試",
+    "temporary": "此筆記和工作階段的暫時顯示模式；伺服器無法儲存語言中繼資料。",
+    "metadataUnavailable": "無法取得語言中繼資料；請重新連線後選擇模式。",
+    "sourceOnly": "已完整保留原始文字。此表示方式無法編輯內文；仍可編輯標題和儲存。",
+    "rawSource": "原始文字"
   }
 }

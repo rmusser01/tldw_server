@@ -1,0 +1,421 @@
+[
+  {
+    "id": "json-large-int",
+    "language": "json",
+    "text": "{\"n\":9007199254740993}",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "9007199254740993"
+    ]
+  },
+  {
+    "id": "json-nan",
+    "language": "json",
+    "text": "{\"n\":NaN}",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "json-duplicate",
+    "language": "json",
+    "text": "{\"a\":1,\"a\":2}",
+    "valid": true,
+    "codes": [
+      "duplicate_key"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "jsonl-blank",
+    "language": "jsonl",
+    "text": "{}\n\n{}\n",
+    "valid": false,
+    "codes": [
+      "blank_record"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-stream",
+    "language": "yaml",
+    "text": "---\na: 1\n...\n---\nb: 2\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "...",
+      "b:"
+    ]
+  },
+  {
+    "id": "json-escaped-duplicate",
+    "language": "json",
+    "text": "{\"a\":1,\"\\u0061\":2}",
+    "valid": true,
+    "codes": [
+      "duplicate_key"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "json-sibling-keys",
+    "language": "json",
+    "text": "{\"left\":{\"a\":1},\"right\":{\"a\":2}}",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "\"left\"",
+      "\"right\""
+    ]
+  },
+  {
+    "id": "json-comment",
+    "language": "json",
+    "text": "{\"a\":1 // comment\n}",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "json-trailing-comma",
+    "language": "json",
+    "text": "{\"a\":1,}",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "json-infinity",
+    "language": "json",
+    "text": "Infinity",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "json-empty",
+    "language": "json",
+    "text": "",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "json-scalar",
+    "language": "json",
+    "text": "true",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "true"
+    ]
+  },
+  {
+    "id": "json-overflow",
+    "language": "json",
+    "text": "1e400",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "1e400"
+    ]
+  },
+  {
+    "id": "json-negative-zero",
+    "language": "json",
+    "text": "-0",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "-0"
+    ]
+  },
+  {
+    "id": "json-precision",
+    "language": "json",
+    "text": "0.12345678901234567890123456789",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "0.12345678901234567890123456789"
+    ]
+  },
+  {
+    "id": "json-escaped-string",
+    "language": "json",
+    "text": "\"a\\n\\u0062\\\"\\\\\"",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "\"a\\n\\u0062\\\"\\\\\""
+    ]
+  },
+  {
+    "id": "jsonl-empty",
+    "language": "jsonl",
+    "text": "",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": []
+  },
+  {
+    "id": "jsonl-final-newline",
+    "language": "jsonl",
+    "text": "{}\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "{}"
+    ]
+  },
+  {
+    "id": "jsonl-no-final-newline",
+    "language": "jsonl",
+    "text": "{}",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "{}"
+    ]
+  },
+  {
+    "id": "jsonl-crlf",
+    "language": "jsonl",
+    "text": "{}\r\ntrue\r\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "{}",
+      "true"
+    ]
+  },
+  {
+    "id": "jsonl-scalars",
+    "language": "jsonl",
+    "text": "1e400\n-0\n\"x\"\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "1e400",
+      "-0",
+      "\"x\""
+    ]
+  },
+  {
+    "id": "jsonl-whitespace-record",
+    "language": "jsonl",
+    "text": "{}\n \t\n",
+    "valid": false,
+    "codes": [
+      "blank_record"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "jsonl-multiline-record",
+    "language": "jsonl",
+    "text": "{\n\"a\":1\n}\n",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-empty",
+    "language": "yaml",
+    "text": "",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-comments",
+    "language": "yaml",
+    "text": "# header\na: 1 # inline\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "# header",
+      "# inline"
+    ]
+  },
+  {
+    "id": "yaml-anchors-aliases-merges",
+    "language": "yaml",
+    "text": "base: &base\n  a: 1\ncopy:\n  <<: *base\n  a: 2\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "&base",
+      "*base",
+      "<<:",
+      "a: 2"
+    ]
+  },
+  {
+    "id": "yaml-directive-1.1",
+    "language": "yaml",
+    "text": "%YAML 1.1\n---\na: yes\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "%YAML 1.1",
+      "yes"
+    ]
+  },
+  {
+    "id": "yaml-directive-1.2",
+    "language": "yaml",
+    "text": "%YAML 1.2\n---\na: yes\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "%YAML 1.2",
+      "yes"
+    ]
+  },
+  {
+    "id": "yaml-mixed-versions",
+    "language": "yaml",
+    "text": "%YAML 1.1\n---\na: yes\n...\n%YAML 1.2\n---\nb: yes\n",
+    "valid": true,
+    "codes": [
+      "unsupported"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-complex-key",
+    "language": "yaml",
+    "text": "? [a, b]\n: value\n",
+    "valid": true,
+    "codes": [
+      "unsupported"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-custom-tag",
+    "language": "yaml",
+    "text": "value: !custom tagged\n",
+    "valid": true,
+    "codes": [
+      "unsupported"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-standard-tag",
+    "language": "yaml",
+    "text": "value: !!str 123\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "!!str",
+      "123"
+    ]
+  },
+  {
+    "id": "yaml-literal",
+    "language": "yaml",
+    "text": "value: |\n  first\n  second\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "|",
+      "  first\n  second\n"
+    ]
+  },
+  {
+    "id": "yaml-folded",
+    "language": "yaml",
+    "text": "value: >\n  first\n  second\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      ">",
+      "  first\n  second\n"
+    ]
+  },
+  {
+    "id": "yaml-chomping",
+    "language": "yaml",
+    "text": "strip: |-\n  first\nkeep: |+\n  second\n\n",
+    "valid": true,
+    "codes": [],
+    "format": "allowed",
+    "must_keep": [
+      "|-",
+      "|+",
+      "  second\n\n"
+    ]
+  },
+  {
+    "id": "yaml-duplicate",
+    "language": "yaml",
+    "text": "a: 1\na: 2\n",
+    "valid": false,
+    "codes": [
+      "duplicate_key"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  },
+  {
+    "id": "yaml-malformed",
+    "language": "yaml",
+    "text": "a: [1, 2\n",
+    "valid": false,
+    "codes": [
+      "syntax"
+    ],
+    "format": "blocked",
+    "must_keep": []
+  }
+]

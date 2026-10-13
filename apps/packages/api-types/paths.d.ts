@@ -1062,6 +1062,7 @@ export type ApiPath =
   | "/api/v1/monitoring/watchlists/{watchlist_id}"
   | "/api/v1/notes/"
   | "/api/v1/notes/bulk"
+  | "/api/v1/notes/capabilities"
   | "/api/v1/notes/collections"
   | "/api/v1/notes/collections/keyword-links"
   | "/api/v1/notes/collections/{collection_id}"

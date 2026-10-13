@@ -24,7 +24,7 @@ class _BulkStubDB:
     def __init__(self):
         self._count = 0
 
-    def add_note(self, title: str, content: str, note_id=None, conversation_id=None, message_id=None):
+    def add_note(self, title: str, content: str, note_id=None, conversation_id=None, message_id=None, content_language=None):
         self._count += 1
         return f"bulk-note-{self._count}"
 

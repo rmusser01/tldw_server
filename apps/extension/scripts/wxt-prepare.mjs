@@ -1,5 +1,9 @@
 import { prepare } from "wxt"
 
+import { prepareMonacoAssets } from "../../scripts/prepare-monaco-assets.mjs"
+
+prepareMonacoAssets()
+
 const skipPrepare = ["1", "true", "yes", "y", "on"].includes(
   String(process.env.SKIP_WXT_PREPARE || "").toLowerCase().trim()
 )

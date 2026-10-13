@@ -248,9 +248,11 @@ def test_capture_submits_the_complete_plan_once(monkeypatch: pytest.MonkeyPatch)
     assert calls == [plan.steps]
 
 
+@pytest.mark.parametrize("admission_race", [False, True])
 def test_ready_server_capture_appends_task_and_activity_as_one_group(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    admission_race: bool,
 ) -> None:
     note_db = CharactersRAGDB(tmp_path / "product.db", client_id=OWNER_ID)
     sync_store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
@@ -662,6 +664,40 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(
             "notes.task_activity",
             "notes.note",
         ]
+
+        canonical = note_db.get_note_by_id(NOTE_ID)
+        assert expanded[2].base_object_revision == canonical["version"]
+        if admission_race:
+            before = sync_store.list_envelopes_after(dataset.dataset_id, 0, limit=1000)
+            heads = [sync_store.get_current_head(dataset.dataset_id, item.domain, item.object_id) for item in expanded]
+            expand = service._expand_task_client_push
+
+            def interleave(**kwargs):
+                plan = expand(**kwargs)
+                note_db.update_note(NOTE_ID, {"content_language": "yaml"}, expected_version=canonical["version"])
+                return plan
+
+            monkeypatch.setattr(service, "_expand_task_client_push", interleave)
+            refused = service.push(
+                user_id=OWNER_ID, dataset_id=dataset.dataset_id, device_id=device_id, envelopes=[client_envelope]
+            )
+            assert refused.accepted == []
+            assert [sync_store.get_conflict(item.conflict_id).conflict_type for item in refused.conflicts] == [
+                "stale_base_state"
+            ]
+            after = sync_store.list_envelopes_after(dataset.dataset_id, 0, limit=1000)
+            assert [item for item in after if item.status == "accepted"] == [
+                item for item in before if item.status == "accepted"
+            ]
+            assert [item for item in after if item.domain == "notes.note"] == [
+                item for item in before if item.domain == "notes.note"
+            ]
+            assert after[-1].status == "conflict"
+            assert [
+                sync_store.get_current_head(dataset.dataset_id, item.domain, item.object_id) for item in expanded
+            ] == heads
+            assert note_db.get_note_by_id(NOTE_ID)["content_language"] == "yaml"
+            return
 
         activity_materializer = service.materializers["notes.task_activity"]
 

@@ -6,9 +6,9 @@
   "description": "A browser extension frontend for tldw_server - your unified AI assistant with RAG, media processing, and more.",
   "author": "tldw-team",
   "scripts": {
-    "dev": "cross-env TARGET=chrome wxt",
-    "dev:firefox": "cross-env TARGET=firefox wxt -b firefox",
-    "dev:edge": "cross-env TARGET=chrome wxt -b edge",
+    "dev": "node ../scripts/prepare-monaco-assets.mjs && cross-env TARGET=chrome wxt",
+    "dev:firefox": "node ../scripts/prepare-monaco-assets.mjs && cross-env TARGET=firefox wxt -b firefox",
+    "dev:edge": "node ../scripts/prepare-monaco-assets.mjs && cross-env TARGET=chrome wxt -b edge",
     "build": "bun run locales:sync && bun run build:chrome && bun run build:firefox && bun run build:edge",
     "build:prod": "bun run locales:sync && bun run build:chrome:prod && bun run build:firefox:prod && bun run build:edge:prod",
     "build:dev": "bun run locales:sync && bun run build:chrome:dev && bun run build:firefox:dev && bun run build:edge:dev",

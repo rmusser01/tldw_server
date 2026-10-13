@@ -2308,5 +2308,42 @@
       "fetchingFiles": "Fetching files ({{completed}}/{{total}})...",
       "generated": "Generated output for {{count}} files ({{tokenCount}} tokens)."
     }
+  },
+  "notesDocument": {
+    "language": "Language",
+    "default": "Default (Markdown)",
+    "text": "Plain text",
+    "markdown": "Markdown",
+    "yaml": "YAML",
+    "json": "JSON",
+    "jsonl": "JSONL",
+    "unknown": "Unspecified",
+    "future": "Unsupported: {{language}}",
+    "check": "Check document",
+    "format": "Format document",
+    "problems": "Problems",
+    "idle": "Checking unavailable",
+    "pending": "Check pending",
+    "checked": "Checked; no problems found",
+    "problemsFound": "Check complete; review Problems",
+    "incomplete": "Check incomplete; showing limited Problems",
+    "unsupported": "This mode or source cannot be checked",
+    "resourceLimited": "Check reached a resource limit; source kept",
+    "failed": "Check failed; retry Check",
+    "formatted": "Formatted",
+    "unchanged": "Already formatted",
+    "blocked": "Formatting not applied; review Problems or focus the source and retry",
+    "temporary": "Temporary display mode for this note/session; this server cannot save language metadata.",
+    "metadataUnavailable": "Language metadata support is unavailable; reconnect to select a mode.",
+    "sourceOnly": "Source retained exactly. Body editing is unavailable for this representation; title and Save remain available.",
+    "rawSource": "Exact source",
+    "diagnostic": {
+      "syntax": "Invalid syntax.",
+      "duplicate_key": "Repeated mapping key blocks formatting.",
+      "blank_record": "JSONL records cannot be blank.",
+      "unsupported": "Checking is unavailable for this source.",
+      "resource_limited": "Document exceeds processing limits.",
+      "failed": "Document check failed; source kept."
+    }
   }
 }

@@ -211,5 +211,10 @@
     "unsavedStateDiscardPromptRestoreState": "Vous avez des modifications non enregistrées dans les documents d’état. Restaurer cette version de l’état et ignorer les brouillons locaux ?",
     "unsavedStateDiscardPromptRouteTransition": "Vous avez des modifications non enregistrées dans les documents d’état. Quitter cette page et ignorer les brouillons locaux ?",
     "unsavedStateBeforeUnloadPrompt": "Vous avez des modifications non enregistrées dans les documents d’état. Quitter cette page sans enregistrer ?"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "Enregistrer la source dans Notes",
+    "saveSource": "Enregistrer la source",
+    "sourceOnlyHelper": "Seul le texte est enregistré. L’URL de la page affichée ici n’est pas incluse."
   }
 }

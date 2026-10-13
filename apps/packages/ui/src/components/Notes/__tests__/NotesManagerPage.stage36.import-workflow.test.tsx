@@ -202,9 +202,9 @@ describe("NotesManagerPage stage 36 import workflow", () => {
     expect(importInput.accept).toContain(".txt")
     expect(
       screen.getByText(
-        "Upload JSON exports, Markdown (.md/.markdown), or plain text (.txt) files. Choose how to handle imported IDs that already exist."
-      )
-    ).toBeInTheDocument()
+        "Import note containers, or choose exact source for JSON, JSONL, YAML, Markdown and text files. Source mode creates one note per file using its extension for language.",
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("notes-import-duplicate-strategy"), {
       target: { value: "skip" }
@@ -316,7 +316,105 @@ describe("NotesManagerPage stage 36 import workflow", () => {
     )
     expect(screen.getByTestId("notes-import-modal")).toBeInTheDocument()
     expect(
-      mockBgRequest.mock.calls.some(([request]) => request.path === "/api/v1/notes/import")
-    ).toBe(false)
-  })
-})
+      mockBgRequest.mock.calls.some(
+        ([request]) => request.path === "/api/v1/notes/import",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("actual import source choice", () => {
+  it.each([false, true])(
+    "submits the same envelope-shaped JSON with source mode %s",
+    async (sourceMode) => {
+      mockBgRequest.mockImplementation(async ({ path }: { path: string }) =>
+        path === "/api/v1/notes/import"
+          ? { created_count: 1 }
+          : { items: [], pagination: { total_items: 0 } },
+      );
+      renderPage();
+      const input = screen.getByTestId(
+        "notes-import-input",
+      ) as HTMLInputElement;
+      for (const ext of [".json", ".yaml", ".yml", ".jsonl"])
+        expect(input.accept).toContain(ext);
+      const source =
+        '\ufeff{"format_version":"tldw.note.v1","title":"Container","content":"literal","content_language":"yaml"}\r\n';
+      const files = [new File([source], "Data.json")];
+      fireEvent.change(input, { target: { files } });
+      const mode = await screen.findByLabelText("Read files as");
+      expect(mode).toHaveValue("container");
+      if (sourceMode) {
+        fireEvent.change(mode, { target: { value: "source" } });
+        await waitFor(() =>
+          expect(
+            screen.getByRole("button", { name: "Import notes" }),
+          ).toBeEnabled(),
+        );
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Import notes" }));
+      await waitFor(() =>
+        expect(mockBgRequest).toHaveBeenCalledWith(
+          expect.objectContaining({
+            path: "/api/v1/notes/import",
+            body: expect.objectContaining({
+              items: [
+                {
+                  file_name: "Data.json",
+                  format: sourceMode ? "source" : "portable_note",
+                  content: sourceMode ? source : source.slice(1),
+                },
+              ],
+            }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it("selects exact YAML/JSONL bytes through the actual file input", async () => {
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) =>
+      path === "/api/v1/notes/import"
+        ? { created_count: 2 }
+        : { items: [], pagination: { total_items: 0 } },
+    );
+    renderPage();
+    const input = screen.getByTestId("notes-import-input");
+    const source = "\ufeffkey: <>&\r\n";
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File([source], "Data.yml"),
+          new File(['{"x":1}\r\n'], "Rows.jsonl"),
+        ],
+      },
+    });
+    await screen.findByLabelText("Read files as");
+    fireEvent.change(screen.getByLabelText("Read files as"), {
+      target: { value: "source" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Import notes" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Import notes" }));
+    await waitFor(() =>
+      expect(mockBgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/api/v1/notes/import",
+          body: expect.objectContaining({
+            items: [
+              { file_name: "Data.yml", format: "source", content: source },
+              {
+                file_name: "Rows.jsonl",
+                format: "source",
+                content: '{"x":1}\r\n',
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+  });
+});

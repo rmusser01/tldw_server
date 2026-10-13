@@ -72,6 +72,20 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'notes-firefox',
+      testDir: 'e2e',
+      testMatch: /notes-(structured-editing|monaco-qualification)\.spec\.ts/,
+      retries: 0,
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'notes-webkit',
+      testDir: 'e2e',
+      testMatch: /notes-(structured-editing|monaco-qualification)\.spec\.ts/,
+      retries: 0,
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
       name: 'standalone-html-firefox',
       testDir: 'e2e/workflows',
       testMatch: 'presentation-studio-standalone-html.security.spec.ts',

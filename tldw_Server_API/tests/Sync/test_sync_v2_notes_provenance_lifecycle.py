@@ -1069,3 +1069,72 @@ def test_ready_profile_required_parent_bootstrap_resumes_exact_source(env, monke
     assert result.envelopes[0].base_server_cursor == source_head.server_cursor
     assert db.get_note_by_id("note")["version"] == 10
     assert save(env, core_expected=9).fully_applied
+
+
+@pytest.mark.parametrize("language", [None, "yaml", "future/mode"])
+def test_complete_language_provenance_capture_receipt_and_bootstrap(env, language):
+    import secrets
+
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import (
+        capture_note_with_provenance,
+        ensure_notes_provenance_ready,
+    )
+
+    service, db = env
+    service.settings = replace(service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    source = "  source: <>&\r\n "
+    fields = {**NOTE, "content": source, "content_language": language}
+    kwargs = {
+        "service": service,
+        "note_db": db,
+        "user_id": "alice",
+        "note_id": "structured",
+        "note_payload": fields,
+        "expected_note_version": 0,
+        "provenance": PAYLOAD,
+        "expected_provenance_version": 0,
+        "idempotency_key": "structured-first",
+        "source": "test-structured",
+    }
+    first = capture_note_with_provenance(**kwargs)
+    assert first.fully_applied
+    note = db.get_note_by_id("structured")
+    assert (note["content"], note["content_language"]) == (source, language)
+    first_head = service.store.get_current_head("personal", "notes.note", "structured")
+    assert first_head.payload.get("content_language") == language
+    if language is not None:
+        assert first_head.adapter_version == 2
+    second = capture_note_with_provenance(
+        **{
+            **kwargs,
+            "note_payload": {**fields, "content": source + "new"},
+            "expected_note_version": 1,
+            "expected_provenance_version": 1,
+            "idempotency_key": "structured-second",
+        }
+    )
+    assert second.fully_applied
+    replay = capture_note_with_provenance(**kwargs)
+    assert replay.envelopes == first.envelopes
+    assert db.get_note_by_id("structured")["content"] == source + "new"
+    ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice", required_note_id="structured")
+    assert db.get_note_by_id("structured")["content_language"] == language
+
+
+@pytest.mark.parametrize("language", [None, "yaml", "future/mode"])
+def test_existing_structured_provenance_bootstrap_keeps_complete_source(env, language):
+    import secrets
+
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance import ensure_notes_provenance_ready
+
+    service, db = env
+    service.settings = replace(service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    source = retain_notes_provenance("source: <>&", {"origin": "reviewed_sources"})
+    db.add_note("Title", source, note_id="existing", content_language=language)
+    db.note_provenance_store.put("existing", PAYLOAD, expected_version=0)
+    ensure_notes_provenance_ready(service=service, note_db=db, user_id="alice", required_note_id="existing")
+    parent = service.store.get_current_head("personal", "notes.note", "existing")
+    assert parent.payload["content"] == source
+    assert parent.payload.get("content_language") == language
+    assert db.get_note_by_id("existing")["content"] == source
+    assert db.note_provenance_store.get("existing")["payload"] == PAYLOAD

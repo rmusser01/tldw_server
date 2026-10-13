@@ -1077,6 +1077,7 @@ class SyncV2Store:
 
         return self.db.insert_envelopes_atomic(
             envelopes,
+            connection=self._connection,
             trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
             trusted_notes_provenance_bootstrap=trusted_notes_provenance_bootstrap,
             trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,

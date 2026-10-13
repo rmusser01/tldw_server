@@ -102,7 +102,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncV2Envelope,
     SyncV2EnvelopeResponse,
 )
-from tldw_Server_API.app.core.Sync.server_sync_processor import ServerSyncProcessor  # noqa: F401 - re-exported for callers of the old path
+from tldw_Server_API.app.core.Sync.server_sync_processor import (
+    ServerSyncProcessor,  # noqa: F401 - re-exported for callers of the old path
+)
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -328,6 +330,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     detail={"error_code": error_code, "message": message},
                 )
         pull_errors = {
+            "sync_pull_token_signing_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Configure SYNC_V2_PULL_TOKEN_SIGNING_SECRET to enable versioned Sync pulls.",
+            ),
+            "notes_snapshot_upgrade_required": (
+                status.HTTP_409_CONFLICT,
+                "Upgrade this client to Notes snapshot version 2 and retry the pull.",
+            ),
             "sync_pull_token_invalid": (
                 status.HTTP_400_BAD_REQUEST,
                 "The Sync pull token is invalid.",

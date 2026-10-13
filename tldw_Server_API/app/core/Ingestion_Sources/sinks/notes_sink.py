@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Notes.organization_capture import capture_note_tombstone
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.models import complete_note_snapshot
 from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationCoordinator,
 )
@@ -181,17 +182,21 @@ def _capture_ingestion_note(
             domain="notes.note",
             operation="upsert",
             object_id=note_id,
-            payload={
-                "title": title,
-                "content": content,
-                "conversation_id": existing.get("conversation_id"),
-                "message_id": existing.get("message_id"),
-            },
+            adapter_version=2,
+            schema_version=2,
+            payload=complete_note_snapshot(
+                {
+                    "content_language": existing.get("content_language"),
+                    "title": title,
+                    "content": content,
+                    "conversation_id": existing.get("conversation_id"),
+                    "message_id": existing.get("message_id"),
+                }
+            ),
             routing_metadata={
-                _INGESTION_EXPECTED_VERSION_KEY: (
-                    int(expected_version) if expected_version is not None else 0
-                )
+                _INGESTION_EXPECTED_VERSION_KEY: (int(expected_version) if expected_version is not None else 0)
             },
+            expected_product_version=expected_version,
             stable_key=request_key,
         ),
         keywords=None,

@@ -42,6 +42,7 @@ type NoteListItem = {
   id: number
   title?: string
   content?: string
+  content_language?: string | null;
   keywords?: any[]
   metadata?: { keywords?: any[] }
   version?: number | null
@@ -364,6 +365,14 @@ export const NotesDockPanel: React.FC = () => {
         path: `/api/v1/notes/${noteId}` as AllowedPath,
         method: "GET"
       })
+      if (
+        detail.content_language != null &&
+        detail.content_language !== "markdown"
+      ) {
+        setOpen(false);
+        navigate(`/notes?source_ref_id=${encodeURIComponent(String(noteId))}`);
+        return;
+      }
       const keywords = extractKeywords(detail)
       openNote({
         id: detail.id,
@@ -525,7 +534,7 @@ export const NotesDockPanel: React.FC = () => {
 
   const toggleTaskCheckboxLocal = useCallback(
     (payload: TaskChecklistTogglePayload) => {
-      if (!activeNote) return
+      if (!activeNote || activeNote.content.includes("\r")) return;
       const nextContent = toggleChecklistItemMarker(
         activeNote.content,
         payload.lineNumber,
@@ -1046,28 +1055,67 @@ export const NotesDockPanel: React.FC = () => {
           <div className="min-h-0 flex-1 p-3">
             {activeNote ? (
               <div className="flex h-full min-h-0 flex-col gap-2">
-                <TaskChecklistPreview
-                  content={activeNote.content}
-                  tasks={activeNoteTasks}
-                  isDirty={activeNote.isDirty}
-                  disabled={editorDisabled}
-                  compact
-                  onToggleLocal={toggleTaskCheckboxLocal}
-                  onToggleTaskStatus={toggleTaskCheckboxStatus}
-                />
-                <TextArea
-                  value={activeNote.content}
-                  onChange={(event) =>
-                    updateNote(activeNote.localId, { content: event.target.value })
-                  }
-                  placeholder={t(
-                    "option:notesDock.contentPlaceholder",
-                    "Jot down notes, ideas, or observations..."
-                  )}
-                  className="min-h-0 flex-1 resize-none text-sm"
-                  style={{ height: "100%" }}
-                  disabled={editorDisabled}
-                />
+                {!activeNote.content.includes("\r") && (
+                  <TaskChecklistPreview
+                    content={activeNote.content}
+                    tasks={activeNoteTasks}
+                    isDirty={activeNote.isDirty}
+                    disabled={editorDisabled}
+                    compact
+                    onToggleLocal={toggleTaskCheckboxLocal}
+                    onToggleTaskStatus={toggleTaskCheckboxStatus}
+                  />
+                )}
+                {activeNote.content.includes("\r") ? (
+                  <>
+                    <p role="status" className="text-xs text-text-muted">
+                      {t(
+                        "option:notesDocument.sourceOnly",
+                        "Source retained exactly. Body editing is unavailable for this representation; title and Save remain available.",
+                      )}
+                    </p>
+                    <pre
+                      role="textbox"
+                      tabIndex={0}
+                      aria-label={t(
+                        "option:notesSearch.editorAriaLabel",
+                        "Note content",
+                      )}
+                      aria-readonly="true"
+                      className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words font-mono text-sm"
+                    >
+                      {activeNote.content}
+                    </pre>
+                    {activeNote.id ? (
+                      <Button
+                        onClick={() => {
+                          setOpen(false);
+                          navigate(
+                            `/notes?source_ref_id=${encodeURIComponent(String(activeNote.id))}`,
+                          );
+                        }}
+                      >
+                        {t("option:notesDocument.openMain", "Open in Notes")}
+                      </Button>
+                    ) : null}
+                  </>
+                ) : (
+                  <TextArea
+                    value={activeNote.content}
+                    onChange={(event) =>
+                      updateNote(activeNote.localId, {
+                        content: event.target.value,
+                      })
+                    }
+                    placeholder={t(
+                      "option:notesDock.contentPlaceholder",
+                      "Jot down notes, ideas, or observations...",
+                    )}
+                    className="min-h-0 flex-1 resize-none text-sm"
+                    style={{ height: "100%" }}
+                    disabled={editorDisabled}
+                  />
+                )}
               </div>
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-text-subtle">

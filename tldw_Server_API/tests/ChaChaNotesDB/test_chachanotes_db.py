@@ -915,7 +915,7 @@ class TestNotes:
         assert not retrieved["deleted"]
 
     def test_add_note_empty_title(self, db_instance: CharactersRAGDB):
-        with pytest.raises(InputError, match="Note title cannot be empty."):
+        with pytest.raises(InputError, match="Note title must be nonblank"):
             db_instance.add_note("", "Content")
 
     def test_add_note_duplicate_id(self, db_instance: CharactersRAGDB):

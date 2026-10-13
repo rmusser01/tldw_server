@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     SchemaError,
 )
+from tldw_Server_API.tests.ChaChaNotesDB.historical_note_seed import seed_pre_language_note
 
 pytestmark = pytest.mark.unit
 
@@ -277,7 +278,7 @@ def _prepare_v59_database(db_path: Path) -> None:
     CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
     try:
         db = CharactersRAGDB(str(db_path), client_id=OWNER)
-        note_id = db.add_note("Task parent", "- [ ] Review source\n", note_id=NOTE_ID)
+        note_id = seed_pre_language_note(db, "Task parent", "- [ ] Review source\n", note_id=NOTE_ID)
         assert note_id == NOTE_ID  # nosec B101
         now = "2026-08-13T00:00:00+00:00"
         with db.transaction() as conn:
@@ -530,7 +531,7 @@ def test_sqlite_v60_upgrade_rejects_mismatched_event_task_and_note(tmp_path: Pat
     CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
     try:
         legacy = CharactersRAGDB(str(db_path), client_id=OWNER)
-        assert legacy.add_note("Other", "Body", note_id=other_note_id) == other_note_id  # nosec B101
+        assert seed_pre_language_note(legacy, "Other", "Body", note_id=other_note_id) == other_note_id  # nosec B101
         with legacy.transaction() as conn:
             conn.execute("UPDATE task_events SET note_id=? WHERE id=?", (other_note_id, EVENT_ID))
         legacy.close_all_connections()

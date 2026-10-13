@@ -988,5 +988,30 @@
       "fetchingFiles": "Fetching files ({{completed}}/{{total}})...",
       "generated": "Generated output for {{count}} files ({{tokenCount}} tokens)."
     }
+  },
+  "notesDocument": {
+    "language": "Langage",
+    "default": "Par défaut (Markdown)",
+    "text": "Texte brut",
+    "unknown": "Non spécifié",
+    "future": "Non pris en charge : {{language}}",
+    "check": "Vérifier le document",
+    "format": "Formater le document",
+    "problems": "Problèmes",
+    "idle": "Vérification indisponible",
+    "pending": "Vérification en attente",
+    "checked": "Vérifié ; aucun problème",
+    "problemsFound": "Vérification terminée ; consulter les problèmes",
+    "incomplete": "Vérification incomplète ; problèmes limités affichés",
+    "unsupported": "Ce mode ou cette source ne peut pas être vérifié",
+    "resourceLimited": "Limite de ressources atteinte ; source conservée",
+    "failed": "Échec de vérification ; réessayer",
+    "formatted": "Formaté",
+    "unchanged": "Déjà formaté",
+    "blocked": "Format non appliqué ; consulter les problèmes ou activer la source et réessayer",
+    "temporary": "Mode temporaire pour cette note/session ; le serveur ne peut pas enregistrer le langage.",
+    "metadataUnavailable": "Métadonnées de langage indisponibles ; reconnectez-vous pour choisir un mode.",
+    "sourceOnly": "Source conservée exactement. Le corps ne peut pas être modifié dans cette représentation ; le titre et Enregistrer restent disponibles.",
+    "rawSource": "Source exacte"
   }
 }

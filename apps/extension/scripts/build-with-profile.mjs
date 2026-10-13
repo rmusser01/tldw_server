@@ -3,11 +3,14 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { prepareMonacoAssets } from "../../scripts/prepare-monaco-assets.mjs"
 import {
   getCurrentGitBranch,
   normalizeBuildProfile,
   resolveBuildProfile,
 } from "../../scripts/resolve-build-profile.mjs"
+
+prepareMonacoAssets()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, "..")

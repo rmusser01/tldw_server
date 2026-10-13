@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     placement_object_id,
     studio_result_hash,
 )
+from tldw_Server_API.tests.ChaChaNotesDB.historical_note_seed import seed_pre_language_note
 
 pytestmark = pytest.mark.unit
 
@@ -161,9 +162,9 @@ def _prepare_v60_product_database(
     CharactersRAGDB._CURRENT_SCHEMA_VERSION = 60
     try:
         db = CharactersRAGDB(str(db_path), client_id=OWNER)
-        assert db.add_note("Board note", "Pinned content", note_id=BOARD_NOTE_ID) == BOARD_NOTE_ID  # nosec B101
-        assert db.add_note("Studio target", "Studio markdown", note_id=STUDIO_NOTE_ID) == STUDIO_NOTE_ID  # nosec B101
-        assert db.add_note("Source note", "Source excerpt body", note_id=SOURCE_NOTE_ID) == SOURCE_NOTE_ID  # nosec B101
+        assert seed_pre_language_note(db, "Board note", "Pinned content", note_id=BOARD_NOTE_ID) == BOARD_NOTE_ID  # nosec B101
+        assert seed_pre_language_note(db, "Studio target", "Studio markdown", note_id=STUDIO_NOTE_ID) == STUDIO_NOTE_ID  # nosec B101
+        assert seed_pre_language_note(db, "Source note", "Source excerpt body", note_id=SOURCE_NOTE_ID) == SOURCE_NOTE_ID  # nosec B101
         with db.transaction() as conn:
             conn.execute(
                 """
@@ -1001,7 +1002,7 @@ def test_v61_rejects_task_authority_mismatch_before_blessing_existing_row(
     CharactersRAGDB._CURRENT_SCHEMA_VERSION = 60
     try:
         db = CharactersRAGDB(str(db_path), client_id=OWNER)
-        note_id = db.add_note("Task parent", "Body")
+        note_id = seed_pre_language_note(db, "Task parent", "Body")
         now = db._get_current_utc_timestamp_iso()
         task_hash = db._note_task_v60_hash({"id": "task-1", "dataset_id": DATASET_A})
         with db.transaction() as conn:

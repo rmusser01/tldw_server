@@ -76,6 +76,10 @@ export default defineConfig({
     resolve: {
       dedupe: ["react", "react-dom"],
       alias: {
+        "@/services/document-editing/app-service": path.join(
+          __dirname,
+          "services/document-worker-service.ts"
+        ),
         "@": sharedRoot,
         "~": sharedRoot,
         "@tldw/ui": sharedRoot,

@@ -1,5 +1,5 @@
-import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
+import { decodeNotesLanguageCapability, type NotesLanguageCapability } from "@/services/note-language-capability"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
@@ -4560,16 +4560,24 @@ export class TldwApiClientBase {
   }
 
   // Notes Methods
-  async createNote(content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    return await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
-      path: '/api/v1/notes/',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
-      body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
-    })
+  async getNotesLanguageCapability(options?: ScopedRequestOptions): Promise<NotesLanguageCapability> {
+    // Probe every time: no stale capability survives reconnect/version/account changes.
+    let changed = false
+    const unwatch = watchChatAccountChanges(invalidated => { changed ||= invalidated })
+    try {
+      const response = await bgRequest<unknown>({
+        ...requestScopeFields(options?.requestScope),
+        ...(options?.signal ? { abortSignal: options.signal } : {}),
+        path: "/api/v1/notes/capabilities",
+        method: "GET"
+      })
+      return changed ? { available: false, reason: "scope_changed" } : decodeNotesLanguageCapability(response)
+    } catch (error) {
+      const status = (error as { status?: number } | null)?.status
+      return { available: false, reason: changed ? "scope_changed" : status === 404 ? "unsupported_server" : status === 401 || status === 403 ? "authentication_required" : "transport_unavailable" }
+    } finally {
+      unwatch()
+    }
   }
 
   async listNoteFolders(): Promise<{

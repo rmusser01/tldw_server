@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Notes_Tasks.reconciler import (
     NotesTaskReconciler,
     classify_managed_projection,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncOperation, normalize_sync_timestamp
+from tldw_Server_API.app.core.Sync.v2.models import SyncOperation, complete_note_snapshot, normalize_sync_timestamp
 from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     NotesTaskActivityV1,
     TaskActivitySource,
@@ -708,16 +708,18 @@ class NotesTaskService:
                 entity="notes",
                 entity_id=str(note["id"]),
             )
+        payload = complete_note_snapshot({**note, "content": content})
+        version = coordinator.service.notes_publication_version(coordinator.dataset_id, str(note["id"]), payload)
+        if version == 1:
+            payload.pop("content_language", None)
         return ServerOriginMutationStep(
             domain="notes.note",
             operation="upsert",
             object_id=str(note["id"]),
-            payload={
-                "title": str(note.get("title") or ""),
-                "content": content,
-                "conversation_id": note.get("conversation_id"),
-                "message_id": note.get("message_id"),
-            },
+            adapter_version=version,
+            schema_version=version,
+            payload=payload,
+            expected_product_version=int(note["version"]),
             object_revision=int(head.object_revision) + 1,
         )
 

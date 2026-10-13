@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, Space, Typography } from "antd"
 
 type NoteQuickSaveModalProps = {
@@ -52,6 +53,7 @@ const NoteQuickSaveModal: React.FC<NoteQuickSaveModalProps> = ({
   onGenerateFlashcards,
   onCreateStudyPack
 }) => {
+  const { t } = useTranslation("option");
   return (
     <Modal
       centered
@@ -129,11 +131,31 @@ const NoteQuickSaveModal: React.FC<NoteQuickSaveModalProps> = ({
           <Typography.Text strong>
             {contentLabel || "Content"}
           </Typography.Text>
-          <Input.TextArea
-            value={content}
-            autoSize={{ minRows: 6 }}
-            onChange={(e) => onContentChange(e.target.value)}
-          />
+          {content.includes("\r") ? (
+            <>
+              <p role="status" className="text-xs text-text-muted">
+                {t("notesDocument.sourceOnly", {
+                  defaultValue:
+                    "Source retained exactly. Body editing is unavailable for this representation; title and Save remain available.",
+                })}
+              </p>
+              <pre
+                role="textbox"
+                tabIndex={0}
+                aria-label={contentLabel || "Content"}
+                aria-readonly="true"
+                className="overflow-auto whitespace-pre-wrap break-words rounded border border-border p-3 font-mono text-sm"
+              >
+                {content}
+              </pre>
+            </>
+          ) : (
+            <Input.TextArea
+              value={content}
+              autoSize={{ minRows: 6 }}
+              onChange={(e) => onContentChange(e.target.value)}
+            />
+          )}
         </div>
 
         {sourceUrl ? (

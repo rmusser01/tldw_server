@@ -873,6 +873,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_historical_note_seed.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
@@ -2528,6 +2529,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_historical_note_seed.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
@@ -4023,6 +4025,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_historical_note_seed.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
@@ -5429,6 +5432,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_historical_note_seed.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
@@ -6826,6 +6830,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_flashcard*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_historical_note_seed.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_provenance.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py

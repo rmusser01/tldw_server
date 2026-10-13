@@ -47,7 +47,9 @@
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",
-    "diff": "^9.0.0"
+    "diff": "^9.0.0",
+    "jsonc-parser": "3.3.1",
+    "yaml": "2.8.1"
   },
   "peerDependencies": {
     "@ant-design/cssinjs": "^2.0.3",

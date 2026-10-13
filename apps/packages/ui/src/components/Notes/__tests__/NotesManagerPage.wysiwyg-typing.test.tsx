@@ -251,13 +251,14 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
       }) => {
         const path = String(request.path || "")
         const method = String(request.method || "GET").toUpperCase()
+        if (path === "/api/v1/notes/capabilities") return { content_language: true }
         if (path === "/api/v1/notes/" && method === "POST") {
           if (holdCreate) await holdCreate
           createdNote = {
             title: String(request.body?.title ?? ""),
             content: String(request.body?.content ?? "")
           }
-          return { id: "note-new", ...createdNote, version: 1, last_modified: "2026-10-03T00:00:00Z" }
+          return { id: "note-new", ...createdNote, content_language: null, version: 1, last_modified: "2026-10-03T00:00:00Z" }
         }
         if (path === "/api/v1/notes/note-new" && method === "GET" && createdNote) {
           if (holdReload) await holdReload
@@ -265,6 +266,7 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
           return {
             id: "note-new",
             ...createdNote,
+            content_language: null,
             metadata: { keywords: [] },
             version: 1,
             last_modified: "2026-10-03T00:00:00Z"
@@ -291,6 +293,7 @@ describe("NotesManagerPage WYSIWYG typing (NE-01)", { timeout: 60_000 }, () => {
           return {
             id,
             title: serverNotes[id].title,
+            content_language: null,
             content: method === "PUT" ? String(request.body?.content ?? "") : serverNotes[id].content,
             metadata: { keywords: [] },
             version: method === "PUT" ? 2 : 1,

@@ -231,6 +231,7 @@ def test_create_note(client: TestClient):
         note_id=note_id_val,
         conversation_id=None,
         message_id=None,
+        content_language=None,
     )
     mock_chacha_db_instance.get_note_by_id.assert_called_once_with(note_id=note_id_val)
 

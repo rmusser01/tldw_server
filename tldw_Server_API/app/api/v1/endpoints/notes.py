@@ -34,6 +34,7 @@ from fastapi import (
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from loguru import logger
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
@@ -116,6 +117,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NotesImportResponse,
     NotesListResponse,
     NoteUpdate,
+    PortableNoteImport,
     TitleSuggestRequest,
     TitleSuggestResponse,
     WikilinkIdResolution,
@@ -214,9 +216,10 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     resolve_service_prompt,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncNotesAdmissionError,
     SyncStoreError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncDomain
+from tldw_Server_API.app.core.Sync.v2.models import SyncDomain, complete_note_snapshot
 from tldw_Server_API.app.core.Sync.v2.notes_attachment_coordinator import (
     NotesAttachmentCoordinator,
     NotesAttachmentMutationPlan,
@@ -361,6 +364,19 @@ def _ensure_note_exists_or_404(db: CharactersRAGDB, note_id: str) -> None:
 
 
 def _note_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SyncStoreError) and "sync_pull_token_signing_unavailable" in str(exc):
+        return HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "sync_pull_token_signing_unavailable",
+                "message": "Configure SYNC_V2_PULL_TOKEN_SIGNING_SECRET to enable Notes snapshot version 2.",
+            },
+        )
+    if isinstance(exc, SyncNotesAdmissionError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error_code": exc.error_code, "message": str(exc)},
+        )
     if isinstance(exc, SyncStoreError) and str(exc).startswith(("notes_provenance_", "notes_note_")):
         return HTTPException(
             status_code=409,
@@ -523,12 +539,7 @@ def _note_keywords_sync_unsupported_error() -> HTTPException:
 
 
 def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
-    return {
-        "title": str(note.get("title") or ""),
-        "content": str(note.get("content") or ""),
-        "conversation_id": note.get("conversation_id"),
-        "message_id": note.get("message_id"),
-    }
+    return complete_note_snapshot(note)
 
 
 def _active_notes_sync_service(current_user: User) -> SyncV2Service | None:
@@ -1625,14 +1636,19 @@ def _fallback_title_from_filename(file_name: str | None) -> str | None:
     return stem[:255] if stem else None
 
 
-def _extract_json_note_rows(payload: Any) -> list[dict[str, Any]]:
+def _extract_json_note_rows(payload: Any, *, portable: bool = False) -> list[dict[str, Any]]:
     if isinstance(payload, list):
+        declared_portable = portable or any(isinstance(item, dict) and "format_version" in item for item in payload)
+        if declared_portable and (not payload or not all(isinstance(item, dict) for item in payload)):
+            raise ValueError("Invalid portable note container.")
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
+        if "format_version" in payload:
+            return [payload]
         for key in ("notes", "data", "items", "results"):
             candidate = payload.get(key)
             if isinstance(candidate, list):
-                return [item for item in candidate if isinstance(item, dict)]
+                return _extract_json_note_rows(candidate, portable=portable)
         if any(key in payload for key in ("title", "content", "id", "metadata", "keywords")):
             return [payload]
     raise InputError(  # noqa: TRY003
@@ -1640,15 +1656,22 @@ def _extract_json_note_rows(payload: Any) -> list[dict[str, Any]]:
     )
 
 
-def _normalize_import_note_row(row: dict[str, Any], fallback_title: str | None = None) -> dict[str, Any]:
+def _normalize_import_note_row(
+    row: dict[str, Any], fallback_title: str | None = None, *, portable: bool = False
+) -> dict[str, Any]:
     raw_id = row.get("id")
     note_id = str(raw_id).strip() if raw_id is not None else None
     if note_id == "":
         note_id = None
 
-    title = _normalize_keyword_text(row.get("title"))
-    raw_content = row.get("content")
-    content = "" if raw_content is None else str(raw_content)
+    title = row.get("title") if portable else _normalize_keyword_text(row.get("title"))
+    content = row.get("content")
+    if not isinstance(content, str) or not content:
+        raise InputError("Imported source must contain nonempty string content.")
+    if "content_language" in row:
+        language = row["content_language"]
+        if language is not None and (not isinstance(language, str) or not 1 <= len(language) <= 100):
+            raise InputError("Invalid imported content_language.")
 
     metadata = row.get("metadata")
     metadata_keywords = metadata.get("keywords") if isinstance(metadata, dict) else None
@@ -1662,12 +1685,14 @@ def _normalize_import_note_row(row: dict[str, Any], fallback_title: str | None =
         title = first_line[:255] if first_line else None
     if not title:
         raise InputError("Imported note is missing a title and usable content.")  # noqa: TRY003
-    if not content:
-        content = title
 
     provenance = row.get("knowledge_provenance")
     provenance = (
-        validate_notes_provenance_payload(provenance) if provenance is not None else read_notes_provenance(content)
+        validate_notes_provenance_payload(provenance)
+        if provenance is not None
+        else read_notes_provenance(content)
+        if row.get("content_language") in (None, "markdown")
+        else None
     )
     provenance_version = row.get("expected_provenance_version", row.get("knowledge_provenance_version"))
     if provenance_version is not None and (
@@ -1683,6 +1708,7 @@ def _normalize_import_note_row(row: dict[str, Any], fallback_title: str | None =
         "content": content,
         "keywords": keywords,
         "keywords_provided": keywords_provided,
+        **({"content_language": row["content_language"]} if "content_language" in row else {}),
     }
 
 
@@ -2226,6 +2252,29 @@ async def notes_health() -> dict[str, Any]:
     health["components"]["storage"] = storage_info
     return health
 
+
+@router.get("/capabilities", dependencies=[Depends(require_expected_user)])
+async def notes_capabilities(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> dict[str, bool]:
+    """The authenticated DB dependency completes migration before this route."""
+    supported = await _run_db_call(db.note_store.supports_content_language)
+    sync_service = _active_notes_sync_service(current_user)
+    if sync_service is not None:
+        supported = (
+            supported
+            and sync_service.notes_v2_ready()
+            and sync_service.adapters.supports_version("notes.note", 2)
+            and all(
+                dataset.encryption_policy == "server_trusted_v1"
+                for dataset in sync_service.store.list_datasets_for_user(str(current_user.id))
+                if "notes.note" in dataset.domains
+            )
+        )
+    return {"content_language": supported}
+
+
 @router.post(
     "/",
     response_model=NoteResponse,
@@ -2300,7 +2349,7 @@ async def create_note(
             else None
         )
         raw_note_fields: dict[str, object] = {
-            "title": (note_in.title or "").strip(),
+            "title": (note_in.title or ""),
             "content": note_in.content,
             "conversation_id": _normalize_optional_id(note_in.conversation_id),
             "message_id": _normalize_optional_id(note_in.message_id),
@@ -2308,6 +2357,7 @@ async def create_note(
             "title_strategy": note_in.title_strategy,
             "title_max_len": note_in.title_max_len,
             "language": note_in.language,
+            **({"content_language": note_in.content_language} if _field_supplied(note_in, "content_language") else {}),
         }
         request_fingerprint: str | None = None
         if sync_service is None:
@@ -2351,11 +2401,7 @@ async def create_note(
                 compound_replayed = True
 
         # Nondeterministic title work follows durable raw-request manifest lookup.
-        effective_title = (
-            str(compound_note["title"])
-            if compound_note is not None
-            else (note_in.title or "").strip()
-        )
+        effective_title = str(compound_note["title"]) if compound_note is not None else (note_in.title or "")
         if not effective_title:
             if getattr(note_in, "auto_title", False):
                 opts = _build_title_opts(note_in)
@@ -2386,6 +2432,7 @@ async def create_note(
             conversation_id = _normalize_optional_id(note_in.conversation_id)
             message_id = _normalize_optional_id(note_in.message_id)
         note_payload = {
+            "content_language": note_in.content_language,
             "title": effective_title,
             "content": note_in.content,
             "conversation_id": conversation_id,
@@ -3543,6 +3590,32 @@ async def import_notes(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
+        validated_rows: dict[int, list[dict[str, Any]]] = {}
+        for file_index, item in enumerate(payload.items):
+            if item.format not in {"json", "portable_note"}:
+                continue
+            try:
+                decoded = json.loads(item.content)
+                rows = _extract_json_note_rows(decoded, portable=item.format == "portable_note")
+            except (json.JSONDecodeError, InputError):
+                if item.format == "portable_note":
+                    raise HTTPException(status_code=422, detail="Invalid portable note contract.") from None
+                continue
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid portable note contract.") from None
+            for row in rows:
+                if item.format == "portable_note" or "format_version" in row:
+                    try:
+                        PortableNoteImport.model_validate(row)
+                        if not row["title"].strip():
+                            raise ValueError("Empty portable title")
+                    except (ValidationError, ValueError):
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Unsupported or invalid portable note contract.",
+                        ) from None
+            validated_rows[file_index] = rows
+
         files: list[NotesImportFileResult] = []
         totals = {
             "detected_notes": 0,
@@ -3575,16 +3648,49 @@ async def import_notes(
             parsed_notes: list[dict[str, Any]] = []
 
             try:
-                if item.format == "json":
-                    raw_payload = json.loads(item.content)
-                    raw_rows = _extract_json_note_rows(raw_payload)
+                if item.format in {"json", "portable_note"}:
+                    raw_rows = validated_rows.get(file_index)
+                    if raw_rows is None:
+                        raw_rows = _extract_json_note_rows(json.loads(item.content))
                     file_result.detected_notes = len(raw_rows)
                     for row_index, row in enumerate(raw_rows, start=1):
                         try:
-                            parsed_notes.append(_normalize_import_note_row(row, fallback_title=fallback_title))
+                            parsed_notes.append(
+                                _normalize_import_note_row(
+                                    row,
+                                    fallback_title=fallback_title,
+                                    portable="format_version" in row,
+                                )
+                            )
                         except _NOTES_NONCRITICAL_EXCEPTIONS as row_err:
                             file_result.failed_count += 1
                             file_result.errors.append(f"Row {row_index}: {row_err}")
+                elif item.format == "source":
+                    source_row: dict[str, Any] = {
+                        "title": "Imported source",
+                        "content": item.content,
+                    }
+                    if item.file_name:
+                        filename = Path(item.file_name.replace("\\", "/")).name
+                        extension = Path(filename).suffix.lower()
+                        modes = {
+                            ".json": "json",
+                            ".jsonl": "jsonl",
+                            ".yaml": "yaml",
+                            ".yml": "yaml",
+                            ".md": "markdown",
+                            ".markdown": "markdown",
+                            ".txt": "text",
+                            ".text": "text",
+                        }
+                        if extension not in modes:
+                            raise InputError("Unsupported source filename extension.")
+                        source_row["title"] = Path(filename).stem
+                        source_row["content_language"] = modes[extension]
+                    if not source_row["title"].strip() or len(source_row["title"]) > 255:
+                        raise InputError("Invalid source filename title.")
+                    file_result.detected_notes = 1
+                    parsed_notes = [_normalize_import_note_row(source_row, portable=True)]
                 else:
                     file_result.detected_notes = 1
                     parsed_notes = [_parse_markdown_import_note(item.content, fallback_title=fallback_title)]
@@ -3604,9 +3710,9 @@ async def import_notes(
                         else None
                     )
                     imported_id = parsed_note.get("id")
-                    provenance = parsed_note.get("knowledge_provenance") or read_notes_provenance(
-                        parsed_note["content"]
-                    )
+                    provenance = parsed_note.get("knowledge_provenance")
+                    if provenance is None and parsed_note.get("content_language") in (None, "markdown"):
+                        provenance = read_notes_provenance(parsed_note["content"])
                     provenance_version = parsed_note.get("expected_provenance_version")
                     local_provenance_save = coordinator is None and provenance is not None
                     raw_note_payload = {
@@ -3614,6 +3720,11 @@ async def import_notes(
                         "content": parsed_note["content"],
                         "conversation_id": None,
                         "message_id": None,
+                        **(
+                            {"content_language": parsed_note["content_language"]}
+                            if "content_language" in parsed_note
+                            else {}
+                        ),
                     }
                     request_fingerprint = None
                     local_receipt_key = request_key if request.headers.get("Idempotency-Key", "").strip() else None
@@ -3693,6 +3804,11 @@ async def import_notes(
                         update_patch = {
                             "title": parsed_note["title"],
                             "content": parsed_note["content"],
+                            **(
+                                {"content_language": parsed_note["content_language"]}
+                                if "content_language" in parsed_note
+                                else {}
+                            ),
                         }
                         if coordinator is not None:
                             projected_note = dict(existing_note)
@@ -3710,6 +3826,7 @@ async def import_notes(
                                 provenance=provenance,
                                 expected_provenance_version=provenance_version,
                                 expected_note_version=int(existing_note["version"]),
+                                expected_version=int(existing_note["version"]),
                             )
                             overwrite_result = _capture_notes_organization_plan(
                                 coordinator,
@@ -6694,6 +6811,8 @@ async def update_note(
     folder_paths = note_in.normalized_folder_paths if folders_supplied else None
     raw_data = note_in.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {}
+    if "content_language" in raw_data:
+        update_data["content_language"] = raw_data["content_language"]
     if "title" in raw_data and raw_data["title"] is not None:
         update_data["title"] = raw_data["title"]
     if "content" in raw_data and raw_data["content"] is not None:
@@ -6707,7 +6826,6 @@ async def update_note(
         if not stripped_title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Title cannot be empty or whitespace.")
-        update_data["title"] = stripped_title
     if not update_data and not keywords_supplied and not folders_supplied and provenance is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
     try:
@@ -6858,6 +6976,7 @@ async def update_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=_note_payload_from_row(projected_note),
+                expected_version=expected_version,
                 keywords=(kw_list or []) if keywords_supplied else None,
                 folder_paths=(folder_paths or []) if folders_supplied else None,
                 request_key=request_key,
@@ -6895,6 +7014,7 @@ async def update_note(
                         operation="upsert",
                         object_id=note_id,
                         payload=_note_payload_from_row(projected_note),
+                        expected_product_version=expected_version,
                         source="server_api",
                     )
                 except Exception as sync_exc:
@@ -6999,6 +7119,8 @@ async def patch_note(
     folder_paths = note_in.normalized_folder_paths if folders_supplied else None
     raw_data = note_in.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {}
+    if "content_language" in raw_data:
+        update_data["content_language"] = raw_data["content_language"]
     if "title" in raw_data and raw_data["title"] is not None:
         update_data["title"] = raw_data["title"]
     if "content" in raw_data and raw_data["content"] is not None:
@@ -7012,7 +7134,6 @@ async def patch_note(
         if not stripped_title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Title cannot be empty or whitespace.")
-        update_data["title"] = stripped_title
     if not update_data and not keywords_supplied and not folders_supplied and provenance is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
     try:
@@ -7148,6 +7269,7 @@ async def patch_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=payload,
+                expected_version=expected_version,
                 keywords=(kw_list or []) if keywords_supplied else None,
                 folder_paths=(folder_paths or []) if folders_supplied else None,
                 request_key=request_key,
@@ -7185,6 +7307,7 @@ async def patch_note(
                         operation="upsert",
                         object_id=note_id,
                         payload=payload,
+                        expected_product_version=expected_version,
                         source="server_api",
                     )
                 except Exception as sync_exc:
@@ -7440,6 +7563,7 @@ async def restore_note(
             id=str(restored_note["id"]),
             title=restored_note.get("title", ""),
             content=restored_note.get("content", ""),
+            content_language=restored_note.get("content_language"),
             created_at=restored_note.get("created_at"),
             last_modified=restored_note.get("last_modified"),
             version=restored_note.get("version", 1),
@@ -7677,14 +7801,24 @@ async def bulk_create_notes(
                     operation="note.bulk_create",
                     note_id=note_id,
                     note_fields={
-                        "title": (getattr(item, "title", None) or "").strip(),
+                        "title": (getattr(item, "title", None) or ""),
                         "content": item.content,
+                        **(
+                            {"content_language": item.content_language}
+                            if _field_supplied(item, "content_language")
+                            else {}
+                        ),
                         "conversation_id": _normalize_optional_id(item.conversation_id),
                         "message_id": _normalize_optional_id(item.message_id),
                         "auto_title": item.auto_title,
                         "title_strategy": item.title_strategy,
                         "title_max_len": item.title_max_len,
                         "language": item.language,
+                        **(
+                            {"content_language": item.content_language}
+                            if _field_supplied(item, "content_language")
+                            else {}
+                        ),
                     },
                     keywords=kw_list,
                     folder_paths=folder_paths,
@@ -7711,9 +7845,7 @@ async def bulk_create_notes(
                     compound_replayed = True
 
             effective_title = (
-                str(compound_note["title"])
-                if compound_note is not None
-                else (getattr(item, "title", None) or "").strip()
+                str(compound_note["title"]) if compound_note is not None else (getattr(item, "title", None) or "")
             )
             if not effective_title:
                 if getattr(item, "auto_title", False):
@@ -7746,6 +7878,7 @@ async def bulk_create_notes(
                 message_id = _normalize_optional_id(item.message_id)
 
             note_payload = {
+                "content_language": item.content_language,
                 "title": effective_title,
                 "content": item.content,
                 "conversation_id": conversation_id,

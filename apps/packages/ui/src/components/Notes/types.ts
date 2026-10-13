@@ -1,6 +1,8 @@
 export type NoteListItem = {
   id: string | number
   title?: string
+  content_language?: string | null;
+  created_at?: string;
   content?: string
   content_preview?: string | null
   updated_at?: string

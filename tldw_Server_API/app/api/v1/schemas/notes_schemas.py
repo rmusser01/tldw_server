@@ -106,6 +106,9 @@ class NoteProvenanceRestore(BaseModel):
 
 
 class NoteBase(BaseModel):
+    content_language: str | None = Field(
+        None, min_length=1, max_length=100, description="Opaque source language; null clears the selection."
+    )
     title: str = Field(..., min_length=1, max_length=255, description="Title of the note")
     content: str = Field(..., min_length=1, max_length=5000000, description="Content of the note (max 5MB)")
     conversation_id: str | None = Field(None, description="Optional conversation ID backlink")
@@ -195,6 +198,9 @@ class NoteCreate(NoteBase, NoteProvenanceWrite):
 
 
 class NoteUpdate(NoteProvenanceWrite):
+    content_language: str | None = Field(
+        None, min_length=1, max_length=100, description="Opaque source language; null clears the selection."
+    )
     title: str | None = Field(None, min_length=1, max_length=255, description="New title for the note")
     content: str | None = Field(None, min_length=1, max_length=5000000, description="New content for the note (max 5MB)")
     conversation_id: str | None = Field(None, description="Optional conversation ID backlink")
@@ -665,9 +671,20 @@ class NotesExportRequest(BaseModel):
     format: Literal['json', 'csv'] = Field(default='json', description="Use /export.csv for CSV exports.")
 
 
+class PortableNoteImport(NoteBase):
+    """Complete versioned source envelope; content is never a document value."""
+
+    format_version: Literal["tldw.note.v1"]
+    content_language: str | None = Field(..., min_length=1, max_length=100)
+    id: str | None = None
+    keywords: list[str] | None = None
+
+
 class NotesImportItem(BaseModel):
     file_name: str | None = Field(default=None, description="Optional source file name.")
-    format: Literal["json", "markdown"] = Field(..., description="Import format for this item.")
+    format: Literal["json", "markdown", "portable_note", "source"] = Field(
+        ..., description="Import format for this item."
+    )
     content: str = Field(..., min_length=1, max_length=5_000_000, description="Raw file content.")
 
 
@@ -683,7 +700,7 @@ class NotesImportRequest(BaseModel):
 
 class NotesImportFileResult(BaseModel):
     file_name: str | None = None
-    source_format: Literal["json", "markdown"]
+    source_format: Literal["json", "markdown", "portable_note", "source"]
     detected_notes: int = 0
     created_count: int = 0
     updated_count: int = 0

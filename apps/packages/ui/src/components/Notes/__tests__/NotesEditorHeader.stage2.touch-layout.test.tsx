@@ -1,11 +1,11 @@
-import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import NotesEditorHeader from "../NotesEditorHeader"
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import NotesEditorHeader from "../NotesEditorHeader";
 
 const responsiveState = vi.hoisted(() => ({
-  isMobile: false
-}))
+  isMobile: false,
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -14,22 +14,26 @@ vi.mock("react-i18next", () => ({
       defaultValueOrOptions?:
         | string
         | {
-            defaultValue?: string
-            [key: string]: unknown
-          }
+            defaultValue?: string;
+            [key: string]: unknown;
+          },
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
-      return key
-    }
-  })
-}))
+      if (typeof defaultValueOrOptions === "string")
+        return defaultValueOrOptions;
+      if (defaultValueOrOptions?.defaultValue)
+        return defaultValueOrOptions.defaultValue;
+      return key;
+    },
+  }),
+}));
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => responsiveState.isMobile
-}))
+  useMobile: () => responsiveState.isMobile,
+}));
 
-type HeaderOverrideProps = Partial<React.ComponentProps<typeof NotesEditorHeader>>
+type HeaderOverrideProps = Partial<
+  React.ComponentProps<typeof NotesEditorHeader>
+>;
 
 const renderHeader = (overrides: HeaderOverrideProps = {}) =>
   render(
@@ -59,108 +63,141 @@ const renderHeader = (overrides: HeaderOverrideProps = {}) =>
       onSave={() => undefined}
       onDelete={() => undefined}
       {...overrides}
-    />
-  )
+    />,
+  );
 
 describe("NotesEditorHeader stage 2 touch layout", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   it("uses wrapped toolbar layout and 44px touch targets on mobile", () => {
-    responsiveState.isMobile = true
-    renderHeader()
+    responsiveState.isMobile = true;
+    renderHeader();
 
-    const actions = screen.getByTestId("notes-header-actions")
-    expect(actions.className).toContain("w-full")
-    expect(actions.className).toContain("flex-wrap")
+    const actions = screen.getByTestId("notes-header-actions");
+    expect(actions.className).toContain("w-full");
+    expect(actions.className).toContain("flex-wrap");
 
-    const saveButton = screen.getByTestId("notes-save-button")
-    const overflowButton = screen.getByTestId("notes-overflow-menu-button")
+    const saveButton = screen.getByTestId("notes-save-button");
+    const overflowButton = screen.getByTestId("notes-overflow-menu-button");
 
-    expect(saveButton.className).toContain("ant-btn-lg")
-    expect(saveButton.className).toContain("min-h-[44px]")
-    expect(overflowButton.className).toContain("min-h-[44px]")
-    expect(overflowButton.className).toContain("min-w-[44px]")
-  })
+    expect(saveButton.className).toContain("ant-btn-lg");
+    expect(saveButton.className).toContain("min-h-[44px]");
+    expect(overflowButton.className).toContain("min-h-[44px]");
+    expect(overflowButton.className).toContain("min-w-[44px]");
+  });
 
   it("keeps compact desktop controls while allowing toolbar wrapping", () => {
-    responsiveState.isMobile = false
-    renderHeader()
+    responsiveState.isMobile = false;
+    renderHeader();
 
-    const actions = screen.getByTestId("notes-header-actions")
-    expect(actions.className).not.toContain("w-full")
-    expect(actions.className).toContain("flex-wrap")
+    const actions = screen.getByTestId("notes-header-actions");
+    expect(actions.className).not.toContain("w-full");
+    expect(actions.className).toContain("flex-wrap");
 
-    const saveButton = screen.getByTestId("notes-save-button")
-    const overflowButton = screen.getByTestId("notes-overflow-menu-button")
+    const saveButton = screen.getByTestId("notes-save-button");
+    const overflowButton = screen.getByTestId("notes-overflow-menu-button");
 
-    expect(saveButton.className).toContain("ant-btn-sm")
-    expect(saveButton.className).not.toContain("min-h-[44px]")
-    expect(overflowButton.className).not.toContain("min-h-[44px]")
-  })
+    expect(saveButton.className).toContain("ant-btn-sm");
+    expect(saveButton.className).not.toContain("min-h-[44px]");
+    expect(overflowButton.className).not.toContain("min-h-[44px]");
+  });
 
   it("shows editor mode toggle on desktop but not on mobile", () => {
-    responsiveState.isMobile = false
-    renderHeader()
+    responsiveState.isMobile = false;
+    renderHeader();
 
     // On desktop the editor mode toggle group is visible
-    expect(screen.getByRole("group", { name: "Editor mode" })).toBeInTheDocument()
-  })
+    expect(
+      screen.getByRole("group", { name: "Editor mode" }),
+    ).toBeInTheDocument();
+  });
 
   it("hides editor mode toggle on mobile", () => {
-    responsiveState.isMobile = true
-    renderHeader()
+    responsiveState.isMobile = true;
+    renderHeader();
 
     // On mobile the editor mode toggle group is hidden
-    expect(screen.queryByRole("group", { name: "Editor mode" })).not.toBeInTheDocument()
-  })
+    expect(
+      screen.queryByRole("group", { name: "Editor mode" }),
+    ).not.toBeInTheDocument();
+  });
 
   it("disables desktop Save & new while a save is in progress", () => {
-    responsiveState.isMobile = false
+    responsiveState.isMobile = false;
     renderHeader({
       isSaving: true,
-      onSaveAndNew: () => undefined
-    })
+      onSaveAndNew: () => undefined,
+    });
 
-    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
-  })
+    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled();
+  });
 
   it("disables mobile Save & new overflow item while a save is in progress", async () => {
-    responsiveState.isMobile = true
+    responsiveState.isMobile = true;
     renderHeader({
       isSaving: true,
-      onSaveAndNew: () => undefined
-    })
+      onSaveAndNew: () => undefined,
+    });
 
-    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"));
 
-    const menuItem = (await screen.findByText("Save & new")).closest(".ant-dropdown-menu-item")
-    expect(menuItem).toHaveClass("ant-dropdown-menu-item-disabled")
-  })
+    const menuItem = (await screen.findByText("Save & new")).closest(
+      ".ant-dropdown-menu-item",
+    );
+    expect(menuItem).toHaveClass("ant-dropdown-menu-item-disabled");
+  });
+
+  it("distinguishes the Export submenu from portable and source downloads", async () => {
+    responsiveState.isMobile = false;
+    const onExport = vi.fn();
+    renderHeader({ onExport });
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"));
+    expect(
+      await screen.findByRole("menuitem", { name: "Export note (.note.json)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Download source" }),
+    ).toBeInTheDocument();
+    const exportSubmenus = screen
+      .getAllByRole("menuitem", { name: /^export/i })
+      .filter((item) => item.getAttribute("aria-haspopup") === "true");
+    expect(exportSubmenus).toHaveLength(1);
+    fireEvent.mouseEnter(exportSubmenus[0]);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /print \/ save as pdf/i }),
+    );
+    expect(onExport).toHaveBeenCalledWith("print");
+    expect(onExport).toHaveBeenCalledTimes(1);
+  });
 
   it("keeps create study pack in the desktop toolbar and mobile overflow menu", async () => {
-    const onCreateStudyPack = vi.fn()
+    const onCreateStudyPack = vi.fn();
 
-    responsiveState.isMobile = false
+    responsiveState.isMobile = false;
     const { unmount } = renderHeader({
       canCreateStudyPack: true,
-      onCreateStudyPack
-    })
+      onCreateStudyPack,
+    });
 
-    expect(screen.getByTestId("notes-create-study-pack-button")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
-    expect(screen.getAllByText("Create study pack")).toHaveLength(1)
+    expect(
+      screen.getByTestId("notes-create-study-pack-button"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"));
+    expect(screen.getAllByText("Create study pack")).toHaveLength(1);
 
-    unmount()
-    responsiveState.isMobile = true
+    unmount();
+    responsiveState.isMobile = true;
     renderHeader({
       canCreateStudyPack: true,
-      onCreateStudyPack
-    })
+      onCreateStudyPack,
+    });
 
-    expect(screen.queryByTestId("notes-create-study-pack-button")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
-    expect(await screen.findByText("Create study pack")).toBeInTheDocument()
-  })
-})
+    expect(
+      screen.queryByTestId("notes-create-study-pack-button"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"));
+    expect(await screen.findByText("Create study pack")).toBeInTheDocument();
+  });
+});

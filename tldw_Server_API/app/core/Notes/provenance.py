@@ -15,7 +15,11 @@ def provenance_response(
     note: dict[str, Any], record: dict[str, Any] | None, *, supported: bool = True, portable: bool = False
 ) -> dict[str, Any]:
     """Project a retained child without treating editable markers as authority."""
-    marker = read_notes_provenance(str(note.get("content") or ""))
+    marker = (
+        read_notes_provenance(str(note.get("content") or ""))
+        if note.get("content_language") in (None, "markdown")
+        else None
+    )
     state = (
         "unsupported" if not supported else "absent" if record is None else "deleted" if record["deleted"] else "active"
     )
@@ -29,7 +33,7 @@ def provenance_response(
             "canonical_wins" if record and marker is not None and marker != payload else None
         ),
     )
-    if portable:
+    if portable and note.get("content_language") in (None, "markdown"):
         if state == "active":
             note["content"] = retain_notes_provenance(note["content"], payload)
         elif state == "deleted":

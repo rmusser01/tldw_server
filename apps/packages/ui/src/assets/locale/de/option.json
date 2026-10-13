@@ -988,5 +988,30 @@
       "fetchingFiles": "Fetching files ({{completed}}/{{total}})...",
       "generated": "Generated output for {{count}} files ({{tokenCount}} tokens)."
     }
+  },
+  "notesDocument": {
+    "language": "Sprache",
+    "default": "Standard (Markdown)",
+    "text": "Klartext",
+    "unknown": "Nicht angegeben",
+    "future": "Nicht unterstützt: {{language}}",
+    "check": "Dokument prüfen",
+    "format": "Dokument formatieren",
+    "problems": "Probleme",
+    "idle": "Prüfung nicht verfügbar",
+    "pending": "Prüfung ausstehend",
+    "checked": "Geprüft; keine Probleme",
+    "problemsFound": "Prüfung abgeschlossen; Probleme prüfen",
+    "incomplete": "Prüfung unvollständig; begrenzte Probleme angezeigt",
+    "unsupported": "Dieser Modus oder Quelltext kann nicht geprüft werden",
+    "resourceLimited": "Ressourcenlimit erreicht; Quelltext erhalten",
+    "failed": "Prüfung fehlgeschlagen; erneut prüfen",
+    "formatted": "Formatiert",
+    "unchanged": "Bereits formatiert",
+    "blocked": "Formatierung nicht angewendet; Probleme prüfen oder Quelltext fokussieren und erneut versuchen",
+    "temporary": "Temporärer Anzeigemodus für diese Notiz/Sitzung; der Server kann Sprachmetadaten nicht speichern.",
+    "metadataUnavailable": "Sprachmetadaten nicht verfügbar; erneut verbinden, um einen Modus zu wählen.",
+    "sourceOnly": "Quelltext exakt erhalten. Der Inhalt kann in dieser Darstellung nicht bearbeitet werden; Titel und Speichern bleiben verfügbar.",
+    "rawSource": "Exakter Quelltext"
   }
 }

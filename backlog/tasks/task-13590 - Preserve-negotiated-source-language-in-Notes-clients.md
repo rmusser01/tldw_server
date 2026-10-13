@@ -1,0 +1,72 @@
+---
+id: TASK-13590
+title: Preserve negotiated source language in Notes clients
+status: Done
+created_date: 2026-10-07 03:07
+dependencies:
+- TASK-13588
+- TASK-13589
+assignee:
+- '@codex'
+labels:
+- notes
+- structured-editing
+documentation:
+- Docs/ADR/070-portable-note-language-and-negotiated-structured-editing.md
+updated_date: 2026-10-07 06:50
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Keep language intent and exact source safe when clients and servers support different Notes versions.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Clients require explicit authenticated language capability and isolate or invalidate capability state on server/profile changes.
+- [x] #2 Old or unavailable peers leave actionable durable pending intent; a body-only acknowledgement never clears pending language.
+- [x] #3 Targeted compatibility tests and scoped static/security evidence cover publication rechecks and account isolation.
+- [x] #4 Relevant governing ADR is assessed/linked and repo-local completion notes name actual evidence and remaining limitations.
+- [x] #5 Clear Notes round trips and compatible private builder/receiver fixtures preserve exact source, language and lineage; unavailable private server transport retains ciphertext-backed local pending intent.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+ADR required: yes
+ADR path: backlog/decisions/194-structured-note-language-and-local-editor-validation.md (C); Docs/ADR/070-portable-note-language-and-negotiated-structured-editing.md (S), existing decisions
+Reason: implement approved negotiated client contracts and private confidentiality/pending behavior without a new transport.
+1. Read task4 brief, repo-local tasks/instructions/lessons and governing ADRs; trace current clear/private builders, receivers, outbox acknowledgements and authenticated Notes client capability paths.
+2. Add failing real SQLite builder/receiver, compatibility/pending/restart and capability/profile controls before edits.
+3. Preserve complete source/language using advertised compatible versions, old omission preservation and explicit null; keep private language inside ciphertext and reject clear leakage.
+4. Retain note-scoped durable pending language/reason when complete/private support is unavailable; body-only acknowledgements cannot erase intent. Recheck authenticated capability before publication and isolate server/profile state.
+5. Run named new and affected C/U selections plus scoped static/security checks; frontend typecheck for shared-client changes. Preserve inherited debt with immutable-base comparison; no full suite.
+6. Document evidence/limitations in task notes and ADR pointers, self-review and commit explicit client files separately. Keep In Progress pending independent controller review.
+Browser ownership/cache correction: U/src/services/tldw/domains/collections.ts overrides createNote, so update that actual owner and keep base method consistent. Use fresh authenticated capability probes on capability requests/publication instead of a new cache; same captured/pinned request scope for probe and publication, reject in-flight authority change before mutation/cleanup. Cover absent support, authenticated404, transport failure and profile changes. Cost: an additional authenticated read for publication and conservative pending state during capability transport failure.
+<!-- SECTION:PLAN:END -->
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implemented authenticated fresh Notes capability checks and complete nullable language publication in the existing browser client owner. Collections mixin is the single createNote implementation; account changes refuse mutation/cleanup and unsupported peers remain actionable pending. ADR070 extends the locked Notes contract without adding private transport.
+Verification: browser25 tests, server compatibility10 and whole frontend typecheck passed on final browser code; scoped ESLint introduced none against immutable base, inherited Prettier debt unchanged; diff check passed. Final client scoped fix2 review clean; server has no fix2 production delta. Bandit not applicable to TypeScript-only server changes; Chatbook touched Python had no introduced security findings.
+Limits: actual server private Notes transport unavailable; compatible encrypted builder/receiver fixtures do not claim actual private server publication. Source-safe UI and pending-reason presentation remain later integration work.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Browser Notes publication uses one authenticated owner with complete language semantics. UI25, server10 and frontend typecheck passed; independent review clean. Actual private transport remains unavailable with local intent retained.
+<!-- SECTION:FINAL_SUMMARY:END -->
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
+
+## Renumbering provenance
+
+Originally TASK-13515 in the reviewed structured-document candidate. The publication task is TASK-13590 because current dev assigns the former ID to unrelated work. This changes tracking identity only; acceptance criteria, status, original creation date and implementation evidence are retained. Original reviewed commits and local evidence preserve the historical ID.

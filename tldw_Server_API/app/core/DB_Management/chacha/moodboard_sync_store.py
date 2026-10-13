@@ -599,13 +599,12 @@ class MoodboardSyncStore:
             parent = notes.get(str(row["note_id"]))
             if parent is None:
                 raise ValueError("Studio parent unavailable")
-            parent_revision, parent_hash = self._db.note_store._notes_note_head(parent)
+            parent_revision, _ = self._db.note_store._notes_note_head(parent)
             if parsed.note_revision > parent_revision:
                 raise ValueError("Studio parent head mismatch")
             if parsed.note_revision == parent_revision and (
-                parsed.note_hash != parent_hash
-                or parsed.companion_content_hash
-                != self._db.note_store._normalized_text_hash(parent["content"])
+                not self._db.note_store._matches_notes_note_hash(parent, parsed.note_hash)
+                or parsed.companion_content_hash != self._db.note_store._normalized_text_hash(parent["content"])
             ):
                 raise ValueError("Studio current parent head mismatch")
             provenance = parsed.accepted_provenance
@@ -616,18 +615,15 @@ class MoodboardSyncStore:
                 source = notes.get(str(parsed.source_note_id))
                 if source is None:
                     raise ValueError("Studio source unavailable")
-                source_revision, source_hash = self._db.note_store._notes_note_head(source)
+                source_revision, _ = self._db.note_store._notes_note_head(source)
                 normalized_source = str(source["content"] or "").replace(
                     "\r\n", "\n"
                 ).replace("\r", "\n")
                 if provenance.source_revision is None or provenance.source_revision > source_revision:
                     raise ValueError("Studio source head mismatch")
                 if provenance.source_revision == source_revision and (
-                    provenance.source_hash != source_hash
-                    or (
-                        parsed.excerpt_snapshot is not None
-                        and parsed.excerpt_snapshot not in normalized_source
-                    )
+                    not self._db.note_store._matches_notes_note_hash(source, provenance.source_hash)
+                    or (parsed.excerpt_snapshot is not None and parsed.excerpt_snapshot not in normalized_source)
                 ):
                     raise ValueError("Studio current source head mismatch")
             deleted = bool(row["deleted"])

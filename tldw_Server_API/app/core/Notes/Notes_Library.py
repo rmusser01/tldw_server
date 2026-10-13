@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
 # Functions:
 
 logger = logger
+_LANGUAGE_UNSET = object()
 
 
 class NotesInteropService:
@@ -152,14 +153,23 @@ class NotesInteropService:
 
     # --- Note Methods (Test-friendly wrappers) ---
 
-    def create_note(self, *, title: str, content: str, user_id: str) -> Any:
+    def create_note(self, *, title: str, content: str, user_id: str, content_language: Any = _LANGUAGE_UNSET) -> Any:
         """Create a note. Uses mock-style `create_note` if available, else DB `add_note`."""
         db = self._get_db(user_id)
         if hasattr(db, "create_note"):
-            return db.create_note(title=title, content=content, user_id=user_id)
-        return self.add_note(user_id=user_id, title=title, content=content)
+            fields = {} if content_language is _LANGUAGE_UNSET else {"content_language": content_language}
+            return db.create_note(title=title, content=content, user_id=user_id, **fields)
+        return self.add_note(user_id=user_id, title=title, content=content, content_language=content_language)
 
-    def add_note(self, user_id: str, title: str, content: str, note_id: Optional[str] = None) -> str:
+    def add_note(
+        self,
+        user_id: str,
+        title: str,
+        content: str,
+        note_id: Optional[str] = None,
+        *,
+        content_language: Any = _LANGUAGE_UNSET,
+    ) -> str:
         """
         Adds a new note for the specified user.
 
@@ -181,7 +191,12 @@ class NotesInteropService:
         if coordinator is not None:
             key = coordinator.request_fingerprint(
                 "notes-interop.note.create",
-                {"note_id": note_id, "title": title, "content": content},
+                {
+                    "note_id": note_id,
+                    "title": title,
+                    "content": content,
+                    **({"content_language": content_language} if content_language is not _LANGUAGE_UNSET else {}),
+                },
             )
             captured_id = note_id or stable_note_id("notes-interop", key)
             capture_note_upsert(
@@ -189,13 +204,15 @@ class NotesInteropService:
                 note_id=captured_id,
                 title=title,
                 content=content,
+                **({"content_language": content_language} if content_language is not _LANGUAGE_UNSET else {}),
                 source="notes-interop",
                 key=key,
             )
             return captured_id
         # ChaChaDB's add_note returns `str | None` in its type hint.
         # Current implementation of ChaChaDB.add_note returns `str` on success or raises.
-        created_note_id = db.add_note(title=title, content=content, note_id=note_id)
+        language_fields = {} if content_language is _LANGUAGE_UNSET else {"content_language": content_language}
+        created_note_id = db.add_note(title=title, content=content, note_id=note_id, **language_fields)
         if created_note_id is None:
             # This path suggests an issue if add_note could return None without raising.
             logger.error(f"add_note for user {user_id} returned None unexpectedly for title '{title}'.")
@@ -254,6 +271,7 @@ class NotesInteropService:
                 capture_note_upsert(
                     coordinator,
                     note_id=note_id,
+                    content_language=update_data.get("content_language", current.get("content_language")),
                     title=str(update_data.get("title", current.get("title") or "")),
                     content=str(update_data.get("content", current.get("content") or "")),
                     conversation_id=current.get("conversation_id"),
@@ -282,6 +300,8 @@ class NotesInteropService:
             data["title"] = title
         if content is not None:
             data["content"] = content
+        if "content_language" in kwargs:
+            data["content_language"] = kwargs["content_language"]
         coerced_version = _coerce_expected_version(expected_version)
         coordinator = active_coordinator(db, user_id=user_id)
         if coordinator is not None:
@@ -291,6 +311,7 @@ class NotesInteropService:
             capture_note_upsert(
                 coordinator,
                 note_id=note_id,
+                content_language=data.get("content_language", current.get("content_language")),
                 title=str(data.get("title", current.get("title") or "")),
                 content=str(data.get("content", current.get("content") or "")),
                 conversation_id=current.get("conversation_id"),

@@ -19,6 +19,7 @@ from ..models import (
     SyncEnvelope,
     SyncEnvelopeCreate,
     validate_notes_note_upsert_payload,
+    validate_notes_note_upsert_payload_v2,
 )
 from ._lineage import (
     current_head,
@@ -44,7 +45,7 @@ class NotesDomainAdapter:
     """Evaluate notes envelopes using private-content conflict rules."""
 
     domain: SyncDomain = "notes.note"
-    supported_adapter_versions: set[int] = field(default_factory=lambda: {1})
+    supported_adapter_versions: set[int] = field(default_factory=lambda: {1, 2})
 
     def evaluate_envelope(
         self,
@@ -56,9 +57,20 @@ class NotesDomainAdapter:
         """Accept metadata-only changes and conflict concurrent encrypted edits."""
 
         del dataset
+        if (envelope.adapter_version, envelope.schema_version) not in {(1, 1), (2, 2)}:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="unsupported_adapter_version",
+                message="Notes requires supported adapter/schema pair (1, 1) or (2, 2).",
+            )
         if envelope.domain == "notes.note" and envelope.operation == "upsert":
             try:
-                validate_notes_note_upsert_payload(envelope.payload)
+                validator = (
+                    validate_notes_note_upsert_payload_v2
+                    if envelope.adapter_version == 2
+                    else validate_notes_note_upsert_payload
+                )
+                validator(envelope.payload)
             except ValueError as exc:
                 return AdapterRejected(
                     client_envelope_id=envelope.client_envelope_id,
@@ -82,6 +94,13 @@ class NotesDomainAdapter:
                 ),
             )
         prior = prior_envelopes(envelope, context)
+        head = current_head(prior)
+        if head is not None and head.adapter_version > envelope.adapter_version:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="notes_snapshot_upgrade_required",
+                message="Upgrade to Notes snapshot version 2 and reload the current note.",
+            )
         delete_conflict = delete_update_conflict(
             envelope,
             prior,

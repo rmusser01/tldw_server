@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
+from secrets import token_hex
 from threading import Barrier, Event, Lock, get_ident
 from typing import cast
 
@@ -2942,7 +2943,7 @@ def test_push_rejects_unsupported_adapter_versions_per_envelope(sync_service: Sy
         user_id="user-1",
         dataset_id="dataset-1",
         device_id="device-1",
-        envelopes=[_envelope(adapter_version=2)],
+        envelopes=[_envelope(adapter_version=3)],
     )
 
     assert result.accepted == []
@@ -2977,6 +2978,10 @@ def test_push_treats_omitted_device_adapter_map_as_v1_only(
 def test_push_accepts_adapter_version_advertised_by_registered_device(
     sync_service: SyncV2Service,
 ) -> None:
+    sync_service.settings = replace(
+        sync_service.settings,
+        pull_token_signing_secret=token_hex(32),
+    )
     sync_service.adapters.register(
         StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1, 2})
     )
@@ -8671,7 +8676,13 @@ def test_pull_uses_server_side_filters_past_echo_filled_raw_window(
             "adapter_versions": [1],
             "status": "accepted",
             "exclude_device_id": "device-1",
-        }
+        },
+        {
+            "limit": 1,
+            "domains": ["notes.note"],
+            "adapter_versions": [2],
+            "status": "accepted",
+        },
     ]
     assert page.next_cursor == "12"
     assert page.has_more is False

@@ -11,6 +11,12 @@ class SyncStoreError(SyncV2Error):
     """Raised when the Sync v2 store cannot complete an operation."""
 
 
+class SyncNotesAdmissionError(SyncStoreError):
+    """A Notes snapshot cannot be admitted against its canonical product row."""
+
+    error_code = "notes_sync_admission_rejected"
+
+
 class PersonalContextStorageEncryptionUnavailableError(SyncStoreError):
     """Raised when a Personal Context envelope cannot be protected at rest."""
 

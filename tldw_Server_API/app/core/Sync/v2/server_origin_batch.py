@@ -19,6 +19,7 @@ from .attachment_refs_v2 import attachment_ref_v2_object_hash
 from .errors import (
     SyncIdempotencyConflictError,
     SyncMaterializationPredecessorError,
+    SyncNotesAdmissionError,
     SyncStoreError,
 )
 from .materializers.guarded_product_mutation import (
@@ -78,6 +79,7 @@ class ServerOriginMutationStep:
     object_revision: int | None = None
     base_object_revision: int | None = None
     base_object_hash: str | None = None
+    expected_product_version: int | None = None  # Process-local admission condition, never serialized.
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,15 +208,6 @@ def capture_server_origin_mutation_batch(
     )
     if trusted_notes_provenance_bootstrap_id is None:
         plan = expand_provenance_tombstone_steps(plan, store=service.store, dataset_id=dataset.dataset_id, existing=existing_group)
-    canonical_steps = tuple(
-        _canonical_step(step, source=source, user_id=user_id) for step in plan
-    )
-    guards = _normalize_guarded_mutations(
-        guarded_mutation=guarded_mutation,
-        guarded_mutations=guarded_mutations,
-    )
-    canonical_steps = _bind_guard_requirements(canonical_steps, ())
-    guarded_canonical_steps = _bind_guard_requirements(canonical_steps, guards)
     mutation_group_id = _mutation_group_id(
         dataset.dataset_id,
         source=source,
@@ -222,6 +215,23 @@ def capture_server_origin_mutation_batch(
     )
 
     existing = service.store.list_mutation_group(dataset.dataset_id, mutation_group_id)
+    canonical_steps = tuple(
+        _canonical_step(
+            step,
+            source=source,
+            user_id=user_id,
+            service=service,
+            dataset_id=dataset.dataset_id,
+            stored=existing[index] if index < len(existing) else None,
+        )
+        for index, step in enumerate(plan)
+    )
+    guards = _normalize_guarded_mutations(
+        guarded_mutation=guarded_mutation,
+        guarded_mutations=guarded_mutations,
+    )
+    canonical_steps = _bind_guard_requirements(canonical_steps, ())
+    guarded_canonical_steps = _bind_guard_requirements(canonical_steps, guards)
     if existing:
         expected_steps = (
             guarded_canonical_steps
@@ -280,27 +290,36 @@ def capture_server_origin_mutation_batch(
             bootstrap_relationship_absence_verifier
         ),
     )
+    expected_versions = {
+        step.object_id: step.expected_product_version
+        for step in canonical_steps
+        if step.domain == "notes.note" and step.expected_product_version is not None
+    }
     try:
-        if trusted_bootstrap_id is None:
-            if trusted_notes_task_coordinator:
-                inserted = service.store.insert_envelopes_atomic(
-                    envelopes,
-                    trusted_notes_task_coordinator=True,
-                )
+        with service.notes_admission_guard(envelopes, expected_versions=expected_versions) as admission_store:
+            if trusted_bootstrap_id is None:
+                if trusted_notes_task_coordinator:
+                    inserted = admission_store.insert_envelopes_atomic(
+                        envelopes,
+                        trusted_notes_task_coordinator=True,
+                    )
+                else:
+                    inserted = admission_store.insert_envelopes_atomic(envelopes)
             else:
-                inserted = service.store.insert_envelopes_atomic(envelopes)
-        else:
-            inserted = service.store.insert_envelopes_atomic(
-                envelopes,
-                trusted_notes_organization_bootstrap_id=trusted_bootstrap_id,
-                trusted_notes_provenance_bootstrap=(bootstrap_step_verifier if trusted_notes_provenance_bootstrap_id is not None else None),
-                trusted_notes_task_bootstrap_id=(
-                    trusted_notes_task_bootstrap_id
-                    or trusted_notes_task_activity_bootstrap_id
-                ),
-            )
+                inserted = admission_store.insert_envelopes_atomic(
+                    envelopes,
+                    trusted_notes_organization_bootstrap_id=trusted_bootstrap_id,
+                    trusted_notes_provenance_bootstrap=(
+                        bootstrap_step_verifier if trusted_notes_provenance_bootstrap_id is not None else None
+                    ),
+                    trusted_notes_task_bootstrap_id=(
+                        trusted_notes_task_bootstrap_id or trusted_notes_task_activity_bootstrap_id
+                    ),
+                )
     except SyncIdempotencyConflictError as exc:
         raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
+    except SyncNotesAdmissionError:
+        raise
     except SyncStoreError as exc:
         raise SyncServerOriginBatchAppendError(mutation_group_id) from exc
     return _materialize_group(
@@ -1117,7 +1136,23 @@ def _canonical_step(
     *,
     source: str,
     user_id: str,
+    service: SyncV2Service,
+    dataset_id: str,
+    stored: SyncEnvelope | None,
 ) -> ServerOriginMutationStep:
+    if step.domain == "notes.note" and step.adapter_version == 2:
+        version = (
+            stored.adapter_version
+            if stored is not None
+            else service.notes_publication_version(dataset_id, step.object_id, step.payload)
+        )
+        if version == 1 and step.payload.get("content_language") is None:
+            step = replace(
+                step,
+                schema_version=1,
+                adapter_version=1,
+                payload={key: value for key, value in step.payload.items() if key != "content_language"},
+            )
     if step.object_revision is not None and (
         type(step.object_revision) is not int or step.object_revision < 1
     ):
@@ -1152,6 +1187,7 @@ def _canonical_step(
         routing_metadata=routing_metadata,
         stable_key=step.stable_key,
         created_at_client=step.created_at_client,
+        expected_product_version=step.expected_product_version,
         schema_version=step.schema_version,
         adapter_version=step.adapter_version,
         client_envelope_id=step.client_envelope_id,

@@ -211,5 +211,10 @@
     "unsavedStateDiscardPromptRestoreState": "您有未儲存的狀態文件變更。要還原此狀態版本並捨棄本機草稿嗎？",
     "unsavedStateDiscardPromptRouteTransition": "您有未儲存的狀態文件變更。要離開此頁面並捨棄本機草稿嗎？",
     "unsavedStateBeforeUnloadPrompt": "您有未儲存的狀態文件變更。要在不儲存的情況下離開此頁面嗎？"
+  },
+  "notes": {
+    "saveSourceToNotesTitle": "將原始文字儲存至筆記",
+    "saveSource": "儲存原始文字",
+    "sourceOnlyHelper": "僅儲存文字，不包含此處顯示的網頁網址。"
   }
 }

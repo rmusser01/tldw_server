@@ -1,8 +1,22 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+import { useNotesImport } from "../hooks/useNotesImport";
+import {
+  readKnowledgeNoteProvenance,
+  retainKnowledgeNoteProvenance,
+} from "@/utils/knowledge-note-provenance";
+import { writeFileSync, mkdirSync } from "node:fs";
+
 
 const {
   mockBgRequest,
@@ -52,6 +66,22 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
+}));
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: {
+      serverUrl: "https://notes.test",
+      authMode: "single-user",
+      apiKey: "synthetic",
+    },
+    loading: false,
+    authorityLoading: false,
+  }),
+}));
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => "synthetic-authority",
+  createNotesGraphAuthorityScope: () => "synthetic-authority",
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -122,17 +152,33 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: () => <div data-testid="notes-list-panel" />
-}))
+  default: ({ onSelectNote }: { onSelectNote: (id: string) => void }) => (
+    <button data-testid="notes-list-panel" onClick={() => onSelectNote("n")}>
+      Load
+    </button>
+  ),
+}));
 
 vi.mock("@/components/Notes/NotesEditorHeader", () => ({
   default: ({ onCopy, onExport }: any) => (
     <div>
-      <button data-testid="copy-content-action" onClick={() => onCopy("content")}>
+      <button
+        data-testid="copy-content-action"
+        onClick={() => onCopy("content")}
+      >
         Copy content
       </button>
-      <button data-testid="copy-markdown-action" onClick={() => onCopy("markdown")}>
+      <button
+        data-testid="copy-markdown-action"
+        onClick={() => onCopy("markdown")}
+      >
         Copy markdown
+      </button>
+      <button
+        data-testid="export-source-action"
+        onClick={() => onExport("source")}
+      >
+        Source
       </button>
       <button data-testid="export-md-action" onClick={() => onExport("md")}>
         Export md
@@ -141,8 +187,8 @@ vi.mock("@/components/Notes/NotesEditorHeader", () => ({
         Export json
       </button>
     </div>
-  )
-}))
+  ),
+}));
 
 const renderPage = () => {
   const queryClient = new QueryClient({
@@ -161,6 +207,7 @@ const renderPage = () => {
 describe("NotesManagerPage stage 31 single-note export/copy parity", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear();
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockSetSetting.mockResolvedValue(undefined)
@@ -239,4 +286,166 @@ describe("NotesManagerPage stage 31 single-note export/copy parity", () => {
     expect(await exportedBlobs[0].text()).toContain("# Export parity note")
     expect(await exportedBlobs[1].text()).toContain('"title": "Export parity note"')
   })
+  it.each([
+    "active",
+    "legacy",
+    "disagreement",
+    "deleted",
+    "unsupported",
+    "json",
+    "future-mode",
+    "json-deleted",
+    "json-unsupported",
+  ])(
+    "preserves %s provenance through actual capture, actions and import preparation",
+    async (kind) => {
+      const evidence = {
+        origin: "knowledge_qa",
+        trust_state: "uncited_degraded_answer",
+        thread_id: "canonical",
+      };
+      const legacy = { ...evidence, thread_id: "legacy" };
+      const structured = kind.startsWith("json") || kind === "future-mode";
+      const deleted = kind.endsWith("deleted"),
+        unsupported = kind.endsWith("unsupported");
+      const body = structured
+        ? ' {"n":9007199254740993,"s":"<>&"}\r\n'
+        : "Body";
+      const markerBody = retainKnowledgeNoteProvenance(body, legacy);
+      const record = {
+        id: "n",
+        title: "Evidence",
+        content: structured || kind === "active" ? body : markerBody,
+        content_language: structured
+          ? kind.startsWith("json")
+            ? "json"
+            : kind
+          : null,
+        version: 1,
+        ...(kind === "legacy"
+          ? {}
+          : {
+              knowledge_provenance_state: deleted
+                ? "deleted"
+                : unsupported
+                  ? "unsupported"
+                  : "active",
+              knowledge_provenance_version: 3,
+              knowledge_provenance: deleted || unsupported ? null : evidence,
+            }),
+      };
+      mockBgRequest.mockImplementation(
+        async ({ path, method }: { path: string; method?: string }) => {
+          if (path === "/api/v1/notes/n") return record;
+          if (path.endsWith("/capabilities")) return { content_language: true };
+          if (path === "/api/v1/notes/import" && method === "POST")
+            return { created_count: 1 };
+          return {
+            items: [],
+            notes: [],
+            tasks: [],
+            events: [],
+            pagination: { total_items: 0, total_pages: 1 },
+          };
+        },
+      );
+      const blobs: Blob[] = [];
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: vi.fn((blob: Blob) => {
+          blobs.push(blob);
+          return "blob:export";
+        }),
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: vi.fn(),
+      });
+      const click = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      const page = renderPage();
+      fireEvent.click(screen.getByTestId("notes-list-panel"));
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText("Title")).toHaveValue("Evidence"),
+      );
+      const expected =
+        deleted || (structured && unsupported)
+          ? null
+          : kind === "legacy" || kind === "unsupported"
+            ? legacy
+            : evidence;
+      const importer = renderHook(() =>
+        useNotesImport({
+          isOnline: true,
+          listMode: "active",
+          message: {
+            error: mockMessageError,
+            success: mockMessageSuccess,
+          } as unknown as Parameters<typeof useNotesImport>[0]["message"],
+          t: (key: string) => key,
+          refetch: vi.fn(),
+        }),
+      );
+      for (const format of structured
+        ? ["json", "source"]
+        : ["md", "json", "source"]) {
+        fireEvent.click(screen.getByTestId(`export-${format}-action`));
+        const blob = blobs.at(-1)!;
+        expect(blob).toBeDefined();
+        const text = await blob.text();
+        if (format === "source") {
+          expect(text).toBe(body);
+          continue;
+        }
+        const portable = format === "json" ? JSON.parse(text) : null;
+        if (portable && !structured) {
+          expect(portable).not.toHaveProperty("knowledge_provenance");
+          expect(portable).not.toHaveProperty("expected_provenance_version");
+        }
+        if (structured) {
+          expect(portable.content).toBe(body);
+          expect(portable.knowledge_provenance ?? null).toEqual(expected);
+        } else
+          expect(
+            readKnowledgeNoteProvenance(portable ? portable.content : text),
+          ).toEqual(expected);
+        const filename =
+          format === "json" ? "Evidence.note.json" : "Evidence.md";
+        await act(async () => {
+          await importer.result.current.prepareImportFiles([
+            {
+              name: filename,
+              arrayBuffer: async () => new TextEncoder().encode(text).buffer,
+            } as File,
+          ]);
+        });
+        await act(async () => {
+          await importer.result.current.confirmImport();
+        });
+        const submitted = mockBgRequest.mock.calls
+          .filter(([x]) => x.path === "/api/v1/notes/import")
+          .at(-1)![0].body;
+        expect(submitted.items[0].content).toBe(text);
+        if (process.env.REVIEW_EXPORT_ARTIFACT_DIR) {
+          mkdirSync(process.env.REVIEW_EXPORT_ARTIFACT_DIR, {
+            recursive: true,
+          });
+          writeFileSync(
+            `${process.env.REVIEW_EXPORT_ARTIFACT_DIR}/${kind}-${format}.json`,
+            JSON.stringify({
+              request: submitted,
+              expected,
+              source: body,
+              structured,
+            }),
+          );
+        }
+      }
+      importer.unmount();
+      page.unmount();
+      click.mockRestore();
+    },
+  );
+
 })

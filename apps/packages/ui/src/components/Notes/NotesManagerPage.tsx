@@ -1,3 +1,5 @@
+import { createDocumentRequest } from "@/services/document-editing/types";
+import { sourceProfile } from "./monaco-format-bridge";
 import React from 'react'
 import { Input, Typography, Button } from 'antd'
 import type { InputRef } from 'antd'
@@ -317,6 +319,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [kw.keywordTokens])
 
   // ---- Editor hook (use actual deps now that list and kw are available) ----
+  const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const ed = useNotesEditorState({
     connectionConfig: canonicalConnectionConfig,
     authorityScope: notesGraphAuthorityScope,
@@ -342,9 +345,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
     editorDisabled,
+    hasActiveDraft,
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
-  const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const resetEditorToEmptyState = React.useCallback(() => {
     setHasActiveDraft(false)
     ed.resetEditor()
@@ -396,10 +399,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
     }
   }, [resetEditorToEmptyState])
-  const startDraftSession = React.useCallback(() => {
-    setHasActiveDraft(true)
-    ed.resetEditor()
-  }, [ed.resetEditor])
+  const startDraftSession = React.useCallback(
+    (languageState?: Parameters<typeof ed.resetEditor>[0]) => {
+      setHasActiveDraft(true);
+      ed.resetEditor(languageState);
+    },
+    [ed.resetEditor]
+  );
   const focusSearchInput = React.useCallback(() => {
     searchInputRef.current?.focus()
   }, [])
@@ -867,6 +873,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     title: ed.title,
     content: ed.content,
     originalMetadata: ed.originalMetadata,
+    contentLanguage: ed.contentLanguage,
+    captureExport: ed.captureExport,
     editorKeywords: kw.editorKeywords,
     selectedStudioState: effectiveStudioState,
     studioPaperSize: selectedStudioPaperSize,
@@ -1122,6 +1130,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const duplicateSelectedNote = React.useCallback(async () => {
     if (editorDisabled) return
+    if (ed.selectedId != null && !(await ed.confirmDiscardIfDirty())) return
     const hasDraft = ed.title.trim().length > 0 || ed.content.trim().length > 0
     if (!hasDraft) {
       message.warning('Add a title or content before duplicating.')
@@ -1132,10 +1141,14 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (isMobileViewport) setMobileSidebarOpen(false)
     const baseTitle = ed.title.trim() || (ed.selectedId != null ? `Note ${ed.selectedId}` : 'Untitled note')
     const duplicateTitle = /\(copy\)$/i.test(baseTitle) ? baseTitle : `${baseTitle} (Copy)`
+    const duplicateLanguage = {
+      contentLanguage: ed.contentLanguage,
+      implicitDefaultLanguage: ed.implicitDefaultLanguage,
+    };
     const duplicateContent = ed.content
     const duplicateKeywords = [...kw.editorKeywords]
 
-    startDraftSession()
+    startDraftSession(duplicateLanguage)
     ed.setTitle(duplicateTitle)
     ed.setContent(duplicateContent)
     kw.setEditorKeywords(duplicateKeywords)
@@ -1147,6 +1160,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     }, 0)
   }, [
     ed.content,
+    ed.contentLanguage,
+    ed.implicitDefaultLanguage,
+    ed.confirmDiscardIfDirty,
     ed.selectedId,
     ed.setContent,
     ed.setIsDirty,
@@ -1662,6 +1678,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const applyMarkdownToolbarAction = React.useCallback(
     (action: MarkdownToolbarAction) => {
+      if (!ed.markdownAllowed) return
       if (editorDisabled) return
       if (ed.editorInputMode === 'wysiwyg') {
         const richEditor = ed.richEditorRef.current
@@ -1810,7 +1827,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   )
 
   const openAttachmentPicker = React.useCallback(() => {
-    if (editorDisabled) return
+    if (editorDisabled || !ed.markdownAllowed) return;
     if (ed.selectedId == null) {
       message.warning(t('option:notesSearch.attachmentSaveFirstWarning', {
         defaultValue: 'Save this note once before adding attachments.'
@@ -1825,6 +1842,15 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const files = event.target.files
       if (!files || files.length === 0) return
       const inputElement = event.target
+      if (!ed.markdownAllowed || editorDisabled) {
+        inputElement.value = "";
+        return;
+      }
+      const admission = ed.captureMarkdownWriter();
+      if (!admission) {
+        inputElement.value = "";
+        return;
+      }
       if (ed.selectedId == null) { inputElement.value = ''; return }
       const noteId = String(ed.selectedId)
       const selectedFiles = Array.from(files)
@@ -1847,13 +1873,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             uploadedMarkdown.push(toAttachmentMarkdown(attachmentName, attachmentUrl, attachmentContentType))
           } catch { failedUploads += 1 }
         }
+        if (!admission.isCurrent()) return;
         if (uploadedMarkdown.length === 0) {
           message.error(t('option:notesSearch.attachmentUploadFailed', { defaultValue: 'Attachment upload failed. Please try again.' }))
           return
         }
         const markdown = uploadedMarkdown.join('\n')
-        if (ed.editorInputMode === 'wysiwyg') {
-          const nextContent = ed.content.trim().length > 0 ? `${ed.content}\n${markdown}` : markdown
+        if (admission.inputMode === "wysiwyg") {
+          const nextContent =
+            admission.content.trim().length > 0
+              ? `${admission.content}\n${markdown}`
+              : markdown;
           ed.setContentDirty(nextContent)
           ed.replaceWysiwygHtml(markdownToWysiwygHtml(nextContent))
           ed.setWysiwygSessionDirty(true)
@@ -1861,9 +1891,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           const activeTextarea = ed.contentTextareaRef.current
           if (!activeTextarea) return
           activeTextarea.focus()
-          const start = activeTextarea.selectionStart ?? ed.content.length
+          const start =
+            activeTextarea.selectionStart ?? admission.content.length;
           const end = activeTextarea.selectionEnd ?? start
-          const nextContent = `${ed.content.slice(0, start)}${markdown}${ed.content.slice(end)}`
+          const nextContent = `${admission.content.slice(0, start)}${markdown}${admission.content.slice(end)}`;
           ed.setContentDirty(nextContent)
           const cursor = start + markdown.length
           window.requestAnimationFrame(() => {
@@ -1887,11 +1918,12 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         }
       })().finally(() => { inputElement.value = '' })
     },
-    [ed, message, t]
-  )
+    [ed, editorDisabled, message, t],
+  );
 
   // WYSIWYG handlers
   const enterWysiwygMode = React.useCallback(() => {
+    if (!ed.markdownAllowed) return
     ed.markdownBeforeWysiwygRef.current = ed.content
     ed.replaceWysiwygHtml(markdownToWysiwygHtml(ed.content))
     ed.setWysiwygSessionDirty(false)
@@ -1900,6 +1932,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [ed])
 
   const exitWysiwygMode = React.useCallback(() => {
+    if (!ed.markdownAllowed) return
     const originalMarkdown = ed.markdownBeforeWysiwygRef.current
     if (!ed.wysiwygSessionDirty && originalMarkdown != null && originalMarkdown !== ed.content) {
       ed.setContent(originalMarkdown)
@@ -1931,6 +1964,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // and update the Markdown, leaving the DOM (and the caret) alone (NE-01).
   const handleWysiwygInput = React.useCallback(
     (event: React.FormEvent<HTMLDivElement>) => {
+      if (!ed.markdownAllowed) return
       const nextHtml = event.currentTarget.innerHTML
       ed.recordWysiwygEditorHtml(nextHtml)
       ed.setWysiwygSessionDirty(true)
@@ -1942,6 +1976,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   )
 
   const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    if (!ed.markdownAllowed) return
     if (editorDisabled) return
     const plain = event.clipboardData.getData('text/plain')
     if (!plain) return
@@ -1949,7 +1984,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
       document.execCommand('insertText', false, plain)
     }
-  }, [editorDisabled])
+  }, [ed.markdownAllowed, editorDisabled])
 
   // TOC jump
   const handleTocJump = React.useCallback(
@@ -2044,6 +2079,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [])
 
   const handleOpenNotesStudio = React.useCallback(() => {
+    if (!ed.markdownAllowed) return;
     if (editorDisabled || ed.selectedId == null) return
     if (ed.isDirty) {
       message.warning(t('option:notesSearch.notesStudioSaveFirstWarning', {
@@ -2084,7 +2120,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [handleEditorInputModeChange])
 
   const handleCreateNotesStudio = React.useCallback(async () => {
+    if (!ed.markdownAllowed) return;
     if (ed.selectedId == null || !notesStudioExcerptText.trim()) return
+    const admission = ed.captureMarkdownWriter();
+    if (!admission) return;
     setNotesStudioCreateLoading(true)
     try {
       const studioState = await deriveNoteStudio({
@@ -2093,10 +2132,12 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         template_type: notesStudioTemplateType,
         handwriting_mode: notesStudioHandwritingMode,
       })
+      if (!admission.isCurrent()) return;
       closeNotesStudioCreateModal()
       await list.refetch()
-      const opened = await ed.handleSelectNote(studioState.note.id)
-      if (!opened) return
+      if (!admission.isCurrent()) return;
+      const opened = await admission.reload(studioState.note.id, true);
+      if (!opened?.loaded || !opened.isCurrent()) return;
       setSelectedStudioState(studioState)
       ed.setEditorMode('preview')
     } catch (error: any) {
@@ -2120,18 +2161,23 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   ])
 
   const handleRegenerateStudioView = React.useCallback(async () => {
+    if (!ed.markdownAllowed) return;
     if (ed.selectedId == null) return
+    const admission = ed.captureMarkdownWriter();
+    if (!admission) return;
     setNotesStudioRegenerating(true)
     try {
       const selectedNoteId = String(ed.selectedId)
       const refreshed = await regenerateNoteStudio(String(ed.selectedId), {
         current_markdown: String(ed.content || ''),
       })
-      const detailReloaded = await ed.loadDetail(selectedNoteId)
-      if (!detailReloaded) {
+      if (!admission.isCurrent()) return;
+      const reloaded = await admission.reload(selectedNoteId);
+      if (!reloaded?.isCurrent()) return;
+      if (!reloaded.loaded) {
         ed.setTitle(String(refreshed.note.title || ''))
         ed.setContent(String(refreshed.note.content || ''))
-        ed.replaceWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
+        if (ed.markdownAllowed) ed.replaceWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))
         ed.setIsDirty(false)
       }
       setSelectedStudioState(refreshed)
@@ -2145,7 +2191,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     } finally {
       setNotesStudioRegenerating(false)
     }
-  }, [ed, message, t])
+  }, [ed, message, t]);
 
   // Flashcards
   const handleGenerateFlashcardsFromNote = React.useCallback(async () => {
@@ -2397,7 +2443,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   openSourceNoteRef.current = ed.openSourceNote
 
   React.useEffect(() => {
-    if (sourceNoteId == null || !isOnline || !notesGraphAuthorityScope) return
+    if (
+      sourceNoteId == null ||
+      !isOnline ||
+      !notesGraphAuthorityScope ||
+      !ed.offlineDraftQueueHydrated
+    )
+      return;
     const controller = new AbortController()
     const id = sourceNoteId.trim()
     setSourceResult(null)
@@ -2406,7 +2458,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       if (!controller.signal.aborted) setSourceResult({ id: sourceNoteId, scope: notesGraphAuthorityScope, status })
     })()
     return () => controller.abort()
-  }, [sourceNoteId, isOnline, notesGraphAuthorityScope, sourceRetry])
+  }, [
+    sourceNoteId,
+    isOnline,
+    notesGraphAuthorityScope,
+    sourceRetry,
+    ed.offlineDraftQueueHydrated,
+  ]);
 
   const sourceUnavailable = sourceResult?.id === sourceNoteId && sourceResult.scope === notesGraphAuthorityScope && sourceResult.status === 'unavailable' && ed.selectedId == null
 
@@ -2759,6 +2817,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         showEmptyState={showEditorEmptyState}
         title={ed.title}
         content={ed.content}
+        contentLanguage={ed.effectiveContentLanguage}
+        markdownAllowed={ed.markdownAllowed}
+        languagePersistence={ed.languagePersistence}
+        onContentLanguageChange={language => {ed.clearAssistUndoState(); ed.selectContentLanguage(language)}}
+        documentRequest={notesGraphAuthorityScope ? createDocumentRequest({
+          key:{authority_id:notesGraphAuthorityScope,document_id:String(ed.selectedId ?? 'draft'),
+            session_generation:ed.documentSession + ed.documentAuthorityEpoch,
+            draft_revision:ed.documentRevision,language_revision:ed.documentLanguageRevision,request_id:ed.documentRevision + ed.documentLanguageRevision},
+          text:ed.content,language:ed.effectiveContentLanguage ?? null,newline:sourceProfile(ed.content) ?? '\n',
+          has_bom:ed.content.startsWith('\ufeff'),
+        }) : null}
         editorDisabled={editorDisabled || ed.loadingSelection}
         isDirty={ed.isDirty}
         isOnline={isOnline}
@@ -2912,7 +2981,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           void handleCreateNotesStudio()
         }}
       />
-      <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
+      <input
+        ref={imp.importInputRef}
+        type="file"
+        multiple
+        accept=".json,.jsonl,.yaml,.yml,.md,.markdown,.txt,application/json,text/markdown,text/plain"
+        className="hidden"
+        data-testid="notes-import-input"
+        onChange={(event) => {
+          void imp.handleImportInputChange(event);
+        }}
+      />
       {hasDeferredOverlayOpen && (
         <React.Suspense fallback={null}>
           <LazyNotesManagerOverlays

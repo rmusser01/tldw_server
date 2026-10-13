@@ -1,5 +1,28 @@
 # Testing Evidence Lessons
 
+## Bind fixtures to the owner that actually consumes them (TASK-13598, PR #3226)
+
+**Incident (2026-10-13).** The structured-document contract passed from the UI
+package but failed in the frontend shard because its raw fixture path depended on
+the working directory. Resolving it from the test module preserved the same
+SHA-256 and passed all 24 cases in both consumers. A separate recovery control
+spied on `Storage.prototype`, while the UI setup supplied a `MemoryStorage` that
+implements the interface without inheriting that prototype. The intended quota
+failure never reached the actual write. Targeting `window.localStorage` passed
+locally with MemoryStorage, but CI's JSDOM Storage proxy absorbed the spy as a
+string key while leaving the inherited method callable. The same failure
+reproduced on installed Node20 with CI's deterministic configuration. Spying on
+`Object.getPrototypeOf(window.localStorage)`, the pattern used by existing
+storage tests, intercepted both real JSDOM and MemoryStorage writes; native and
+fallback probes verified the defining method owner and restoration.
+
+**Evidence and rule.** Keep the same fixture bytes and assertions while binding
+filesystem fixtures and injected failures to the actual module or defining
+method owner. An exotic receiver can report successful property replacement
+without changing the callable method. A passing sibling working directory or
+one storage implementation does not prove the consuming test exercised the
+intended data or failure.
+
 
 ## Hash navigation does not replay browser initialization (TASK-13227, 2026-10-11)
 
@@ -392,3 +415,22 @@ only after the current request's profile check succeeds.
 ## A copied linter baseline needs the same module filename
 
 **PR3091, 2026-10-04.** The Buddy service-base integration copied nine reviewed dev modules into a temporary directory for a Ruff comparison. Their bytes matched the integrated modules, but the copy reported fifteen findings versus six: its temporary paths bypassed nine `BLE001` per-file ignores. Passing the real module name through `--stdin-filename` in both arms applied the same configuration and produced the same six findings. Preserve the filename/configuration context as well as source bytes when comparing static diagnostics; do not report an apparent improvement from a mismatched baseline.
+
+## Monaco history depends on its browser platform and source EOL (TASK-13587, 2026-10-07)
+
+The I1 real Notes candidate initially typed at the wrong location when host-macOS
+shortcuts were used against Playwright Desktop Chrome/Firefox Windows user agents.
+Monaco derives its keybinding platform from the UA, not the host's platform field.
+A newline-free source also defaulted to Windows CRLF, changing an LF replacement.
+Explicit source EOL at model load, exact round-trip admission, and actual UA-native
+keyboard traces exposed and fixed both errors. Test LF and CRLF history separately;
+a mocked edit or a host-based shortcut is insufficient evidence. The mounted
+composition control also caught an ignored option typo: installed Monaco 0.55 uses
+`editContext`, not `experimentalEditContextEnabled`. Synthetic composition flag
+coverage still does not establish actual OS IME behavior.
+
+## Ignore-aware inventories are not package absence proof
+
+**Incident (TASK-13595, 2026-10-11):** `rg --files` hid JSON paths under inherited ignore rules. An initial extension runtime diagnosis incorrectly inferred that the default locale catalog was absent. Direct `ls`, tracked-file lookup and actual `.output/chrome-mv3` plus exported `build/chrome-mv3-dev` checks proved the unchanged 1311-key catalog existed. Raw Chromium inventory then showed the untouched extension enabled without manifest errors; an assumed always-live MV3 worker and a normal first-run tutorial were the actual earlier harness gates. No catalog or manifest repair was needed.
+
+**Evidence and rule:** Use ignore-aware search for discovery, then direct source/tracked/output checks before claiming absence. Inspect the actual browser inventory and normal UI lifecycle before inferring a package defect. A staged test helper that manufactures a locale catalog or manifest key does not qualify the untouched installed artifact. Similarly, a live test helper's name is insufficient: this task found it still set a readiness bypass even in its strict profile. Final actual runs explicitly removed both bypass flags before navigation and used normal health/auth flows.

@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     sync_v2_domain_schemas,
     sync_v2_server_supported_adapter_versions,
     validate_notes_note_upsert_payload,
+    validate_notes_note_upsert_payload_v2,
 )
 from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextActivationReceipt,
@@ -1968,7 +1969,14 @@ class SyncV2Envelope(BaseModel):
             raise ValueError("chat.message append envelopes require object_id and payload_hash")
 
         if self.domain == "notes.note" and self.operation == "upsert":
-            validate_notes_note_upsert_payload(self.payload)
+            if (self.adapter_version, self.schema_version) not in {(1, 1), (2, 2)}:
+                raise ValueError("Unsupported Notes adapter/schema version pair")
+            validator = (
+                validate_notes_note_upsert_payload_v2
+                if self.adapter_version == 2
+                else validate_notes_note_upsert_payload
+            )
+            validator(self.payload)
 
         if self.domain == "attachment.ref":
             if self.adapter_version == 2:

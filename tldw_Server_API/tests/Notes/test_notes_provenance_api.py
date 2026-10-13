@@ -3,6 +3,8 @@
 import csv
 import io
 import json
+import secrets
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -963,3 +965,105 @@ def test_reads_fence_committed_child_ahead_of_rolled_back_applied_head(client, s
     assert current["content"] == "Later body"
     assert current["knowledge_provenance"] == payload
     assert (current["version"], current["knowledge_provenance_version"]) == (2, 3)
+
+
+@pytest.mark.parametrize("language", ["yaml", "json", "text", "future/mode"])
+def test_structured_provenance_export_retains_exact_source(api, language, sync_service):
+    sync_service.settings = replace(sync_service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    client, _ = api
+    source = retain_notes_provenance("  source: <>&\r\n", {"origin": "reviewed_sources"}) + "\r\n "
+    saved = create(api, content=source, content_language=language)
+    exported = client.post(BASE + "/export", json={"note_ids": [saved["id"]]}).json()["notes"][0]
+    assert exported["content"] == source
+    assert exported["content_language"] == language
+    assert exported["knowledge_provenance"] == PAYLOAD
+    assert client.get(BASE + "/" + saved["id"]).json()["content"] == source
+
+
+def test_structured_source_import_does_not_infer_markdown_provenance(api, sync_service):
+    sync_service.settings = replace(sync_service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    client, _ = api
+    source = retain_notes_provenance("source: <>&", PAYLOAD)
+    response = client.post(
+        BASE + "/import", json={"items": [{"format": "source", "file_name": "config.yaml", "content": source}]}
+    )
+    assert response.status_code == 200, response.text
+    row = client.get(BASE + "/").json()["notes"][0]
+    assert row["content"] == source
+    assert row["content_language"] == "yaml"
+    assert row["knowledge_provenance_state"] == "absent"
+
+
+@pytest.mark.parametrize(
+    "language_fields",
+    [{}, {"content_language": None}, {"content_language": "yaml"}, {"content_language": "future/mode"}],
+)
+def test_compound_ack_language_survives_newer_row_and_receipt_replay(api, sync_service, language_fields):
+    sync_service.settings = replace(sync_service.settings, pull_token_signing_secret=secrets.token_urlsafe(32))
+    client, _ = api
+    source = " exact <>&\r\n"
+    body = {
+        "title": "Immutable",
+        "content": source,
+        "knowledge_provenance": PAYLOAD,
+        "expected_provenance_version": 0,
+        **language_fields,
+    }
+    create_headers = {"Idempotency-Key": "language-create"}
+    first = client.post(BASE + "/", json=body, headers=create_headers)
+    assert first.status_code == 201, first.text
+    saved = first.json()
+    assert saved["content"] == source
+    assert saved["content_language"] == language_fields.get("content_language")
+    assert saved["knowledge_provenance"] == PAYLOAD
+    path = BASE + "/" + saved["id"]
+    updated_body = {
+        "content": source + "updated",
+        "knowledge_provenance": PAYLOAD,
+        "expected_provenance_version": 1,
+        **language_fields,
+    }
+    update_headers = {"expected-version": "1", "Idempotency-Key": "language-update"}
+    updated = client.put(path, json=updated_body, headers=update_headers)
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["content_language"] == language_fields.get("content_language")
+    assert updated.json()["content"] == source + "updated"
+    assert updated.json()["knowledge_provenance"] == PAYLOAD
+    later = client.put(
+        path,
+        json={"content": "newest source", "content_language": "text"},
+        headers={"expected-version": str(updated.json()["version"])},
+    )
+    assert later.status_code == 200, later.text
+    current = client.get(path).json()
+    assert (current["content"], current["content_language"]) == ("newest source", "text")
+    replay_create = client.post(BASE + "/", json=body, headers=create_headers)
+    replay_update = client.put(path, json=updated_body, headers=update_headers)
+    assert replay_create.status_code == 201, replay_create.text
+    assert replay_update.status_code == 200, replay_update.text
+    assert replay_create.json() == saved
+    assert replay_update.json() == updated.json()
+    assert client.get(path).json() == current
+
+
+@pytest.mark.parametrize(
+    "language_fields",
+    [{}, {"content_language": None}, {"content_language": "yaml"}, {"content_language": "future/mode"}],
+)
+def test_immutable_compound_response_preserves_language_field_presence(language_fields):
+    from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import NotesOrganizationCoordinator
+    from tldw_Server_API.app.core.Sync.v2.server_origin_batch import ServerOriginMutationStep
+
+    coordinator = object.__new__(NotesOrganizationCoordinator)
+    step = ServerOriginMutationStep(
+        domain="notes.note",
+        operation="upsert",
+        object_id="legacy-or-current",
+        payload={"title": "Snapshot", "content": " exact <>&\r\n", **language_fields},
+        routing_metadata={"notes_organization_note_response": {"version": 2}},
+    )
+    response = coordinator._load_note_response(step, dataset_id="immutable-manifest")
+    assert ("content_language" in response) == ("content_language" in language_fields)
+    if language_fields:
+        assert response["content_language"] == language_fields["content_language"]
+    assert response["content"] == step.payload["content"]

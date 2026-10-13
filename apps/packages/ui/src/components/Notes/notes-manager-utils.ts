@@ -480,6 +480,10 @@ export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'li
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
   pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
+  draftVersion?: 2 | 3;
+  implicitDefaultLanguage?: boolean;
+  revision?: number
+  content_language?: string | null
   key: string
   noteId: string | null
   baseVersion: number | null
@@ -493,9 +497,37 @@ export type OfflineDraftEntry = {
   syncState: OfflineDraftSyncState
   lastError: string | null
 }
+export const isValidNoteLanguage = (value: unknown): value is string | null =>
+  value === null ||
+  (typeof value === 'string' && value.length > 0 && Array.from(value).length <= 100);
+
+export const isCompleteNoteSourceAcknowledgement = (
+  reply: unknown,
+  content: string,
+  expectedId?: string | number | null
+): boolean => {
+  if (!reply || typeof reply !== 'object') return false;
+  const note = reply as Record<string, unknown>;
+  const id = note.id;
+  const validId =
+    typeof id === 'string'
+      ? id.length > 0 && id.trim() === id
+      : typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
+  const version = toNoteVersion(note);
+  return (
+    validId &&
+    note.content === content &&
+    (note.content_language === undefined || isValidNoteLanguage(note.content_language)) &&
+    version !== null &&
+    Number.isSafeInteger(version) &&
+    (expectedId == null || String(id) === String(expectedId))
+  );
+};
+
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
+      contentLanguage?: string | null
       savedTitle: string | null
       head?: KnowledgeNoteHead
       submittedBody?: Record<string, unknown>
@@ -535,6 +567,19 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
           /^sha256:[a-f0-9]{64}$/.test(draft.pendingWrite.body.expected_provenance_hash) && Number.isSafeInteger(draft.pendingWrite.expectedVersion))) &&
         (draft.pendingWrite.expectedVersion === null || Number.isSafeInteger(draft.pendingWrite.expectedVersion))
         ? { pendingWrite: draft.pendingWrite } : {}),
+      draftVersion: 3,
+      implicitDefaultLanguage:
+        draft.draftVersion === 3 &&
+        draft.implicitDefaultLanguage === true &&
+        normalizedKey === NOTES_OFFLINE_NEW_DRAFT_KEY &&
+        draft.noteId == null &&
+        draft.baseVersion == null &&
+        toNoteVersion(draft) === null &&
+        draft.content_language === null,
+      revision: Number.isSafeInteger(draft.revision) && draft.revision >= 0 ? draft.revision : 0,
+      ...(isValidNoteLanguage(draft.content_language)
+        ? { content_language: draft.content_language }
+        : {}),
       key: normalizedKey,
       noteId: draft.noteId != null ? String(draft.noteId) : null,
       baseVersion:
@@ -627,7 +672,7 @@ export type MoodboardSummary = {
   last_modified?: string
 }
 export type NotebookFilterOption = NotesNotebookSetting
-export type ImportFormat = 'json' | 'markdown'
+export type ImportFormat = 'json' | 'markdown' | 'portable_note' | 'source'
 export type ImportDuplicateStrategy = 'skip' | 'overwrite' | 'create_copy'
 export type PendingImportFile = {
   fileName: string
@@ -1200,31 +1245,68 @@ export const unwrapListsFromBlocks = (root: HTMLElement): void => {
   }
 }
 
-export const detectImportFormatFromFileName = (fileName: string): ImportFormat => {
-  const lower = fileName.toLowerCase()
-  if (lower.endsWith('.json')) return 'json'
-  return 'markdown'
-}
+export const detectImportFormatFromFileName = (
+  fileName: string,
+  sourceMode = false
+): ImportFormat => {
+  if (sourceMode) return 'source';
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.json')) return 'json';
+  if (/\.(jsonl|yaml|yml|txt|text)$/.test(lower)) return 'source';
+  return 'markdown';
+};
 
-export const estimateDetectedNotesFromImportContent = (format: ImportFormat, content: string): number => {
-  if (format === 'markdown') return 1
+export const detectDeclaredPortableImport = (
+  format: ImportFormat,
+  content: string
+): ImportFormat => {
+  if (format !== 'json') return format;
   try {
-    const parsed = JSON.parse(content)
-    if (Array.isArray(parsed)) return parsed.filter((entry) => entry && typeof entry === 'object').length
+    const parsed: unknown = JSON.parse(content);
+    const records = Array.isArray(parsed)
+      ? parsed
+      : [
+          parsed,
+          ...['notes', 'data', 'items', 'results'].flatMap((key) => {
+            const rows =
+              parsed && typeof parsed === 'object'
+                ? (parsed as Record<string, unknown>)[key]
+                : null;
+            return Array.isArray(rows) ? rows : [];
+          }),
+        ];
+    if (records.some((row) => row && typeof row === 'object' && 'format_version' in row))
+      return 'portable_note';
+  } catch {
+    /* The existing preview reports invalid containers. */
+  }
+  return format;
+};
+
+export const estimateDetectedNotesFromImportContent = (
+  format: ImportFormat,
+  content: string
+): number => {
+  if (format === 'markdown' || format === 'source') return content.length > 0 ? 1 : 0;
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed))
+      return parsed.filter((entry) => entry && typeof entry === 'object').length;
     if (parsed && typeof parsed === 'object') {
+      if ('format_version' in parsed) return 1;
       for (const key of ['notes', 'data', 'items', 'results']) {
-        const candidate = (parsed as Record<string, unknown>)[key]
+        const candidate = (parsed as Record<string, unknown>)[key];
         if (Array.isArray(candidate)) {
-          return candidate.filter((entry) => entry && typeof entry === 'object').length
+          return candidate.filter((entry) => entry && typeof entry === 'object').length;
         }
       }
-      return 1
+      return 1;
     }
   } catch {
-    return 0
+    return 0;
   }
-  return 0
-}
+  return 0;
+};
 
 export const NOTE_SORT_API_PARAMS: Record<
   NotesSortOption,

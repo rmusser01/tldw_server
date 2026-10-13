@@ -561,6 +561,7 @@ def test_v61_studio_write_reduces_equal_legacy_aliases_and_rebuilds_all_hashes(
             "content": "# Companion\r\n\r\nAccepted content",
             "conversation_id": None,
             "message_id": None,
+            "content_language": None,
         }
     )
     assert stored["note_hash"] == note_hash  # nosec B101
@@ -662,3 +663,42 @@ def test_v61_studio_write_rejects_effective_sync_envelope_over_limit(
             companion_content_hash=stable_content_hash("Accepted content"),
             render_version=1,
         )
+
+
+def test_retained_v1_studio_provenance_is_narrowly_verified(db, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+    from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
+    from tldw_Server_API.app.core.Sync.v2.server_origin import canonical_payload_hash
+
+    note_id = db.add_note(title="Legacy", content="Exact source")
+
+    def legacy_head(note):
+        payload = validate_notes_note_upsert_payload(
+            {key: note.get(key) for key in ("title", "content", "conversation_id", "message_id")}
+        )
+        return note["version"], canonical_payload_hash(payload)[0]
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(NoteStore, "_notes_note_head", staticmethod(legacy_head))
+        stored = db.create_note_studio_document(
+            note_id=note_id,
+            payload_json=_canonical_sections(),
+            template_type="lined",
+            handwriting_mode="accented",
+            source_note_id=None,
+            excerpt_snapshot=None,
+            excerpt_hash=None,
+            companion_content_hash="unused",
+            render_version=1,
+        )
+    with db.transaction() as conn:
+        db.note_store._prove_stored_studio_retry_state(conn, stored)
+        raw = conn.execute("SELECT * FROM note_studio_documents WHERE note_id = ?", (note_id,)).fetchone()
+        db.moodboard_sync_store._validate_studio_rows(conn, rows=[raw], owner=db.client_id, dataset="local-unbound")
+    current = db.get_note_by_id(note_id)
+    assert db.note_store._notes_note_head(current)[1] != stored["note_hash"]
+    assert not db.note_store._matches_notes_note_hash(current, "sha256:wrong")
+    assert not db.note_store._matches_notes_note_hash({**current, "content_language": "json"}, stored["note_hash"])
+    with db.transaction() as conn:
+        with pytest.raises(ConflictError):
+            db.note_store._prove_stored_studio_retry_state(conn, {**stored, "note_revision": 999})
