@@ -1,3 +1,4 @@
+import { storageOriginal, spyOnStorageGet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -177,6 +178,10 @@ vi.mock("@/services/title", () => ({
 
 vi.mock("@/utils/update-page-title", () => ({
   updatePageTitle: updatePageTitleMock,
+}));
+
+vi.mock("@/db/dexie/schema", async () => ({
+  db: (await import("./local-history-fixture")).memory
 }));
 
 vi.mock("@/db/dexie/chat-persistence-transaction", () => ({
@@ -522,7 +527,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
       continuationStoreBoundary.actual = true;
       localStorage.clear();
       const { db } = await import("@/db/dexie/schema");
-      // The common Vitest table is nonretaining; declare this original profile IO explicitly.
+      // Declare this original profile in the shared retaining table fixture.
       const profile = vi.spyOn(db.userSettings, "get").mockResolvedValue({ id: "main", history_profile_id: "qualified-compare-profile" });
       restoreProfile = () => profile.mockRestore();
       useStoreChatModelSettings.getState().reset();
@@ -823,7 +828,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
       const service = await vi.importActual<typeof import("@/services/actor-settings")>("@/services/actor-settings");
       getActorSceneMock.mockImplementationOnce(service.getActorSceneForChat);
       const pending = deferred<undefined>();
-      const read = vi.spyOn(Storage.prototype, "get").mockReturnValueOnce(pending.promise);
+      const read = spyOnStorageGet().mockReturnValueOnce(pending.promise);
       const view = mount();
       let attempt!: ReturnType<typeof view.result.current.onSubmit>;
       try {
@@ -929,9 +934,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
       );
       const entered = deferred<string>();
       const failure = deferred<undefined>();
-      const originalGet = Storage.prototype.get;
+      const originalGet = storageOriginal.get;
       let qualifiedKey: string | undefined;
-      const read = vi.spyOn(Storage.prototype, "get").mockImplementation(
+      const read = spyOnStorageGet().mockImplementation(
         function (key) {
           if (key.startsWith("actorSettings:owned:") && !qualifiedKey) {
             qualifiedKey = key;

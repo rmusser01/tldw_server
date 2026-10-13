@@ -1,9 +1,10 @@
-import { afterAll, vi } from "vitest"
+import { afterAll, beforeEach, vi } from "vitest"
 import { safeStorageSerde } from "@/utils/safe-storage"
 import { browser } from "../../../../../../tldw-frontend/extension/shims/wxt-browser"
 
 // Install the API before source imports construct real Plasmo storage instances.
 vi.stubGlobal("chrome", { storage: browser.storage })
+beforeEach(() => vi.stubGlobal("chrome", { storage: browser.storage }))
 afterAll(() => vi.unstubAllGlobals())
 
 // Fault controls reach the captured native API or the WebUI instance backend.

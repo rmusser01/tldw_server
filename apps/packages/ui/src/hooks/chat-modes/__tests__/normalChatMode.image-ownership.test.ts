@@ -1,3 +1,4 @@
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"

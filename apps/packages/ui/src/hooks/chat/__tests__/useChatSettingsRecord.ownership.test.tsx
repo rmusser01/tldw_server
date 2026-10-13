@@ -1,3 +1,4 @@
+import { storageOriginal, spyOnStorageGet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { Storage } from "@plasmohq/storage"
@@ -46,8 +47,8 @@ it.each([null, settings("Beta")])("never presents a warm previous chat while the
   const hook = renderHook(({ id }) => useChatSettingsRecord({ historyId: null, serverChatId: id }), { initialProps: { id: "A" } })
   await waitFor(() => expect(hook.result.current.settings?.authorNote).toBe("Alpha"))
   const entered = deferred(), held = deferred()
-  const read = Storage.prototype.get
-  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+  const read = storageOriginal.get
+  spyOnStorageGet().mockImplementation(async function(this: Storage, storageKey: string) {
     if (storageKey === key("B")) { entered.release(); await held.promise }
     return await read.call(this, storageKey)
   })
@@ -87,8 +88,8 @@ it.each(["restore", "selection"])("rejects a retained callback after synchronous
 
 
 it("marks unread settings unresolved until the owned storage read completes", async () => {
-  const held = deferred(), entered = deferred(), read = Storage.prototype.get
-  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+  const held = deferred(), entered = deferred(), read = storageOriginal.get
+  spyOnStorageGet().mockImplementation(async function(this: Storage, storageKey: string) {
     if (storageKey === key("A")) { entered.release(); await held.promise }
     return read.call(this, storageKey)
   })
@@ -118,8 +119,8 @@ it("does not publish an old recovery receipt after a held read retires to anothe
   const receiptKey = `tldw:chatSettingsSaves:v1:${destination}`
   await new Storage({ area: "local" }).set(receiptKey, { value: { version: 1, destination, operation_id: "pending-A", status: "pending", intent: { authorNote: "Old unresolved A" }, patch: { authorNote: "Old unresolved A" } }, updatedAt: 1 })
   await new Storage({ area: "local" }).set(key("B"), { value: settings("Beta"), updatedAt: 2 })
-  const entered = deferred(), held = deferred(), read = Storage.prototype.get
-  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+  const entered = deferred(), held = deferred(), read = storageOriginal.get
+  spyOnStorageGet().mockImplementation(async function(this: Storage, storageKey: string) {
     if (storageKey === receiptKey) { entered.release(); await held.promise }
     return read.call(this, storageKey)
   })
@@ -136,9 +137,9 @@ it("does not publish an old recovery receipt after a held read retires to anothe
 it.each([false, true])("only publishes the latest recovery read on the same source, old failure=%s", async (oldFailure) => {
   const destination = resolveChatSettingsKey({ historyId: null, serverChatId: "A", requestScope })
   const receiptKey = `tldw:chatSettingsSaves:v1:${destination}`
-  const entered = deferred(), held = deferred(), read = Storage.prototype.get
+  const entered = deferred(), held = deferred(), read = storageOriginal.get
   let blocked = false
-  vi.spyOn(Storage.prototype, "get").mockImplementation(async function(this: Storage, storageKey: string) {
+  spyOnStorageGet().mockImplementation(async function(this: Storage, storageKey: string) {
     const snapshot = await read.call(this, storageKey)
     if (storageKey === receiptKey && !blocked) { blocked = true; entered.release(); await held.promise; if (oldFailure) throw new Error("Old read failed") }
     return snapshot

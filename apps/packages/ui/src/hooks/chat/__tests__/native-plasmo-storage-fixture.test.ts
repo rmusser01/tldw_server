@@ -78,3 +78,14 @@ it("preserves enumeration and plain legacy values during a read fault control", 
   expect(read).not.toHaveBeenCalled()
   expect(await storage.get("native-legacy-string")).toBe("Legacy plain text")
 })
+
+it("allows an owning case to retire its declared runtime", () => {
+  vi.unstubAllGlobals()
+  expect(globalThis.chrome).toBeUndefined()
+})
+it("restores the captured API for the next independent case", async () => {
+  requirePersistentStorage(storage)
+  await storage.set("native-runtime-restored", { original: true })
+  expect(await storage.get("native-runtime-restored")).toEqual({ original: true })
+  expect(window.localStorage.getItem("native-runtime-restored")).not.toBeNull()
+})

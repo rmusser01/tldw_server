@@ -1,4 +1,3 @@
-import { browser as nativeBrowser } from "../../../../../../tldw-frontend/extension/shims/wxt-browser"
 import { storageOriginal, spyOnStorageGet, spyOnStorageSet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client"
@@ -2259,7 +2258,6 @@ describe("real full and compact Scene consumers across persistence and steering"
 
   afterEach(() => {
     vi.unstubAllGlobals()
-    vi.stubGlobal("chrome", { storage: nativeBrowser.storage })
     useStoreMessageOption.setState(initialCore)
     useActorStore.getState().reset()
   })
