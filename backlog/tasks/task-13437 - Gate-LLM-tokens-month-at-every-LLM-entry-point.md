@@ -1,7 +1,7 @@
 ---
 id: TASK-13437
 title: Gate LLM tokens/month at every LLM entry point
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -27,6 +27,7 @@ PR 2b: the check at the call (core/Usage/llm_quota_gate.py). The wrapped provide
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Every LLM call for a known user is now recorded (PR 1a, 1b) and gated (PR 2a, 2b). PR 2a checks limits.llm_tokens_per_month and the two new cost keys at the request boundary of the main entry points (402 before any work). PR 2b checks at the call everywhere else (jobs, workflows, WebSockets, other endpoints), deciding on the accounting loop, and keeps shared machinery from treating a refusal as a provider outage. Bandit -ll: 0 issues on the 27 changed app files in PR 2b. Known skips: MCP tool calls carry no user and are neither recorded nor checked (TASK-13585); a sync call on the event loop thread is recorded but not checked (the known ones were moved off the loop). Follow-ups: TASK-13610, TASK-13635, TASK-13636, TASK-13637, TASK-13638.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -34,7 +35,7 @@ PR 2b: the check at the call (core/Usage/llm_quota_gate.py). The wrapped provide
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
