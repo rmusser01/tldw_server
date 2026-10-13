@@ -1,10 +1,11 @@
+// WebUI cookie/session authority and storage readback require the WebUI runtime aliases.
 import React from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { App, ConfigProvider } from "antd"
 import { createMemoryRouter, RouterProvider } from "react-router-dom"
 import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { useComposerText } from "../hooks/useComposerText"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { useHistorySelection, HistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { TldwSettings } from "@/components/Option/Settings/tldw"
 import { tldwClient } from "@/services/tldw/TldwApiClient"

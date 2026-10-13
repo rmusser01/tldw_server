@@ -1,7 +1,8 @@
+// WebUI cookie/session authority and storage readback require the WebUI runtime aliases.
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { Storage } from "@plasmohq/storage"
-import { TldwApiClient } from "../TldwApiClient"
-import { clearRuntimeAuthOverride, setRuntimeSingleUserApiKeyOverride, activateCookieSessionConfig, invalidateCookieSessionConfig } from "../runtime-auth-override"
+import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import { clearRuntimeAuthOverride, setRuntimeSingleUserApiKeyOverride, activateCookieSessionConfig, invalidateCookieSessionConfig } from "@/services/tldw/runtime-auth-override"
 
 vi.mock("@/services/background-proxy", () => ({ bgRequest: vi.fn(), bgStream: vi.fn(), bgUpload: vi.fn() }))
 
