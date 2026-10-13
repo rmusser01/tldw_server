@@ -11,7 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.AuthNZ import storage_quota_backfill
-from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations
+from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations, get_authnz_migrations
 
 pytestmark = pytest.mark.unit
 KEY = "limits.storage_quota_mb"
@@ -74,27 +74,45 @@ def test_skips_when_users_table_absent(tmp_path: Path) -> None:
     """A synthetic version-99 DB without a users table migrates to 100 without error."""
     db_path = tmp_path / "synthetic.db"
     with sqlite3.connect(db_path) as conn:
-        conn.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)")
+        conn.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)"
+        )
         conn.execute("INSERT INTO schema_migrations VALUES (99, 'synthetic', CURRENT_TIMESTAMP)")
+    apply_authnz_migrations(db_path, target_version=100)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
     apply_authnz_migrations(db_path)
     with sqlite3.connect(db_path) as conn:
-        # Later migrations (e.g. 101's admin perf indexes) also run; only the
-        # version-100 step itself is under test here.
-        applied = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        assert 100 in applied
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == max(
+            migration.version for migration in get_authnz_migrations()
+        )
+        assert (
+            conn.execute("SELECT name FROM sqlite_master WHERE name = 'native_chat_quota_reservations'").fetchone()
+            is not None
+        )
 
 
 def test_skips_when_users_table_has_no_quota_column(tmp_path: Path) -> None:
     """A version-99 DB whose users table lacks storage_quota_mb migrates to 100 and writes no override."""
     db_path = tmp_path / "nocolumn.db"
     with sqlite3.connect(db_path) as conn:
-        conn.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)")
+        conn.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)"
+        )
         conn.execute("INSERT INTO schema_migrations VALUES (99, 'synthetic', CURRENT_TIMESTAMP)")
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
         conn.execute("INSERT INTO users (username) VALUES ('nocol')")
+    apply_authnz_migrations(db_path, target_version=100)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
     apply_authnz_migrations(db_path)
     with sqlite3.connect(db_path) as conn:
-        applied = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
-        assert 100 in applied
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == max(
+            migration.version for migration in get_authnz_migrations()
+        )
+        assert (
+            conn.execute("SELECT name FROM sqlite_master WHERE name = 'native_chat_quota_reservations'").fetchone()
+            is not None
+        )
         # The skip returns before the overrides table is even created, so nothing was written.
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'user_config_overrides'").fetchone() is None

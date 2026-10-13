@@ -53,6 +53,8 @@ class _FakeStorageService:
         return {
             "storage_quota_mb": quota_mb,
             "storage_used_mb": 100.0,
+            "legacy_storage_used_mb": 75.0,
+            "native_storage_used_mb": 25.0,
             "available_mb": max(0.0, float(quota_mb) - 100.0),
             "usage_percentage": 10.0,
         }
@@ -164,6 +166,8 @@ async def test_storage_admin_quota_endpoints_200_for_admin_role_claim(monkeypatc
         org_get = client.get("/api/v1/storage/admin/quotas/org/4")
 
     assert user_put.status_code == 200, user_put.text
+    assert user_put.json()["quota"]["legacy_used_mb"] == 75.0
+    assert user_put.json()["quota"]["native_used_mb"] == 25.0
     assert team_put.status_code == 200, team_put.text
     assert org_put.status_code == 200, org_put.text
     assert team_get.status_code == 200, team_get.text
