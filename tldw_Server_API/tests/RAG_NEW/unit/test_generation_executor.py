@@ -4340,3 +4340,35 @@ async def test_answer_generator_never_replaces_a_quota_refusal_with_a_fallback_a
 
     with pytest.raises(LLMQuotaExceededError):
         await AnswerGenerator(provider="anthropic", model="claude-test").generate(query="question", context="evidence")
+
+
+@pytest.mark.parametrize(("stage", "metadata_key"), [("gap", "gap_analysis"), ("reranker", "reranking")])
+@pytest.mark.asyncio
+async def test_unified_optional_stage_degrades_when_llm_quota_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    metadata_key: str,
+) -> None:
+    """A search with generation off, for a user over the LLM quota, returns its results with the stage degraded (§4a)."""
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    attempts: list[str] = []
+
+    def refused(*_args: Any, **_kwargs: Any) -> str:
+        """The provider call is refused; analyze() does not catch an HTTPException."""
+        attempts.append("refused")
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(sgl, "_dispatch_to_api", refused)
+    runtime = _RecordingCredentialRuntime()
+
+    result = await _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+
+    assert attempts  # nosec B101 - the stage really called the provider
+    assert [doc["id"] for doc in result.documents] == [f"doc-{stage}"]  # nosec B101
+    assert result.metadata[metadata_key]["failure_code"] == "provider_unavailable"  # nosec B101
+    assert result.metadata[metadata_key]["verification_available"] is False  # nosec B101
+    assert runtime.marked == []  # nosec B101 - a refused call is not credential use
