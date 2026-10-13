@@ -382,7 +382,7 @@ class RAGEvaluator:
             )
             for i, result in enumerate(metric_results):
                 if isinstance(result, Exception):
-                    if isinstance(result, (SummaryProviderError, DaemonCapacityError)):
+                    if isinstance(result, (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError)):
                         raise result
                     # Log the failure but continue with other metrics
                     metric_name = metric_names[i] if i < len(metric_names) else f"metric_{i}"

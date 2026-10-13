@@ -98,7 +98,7 @@ def check_user_sync(user_id: int) -> bool:
         _warn_once(
             "no_loop",
             "No accounting loop is set, so synchronous LLM calls are not quota-checked "
-            "(a standalone worker process must call set_accounting_loop)",
+            "(run job workers inside the server process)",
         )
         return False
     if _running_loop() is loop:

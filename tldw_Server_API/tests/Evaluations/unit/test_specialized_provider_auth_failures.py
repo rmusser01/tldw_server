@@ -631,3 +631,47 @@ async def test_rag_quota_refusal_stops_the_evaluation_at_the_first_metric(monkey
         )
 
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_quota_refusal_in_a_later_metric_is_raised_not_kept_as_a_partial_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusal in a metric after the probe raises; it is not recorded as one failed metric (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    calls = 0
+
+    def score_then_refuse(api_name: str, *_args: Any, **_kwargs: Any) -> str:
+        """Score the probe metric, then refuse every later call."""
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "4"
+        raise _quota_refusal()
+
+    async def call_inline(_provider: str, function, *args: Any, **kwargs: Any):
+        """Run the metric without the breaker's thread hop."""
+        return await _run_analyze_inline(function, *args, **kwargs)
+
+    monkeypatch.setattr(rag_evaluator, "analyze", score_then_refuse)
+    monkeypatch.setattr(rag_evaluator.llm_circuit_breaker, "call_with_breaker", call_inline)
+
+    evaluator = rag_evaluator.RAGEvaluator(
+        embedding_provider=None,
+        embedding_model=None,
+        api_key="key",
+        app_config={"openai_api": {"model": "model-a"}},
+        credentials_resolved=True,
+    )
+    with pytest.raises(LLMQuotaExceededError):
+        await evaluator.evaluate(
+            query="query",
+            contexts=["context"],
+            response="response",
+            metrics=["relevance", "faithfulness"],
+            api_name="openai",
+            model="model-a",
+        )
+
+    assert calls >= 2
