@@ -4,6 +4,12 @@ import { spawn, spawnSync } from "node:child_process"
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
+  ftruncateSync,
+  openSync,
+  writeSync,
   existsSync,
   lstatSync,
   realpathSync,
@@ -13,7 +19,7 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
-} from "node:fs"
+} from 'node:fs';
 import { createRequire } from "node:module"
 import { createHash, randomBytes } from "node:crypto"
 import path from "node:path"
@@ -743,12 +749,116 @@ export function applyDeferred43Edits(original, patch) {
   return result
 }
 
-export function installDeferred43Sources({ repoRoot, frontendRoot, artifactRoot, targets = resolveDeferred43Sources(frontendRoot, repoRoot), afterSwap = () => {} }) {
-  const root = realpathSync(repoRoot), artifacts = realpathSync(artifactRoot)
-  if (!artifacts.startsWith(`${root}${path.sep}`) || targets.length !== deferred43Patches.length) throw new Error("DEFERRED43_SCOPE")
-  const records = [], receiptPath = path.join(artifacts, "deferred43-source-receipt.json")
+export function installDeferred43Sources({
+  repoRoot,
+  frontendRoot,
+  artifactRoot,
+  receiptRoot,
+  targets = resolveDeferred43Sources(frontendRoot, repoRoot),
+  afterSwap = () => {},
+  transaction = {},
+}) {
+  const root = realpathSync(repoRoot),
+    artifacts = realpathSync(artifactRoot),
+    frontend = realpathSync(frontendRoot);
+  const runId = path.basename(artifacts),
+    temporary = realpathSync(tmpdir());
+  if (
+    !/^[A-Za-z0-9._-]{1,128}$/.test(runId) ||
+    artifacts !== path.join(frontend, 'test-results/live-tier-uat', runId) ||
+    !artifacts.startsWith(`${root}${path.sep}`) ||
+    targets.length !== deferred43Patches.length
+  )
+    throw new Error('DEFERRED43_SCOPE');
+  const receiptDirectory = realpathSync(receiptRoot);
+  if (
+    receiptDirectory !==
+    path.join(temporary, `tldw-onboarding-uat-${runId}`, 'reports/live-tier-uat')
+  )
+    throw new Error('DEFERRED43_RECEIPT_SCOPE');
+  const receiptAncestors = [];
+  for (
+    let ancestor = path.resolve(receiptRoot);
+    ancestor !== path.resolve(tmpdir());
+    ancestor = path.dirname(ancestor)
+  ) {
+    const stats = lstatSync(ancestor);
+    if (
+      !ancestor.startsWith(`${path.resolve(tmpdir())}${path.sep}`) ||
+      !stats.isDirectory() ||
+      stats.isSymbolicLink() ||
+      stats.uid !== process.getuid?.()
+    )
+      throw new Error('DEFERRED43_RECEIPT_ANCESTOR');
+    receiptAncestors.push({ path: ancestor, ino: stats.ino, dev: stats.dev });
+  }
+  const records = [],
+    receiptPath = path.join(receiptDirectory, 'deferred43-source-receipt.json');
   const receipt = { schema: 43, source: deferred43Source, appSource: deferred43AppSource, installed: false, restored: false, records, runtime: { platform: process.platform, node: process.version, binary: deferred43Hash(readFileSync(process.execPath)) } }
-  const save = () => writeFileSync(receiptPath, JSON.stringify(receipt), { mode: 0o600 })
+  let receiptIdentity = null,
+    receiptHash = null;
+  const save = () => {
+    for (const ancestor of receiptAncestors) {
+      const stats = lstatSync(ancestor.path);
+      if (
+        !stats.isDirectory() ||
+        stats.isSymbolicLink() ||
+        stats.ino !== ancestor.ino ||
+        stats.dev !== ancestor.dev ||
+        stats.uid !== process.getuid?.()
+      )
+        throw new Error('DEFERRED43_RECEIPT_ANCESTOR_CHANGED');
+    }
+    if (realpathSync(receiptRoot) !== receiptDirectory)
+      throw new Error('DEFERRED43_RECEIPT_ANCESTOR_CHANGED');
+    const bytes = Buffer.from(JSON.stringify(receipt));
+    const fd = openSync(
+      receiptPath,
+      constants.O_RDWR |
+        constants.O_NOFOLLOW |
+        (receiptIdentity ? 0 : constants.O_CREAT | constants.O_EXCL),
+      0o600
+    );
+    try {
+      const stats = fstatSync(fd);
+      if (
+        !stats.isFile() ||
+        stats.nlink !== 1 ||
+        (stats.mode & 0o777) !== 0o600 ||
+        stats.uid !== process.getuid?.() ||
+        (receiptIdentity &&
+          (stats.ino !== receiptIdentity.ino ||
+            stats.dev !== receiptIdentity.dev ||
+            deferred43Hash(readFileSync(fd)) !== receiptHash))
+      )
+        throw new Error('DEFERRED43_RECEIPT_CHANGED');
+      let written = 0;
+      while (written < bytes.length) {
+        const count = writeSync(fd, bytes, written, bytes.length - written, written);
+        if (count === 0) throw new Error('DEFERRED43_RECEIPT_SHORT_WRITE');
+        written += count;
+      }
+      ftruncateSync(fd, bytes.length);
+      const readback = lstatSync(receiptPath);
+      if (
+        !readback.isFile() ||
+        readback.isSymbolicLink() ||
+        readback.ino !== stats.ino ||
+        readback.dev !== stats.dev ||
+        readback.nlink !== 1 ||
+        (readback.mode & 0o777) !== 0o600 ||
+        readback.uid !== process.getuid?.() ||
+        realpathSync(receiptPath) !== receiptPath ||
+        deferred43Hash(readFileSync(receiptPath)) !== deferred43Hash(bytes)
+      )
+        throw new Error('DEFERRED43_RECEIPT_CHANGED');
+      receiptIdentity = { ino: stats.ino, dev: stats.dev };
+      receiptHash = deferred43Hash(bytes);
+      transaction.ownsReceipt = true;
+    } finally {
+      closeSync(fd);
+    }
+  };
   const restore = () => {
     const errors = []
     for (const record of [...records].reverse()) {
@@ -771,7 +881,9 @@ export function installDeferred43Sources({ repoRoot, frontendRoot, artifactRoot,
     save()
     if (errors.length) throw new AggregateError(errors, "DEFERRED43_RESTORATION_UNAVAILABLE")
   }
+  Object.assign(transaction, { restore, receipt, receiptPath, ownsReceipt: false });
   try {
+    save();
     // Validate every source and ancestor before the first rename. Hardlinks are preserved by rename.
     const staged = targets.map((target, index) => {
       target = path.resolve(target)
@@ -804,33 +916,114 @@ export function installDeferred43Sources({ repoRoot, frontendRoot, artifactRoot,
       afterSwap(index)
     }
     receipt.installed = true; save()
-    return { restore, receipt }
+    return transaction;
   } catch (error) {
     try { restore() } catch (restoreError) { throw new AggregateError([error, restoreError], "DEFERRED43_INSTALL_RESTORE_FAILED") }
     throw error
   }
 }
 
-function inspectDeferred43Ledgers(artifactRoot) {
+function inspectDeferred43Ledgers(artifactRoot, retainedBodies) {
   let files
   try { files = readdirSync(artifactRoot).filter(name => /^deferred43-server-\d+\.json$/.test(name)) }
   catch { return { files: 0, owning: 0, faults: 4, available: false } }
   let owning = 0, faults = 0
   for (const name of files) {
-    let bytes
+    let bytes, stats;
     try {
-      const file = path.join(artifactRoot, name), stats = lstatSync(file)
-      if (!stats.isFile() || stats.isSymbolicLink() || realpathSync(file) !== path.resolve(file)) { faults |= 4; continue }
-      if (stats.size > 262144) { faults |= 1; continue }
+      const file = path.join(artifactRoot, name);
+      stats = lstatSync(file);
+      if (!stats.isFile() || stats.isSymbolicLink() || realpathSync(file) !== path.resolve(file)) {
+        faults |= 4;
+        retainedBodies?.push({ kind: 'server', fault: 4 });
+        continue;
+      }
+      if (stats.size > 262144) {
+        faults |= 1;
+        retainedBodies?.push({ kind: 'server', fault: 1 });
+        continue;
+      }
       bytes = readFileSync(file)
     } catch { faults |= 4; continue }
-    if (bytes.length > 262144) { faults |= 1; continue }
+    if (bytes.length > 262144) {
+      faults |= 1;
+      retainedBodies?.push({ kind: 'server', fault: 1 });
+      continue;
+    }
     try {
       const payload = JSON.parse(bytes)
-      if (payload.schema !== 43 || payload.realm !== 3 || payload.source !== deferred43Source || !Number.isInteger(payload.count) || payload.count < 0 || payload.count > 1024 || !Number.isSafeInteger(payload.faults) || payload.faults < 0 || !Number.isFinite(payload.timeOrigin) || payload.first !== 0 || payload.order !== 0 || !Array.isArray(payload.counts) || payload.counts.length !== 4 || payload.counts.some(value => !Number.isSafeInteger(value) || value < 0 || value > 512) || !Array.isArray(payload.rows) || payload.rows.length !== payload.count || payload.rows.some((row, index) => !Array.isArray(row) || row.length !== 24 || ![40,41,42,43,44,45,46].includes(row[0]) || row[1] !== index + 1 || row.some(value => typeof value !== "number" || !Number.isFinite(value)))) { faults |= 2; continue }
+      if (
+        payload.schema !== 43 ||
+        payload.realm !== 3 ||
+        payload.source !== deferred43Source ||
+        !Number.isInteger(payload.count) ||
+        payload.count < 0 ||
+        payload.count > 1024 ||
+        !Number.isSafeInteger(payload.faults) ||
+        payload.faults < 0 ||
+        !Number.isFinite(payload.timeOrigin) ||
+        payload.first !== 0 ||
+        payload.order !== 0 ||
+        !Array.isArray(payload.counts) ||
+        payload.counts.length !== 4 ||
+        payload.counts.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 512) ||
+        !Array.isArray(payload.rows) ||
+        payload.rows.length !== payload.count ||
+        payload.rows.some(
+          (row, index) =>
+            !Array.isArray(row) ||
+            row.length !== 24 ||
+            ![40, 41, 42, 43, 44, 45, 46].includes(row[0]) ||
+            row[1] !== index + 1 ||
+            row.some((value) => typeof value !== 'number' || !Number.isFinite(value))
+        )
+      ) {
+        faults |= 2;
+        retainedBodies?.push({ kind: 'server', fault: 2 });
+        continue;
+      }
+      if (retainedBodies && payload.count) {
+        const browser = payload.browser;
+        const flags =
+          /^--(?:headless(?:=(?:new|old))?|enable-automation|no-sandbox|disable-dev-shm-usage)$|^--window-size=\d{1,5},\d{1,5}$|^--force-device-scale-factor=\d{1,2}(?:\.\d{1,4})?$/;
+        const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+        const safe =
+          bytes.equals(Buffer.from(JSON.stringify(payload))) &&
+          stats.uid === process.getuid?.() &&
+          stats.nlink === 1 &&
+          (stats.mode & 0o777) === 0o600 &&
+          Object.keys(payload).sort().join(',') ===
+            'binary,browser,count,counts,faults,first,order,pid,platform,realm,rows,schema,source,timeOrigin,version' &&
+          Number.isSafeInteger(payload.pid) &&
+          payload.pid > 0 &&
+          payload.pid === Number(name.slice(18, -5)) &&
+          ['linux', 'darwin', 'win32'].includes(payload.platform) &&
+          /^v\d+\.\d+\.\d+$/.test(payload.version) &&
+          hash(payload.binary) &&
+          (browser === null ||
+            (Object.keys(browser).sort().join(',') ===
+              'binary,executable,flags,omittedArgs,pid,readback,version' &&
+              Number.isSafeInteger(browser.pid) &&
+              browser.pid > 0 &&
+              typeof browser.executable === 'string' &&
+              /^[A-Za-z0-9/_.+:-]{1,128}$/.test(browser.executable) &&
+              /^\d+(?:\.\d+){1,3}$/.test(browser.version) &&
+              Array.isArray(browser.flags) &&
+              browser.flags.length <= 64 &&
+              browser.flags.every((value) => typeof value === 'string' && flags.test(value)) &&
+              Number.isSafeInteger(browser.omittedArgs) &&
+              browser.omittedArgs >= 0 &&
+              browser.omittedArgs <= 64 &&
+              [0, 1].includes(browser.readback) &&
+              (browser.binary === null || hash(browser.binary))));
+        retainedBodies.push(safe ? { kind: 'server', bytes } : { kind: 'server', fault: 2 });
+      }
       if (payload.count) owning++
       faults |= payload.faults
-    } catch { faults |= 4 }
+    } catch {
+      faults |= 4;
+      retainedBodies?.push({ kind: 'server', fault: 4 });
+    }
   }
   return { files: files.length, owning, faults, available: owning === 1 && faults === 0 }
 }
@@ -1407,6 +1600,7 @@ export async function runLiveTierUat({
   let ownsArtifactRoot = false
   let deferred43Transaction = null
   let deferred43Ledger = null
+  const deferred43RetainedBodies = [];
 
   try {
     assertFreshRunTargets([artifactRoot, profileRoot, nextDistPath])
@@ -1423,9 +1617,6 @@ export async function runLiveTierUat({
         throw new Error(`Extension build failed with exit code ${build.code}; see ${logs.extensionBuild}`)
       }
     }
-    if (options.projects.length === 1 && options.projects[0] === "ux-regression" && !options.grep) {
-      deferred43Transaction = installDeferred43Sources({ repoRoot, frontendRoot, artifactRoot })
-    }
     ports = await reservePorts(["backend", "web", "mock"])
     const pythonCommand = resolvePythonCommand({ repoRoot, baseEnv })
     profile = buildLiveTierProfile({
@@ -1436,6 +1627,16 @@ export async function runLiveTierUat({
       baseTmpDir: tmpdir(),
       pythonCommand,
     })
+    if (options.projects.length === 1 && options.projects[0] === 'ux-regression' && !options.grep) {
+      deferred43Transaction = {};
+      installDeferred43Sources({
+        repoRoot,
+        frontendRoot,
+        artifactRoot,
+        receiptRoot: profile.reportsDir,
+        transaction: deferred43Transaction,
+      });
+    }
     commands = buildCommands({
       repoRoot,
       frontendRoot,
@@ -1448,7 +1649,8 @@ export async function runLiveTierUat({
       artifactRoot,
       baseEnv,
     })
-    if (deferred43Transaction) commands.playwrightRun.env.TLDW_DEFERRED43_SOURCE = deferred43Source
+    if (deferred43Transaction?.receipt)
+      commands.playwrightRun.env.TLDW_DEFERRED43_SOURCE = deferred43Source;
     signal?.throwIfAborted()
     processes.push(spawnLoggedProcess({ ...commands.mockOpenai, logPath: logs.mock }))
     await waitForHttpOk(`${commands.urls.mock}/health`, { timeoutMs: 30_000, signal })
@@ -1543,11 +1745,14 @@ export async function runLiveTierUat({
       status = "failed"
     }
 
-    if (deferred43Transaction) {
+    if (deferred43Transaction?.receipt) {
       try {
         if (health.stopped) {
-          try { deferred43Ledger = inspectDeferred43Ledgers(artifactRoot) }
-          catch { deferred43Ledger = { files: 0, owning: 0, faults: 4, available: false } }
+          try {
+            deferred43Ledger = inspectDeferred43Ledgers(artifactRoot, deferred43RetainedBodies);
+          } catch {
+            deferred43Ledger = { files: 0, owning: 0, faults: 4, available: false };
+          }
           deferred43Transaction.restore()
         } else {
           runnerError = [runnerError, "DEFERRED43_SERVICES_STILL_RUNNING"].filter(Boolean).join("\n")
@@ -1557,6 +1762,301 @@ export async function runLiveTierUat({
         runnerError = [runnerError, error?.stack ?? error?.message ?? String(error)].filter(Boolean).join("\n")
         status = "failed"
       }
+      // Cold retention uses the existing stdout and artifact paths after stopped restoration.
+      const retention = { faults: 0, missing: [], malformed: [], oversize: [], records: [] };
+      (() => {
+        try {
+          if (!health.stopped || !deferred43Transaction.ownsReceipt)
+            throw new Error('DEFERRED43_RETAIN_RECEIPT_UNOWNED');
+          const bytes = Buffer.from(JSON.stringify(deferred43Transaction.receipt));
+          if (bytes.length > 1048576) {
+            retention.faults |= 1;
+            retention.oversize.push('receipt');
+          } else {
+            const stats = lstatSync(deferred43Transaction.receiptPath);
+            if (
+              !stats.isFile() ||
+              stats.isSymbolicLink() ||
+              stats.nlink !== 1 ||
+              stats.uid !== process.getuid?.() ||
+              realpathSync(deferred43Transaction.receiptPath) !==
+                deferred43Transaction.receiptPath ||
+              deferred43Hash(readFileSync(deferred43Transaction.receiptPath)) !==
+                deferred43Hash(bytes)
+            )
+              throw new Error('DEFERRED43_RETAIN_RECEIPT_CHANGED');
+            const frontend = realpathSync(frontendRoot),
+              destination = path.resolve(artifactRoot);
+            if (destination !== path.join(frontend, 'test-results/live-tier-uat', runId))
+              throw new Error('DEFERRED43_RETAIN_ARTIFACT_SCOPE');
+            const missingDirectories = [];
+            for (
+              let ancestor = destination;
+              ancestor !== frontend;
+              ancestor = path.dirname(ancestor)
+            ) {
+              if (!ancestor.startsWith(`${frontend}${path.sep}`))
+                throw new Error('DEFERRED43_RETAIN_ARTIFACT_SCOPE');
+              let stats;
+              try {
+                stats = lstatSync(ancestor);
+              } catch (error) {
+                if (error.code !== 'ENOENT') throw error;
+                missingDirectories.unshift(ancestor);
+                continue;
+              }
+              if (
+                !stats.isDirectory() ||
+                stats.isSymbolicLink() ||
+                stats.uid !== process.getuid?.() ||
+                realpathSync(ancestor) !== ancestor
+              )
+                throw new Error('DEFERRED43_RETAIN_ARTIFACT_ANCESTOR');
+            }
+            for (const directory of missingDirectories) {
+              const parent = path.dirname(directory),
+                stats = lstatSync(parent);
+              if (
+                !stats.isDirectory() ||
+                stats.isSymbolicLink() ||
+                stats.uid !== process.getuid?.() ||
+                realpathSync(parent) !== parent
+              )
+                throw new Error('DEFERRED43_RETAIN_ARTIFACT_ANCESTOR');
+              mkdirSync(directory, { mode: 0o700 });
+              if (
+                realpathSync(directory) !== directory ||
+                lstatSync(directory).uid !== process.getuid?.()
+              )
+                throw new Error('DEFERRED43_RETAIN_ARTIFACT_ANCESTOR');
+            }
+            if (realpathSync(artifactRoot) !== destination)
+              throw new Error('DEFERRED43_RETAIN_ARTIFACT_SCOPE');
+            writeFileSync(path.join(artifactRoot, 'deferred43-source-receipt.json'), bytes, {
+              flag: 'wx',
+              mode: 0o600,
+            });
+            deferred43RetainedBodies.push({ kind: 'receipt', bytes });
+          }
+        } catch {
+          retention.faults |= 4;
+          retention.malformed.push('receipt');
+        }
+        try {
+          if (!health.stopped) throw new Error('DEFERRED43_RETAIN_SERVICES_RUNNING');
+          const report = playwrightReport;
+          const matches = [],
+            pending = [report];
+          let visits = 0;
+          while (pending.length) {
+            const suite = pending.pop();
+            if (
+              !suite ||
+              ++visits > 128 ||
+              (suite.suites && (!Array.isArray(suite.suites) || suite.suites.length > 64)) ||
+              (suite.specs && (!Array.isArray(suite.specs) || suite.specs.length > 64))
+            )
+              throw new Error('DEFERRED43_RETAIN_REPORT_SHAPE');
+            pending.push(...(suite.suites ?? []));
+            for (const spec of suite.specs ?? []) {
+              if (
+                spec.file !== 'e2e/ux-regression/notes-p0.spec.ts' ||
+                spec.title !== "NE-04: 'Print / Save as PDF' prints the note without a pop-up error"
+              )
+                continue;
+              if (!Array.isArray(spec.tests) || spec.tests.length > 8)
+                throw new Error('DEFERRED43_RETAIN_TEST_SHAPE');
+              for (const test of spec.tests)
+                if (test.projectName === 'ux-regression') matches.push(test);
+            }
+          }
+          if (
+            matches.length !== 1 ||
+            !Array.isArray(matches[0].results) ||
+            matches[0].results.length !== 1 ||
+            !Array.isArray(matches[0].results[0].attachments) ||
+            matches[0].results[0].attachments.length > 32
+          )
+            throw new Error('DEFERRED43_RETAIN_TEST_SHAPE');
+          const attachments = matches[0].results[0].attachments;
+          const numeric = (value) => typeof value === 'number' && Number.isFinite(value);
+          const keys = (value, expected) =>
+            value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            Object.keys(value).sort().join(',') === expected;
+          const clock = (value) =>
+            keys(value, 'after,before,local,origin') && Object.values(value).every(numeric);
+          const id = (value) => typeof value === 'string' && /^[A-Za-z0-9_.:-]{0,128}$/.test(value);
+          const sites = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 27, 28, 29, 30, 31, 40, 41, 42, 43, 44, 45, 46, 50, 51, 52, 53, 54, 55, 56,
+          ];
+          for (const [kind, bound, realm] of [
+            ['app', 1048576, 1],
+            ['utility', 524288, 2],
+            ['contexts', 65536, 0],
+          ]) {
+            const found = attachments.filter((entry) => entry.name === `deferred43-${kind}.json`);
+            if (!found.length) continue;
+            if (
+              found.length !== 1 ||
+              !keys(found[0], 'body,contentType,name') ||
+              found[0].contentType !== 'application/json' ||
+              typeof found[0].body !== 'string'
+            ) {
+              retention.faults |= 2;
+              retention.malformed.push(kind);
+              continue;
+            }
+            if (found[0].body.length > 4 * Math.ceil(bound / 3)) {
+              retention.faults |= 1;
+              retention.oversize.push(kind);
+              continue;
+            }
+            const bytes = Buffer.from(found[0].body, 'base64');
+            if (bytes.length > bound) {
+              retention.faults |= 1;
+              retention.oversize.push(kind);
+              continue;
+            }
+            let payload;
+            try {
+              payload = JSON.parse(bytes.toString('utf8'));
+            } catch {
+              retention.faults |= 2;
+              retention.malformed.push(kind);
+              continue;
+            }
+            let valid =
+              bytes.toString('base64') === found[0].body &&
+              bytes.equals(Buffer.from(JSON.stringify(payload)));
+            if (realm)
+              valid &&=
+                keys(
+                  payload,
+                  'count,counts,faults,first,order,realm,rows,schema,source,timeOrigin'
+                ) &&
+                payload.schema === 43 &&
+                payload.source === deferred43Source &&
+                payload.realm === realm &&
+                numeric(payload.timeOrigin) &&
+                Number.isSafeInteger(payload.count) &&
+                payload.count > 0 &&
+                payload.count <= (realm === 1 ? 4096 : 2048) &&
+                Number.isSafeInteger(payload.faults) &&
+                payload.faults >= 0 &&
+                Number.isSafeInteger(payload.first) &&
+                payload.first >= 0 &&
+                payload.first <= payload.count &&
+                payload.order === 0 &&
+                Array.isArray(payload.counts) &&
+                payload.counts.length === 4 &&
+                payload.counts.every(
+                  (value) => Number.isSafeInteger(value) && value >= 0 && value <= 512
+                ) &&
+                Array.isArray(payload.rows) &&
+                payload.rows.length === payload.count &&
+                payload.rows.every(
+                  (row, index) =>
+                    Array.isArray(row) &&
+                    row.length === 24 &&
+                    sites.includes(row[0]) &&
+                    row[1] === index + 1 &&
+                    row.every(numeric)
+                );
+            else
+              valid &&=
+                payload &&
+                Object.keys(payload)
+                  .filter((key) => key !== 'calibration')
+                  .sort()
+                  .join(',') ===
+                  'clocks,contextLost,contexts,documents,faults,frameId,ordering,schema' &&
+                payload.schema === 43 &&
+                id(payload.frameId) &&
+                Number.isSafeInteger(payload.documents) &&
+                payload.documents >= 0 &&
+                typeof payload.contextLost === 'boolean' &&
+                Number.isSafeInteger(payload.faults) &&
+                payload.faults >= 0 &&
+                payload.ordering === 'ORDER_UNBOUND' &&
+                (!Object.hasOwn(payload, 'calibration') || clock(payload.calibration)) &&
+                Array.isArray(payload.clocks) &&
+                payload.clocks.length <= 2 &&
+                payload.clocks.every(
+                  (value) =>
+                    keys(value, 'after,before,local,origin,realm') &&
+                    [1, 2].includes(value.realm) &&
+                    Object.values(value).every(numeric)
+                ) &&
+                Array.isArray(payload.contexts) &&
+                payload.contexts.length <= 2 &&
+                payload.contexts.every(
+                  (value) =>
+                    keys(value, 'default,destroyed,frameId,id,isolated,uniqueId') &&
+                    Number.isSafeInteger(value.id) &&
+                    value.id > 0 &&
+                    id(value.frameId) &&
+                    id(value.uniqueId) &&
+                    [value.default, value.isolated, value.destroyed].every(
+                      (flag) => typeof flag === 'boolean'
+                    )
+                );
+            if (!valid) {
+              retention.faults |= 2;
+              retention.malformed.push(kind);
+              continue;
+            }
+            deferred43RetainedBodies.push({ kind, bytes });
+          }
+        } catch {
+          retention.faults |= 256;
+          retention.malformed.push('attachments');
+        }
+        try {
+          const required = ['receipt', 'server', 'app', 'utility', 'contexts'];
+          let emittedBytes = 0;
+          for (const kind of required) {
+            const entries = deferred43RetainedBodies.filter((entry) => entry.kind === kind);
+            if (entries.length !== 1) {
+              retention.faults |= 256;
+              (entries.length ? retention.malformed : retention.missing).push(kind);
+              continue;
+            }
+            const entry = entries[0];
+            if (entry.fault) {
+              retention.faults |= entry.fault;
+              (entry.fault & 1 ? retention.oversize : retention.malformed).push(kind);
+              continue;
+            }
+            if (!health.stopped || emittedBytes + entry.bytes.length > 3145728) {
+              retention.faults |= 1;
+              retention.oversize.push(kind);
+              continue;
+            }
+            const encoded = entry.bytes.toString('base64'),
+              digest = deferred43Hash(entry.bytes),
+              parts = Math.ceil(encoded.length / 16384);
+            for (let part = 0; part < parts; part++)
+              process.stdout.write(
+                `DEFERRED43_RETAIN ${JSON.stringify({ schema: 43, source: deferred43Source, kind, bytes: entry.bytes.length, sha256: digest, part: part + 1, parts, body: encoded.slice(part * 16384, (part + 1) * 16384) })}\n`
+              );
+            emittedBytes += entry.bytes.length;
+            retention.records.push({ kind, bytes: entry.bytes.length, sha256: digest, parts });
+          }
+        } catch {
+          retention.faults |= 4;
+        }
+        retention.complete = retention.faults === 0 && retention.records.length === 5;
+        try {
+          process.stdout.write(
+            `DEFERRED43_RETENTION ${JSON.stringify({ schema: 43, source: deferred43Source, ...retention })}\n`
+          );
+        } catch {
+          /* Retention cannot mask the original outcome. */
+        }
+      })();
       try {
       const line = `DEFERRED43_SUITE ${JSON.stringify({ schema: 43, restored: deferred43Transaction.receipt.restored, source: deferred43Source, ledger: deferred43Ledger })}\n`
       if (Buffer.byteLength(line) <= 8192) process.stdout.write(line)

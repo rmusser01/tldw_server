@@ -2,8 +2,9 @@
  * Extended Playwright test fixtures for workflow tests
  */
 import { test as base, expect, type Page, type CDPSession, type TestInfo } from "@playwright/test"
-import { readFileSync, realpathSync, statSync } from "node:fs"
+import { readFileSync, realpathSync, lstatSync } from 'node:fs';
 import path from "node:path"
+import { tmpdir } from 'node:os';
 import { createHash } from "node:crypto"
 import {
   seedAuth,
@@ -53,50 +54,201 @@ async function prepareDeferred43(page: Page, testInfo: TestInfo): Promise<null |
   let app: Deferred43Payload | undefined, utility: Deferred43Payload | undefined
   let calibration: { before: number; after: number; local: number; origin: number } | undefined
   const setup = async () => {
-    const reporter = process.env.PLAYWRIGHT_JSON_OUTPUT_NAME
-    if (!reporter || path.basename(reporter) !== "playwright-results.json") { faults |= 1024; return }
-    const frontend = realpathSync(process.cwd())
-    const artifacts = realpathSync(path.dirname(reporter))
-    if (!artifacts.startsWith(`${path.join(frontend, "test-results/live-tier-uat")}${path.sep}`)) { faults |= 1024; return }
-    const receiptPath = path.join(artifacts, "deferred43-source-receipt.json")
-    if (statSync(receiptPath).size > 1048576) { faults |= 1; return }
-    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { source?: unknown; installed?: unknown; appSource?: unknown; records?: Array<{ candidateHash: string; target: string }> }
-    if (receipt.source !== deferred43Marker || typeof receipt.appSource !== "string" || createHash("sha256").update(receipt.appSource).digest("hex") !== "64ac2ff634022084d76c70e1435699351387052b6daa90cb4aab2e04651deb46" || receipt.installed !== true || typeof receipt.appSource !== "string" || Buffer.byteLength(receipt.appSource) > 65536 || !Array.isArray(receipt.records) || receipt.records.length !== 13 || receipt.records.some(record => typeof record.target !== "string" || !realpathSync(record.target).startsWith(`${path.dirname(frontend)}${path.sep}`) || createHash("sha256").update(readFileSync(record.target)).digest("hex") !== record.candidateHash)) { faults |= 1024; return }
-    session = await page.context().newCDPSession(page)
-    guardSetup()
-    session.on("Runtime.executionContextCreated", (event: { context: { id: number; uniqueId?: string; auxData?: { frameId?: string; isDefault?: boolean; type?: string } } }) => {
-      const context = event.context
-      if (frameId && context.auxData?.frameId !== frameId) return
-      if (contexts.has(context.id) && contexts.get(context.id)?.uniqueId !== context.uniqueId) { faults |= 256; return }
-      if (!Number.isSafeInteger(context.id) || !context.auxData?.frameId || Buffer.byteLength(context.auxData.frameId) > 128 || typeof context.uniqueId !== "string" || Buffer.byteLength(context.uniqueId) > 128 || contexts.size >= 8) { faults |= 256; return }
-      contexts.set(context.id, { id: context.id, frameId: context.auxData.frameId, uniqueId: context.uniqueId, default: context.auxData.isDefault === true, isolated: context.auxData.type === "isolated", destroyed: false })
-      if (frameId && context.auxData.frameId === frameId && context.auxData.isDefault === true && ++documents > 2) faults |= 512
-    })
-    session.on("Runtime.executionContextDestroyed", (event: { executionContextId: number }) => {
-      const context = contexts.get(event.executionContextId)
-      if (context) { context.destroyed = true; if (documents >= 2 && context.frameId === frameId && context.isolated) { contextLost = true; faults |= 256 } }
-    })
-    session.on("Runtime.executionContextsCleared", () => {
-      for (const context of contexts.values()) { context.destroyed = true; if (documents >= 2 && context.frameId === frameId && context.isolated) { contextLost = true; faults |= 256 } }
-    })
-    await session.send("Page.enable")
-    guardSetup()
-    const tree = await session.send("Page.getFrameTree") as { frameTree: { frame: { id: string } } }
-    guardSetup()
-    frameId = tree.frameTree.frame.id
-    if (typeof frameId !== "string" || frameId.length > 128) { faults |= 256; return }
-    await session.send("Runtime.enable")
-    guardSetup()
-    documents = Array.from(contexts.values()).filter(context => context.frameId === frameId && context.default).length
-    if (documents > 2) faults |= 512
-    if (faults) return
-    await page.addInitScript({ content: receipt.appSource })
-    guardSetup()
-    const before = Date.now()
-    const clock = await page.evaluate(() => ({ local: performance.now(), origin: performance.timeOrigin }))
-    guardSetup()
-    calibration = { before, after: Date.now(), local: clock.local, origin: clock.origin }
-  }
+    const reporter = process.env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+    if (!reporter || path.basename(reporter) !== 'playwright-results.json') {
+      faults |= 1024;
+      return;
+    }
+    const frontend = realpathSync(process.cwd());
+    const runId = process.env.TLDW_LIVE_TIER_UAT_RUN_ID;
+    if (
+      !runId ||
+      !/^[A-Za-z0-9._-]{1,128}$/.test(runId) ||
+      path.resolve(reporter) !==
+        path.join(frontend, 'test-results/live-tier-uat', runId, 'playwright-results.json')
+    ) {
+      faults |= 1024;
+      return;
+    }
+    const receiptDirectory = path.join(
+      tmpdir(),
+      `tldw-onboarding-uat-${runId}`,
+      'reports/live-tier-uat'
+    );
+    for (
+      let ancestor = path.resolve(receiptDirectory);
+      ancestor !== path.resolve(tmpdir());
+      ancestor = path.dirname(ancestor)
+    ) {
+      const stats = lstatSync(ancestor);
+      if (
+        !ancestor.startsWith(`${path.resolve(tmpdir())}${path.sep}`) ||
+        !stats.isDirectory() ||
+        stats.isSymbolicLink() ||
+        stats.uid !== process.getuid?.()
+      ) {
+        faults |= 1024;
+        return;
+      }
+    }
+    if (
+      realpathSync(receiptDirectory) !==
+      path.join(realpathSync(tmpdir()), `tldw-onboarding-uat-${runId}`, 'reports/live-tier-uat')
+    ) {
+      faults |= 1024;
+      return;
+    }
+    const receiptPath = path.join(realpathSync(receiptDirectory), 'deferred43-source-receipt.json');
+    const receiptStats = lstatSync(receiptPath);
+    if (
+      !receiptStats.isFile() ||
+      receiptStats.isSymbolicLink() ||
+      receiptStats.nlink !== 1 ||
+      (receiptStats.mode & 0o777) !== 0o600 ||
+      receiptStats.uid !== process.getuid?.()
+    ) {
+      faults |= 1024;
+      return;
+    }
+    if (receiptStats.size > 1048576) {
+      faults |= 1;
+      return;
+    }
+    const receiptBytes = readFileSync(receiptPath, 'utf8');
+    const receipt = JSON.parse(receiptBytes) as {
+      source?: unknown;
+      installed?: unknown;
+      appSource?: unknown;
+      records?: Array<{ candidateHash: string; target: string }>;
+    };
+    if (
+      receipt.source !== deferred43Marker ||
+      typeof receipt.appSource !== 'string' ||
+      createHash('sha256').update(receipt.appSource).digest('hex') !==
+        '64ac2ff634022084d76c70e1435699351387052b6daa90cb4aab2e04651deb46' ||
+      receipt.installed !== true ||
+      typeof receipt.appSource !== 'string' ||
+      Buffer.byteLength(receipt.appSource) > 65536 ||
+      !Array.isArray(receipt.records) ||
+      receipt.records.length !== 13 ||
+      receipt.records.some(
+        (record) =>
+          typeof record.target !== 'string' ||
+          !realpathSync(record.target).startsWith(`${path.dirname(frontend)}${path.sep}`) ||
+          createHash('sha256').update(readFileSync(record.target)).digest('hex') !==
+            record.candidateHash
+      )
+    ) {
+      faults |= 1024;
+      return;
+    }
+    const receiptReadback = lstatSync(receiptPath);
+    if (
+      !receiptReadback.isFile() ||
+      receiptReadback.isSymbolicLink() ||
+      receiptReadback.ino !== receiptStats.ino ||
+      receiptReadback.dev !== receiptStats.dev ||
+      receiptReadback.nlink !== 1 ||
+      (receiptReadback.mode & 0o777) !== 0o600 ||
+      receiptReadback.uid !== process.getuid?.() ||
+      createHash('sha256').update(readFileSync(receiptPath)).digest('hex') !==
+        createHash('sha256').update(receiptBytes).digest('hex')
+    ) {
+      faults |= 1024;
+      return;
+    }
+    session = await page.context().newCDPSession(page);
+    guardSetup();
+    session.on(
+      'Runtime.executionContextCreated',
+      (event: {
+        context: {
+          id: number;
+          uniqueId?: string;
+          auxData?: { frameId?: string; isDefault?: boolean; type?: string };
+        };
+      }) => {
+        const context = event.context;
+        if (frameId && context.auxData?.frameId !== frameId) return;
+        if (contexts.has(context.id) && contexts.get(context.id)?.uniqueId !== context.uniqueId) {
+          faults |= 256;
+          return;
+        }
+        if (
+          !Number.isSafeInteger(context.id) ||
+          !context.auxData?.frameId ||
+          Buffer.byteLength(context.auxData.frameId) > 128 ||
+          typeof context.uniqueId !== 'string' ||
+          Buffer.byteLength(context.uniqueId) > 128 ||
+          contexts.size >= 8
+        ) {
+          faults |= 256;
+          return;
+        }
+        contexts.set(context.id, {
+          id: context.id,
+          frameId: context.auxData.frameId,
+          uniqueId: context.uniqueId,
+          default: context.auxData.isDefault === true,
+          isolated: context.auxData.type === 'isolated',
+          destroyed: false,
+        });
+        if (
+          frameId &&
+          context.auxData.frameId === frameId &&
+          context.auxData.isDefault === true &&
+          ++documents > 2
+        )
+          faults |= 512;
+      }
+    );
+    session.on('Runtime.executionContextDestroyed', (event: { executionContextId: number }) => {
+      const context = contexts.get(event.executionContextId);
+      if (context) {
+        context.destroyed = true;
+        if (documents >= 2 && context.frameId === frameId && context.isolated) {
+          contextLost = true;
+          faults |= 256;
+        }
+      }
+    });
+    session.on('Runtime.executionContextsCleared', () => {
+      for (const context of contexts.values()) {
+        context.destroyed = true;
+        if (documents >= 2 && context.frameId === frameId && context.isolated) {
+          contextLost = true;
+          faults |= 256;
+        }
+      }
+    });
+    await session.send('Page.enable');
+    guardSetup();
+    const tree = (await session.send('Page.getFrameTree')) as {
+      frameTree: { frame: { id: string } };
+    };
+    guardSetup();
+    frameId = tree.frameTree.frame.id;
+    if (typeof frameId !== 'string' || frameId.length > 128) {
+      faults |= 256;
+      return;
+    }
+    await session.send('Runtime.enable');
+    guardSetup();
+    documents = Array.from(contexts.values()).filter(
+      (context) => context.frameId === frameId && context.default
+    ).length;
+    if (documents > 2) faults |= 512;
+    if (faults) return;
+    await page.addInitScript({ content: receipt.appSource });
+    guardSetup();
+    const before = Date.now();
+    const clock = await page.evaluate(() => ({
+      local: performance.now(),
+      origin: performance.timeOrigin,
+    }));
+    guardSetup();
+    calibration = { before, after: Date.now(), local: clock.local, origin: clock.origin };
+  };
   try { await deferred43Bound(setup(), setupDeadline) } catch { setupExpired = true; faults |= 4 }
   return async () => {
     const deadline = Date.now() + 4000
