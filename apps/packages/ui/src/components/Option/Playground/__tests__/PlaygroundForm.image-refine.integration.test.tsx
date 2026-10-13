@@ -1,13 +1,30 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundForm } from "../PlaygroundForm"
 import type { AttachedResearchContext } from "../research-chat-context"
 import { DICTATION_DIAGNOSTICS_EVENT } from "@/utils/dictation-diagnostics"
 import { fetchChatModels } from "@/services/tldw-server"
 import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { useActorStore } from "@/store/actor"
+import { createDefaultActorSettings } from "@/types/actor"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { ActorSettingsTarget } from "@/utils/actor-settings-target"
+
+const sceneIO = vi.hoisted(() => ({ read: vi.fn() }))
+let accountAbort: AbortController
+let sceneController: HistorySelectionController
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext: () => sceneController
+}))
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: (...args: unknown[]) => sceneIO.read(...args)
+}))
 
 const onSubmitMock = vi.hoisted(() =>
   vi.fn(async (_payload: unknown) => ({ status: "submitted" as const }))
@@ -523,32 +540,7 @@ vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => playgroundFormMessageOptionState.value
 }))
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: (selector: (state: any) => unknown) =>
-    selector({
-      systemPrompt: "",
-      setSystemPrompt: vi.fn(),
-      temperature: 0.7,
-      numPredict: 512,
-      topP: 0.9,
-      topK: 40,
-      frequencyPenalty: 0,
-      presencePenalty: 0,
-      repeatPenalty: 1,
-      reasoningEffort: "medium",
-      historyMessageLimit: 20,
-      historyMessageOrder: "recent_first",
-      slashCommandInjectionMode: "append",
-      apiProvider: "custom",
-      extraHeaders: "",
-      extraBody: "",
-      jsonMode: false,
-      numCtx: 8192,
-      setActiveSettingsScope: vi.fn(),
-      updateSetting: vi.fn(),
-      updateSettings: vi.fn()
-    })
-}))
+
 
 vi.mock("~/store/webui", () => ({
   useWebUI: () => ({
@@ -1094,10 +1086,32 @@ vi.mock("@/hooks/playground", () => ({
 
 // Real Zustand and form revisions are shared by the deployed Form and composer hooks.
 beforeEach(() => {
+  accountAbort = new AbortController()
+  const signal = accountAbort.signal
+  const isCurrent = () => !signal.aborted
+  sceneController = {
+    status: "idle",
+    getCurrent: () => ({ status: "idle", owner: null, view: null }),
+    fence: () => isCurrent,
+    getSignal: () => signal,
+    reset: vi.fn(), settingsMode: () => "ordinary",
+    draftAccount: {
+      requestScope: { config: { serverUrl: "https://captured.example", authMode: "multi-user" }, userId: "fixture-user" },
+      isCurrent, retryVerification: vi.fn()
+    }
+  } as unknown as HistorySelectionController
+  sceneIO.read.mockReset().mockImplementation(async ({ target, validate_lease }: { target: ActorSettingsTarget; validate_lease?: () => boolean }) => {
+    if (!target.isCurrent() || validate_lease?.() === false) throw new Error("actor_settings_scope_changed")
+    return { target, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }
+  })
+  useStoreChatModelSettings.getState().reset("custom")
+  useActorStore.getState().reset()
   useStoreMessageOption.setState({ ...useStoreMessageOption.getInitialState(), ...createMessageOptionState() }, true)
   useStoreMessageOption.getState().startNewChatDraft()
   playgroundFormMessageOptionState.value = useStoreMessageOption.getState()
 })
+
+afterEach(() => { accountAbort.abort() })
 
 describe("PlaygroundForm image prompt refinement modal integration", () => {
   beforeEach(() => {
@@ -1198,6 +1212,29 @@ describe("PlaygroundForm image prompt refinement modal integration", () => {
     expect(vi.mocked(fetchChatModels)).not.toHaveBeenCalledWith(
       expect.objectContaining({ refreshOpenRouter: true })
     )
+  })
+
+  it.each(["Scene read fails", "account retires"])("preserves typed input without dispatch when %s", async reason => {
+    let release!: (value: unknown) => void
+    let reject!: (error: Error) => void
+    const originalRead = sceneIO.read.getMockImplementation()!
+    const held = new Promise((resolve, refuse) => { release = resolve; reject = refuse })
+    sceneIO.read.mockImplementationOnce(() => held)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "KEEP EXACT INPUT")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await waitFor(() => expect(sceneIO.read).toHaveBeenCalledOnce())
+    const args = sceneIO.read.mock.calls[0][0]
+    const receipt = await originalRead(args)
+    await act(async () => {
+      if (reason === "Scene read fails") reject(new Error("Scene storage unavailable"))
+      else { accountAbort.abort(); release(receipt) }
+      await held.catch(() => undefined)
+    })
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("KEEP EXACT INPUT")
+    if (reason === "account retires") expect(args.target.isCurrent()).toBe(false)
   })
 
   it("supports create -> refine -> accept flow and submits refine metadata", async () => {
