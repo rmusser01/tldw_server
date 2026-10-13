@@ -659,7 +659,7 @@ export function useModelSelector({
         type: "group" as const,
         key: `group-${key}`,
         label: (
-          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-text-subtle">
+          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-text-muted">
             <ProviderIcons provider={key} className="h-3 w-3" />
             <span>{getProviderDisplayName(key)}</span>
           </div>

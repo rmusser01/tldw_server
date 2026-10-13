@@ -111,6 +111,12 @@ const renderNotices = (props: Partial<PlaygroundComposerNoticesProps> = {}) =>
   )
 
 describe("PlaygroundComposerNotices first-run banner", () => {
+  it("names the startup template launcher for assistive technology", () => {
+    mockNoFirstRunBanner()
+    renderNotices({ isProMode: true })
+    expect(screen.getByRole("combobox", { name: "Launch saved template" })).toBeVisible()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()

@@ -842,6 +842,10 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
             </Button>
             <Select
               size="small"
+              aria-label={t(
+                "playground:composer.startupTemplatesLaunch",
+                "Launch saved template"
+              )}
               placeholder={t(
                 "playground:composer.startupTemplatesLaunch",
                 "Launch saved template"

@@ -37,7 +37,7 @@ export const PlaygroundModelCatalogControls = ({
         aria-pressed={modelListScope === "catalog"}
         className={`rounded border px-2 py-1 text-xs transition-colors ${
           modelListScope === "catalog"
-            ? "border-primary bg-primary/10 text-primary"
+            ? "border-primary bg-primary/10 text-text"
             : "border-border bg-surface2 text-text-muted hover:text-text"
         }`}
         onClick={(event) => {
@@ -51,7 +51,7 @@ export const PlaygroundModelCatalogControls = ({
           ? t("playground:composer.configuredModels", "Configured")
           : t("playground:composer.searchAllModels", "Search all models")}
       </button>
-      <span className="text-[11px] text-text-subtle">
+      <span className="text-[11px] text-text-muted">
         {modelListScope === "catalog"
           ? t("playground:composer.catalogScopeHint", "All known models")
           : t(

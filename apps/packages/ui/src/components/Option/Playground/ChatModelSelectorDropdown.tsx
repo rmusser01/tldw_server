@@ -107,7 +107,7 @@ export const ChatModelSelectorDropdown = React.memo(
         }}
         menu={{
           items: modelDropdownMenuItems,
-          className: "no-scrollbar [&_.ant-dropdown-menu-item]:whitespace-normal",
+          className: "no-scrollbar [&_.ant-dropdown-menu-item]:whitespace-normal [&_.ant-dropdown-menu-item-group-title]:!text-text",
           style: { minWidth: 0 },
           activeKey: selectedModel ?? undefined
         }}
@@ -193,7 +193,7 @@ export const ChatModelSelectorDropdown = React.memo(
             <div className="shrink-0 border-t border-border p-2">
               <Link
                 to="/docs/models"
-                className="flex items-center gap-1.5 text-xs text-primary transition-colors hover:text-primary/80"
+                className="flex items-center gap-1.5 text-xs !text-text underline underline-offset-2"
                 onClick={() => setModelDropdownOpen(false)}
               >
                 <HelpCircle className="h-3.5 w-3.5" />
