@@ -270,7 +270,8 @@ vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => recentChatState.enabled),
 }));
 
-vi.mock("@/services/chat-settings", () => ({
+vi.mock("@/services/chat-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(),
   syncChatSettingsForServerChat: (params: unknown) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
 }));
@@ -303,9 +304,7 @@ vi.mock("@/db/dexie/helpers", async importOriginal => ({
   getRecentChatFromWebUI: (...args: unknown[]) => recentChatState.recent(...args),
 }));
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn() }),
-}));
+
 
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import React from "react"
 import { createInstance } from "i18next"
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, cleanup, render as renderComponent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -13,6 +14,11 @@ import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff
 import { useMilestoneStore } from "@/store/milestones"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import { useChatActions } from "@/hooks/chat/useChatActions"
+import { useStoreChatModelSettings } from "@/store/model"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence"
@@ -41,9 +47,40 @@ vi.mock("@/services/service-prompts", async () => ({
   loadServicePromptSnapshot: async () => sourceFlow.snapshot
 }))
 vi.mock("@/models", () => ({ pageAssistModel: async () => ({ stream: sourceFlow.stream }) }))
-vi.mock("@/services/actor-settings", () => ({ getActorSettingsForChat: async () => null }))
+const sceneIo = vi.hoisted(() => ({ read: vi.fn(), submissions: vi.fn(), staticController: null as any, sdkAddress: null as ReturnType<typeof freshChatDraftAddress> | null }))
+vi.mock("@/services/actor-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: (...args: unknown[]) => sceneIo.read(...args)
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return { ...actual, useHistorySelectionContext: () => sourceFlow.enabled ? actual.useHistorySelectionContext() : sceneIo.staticController }
+})
+vi.mock("@/hooks/chat/actor-scene-source", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/actor-scene-source")>()
+  return { ...actual, captureActorSceneSend: (controller: any, commandIsCurrent = () => true) => {
+    if (!sourceFlow.enabled || controller !== null) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    // Standalone SDK source tests retain a private Scene without claiming H1 readiness.
+    const entry = sourceFlow.snapshot
+    if (!entry) return null
+    const key = chatDraftOwnerKey(entry.requestScope)
+    const account = { requestScope: entry.requestScope, isCurrent: () => sourceFlow.snapshot === entry &&
+      !entry.scopeSignal.aborted && !entry.scopeInvalidatedSignal.aborted &&
+      chatDraftOwnerKey(sourceFlow.snapshot.requestScope) === key }
+    const session = usePlaygroundSessionStore.getState()
+    const address = sceneIo.sdkAddress
+    const isCurrent = () => sceneIo.sdkAddress === address && commandIsCurrent() && account.isCurrent() &&
+      usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === session.sourceSelectionRevision
+    const source = captureChatDraftSource(isCurrent)
+    const target = captureActorSettingsTarget({ address,
+      requestScope: account.requestScope, accountIsCurrent: account.isCurrent, isCurrent: source.isCurrent })
+    return actual.captureActorSceneSendForTarget(target, account, source.isCurrent, isCurrent)
+  } }
+})
 vi.mock("@/db/dexie/nickname", () => ({ getModelNicknameByID: async () => null }))
-vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
+vi.mock("@/services/chat-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(), syncChatSettingsForServerChat: async () => null }))
 vi.mock("@/services/tldw/server-capabilities", () => ({ getServerCapabilities: async () => ({ hasChatSaveToDb: true }) }))
 vi.mock("@/services/title", () => ({ generateTitle: async () => "Cedar saved chat" }))
 vi.mock("@/services/app", async () => ({
@@ -73,7 +110,10 @@ const createMessageOptionState = () => ({
   messages: [],
   selectedModel: "deepseek-chat",
   selectedModelIsLoading: false,
-  setSelectedModel: vi.fn(),
+  setSelectedModel: vi.fn((value: string | null) => {
+    messageOptionState.value.selectedModel = value
+    return useStoreMessageOption.getState().setSelectedModel(value)
+  }),
   chatMode: "normal",
   setChatMode: vi.fn(),
   compareMode: false,
@@ -146,9 +186,8 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+vi.mock("@tanstack/react-query", async importOriginal => ({
+  ...await importOriginal<typeof import("@tanstack/react-query")>(),
   useMutation: ({
     mutationFn,
     onMutate,
@@ -327,16 +366,14 @@ vi.mock("@/store/option", async () => {
     (selector: (state: any) => unknown, equality?: (left: unknown, right: unknown) => boolean) => sourceFlow.enabled
       ? actual.useStoreMessageOption(selector, equality)
       : selector({
+      ...actual.useStoreMessageOption.getState(),
       setRagMediaIds: handoff.setRagMediaIds,
       setRagPinnedResults: vi.fn()
     }), actual.useStoreMessageOption) }
 })
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: (selector: (state: any) => unknown) =>
-    (selector ?? ((state: unknown) => state))({
+const modelSettingsFixture: import("@/store/model").ChatModelSettings = {
       systemPrompt: "",
-      setSystemPrompt: vi.fn(),
       temperature: 0.7,
       numPredict: 512,
       topP: 0.9,
@@ -358,11 +395,7 @@ vi.mock("@/store/model", () => ({
       llamaGrammarOverride: "",
       jsonMode: false,
       numCtx: 8192,
-      setActiveSettingsScope: vi.fn(),
-      updateSetting: vi.fn(),
-      updateSettings: vi.fn()
-    })
-}))
+    }
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   shouldEnableOptionalResource: () => false,
@@ -1141,7 +1174,10 @@ function useSourceFlowActions() {
     isCharacterConversation: false,
     setSelectedModel: state.setSelectedModel
   } as Parameters<typeof useChatActions>[0])
-  return { ...createMessageOptionState(), ...state, ...actions }
+  return { ...createMessageOptionState(), ...state, ...actions, onSubmit: (input: Parameters<typeof actions.onSubmit>[0]) => {
+    sceneIo.submissions(input)
+    return actions.onSubmit(input)
+  } }
 }
 
 function useStaticMessageOptions() {
@@ -1180,6 +1216,35 @@ const deliverMediaHandoff = async (payload: MediaChatHandoffPayload) => {
   const replace = screen.queryByRole("button", { name: "Replace current draft" })
   if (replace) await userEvent.setup().click(replace)
 }
+
+let queryClient: QueryClient
+beforeEach(() => {
+  handoff.scope = "server-a:alice"
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  useStoreChatModelSettings.getState().reset()
+  useStoreChatModelSettings.getState().updateSettings(modelSettingsFixture)
+  useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+  useStoreMessageOption.getState().startNewChatDraft(false)
+  sceneIo.sdkAddress = freshChatDraftAddress(false)
+  useStoreMessageOption.setState({ selectedModel: "deepseek-chat" })
+  const requestScope = { config: structuredClone(sourceFlow.config), userId: 1 }
+  const owner = handoff.scope
+  sceneIo.staticController = {
+    status: "idle", settingsMode: () => "ordinary",
+    getCurrent: () => ({ status: "idle", owner: null, view: null }),
+    fence: () => captureChatDraftSource(() => handoff.scope === owner).isCurrent,
+    draftAccount: { requestScope, isCurrent: () => handoff.scope === owner }
+  }
+  sceneIo.submissions.mockReset()
+  sceneIo.read.mockReset().mockImplementation(async ({ target, validate_lease }) => {
+    if (!target.isCurrent() || validate_lease?.() === false) throw new Error("actor_settings_scope_changed")
+    return { target, originalRecord: null, settings: (await import("@/types/actor")).createDefaultActorSettings(), origin: "default", profileUnavailable: false }
+  })
+})
+afterEach(() => { cleanup(); queryClient.clear() })
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
 
 describe("Home source handoff through the real Chat and RAG send boundary", () => {
   beforeEach(() => {
@@ -1253,6 +1318,35 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
   }
+
+  it("forwards the original private Scene to real source actions and retires its authority", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    await send()
+    const receipt = sceneIo.submissions.mock.calls[0][0].actorSceneSend
+    expect(receipt.scene.target.address).toEqual(sceneIo.sdkAddress)
+    expect(receipt.requestScope).toEqual(sourceFlow.snapshot!.requestScope)
+    expect(receipt.isCurrent()).toBe(true)
+    sourceFlow.snapshot = { ...sourceFlow.snapshot!, scopeInvalidatedSignal: new AbortController().signal }
+    expect(receipt.isCurrent()).toBe(false)
+  })
+
+  it("preserves raw input and original messages when the private Scene read fails", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    const input = screen.getByTestId("composer-textarea") as HTMLTextAreaElement
+    const originalInput = input.value
+    const originalMessages = structuredClone(useStoreMessageOption.getState().messages)
+    sceneIo.read.mockRejectedValueOnce(new Error("Scene storage unavailable"))
+    await send()
+    expect(input).toHaveValue(originalInput)
+    expect(useStoreMessageOption.getState().messages).toEqual(originalMessages)
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(sourceFlow.stream).not.toHaveBeenCalled()
+    expect(sceneIo.submissions).not.toHaveBeenCalled()
+  })
 
   const persistSourceSession = async (enabled = true, failedRetrieval = false) => {
     const view = render(<SourceFlowHarness />)

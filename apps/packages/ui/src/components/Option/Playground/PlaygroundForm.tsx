@@ -1,3 +1,4 @@
+import { shallow } from "zustand/shallow";
 import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSaveFeedback";
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition";
@@ -787,7 +788,7 @@ export const PlaygroundForm = ({
     llamaGrammarOverride: state.llamaGrammarOverride,
     jsonMode: state.jsonMode,
     systemPromptTemplateId: state.systemPromptTemplateId,
-  }));
+  }), shallow);
   const numCtx = useStoreChatModelSettings((state) => state.numCtx);
   const updateChatModelSetting = useStoreChatModelSettings(
     (state) => state.updateSetting,
