@@ -23,6 +23,7 @@ After LLM usage accounting PR 2b (TASK-13437) an LLM call for an over-quota user
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From the PR 2b final review: a media item that reuses a transcript calls analyze per chunk inside _PERSISTENCE_NONCRITICAL_EXCEPTIONS (Ingestion_Media_Processing/persistence.py near lines 1701-1710), so every chunk after the first refusal is attempted and refused (one hand-off and counter read each); stop at the first refusal. The Explainer node stores generation_failed for a refusal (Explainer/jobs.py near line 451) while the job's error code says llm_quota_exceeded; carry the exception's failure_code into the node's error metadata.
+From the PR #3234 review: HyDE's legacy branch (RAG/rag_service/unified_pipeline.py near line 4063, taken with no credential runtime, so internal callers only) calls the sync sgl.analyze on the server loop, where the check at the call cannot run; move it to asyncio.to_thread. Changing unified_pipeline.py moves line numbers in two baselines: regenerate them (Helper_Scripts/ci/scope_predicate_ratchet.py --write-baseline; Helper_Scripts/web_scraping_refactor_inventory.py --json ... --markdown ...).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
