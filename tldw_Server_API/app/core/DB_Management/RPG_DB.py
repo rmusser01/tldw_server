@@ -666,6 +666,133 @@ class RPGRepository:
         with self.db.transaction() as conn:
             return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
 
+    def list_campaigns(
+        self,
+        owner_user_id: int,
+        *,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGCampaign], int]:
+        clauses = ["owner_user_id = ?"]
+        params: list[Any] = [owner_user_id]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = " AND ".join(clauses)
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM rpg_campaigns WHERE {where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_campaigns WHERE {where}", params).fetchone()[0])
+        return [self._campaign_from_row(row) for row in rows], total
+
+    def list_sessions(
+        self,
+        owner_user_id: int,
+        *,
+        campaign_id: int | None = None,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGSession], int]:
+        clauses = ["owner_user_id = ?"]
+        params: list[Any] = [owner_user_id]
+        if campaign_id is not None:
+            clauses.append("campaign_id = ?")
+            params.append(campaign_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = " AND ".join(clauses)
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM rpg_sessions WHERE {where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_sessions WHERE {where}", params).fetchone()[0])
+        return [self._session_from_row(row) for row in rows], total
+
+    def count_campaign_sessions(self, owner_user_id: int, campaign_id: int) -> int:
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM rpg_sessions WHERE owner_user_id = ? AND campaign_id = ?",
+                (owner_user_id, campaign_id),
+            ).fetchone()
+        return int(row[0])
+
+    def count_pending_proposals(self, owner_user_id: int, session_id: int) -> int:
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM rpg_session_proposals WHERE owner_user_id = ? AND session_id = ? AND status = 'pending'",
+                (owner_user_id, session_id),
+            ).fetchone()
+        return int(row[0])
+
+    def list_events(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        *,
+        after_sequence: int = 0,
+        limit: int = 50,
+        source_type: str | None = None,
+        event_type: str | None = None,
+    ) -> list[RPGSessionEvent]:
+        clauses = ["owner_user_id = ?", "session_id = ?", "sequence_number > ?"]
+        params: list[Any] = [owner_user_id, session_id, after_sequence]
+        if source_type is not None:
+            clauses.append("source_type = ?")
+            params.append(source_type)
+        if event_type is not None:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM rpg_session_events WHERE {' AND '.join(clauses)} ORDER BY sequence_number ASC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    def list_proposals(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        *,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGProposalRecord], int]:
+        clauses = ["owner_user_id = ?", "session_id = ?"]
+        params: list[Any] = [owner_user_id, session_id]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = " AND ".join(clauses)
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM rpg_session_proposals WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+            total = int(conn.execute(f"SELECT COUNT(*) FROM rpg_session_proposals WHERE {where}", params).fetchone()[0])
+        return [self._proposal_from_row(row) for row in rows], total
+
+    def get_snapshot_by_version(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        snapshot_version: int,
+    ) -> RPGSnapshotRecord:
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM rpg_session_snapshots WHERE owner_user_id = ? AND session_id = ? AND snapshot_version = ?",
+                (owner_user_id, session_id, snapshot_version),
+            ).fetchone()
+        if row is None:
+            raise RPGNotFoundError("snapshot_not_found")
+        return self._snapshot_from_row(row)
+
     def mark_proposal_applied(
         self,
         owner_user_id: int,

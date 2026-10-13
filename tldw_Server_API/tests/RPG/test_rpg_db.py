@@ -426,3 +426,71 @@ def test_commit_events_rejects_stale_expected_sequence():
 
     with pytest.raises(RPGConflictError, match="stale_event_sequence"):
         repo.commit_events_and_snapshot(42, session.id, 7, 0, payload, {"notes": []}, {}, "stale-key", "hash-a", "fate", "1.0.0", None)
+
+
+def test_list_campaigns_filters_status_and_paginates():
+    repo = _repo()
+    first = _campaign(repo)
+    second = repo.create_campaign(
+        owner_user_id=42, title="Second", description=None,
+        default_adapter_key="fate", default_adapter_version="1.0.0",
+        settings={}, linked_rules_pack_refs=[],
+        idempotency_key="campaign-2", request_payload_hash="hash-2", source_type="user",
+    )
+    listed, total = repo.list_campaigns(owner_user_id=42)
+    assert total == 2  # nosec B101
+    assert [c.id for c in listed] == [second.id, first.id]  # nosec B101  (updated_at DESC, id DESC)
+    empty, empty_total = repo.list_campaigns(owner_user_id=42, status="archived")
+    assert empty == [] and empty_total == 0  # nosec B101
+    page, page_total = repo.list_campaigns(owner_user_id=42, limit=1, offset=1)
+    assert page_total == 2 and [c.id for c in page] == [first.id]  # nosec B101
+    foreign, foreign_total = repo.list_campaigns(owner_user_id=7)
+    assert foreign == [] and foreign_total == 0  # nosec B101
+    with repo.db.transaction() as conn:
+        conn.execute("UPDATE rpg_campaigns SET status = 'archived' WHERE id = ?", (second.id,))
+    archived, archived_total = repo.list_campaigns(owner_user_id=42, status="archived")
+    assert archived_total == 1 and archived[0].id == second.id  # nosec B101
+
+
+def test_list_sessions_filters_and_counts():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    listed, total = repo.list_sessions(owner_user_id=42)
+    assert total == 1 and listed[0].id == session.id  # nosec B101
+    assert repo.list_sessions(owner_user_id=42, campaign_id=campaign.id)[1] == 1  # nosec B101
+    assert repo.list_sessions(owner_user_id=42, campaign_id=999)[1] == 0  # nosec B101
+    assert repo.count_campaign_sessions(owner_user_id=42, campaign_id=campaign.id) == 1  # nosec B101
+    assert repo.count_pending_proposals(owner_user_id=42, session_id=session.id) == 0  # nosec B101
+
+
+def test_list_events_cursors_and_filters():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    for seq, (event_type, source) in enumerate(
+        [("note.added", "user"), ("note.added", "mcp"), ("scene.updated", "user")], start=1
+    ):
+        repo.commit_events_and_snapshot(
+            owner_user_id=42, session_id=session.id,
+            expected_last_event_sequence=seq - 1, base_snapshot_version=seq - 1,
+            events=[{"event_type": event_type, "event_payload": {"note_id": f"n{seq}", "scene_id": f"s{seq}"}, "source_type": source}],
+            snapshot={}, diagnostics={}, idempotency_key=f"evt-{seq}", request_payload_hash=f"h{seq}",
+            adapter_key=session.adapter_key, adapter_version=session.adapter_version, proposal_id=None,
+        )
+    events = repo.list_events(owner_user_id=42, session_id=session.id)
+    assert [e.sequence_number for e in events] == [1, 2, 3]  # nosec B101
+    assert [e.sequence_number for e in repo.list_events(owner_user_id=42, session_id=session.id, after_sequence=1)] == [2, 3]  # nosec B101
+    assert len(repo.list_events(owner_user_id=42, session_id=session.id, source_type="mcp")) == 1  # nosec B101
+    assert len(repo.list_events(owner_user_id=42, session_id=session.id, event_type="scene.updated")) == 1  # nosec B101
+
+
+def test_list_proposals_and_get_snapshot_by_version():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    assert repo.list_proposals(owner_user_id=42, session_id=session.id) == ([], 0)  # nosec B101
+    record = repo.get_snapshot_by_version(owner_user_id=42, session_id=session.id, snapshot_version=0)
+    assert record.snapshot_version == 0  # nosec B101
+    with pytest.raises(RPGNotFoundError):
+        repo.get_snapshot_by_version(owner_user_id=42, session_id=session.id, snapshot_version=99)
