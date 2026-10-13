@@ -1,3 +1,5 @@
+import { spyOnStorageSet, storageOriginal } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
+import { Storage } from "@plasmohq/storage"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
@@ -9,9 +11,8 @@ import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useStoreMessageOption } from "@/store/option"
 import type { Prompt } from "@/db/dexie/types"
 
-// Actual application hook; these tests declare the persistence/identity boundary.
-// Actual model store and device I/O acknowledgement controls live in
-// useSelectedModel.persistence.test.tsx. No native storage is claimed here.
+// Actual application/model hooks and SDK; identity acknowledgement remains declared.
+// Device faults reach the actual default backend; installed-extension evidence is separate.
 const createDeps = (
   overrides: Partial<UsePromptTemplatesDeps> = {}
 ): UsePromptTemplatesDeps => ({
@@ -205,17 +206,15 @@ describe("startup template model and publication acknowledgements", () => {
 
 
 describe("exact startup application Retry with the actual model device boundary", () => {
-  beforeEach(() => {
-    window.localStorage.setItem(
-      "selectedModel",
-      JSON.stringify("openai:original")
-    )
+  const deviceStorage = new Storage()
+  beforeEach(async () => {
+    await deviceStorage.set("selectedModel", "openai:original")
     useStoreMessageOption.getState().setSelectedModel("openai:original")
   })
-  afterEach(() => {
+  afterEach(async () => {
     cleanup()
     vi.restoreAllMocks()
-    window.localStorage.removeItem("selectedModel")
+    await deviceStorage.remove("selectedModel")
   })
   const mountApplication = () => {
     const deps = createDeps()
@@ -237,23 +236,16 @@ describe("exact startup application Retry with the actual model device boundary"
   }
   const failDeviceWrite = () => {
     let fail = true
-    const prototype = Object.getPrototypeOf(
-      window.localStorage
-    ) as globalThis.Storage
-    const original = prototype.setItem
     const writes: string[] = []
     const failure = new Error("Model device write unavailable")
-    vi.spyOn(prototype, "setItem").mockImplementation(function (
-      this: globalThis.Storage,
-      key: string,
-      value: string
-    ) {
-      if (key === "selectedModel") {
-        writes.push(value)
-        if (fail) throw failure
-      }
-      return original.call(this, key, value)
-    })
+    spyOnStorageSet(deviceStorage.area === "sync" ? "sync" : "local")
+      .mockImplementation(function (key: string, value: unknown) {
+        if (key === "selectedModel") {
+          writes.push(JSON.stringify(value))
+          if (fail) return Promise.reject(failure)
+        }
+        return storageOriginal.set.call(this, key, value)
+      })
     return {
       writes,
       failure,
@@ -321,6 +313,7 @@ describe("exact startup application Retry with the actual model device boundary"
       writes: [JSON.stringify("openai:next"), JSON.stringify("openai:next")],
       prompt: ["Frozen reviewed behavior"]
     })
+    expect(await storageOriginal.get.call(deviceStorage, "selectedModel")).toBe("openai:next")
   })
   it.each(["other model", "same model newer revision"])(
     "refuses cached model Retry after another hook selects %s",
