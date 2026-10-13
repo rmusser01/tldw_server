@@ -89,7 +89,10 @@ export const useChatSettingsRecord = ({
     return {
       get: async (key: string) => stamp(key, await base.get(key)),
       watch: (callbacks: Parameters<typeof base.watch>[0]) => {
-        const mapped = Object.fromEntries(Object.entries(callbacks).map(([key, callback]) => [key, (change: { newValue?: unknown; oldValue?: unknown }) => callback({ ...change, newValue: stamp(key, change.newValue) })]))
+        const mapped = Object.fromEntries(Object.entries(callbacks).map(([key, callback]) => [key, (...args: Parameters<typeof callback>) => {
+          const [change, ...context] = args
+          return callback({ ...change, newValue: stamp(key, change.newValue) }, ...context)
+        }]))
         subscriptions.set(callbacks, mapped)
         return base.watch(mapped)
       },

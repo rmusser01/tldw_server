@@ -219,13 +219,15 @@ async function apiSendImpl<
       },
       set: async <V,>(key: string, value: V) => {
         assertCurrent()
-        await storage.set(key, value)
+        const result = await storage.set(key, value)
         assertCurrent()
+        return result
       },
       remove: async (key: string) => {
         assertCurrent()
-        await storage.remove(key)
+        const result = await storage.remove(key)
         assertCurrent()
+        return result
       }
     }
     const runtime = createDirectRuntime(guardedStorage, {
