@@ -1980,13 +1980,14 @@ class EnhancedWebScraper:
             system_default = kwargs.get('system_prompt')
             if system_default is None:
                 system_default = 'Summarize this article concisely.'
-            summary = analyze(
+            summary = await asyncio.to_thread(
+                analyze,
                 input_data=content,
                 custom_prompt_arg=overrides.get('user', kwargs.get('custom_prompt', '')),
                 api_name=kwargs.get('api_name', 'openai'),
                 api_key=kwargs.get('api_key'),
                 temp=kwargs.get('temperature', 0.7),
-                system_message=overrides.get('system', kwargs.get('system_message', system_default))
+                system_message=overrides.get('system', kwargs.get('system_message', system_default)),
             )
             return summary
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:

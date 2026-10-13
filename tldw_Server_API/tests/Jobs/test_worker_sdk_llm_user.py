@@ -67,3 +67,27 @@ async def test_a_failing_handler_still_releases_the_user(tmp_path) -> None:
     await asyncio.wait_for(sdk.run(handler=handler, job_type="t"), timeout=5)
 
     assert seen == [7, None]
+
+
+async def test_a_job_refused_by_the_llm_quota_fails_at_once_with_its_code(tmp_path, monkeypatch) -> None:
+    """A refused handler is not retried, since a quota window does not reset in seconds (spec §4b)."""
+    from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    refuse_llm_calls(monkeypatch)
+    db_path = tmp_path / "jobs_llm_quota.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(domain="writing", queue="default", job_type="t", payload={}, owner_user_id="7")
+    sdk = _sdk(jm)
+
+    async def handler(job_row):
+        """Make a checked LLM call for the job's owner."""
+        sdk.stop()
+        await check_llm_call_async()
+        return {"ok": True}
+
+    await asyncio.wait_for(sdk.run(handler=handler, job_type="t"), timeout=5)
+
+    row = jm.get_job(int(job["id"]))
+    assert (row["status"], row["error_code"]) == ("failed", "llm_quota_exceeded")

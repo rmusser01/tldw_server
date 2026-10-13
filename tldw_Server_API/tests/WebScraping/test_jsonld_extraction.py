@@ -247,3 +247,38 @@ def test_microdata_extraction_basic():
     assert result["author"] == "Micro Author"
     assert result["date"] == "2024-06-01"
     assert result["content"] == "Micro body text"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_scrape_summary_runs_off_the_event_loop_thread(monkeypatch):
+    """The article summary runs on a worker thread, where it can be quota-checked (spec §4b)."""
+    import threading
+
+    seen = []
+
+    async def fake_scrape_article(_url, custom_cookies=None, *, allow_llm_extraction=True):
+        """One extracted article."""
+        return {"url": "https://example.com", "title": "T", "content": "body", "extraction_successful": True}
+
+    def fake_analyze(**_kwargs):
+        """Record the thread."""
+        seen.append(threading.get_ident())
+        return "summary"
+
+    monkeypatch.setattr(extractor_lib, "scrape_article", fake_scrape_article)
+    monkeypatch.setattr(extractor_lib, "RateLimiter", lambda: None)
+    monkeypatch.setattr(extractor_lib, "analyze", fake_analyze)
+
+    result = await extractor_lib.scrape_and_summarize_multiple(
+        urls="https://example.com",
+        custom_prompt_arg=None,
+        api_name="openai",
+        api_key=None,
+        keywords="",
+        custom_article_titles=None,
+        summarize_checkbox=True,
+    )
+
+    assert result[0]["summary"] == "summary"
+    assert seen and seen[0] != threading.get_ident()

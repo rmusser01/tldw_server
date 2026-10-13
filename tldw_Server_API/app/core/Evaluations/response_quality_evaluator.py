@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
 )
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import llm_circuit_breaker
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_likert
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
     analyze,
@@ -233,7 +234,7 @@ class ResponseQualityEvaluator:
                 "explanation": "How well the response addresses the prompt"
             })
 
-        except (SummaryProviderError, DaemonCapacityError):
+        except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
             raise
         except Exception as e:
             logger.error("Relevance evaluation failed error_type={}", type(e).__name__)
@@ -298,7 +299,7 @@ class ResponseQualityEvaluator:
                 "explanation": "How complete and comprehensive the response is"
             })
 
-        except (SummaryProviderError, DaemonCapacityError):
+        except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
             raise
         except Exception as e:
             logger.error("Completeness evaluation failed error_type={}", type(e).__name__)
@@ -360,7 +361,7 @@ class ResponseQualityEvaluator:
                 "explanation": "Clarity and coherence of the response"
             })
 
-        except (SummaryProviderError, DaemonCapacityError):
+        except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
             raise
         except Exception as e:
             logger.error("Clarity evaluation failed error_type={}", type(e).__name__)
@@ -425,7 +426,7 @@ class ResponseQualityEvaluator:
                 "explanation": "Factual accuracy of the response"
             })
 
-        except (SummaryProviderError, DaemonCapacityError):
+        except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
             raise
         except Exception as e:
             logger.error("Accuracy evaluation failed error_type={}", type(e).__name__)
@@ -494,7 +495,7 @@ class ResponseQualityEvaluator:
                 "issues": issues
             })
 
-        except (SummaryProviderError, DaemonCapacityError):
+        except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
             raise
         except Exception as e:
             logger.error("Format compliance check failed error_type={}", type(e).__name__)
@@ -557,7 +558,7 @@ class ResponseQualityEvaluator:
                 "explanation": criterion_desc
             })
 
-        except (SummaryProviderError, DaemonCapacityError):
+        except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
             raise
         except Exception as e:
             logger.error("Custom criterion evaluation failed error_type={}", type(e).__name__)

@@ -203,3 +203,17 @@ async def test_strip_markdown_fences_json_prefix():
     from tldw_Server_API.app.core.Writing.manuscript_analysis import _strip_markdown_fences
 
     assert json.loads(_strip_markdown_fences('```json\n{"a": 1}\n```')) == {"a": 1}
+
+
+@pytest.mark.asyncio
+async def test_an_llm_quota_refusal_is_raised_not_stored_as_a_failed_analysis():
+    """The refusal reaches the endpoint, which answers 402, instead of becoming an analysis_failed result (§4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.app.core.Writing.manuscript_analysis import analyze_pacing
+
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+    with patch(f"{MODULE}.perform_chat_api_call_async", new_callable=AsyncMock, side_effect=refusal):
+        with pytest.raises(LLMQuotaExceededError):
+            await analyze_pacing("Some scene text.")

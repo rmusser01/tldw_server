@@ -470,3 +470,162 @@ def test_a_coroutine_astream_stays_a_coroutine_function() -> None:
     """The wrapped astream keeps the kind of the method it wraps."""
     assert inspect.iscoroutinefunction(_AwaitableAstreamProvider.astream)
     assert not inspect.iscoroutinefunction(_FakeProvider.astream)
+
+
+# --- The check at the call (LLM usage accounting spec §4b) ---
+
+
+class _EagerStreamProvider(_FakeProvider):
+    """Sends its request inside stream(), before any item is read, as moonshot, zai and cohere do."""
+
+    name = "fake-eager-stream"
+    sent: list[str] = []
+
+    def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        """Record that the provider was called."""
+        self.sent.append("chat")
+        return super().chat(request, timeout=timeout)
+
+    def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:  # type: ignore[override]
+        """Record the request when stream() is called, then return the lines."""
+        self.sent.append("stream")
+        return iter(LINES)
+
+    async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        """Record that the provider was called."""
+        self.sent.append("achat")
+        return {"choices": [{"message": {"content": "hello"}}], "usage": dict(USAGE)}
+
+    async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
+        """Record when the provider code runs, then yield the lines."""
+        self.sent.append("astream")
+        for line in LINES:
+            yield line
+
+
+@pytest.fixture
+def refused(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Quotas on and user 7 over a limit; returns the users the decision ran for."""
+    from tldw_Server_API.app.core.Usage import llm_quota_gate, quota_resolver
+    from tldw_Server_API.app.core.Usage.quota_checks import LLMQuotaRefusal
+
+    seen: list[int] = []
+
+    async def _decide(user_id: Any, requested_tokens: int = 1) -> LLMQuotaRefusal | None:
+        """Refuse user 7."""
+        seen.append(user_id)
+        if user_id == 7:
+            return LLMQuotaRefusal("llm_tokens_month", 100, 100, "Monthly LLM token limit reached", 60)
+        return None
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+    quota_resolver.invalidate_all()
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _decide)
+    _EagerStreamProvider.sent = []
+    return seen
+
+
+async def test_a_refused_call_never_reaches_the_provider_and_records_nothing(rows, refused) -> None:
+    """chat on a thread, achat, stream on a thread and astream all raise the 402 before the provider runs."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    provider = _EagerStreamProvider()
+    with llm_call_context(user_id=7):
+        with pytest.raises(LLMQuotaExceededError):
+            await asyncio.to_thread(provider.chat, REQUEST)
+        with pytest.raises(LLMQuotaExceededError):
+            await provider.achat(REQUEST)
+        with pytest.raises(LLMQuotaExceededError):
+            await asyncio.to_thread(provider.stream, REQUEST)
+        astream = provider.astream(REQUEST)
+    with pytest.raises(LLMQuotaExceededError):
+        await astream.__anext__()
+    assert _EagerStreamProvider.sent == []
+    assert await _settled(rows) == []
+    assert refused == [7, 7, 7, 7]
+
+
+async def test_an_admitted_user_is_checked_once_per_call_and_recorded(rows, refused) -> None:
+    """A user under every limit goes through; nested provider methods are not checked again."""
+    with llm_call_context(user_id=8):
+        await asyncio.to_thread(_FakeProvider().chat, REQUEST)
+        await _FakeProvider().achat(REQUEST)
+        assert [line async for line in _FakeProvider().astream(REQUEST)] == LINES
+    assert refused == [8, 8, 8]
+    assert len(await _settled(rows)) == 3
+
+
+async def test_a_call_that_records_itself_is_still_checked(rows, refused) -> None:
+    """The claims engine records its own rows, and its calls are still refused."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    with llm_call_context(user_id=7, records_itself=True), pytest.raises(LLMQuotaExceededError):
+        await asyncio.to_thread(_EagerStreamProvider().chat, REQUEST)
+    assert _EagerStreamProvider.sent == []
+
+
+async def test_an_admitted_request_is_not_refused_part_way(rows, refused) -> None:
+    """After a boundary check admits the request, its calls are not checked, even for a refused user."""
+    with llm_call_context(user_id=7, prechecked=True):
+        await asyncio.to_thread(_FakeProvider().chat, REQUEST)
+    assert refused == []
+    assert len(await _settled(rows)) == 1
+
+
+async def test_a_sync_call_on_the_loop_thread_is_recorded_but_not_checked(rows, refused) -> None:
+    """Waiting on the accounting loop from its own thread would deadlock: the call goes through and is recorded."""
+    with llm_call_context(user_id=7):
+        assert _FakeProvider().chat(REQUEST)["usage"] == USAGE
+    assert refused == []
+    assert len(await _settled(rows)) == 1
+
+
+async def test_a_stream_started_on_the_loop_thread_is_checked_at_its_first_item(rows, refused) -> None:
+    """stream() called on the loop cannot check; the thread that reads the first item does, and records nothing."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    with llm_call_context(user_id=7):
+        stream = _FakeProvider().stream(REQUEST)
+    with pytest.raises(LLMQuotaExceededError):
+        await asyncio.to_thread(next, stream)
+    assert refused == [7]
+    assert await _settled(rows) == []
+
+
+async def test_an_awaitable_astream_is_checked_before_it_is_awaited(rows, refused) -> None:
+    """An astream that returns an awaitable stays awaitable, and the refusal comes from awaiting it."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    with llm_call_context(user_id=7):
+        pending = _AwaitableAstreamProvider().astream(REQUEST)
+    assert inspect.isawaitable(pending)
+    with pytest.raises(LLMQuotaExceededError):
+        await pending
+    assert await _settled(rows) == []
+
+
+async def test_a_self_recorded_call_is_decided_once_even_when_achat_calls_chat(rows, refused) -> None:
+    """The claims engine's calls record themselves; the nested sync chat is not checked a second time."""
+    with llm_call_context(user_id=8, records_itself=True):
+        await _FakeProvider().achat(REQUEST)
+    assert refused == [8]
+    assert await _settled(rows) == []
+
+
+async def test_with_quotas_off_a_provider_call_hands_nothing_off(rows, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default costs a switch read: no hand-off to the accounting loop and no decision."""
+    from tldw_Server_API.app.core.Usage import llm_quota_gate
+
+    def _no_hand_off(*args: Any, **kwargs: Any) -> None:
+        """Fail the test if the check hands anything to the loop."""
+        raise AssertionError("handed off")
+
+    monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
+    monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
+    monkeypatch.setattr(llm_quota_gate, "get_accounting_loop", _no_hand_off)
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _no_hand_off)
+    with llm_call_context(user_id=7):
+        assert (await asyncio.to_thread(_FakeProvider().chat, REQUEST))["usage"] == USAGE
+        await _FakeProvider().achat(REQUEST)
+    assert len(await _settled(rows)) == 2
