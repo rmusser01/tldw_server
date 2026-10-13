@@ -468,14 +468,14 @@ class ConversationResumeStore:
         """
         from pydantic import ValidationError
 
-        from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
-            RoleplayResumeUserAppendRequest,
-            RoleplayResumeUserAppendResponse,
-        )
         from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
             RoleplayResumeConflictError,
             require_roleplay_resume_fence,
             roleplay_resume_fence,
+        )
+        from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+            RoleplayResumeUserAppendRequest,
+            RoleplayResumeUserAppendResponse,
         )
 
         body = RoleplayResumeUserAppendRequest.model_validate(request).model_dump(mode="json")
@@ -681,12 +681,12 @@ class ConversationResumeStore:
         """Read only original owner authority, never infer completion from edited text."""
         from pydantic import ValidationError
 
-        from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
-            CharacterChatCompletionV2Response,
-            RoleplayResumeCompletionV1,
-        )
         from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
             RoleplayResumeConflictError,
+        )
+        from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+            CharacterChatCompletionV2Response,
+            RoleplayResumeCompletionV1,
         )
 
         row = conn.execute(
@@ -752,13 +752,13 @@ class ConversationResumeStore:
         conn: Any | None = None,
     ) -> dict[str, Any]:
         """CAS one generated reply against all original behavior and history authority."""
-        from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
-            CharacterChatCompletionV2Response,
-            RoleplayResumeCompletionV1,
-        )
         from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
             RoleplayResumeConflictError,
             roleplay_resume_fence,
+        )
+        from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+            CharacterChatCompletionV2Response,
+            RoleplayResumeCompletionV1,
         )
 
         if not isinstance(content, str) or not content.strip() or len(content) > 1_000_000:
@@ -868,14 +868,14 @@ class ConversationResumeStore:
         """Freeze exact acknowledged input, complete history and saved behavior before dispatch."""
         from pydantic import ValidationError
 
-        from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
-            RoleplayResumeCompletionV1,
-            RoleplayResumeUserAppendResponse,
-        )
         from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
             RoleplayResumeConflictError,
             require_roleplay_resume_fence,
             roleplay_resume_fence,
+        )
+        from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+            RoleplayResumeCompletionV1,
+            RoleplayResumeUserAppendResponse,
         )
 
         body = RoleplayResumeCompletionV1.model_validate(request).model_dump(mode="json")

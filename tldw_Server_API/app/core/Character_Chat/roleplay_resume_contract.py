@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import RoleplayResumeFenceV1
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import RoleplayResumeFenceV1
 
 ROLEPLAY_RESUME_CONTRACT_VERSION = 1
 ROLEPLAY_RESUME_FEATURES = (

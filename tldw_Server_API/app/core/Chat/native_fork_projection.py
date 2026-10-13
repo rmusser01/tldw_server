@@ -15,15 +15,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
-    NativeAssetManifestEntryV1,
-    NativeAssetRetentionRequestV1,
-    NativeForkBindingTemplateV1,
-    NativeForkCaptureRequestV1,
-    NativeForkCaptureV1,
-    NativeForkRequestV1,
-    NativeScopeV1,
-)
 from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import (
     build_behavior_snapshot,
     is_credential_key,
@@ -54,6 +45,15 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     _freeze_json,
     _wire_json,
     selection_digest,
+)
+from tldw_Server_API.app.core.Chat.native_fork_schemas import (
+    NativeAssetManifestEntryV1,
+    NativeAssetRetentionRequestV1,
+    NativeForkBindingTemplateV1,
+    NativeForkCaptureRequestV1,
+    NativeForkCaptureV1,
+    NativeForkRequestV1,
+    NativeScopeV1,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     build_materialized_behavior_settings,

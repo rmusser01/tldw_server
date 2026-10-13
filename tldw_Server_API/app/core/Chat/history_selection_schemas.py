@@ -1,0 +1,382 @@
+"""Strict H1 request and response envelopes for owner-backed selection endpoints."""
+
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+
+def _wire_array(value: object) -> object:
+    """Accept a JSON array while storing its validated members as a tuple."""
+
+    return tuple(value) if isinstance(value, list) else value
+
+
+class HistoryWireModel(BaseModel):
+    """Reject unknown wire members and accidental mutation after validation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class HistoryEditTargetV1(HistoryWireModel):
+    """Original excluded user row that a protected Edit admission must still match."""
+
+    version: Literal[1]
+    message_id: str = Field(min_length=1)
+    message_revision: str = Field(min_length=1)
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _strict_version(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("Edit target version must be the integer 1")
+        return value
+
+
+HISTORY_EDIT_FIELD_DESCRIPTION = (
+    "[Extension] Original excluded user row for protected Edit and resend. Requires "
+    "tldw_history_branch=true and a send selection with a matching before_message cursor. "
+    "The owner checks the live settled user and original opaque message_revision inside "
+    "admission before inserting input or calling a provider. A changed or missing target "
+    "refuses with 409 {status: 'stale_selection', code: 'history_edit_target_changed', "
+    "conversation_id, message_id, message_revision, selection_digest}; all echoes identify "
+    "the original request and nothing is written. Committed same-ID replay compares the "
+    "original precondition with immutable input intent before rechecking old source history."
+)
+
+
+class AfterMessageCursorV1(HistoryWireModel):
+    kind: Literal["after_message"]
+    message_id: str = Field(min_length=1)
+
+
+class BeforeMessageCursorV1(HistoryWireModel):
+    kind: Literal["before_message"]
+    message_id: str = Field(min_length=1)
+
+
+class EmptyCursorV1(HistoryWireModel):
+    kind: Literal["empty"]
+
+
+HistoryCursorV1 = Annotated[
+    AfterMessageCursorV1 | BeforeMessageCursorV1 | EmptyCursorV1,
+    Field(discriminator="kind"),
+]
+
+
+class ParentGraphInterpretationV1(HistoryWireModel):
+    kind: Literal["parent_graph_v1"]
+
+
+class LegacyLinearInterpretationV1(HistoryWireModel):
+    kind: Literal["legacy_linear_v1"]
+    projection_id: str = Field(min_length=1)
+
+
+HistoryInterpretationV1 = Annotated[
+    ParentGraphInterpretationV1 | LegacyLinearInterpretationV1,
+    Field(discriminator="kind"),
+]
+
+
+class LegacyReviewRequiredV1(HistoryWireModel):
+    kind: Literal["legacy_review_required"]
+
+
+class AcceptedLegacyInterpretationV1(LegacyLinearInterpretationV1):
+    ordered_path_ids: tuple[str, ...]
+
+    _freeze_path = field_validator("ordered_path_ids", mode="before")(_wire_array)
+
+
+HistoryInterpretationStatusV1 = Annotated[
+    ParentGraphInterpretationV1 | AcceptedLegacyInterpretationV1 | LegacyReviewRequiredV1,
+    Field(discriminator="kind"),
+]
+
+
+class HistoryMessageRevisionV1(HistoryWireModel):
+    id: str = Field(min_length=1)
+    revision: str = Field(min_length=1)
+
+
+class HistoryFencesV1(HistoryWireModel):
+    conversation: str
+    history: str
+    settings: str
+
+
+class HistoryRequiredReferenceV1(HistoryWireModel):
+    id: str
+    revision: str
+    kind: str
+
+
+class HistoryComparisonMetadataV1(HistoryWireModel):
+    cluster_id: str
+    model_id: str | None
+    common: StrictBool
+
+
+class HistoryNodeV1(HistoryMessageRevisionV1):
+    preview: str | None = Field(None, max_length=200)
+    legacy_projection_id: str | None = None
+    parent_id: str | None
+    role: str
+    settled: StrictBool
+    conversation_id: str | None = None
+    metadata: tuple[HistoryRequiredReferenceV1, ...] = ()
+    assets: tuple[HistoryRequiredReferenceV1, ...] = ()
+    comparison: HistoryComparisonMetadataV1 | None = None
+
+    _freeze_references = field_validator("metadata", "assets", mode="before")(_wire_array)
+
+
+class HistorySelectedContentV1(HistoryMessageRevisionV1):
+    """Composer input bound by ID, order and revision to selected manifest rows."""
+
+    message: str
+    images: tuple[str, ...]
+    tool_calls: list[dict[str, Any]] | None = None
+    extra_metadata: dict[str, Any] | None = None
+
+    _freeze_images = field_validator("images", mode="before")(_wire_array)
+
+
+class NativeForkContextV1(HistoryWireModel):
+    """Digest-bound eligibility for the deliberately limited legacy plain copier."""
+
+    policy: Literal["plain_v1"]
+    storage_context_digest: str = Field(min_length=1)
+    supported: StrictBool
+
+
+class HistorySelectionSnapshotV1(HistoryWireModel):
+    version: Literal[1]
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    fences: HistoryFencesV1
+    nodes: tuple[HistoryNodeV1, ...]
+    source_digest: str
+    interpretation_status: HistoryInterpretationStatusV1
+    storage_context_digest: str
+    native_fork_context: NativeForkContextV1 | None = None
+
+    _freeze_nodes = field_validator("nodes", mode="before")(_wire_array)
+
+    @model_validator(mode="after")
+    def validate_native_fork_context(self) -> HistorySelectionSnapshotV1:
+        """Do not accept an eligibility proof from another context capture."""
+        if self.native_fork_context and self.native_fork_context.storage_context_digest != self.storage_context_digest:
+            raise ValueError("native_fork_context_mismatch")
+        return self
+
+
+class HistoryViewSelectionV1(HistoryWireModel):
+    view_session_id: str
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    interpretation: HistoryInterpretationV1
+    cursor: HistoryCursorV1
+    selection_revision: StrictInt = Field(ge=0)
+
+
+class HistorySelectionV1(HistoryWireModel):
+    version: Literal[1]
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    interpretation: HistoryInterpretationV1
+    cursor: HistoryCursorV1
+    selection_revision: StrictInt = Field(ge=0)
+    purpose: Literal["send", "fork"]
+    messages: tuple[HistoryMessageRevisionV1, ...]
+    fences: HistoryFencesV1
+    storage_context_digest: str
+    request_context_digest: str
+    selection_digest: str
+
+    _freeze_messages = field_validator("messages", mode="before")(_wire_array)
+
+
+class HistorySelectionEnvelopeV1(HistoryWireModel):
+    """Finalized selection submitted with an owner admission request."""
+
+    selection: HistorySelectionV1
+
+
+class CompareHistorySelectionV1(HistoryWireModel):
+    """One model's semantic comparison projection and tagged digest."""
+
+    version: Literal[1]
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    model_id: str = Field(min_length=1)
+    cluster_id: str | None
+    cursor: HistoryCursorV1
+    messages: tuple[HistoryMessageRevisionV1, ...]
+    fences: HistoryFencesV1
+    storage_context_digest: str
+    request_context_digest: str
+    selection_digest: str
+
+    _freeze_messages = field_validator("messages", mode="before")(_wire_array)
+
+
+class NormalForkInputV1(HistoryWireModel):
+    kind: Literal["normal"]
+    selection: HistorySelectionV1
+
+
+class ComparisonForkInputV1(HistoryWireModel):
+    kind: Literal["comparison"]
+    selection: CompareHistorySelectionV1
+
+
+ForkInputV1 = Annotated[NormalForkInputV1 | ComparisonForkInputV1, Field(discriminator="kind")]
+
+
+class ForkRequestV1(HistoryWireModel):
+    operation_id: str = Field(min_length=1)
+    owner_key: str = Field(min_length=1)
+    destination_owner_key: str = Field(min_length=1)
+    request_digest: str
+    input: ForkInputV1
+
+
+class HistoryCaptureViewV1(HistoryViewSelectionV1):
+    """Only a fresh read-only bootstrap may omit its owner namespace."""
+
+    owner_key: str | None = Field(None, min_length=1)
+
+
+class HistoryCaptureRequestV1(HistoryWireModel):
+    view: HistoryCaptureViewV1
+    purpose: Literal["send", "fork"]
+
+
+class NativeCompletionCapabilityV1(HistoryWireModel):
+    """Capture-bound persistence ownership eligibility; admission checks remain mandatory."""
+
+    policy: Literal["selected_history_v1"]
+    supported: StrictBool
+    storage_context_digest: str = Field(min_length=1)
+
+
+class CapturedHistoryV1(HistoryWireModel):
+    status: Literal["captured"]
+    snapshot: HistorySelectionSnapshotV1
+    rows: tuple[HistoryNodeV1, ...]
+    selected_content: tuple[HistorySelectedContentV1, ...]
+    view: HistoryViewSelectionV1
+    purpose: Literal["send", "fork"]
+    storage_context_digest: str
+
+    native_completion_v1: NativeCompletionCapabilityV1 | None = None
+
+    _freeze_rows = field_validator("rows", "selected_content", mode="before")(_wire_array)
+
+    @model_serializer(mode="wrap")
+    def omit_unrequested_native_completion(self, handler):
+        """Keep legacy strict captures byte-compatible in their JSON members."""
+        result = handler(self)
+        if self.native_completion_v1 is None:
+            result.pop("native_completion_v1", None)
+        return result
+
+    @model_validator(mode="after")
+    def validate_content_binding(self) -> CapturedHistoryV1:
+        """A strict capture cannot pair content with another manifest revision."""
+
+        if self.native_completion_v1 and (
+            self.purpose != "send"
+            or self.native_completion_v1.storage_context_digest != self.storage_context_digest
+            or self.storage_context_digest != self.snapshot.storage_context_digest
+        ):
+            raise ValueError("native_completion_capability_mismatch")
+        members = {row.id: row.revision for row in self.snapshot.nodes}
+        if len(members) != len(self.snapshot.nodes):
+            raise ValueError("duplicate_message_id")
+        if len(self.rows) != len(self.selected_content) or len({row.id for row in self.rows}) != len(self.rows):
+            raise ValueError("selected_content_mismatch")
+        for row, content in zip(self.rows, self.selected_content):
+            if members.get(row.id) != row.revision or row.id != content.id or row.revision != content.revision:
+                raise ValueError("selected_content_mismatch")
+        return self
+
+
+HISTORY_BRANCH_FIELD_DESCRIPTION = (
+    "[Extension] Branch intent for a `tldw_history_selection_v1` admission. It sits beside the "
+    "selection and is not covered by its digest. `false`: the send must extend the latest message; "
+    "if the selection's last message (or, for an empty selection, the conversation root) already has "
+    "a live child, the owner refuses with 409 `{status: 'stale_selection', code: "
+    "'history_branch_changed', conversation_id, parent_message_id, leaf_ids, history_version}` and "
+    "writes nothing. `leaf_ids` are the live leaves below that message, oldest first. `true`: an "
+    "explicit branch (for example Edit & resend), admitted beside any newer messages. Omitted: no "
+    "leaf check (the pre-D7 behaviour). Replaying an already-admitted message id is unaffected."
+)
+
+
+class HistoryFailureV1(HistoryWireModel):
+    status: Literal["legacy_review_required", "stale_selection", "invalid_history", "unsupported_history_capability"]
+    code: str
+
+
+class HistoryCaptureFailureV1(HistoryFailureV1):
+    """Read failures retain the authenticated complete source for explicit review."""
+
+    snapshot: HistorySelectionSnapshotV1
+    view: HistoryViewSelectionV1
+
+
+HistoryCaptureResultV1 = Annotated[CapturedHistoryV1 | HistoryCaptureFailureV1, Field(discriminator="status")]
+
+
+class LegacyHistoryProjectionConfirmV1(HistoryWireModel):
+    version: Literal[1]
+    projection_id: str = Field(min_length=1)
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    source_digest: str
+    fences: HistoryFencesV1
+    source_members: tuple[HistoryMessageRevisionV1, ...]
+    ordered_path_ids: tuple[str, ...]
+    cursor: HistoryCursorV1
+    selection_revision: StrictInt = Field(ge=0)
+
+    _freeze_members = field_validator("source_members", "ordered_path_ids", mode="before")(_wire_array)
+
+
+class LegacyProjectionConfirmEnvelopeV1(HistoryWireModel):
+    confirmation: LegacyHistoryProjectionConfirmV1
+
+
+class LegacyHistoryProjectionV1(LegacyHistoryProjectionConfirmV1):
+    projection_digest: str
+    created_at: str
+
+
+class HistoryAdmissionReferenceV1(HistoryWireModel):
+    version: Literal[1]
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    input_message_id: str
+    input_message_revision: str
+    selection_digest: str
+
+
+class HistoryAdmissionV1(HistoryAdmissionReferenceV1):
+    messages: tuple[HistoryMessageRevisionV1, ...]
+    originating_selection_revision: StrictInt = Field(ge=0)
+
+    _freeze_messages = field_validator("messages", mode="before")(_wire_array)

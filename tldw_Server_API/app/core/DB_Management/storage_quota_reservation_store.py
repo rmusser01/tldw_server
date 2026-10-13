@@ -62,7 +62,7 @@ class NativeQuotaOwner:
 
     def __post_init__(self) -> None:
         """Reject ambiguous IDs before any quota query."""
-        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeScopeV1
+        from tldw_Server_API.app.core.Chat.native_fork_schemas import NativeScopeV1
 
         scope = {"kind": self.scope_type}
         if self.workspace_id is not None:

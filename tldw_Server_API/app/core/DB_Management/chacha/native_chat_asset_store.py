@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+    from tldw_Server_API.app.core.Chat.native_fork_schemas import (
         NativeAssetContextUpdateV1,
         NativeAssetContextV1,
         NativeAssetRetentionRequestV1,
@@ -160,7 +160,7 @@ class NativeChatAssetStore:
         conn: Any,
     ) -> NativeCandidate:
         """Bind staging metadata to the original reviewed reference and live lease."""
-        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+        from tldw_Server_API.app.core.Chat.native_fork_schemas import (
             NativeAssetRetentionRequestV1,
         )
 
@@ -738,7 +738,7 @@ class NativeChatAssetStore:
         """Read private fork-backed context metadata; never read bytes or publish readiness."""
         import json
 
-        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+        from tldw_Server_API.app.core.Chat.native_fork_schemas import (
             NativeAssetContextV1,
             NativeAssetManifestEntryV1,
         )
@@ -882,7 +882,7 @@ class NativeChatAssetStore:
         """Remove one reviewed reference atomically; replacement authority is unqualified."""
         import json
 
-        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextUpdateV1
+        from tldw_Server_API.app.core.Chat.native_fork_schemas import NativeAssetContextUpdateV1
 
         self._db.native_forks._require_active_transaction(conn)
         if not isinstance(request, NativeAssetContextUpdateV1):

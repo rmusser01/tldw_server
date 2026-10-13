@@ -674,8 +674,8 @@ class MessageStore:
         history_edit: Mapping[str, Any] | None = None,
     ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
         """Re-resolve retained membership and context under the caller's owner fence."""
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
         from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistorySelectionV1
 
         body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
         if body["owner_key"] != owner_key or body["conversation_id"] != conversation_id:
@@ -763,7 +763,7 @@ class MessageStore:
             return None
         from pydantic import ValidationError
 
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryEditTargetV1
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryEditTargetV1
 
         try:
             target = HistoryEditTargetV1.model_validate(history_edit).model_dump(mode="json")
@@ -1025,7 +1025,7 @@ class MessageStore:
         """Reuse a protected user behind the selected reply without rewriting its authority."""
         from pydantic import ValidationError
 
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionV1
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionV1
 
         body = dict(selection)
         if (
@@ -1156,7 +1156,7 @@ class MessageStore:
         conn: Any | None = None,
     ) -> str:
         """Settle an assistant/tool result against its immutable accepted input."""
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
 
         binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
         data = dict(message)

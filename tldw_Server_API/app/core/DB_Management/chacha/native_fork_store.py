@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import (
+from tldw_Server_API.app.core.Chat.native_fork_schemas import (
     NativeAssetRetentionCommittedV1,
     NativeAssetRetentionRequestV1,
     NativeForkCommittedV1,

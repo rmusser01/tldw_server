@@ -33,8 +33,8 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import (
 )
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetRetentionRequestV1
     from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
+    from tldw_Server_API.app.core.Chat.native_fork_schemas import NativeAssetRetentionRequestV1
     from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeCandidate
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
@@ -397,7 +397,7 @@ class NativeChatAssetIO:
         quota_service: StorageQuotaService,
     ) -> NativeCandidate:
         """Prepare one reviewed candidate without publishing claims or readiness."""
-        from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetRetentionRequestV1
+        from tldw_Server_API.app.core.Chat.native_fork_schemas import NativeAssetRetentionRequestV1
 
         self._require_outermost(owner)
         self._db.native_assets._quota_identity(owner, quota_owner)
