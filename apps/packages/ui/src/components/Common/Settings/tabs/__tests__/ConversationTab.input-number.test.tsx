@@ -166,8 +166,10 @@ describe("ConversationTab real AntD numeric controls", () => {
     await waitFor(() => expect(verify).toBeEnabled())
     expect(screen.getByText(/Legacy pending note/, { selector: "pre" })).toBeInTheDocument()
     fireEvent.click(verify)
-    if (committed) await waitFor(() => expect(screen.queryByRole("button", { name: "Review previous settings change" })).not.toBeInTheDocument())
-    else {
+    if (committed) {
+      await waitFor(() => expect(review).not.toBeInTheDocument())
+      expect(screen.queryByText("Review previous settings change", { exact: true })).not.toBeInTheDocument()
+    } else {
       await screen.findByText(/The server has not confirmed this change/, { selector: '[role="alert"]' })
       expect(await getChatSettingsRecovery(target)).toEqual(receipt)
       expect(screen.getByText(/Legacy pending note/, { selector: "pre" })).toBeInTheDocument()
@@ -213,10 +215,18 @@ describe("ConversationTab real AntD numeric controls", () => {
     await new Storage({ area: "local" }).set(localStorageKey, boundary.settings)
     mountConversation(false)
     await screen.findByRole("spinbutton", { name: "Depth" })
-    for (const name of ["Conversation status", "Author note insertion", "Greeting scope", "Preset scope", "Chat preset override", "Chat generation override", "Memory scope", "Turn-taking mode", "Participants", "Directed responder", "Memory character", "Auto summary"])
-      expect(screen.getByRole("combobox", { name })).toBeInTheDocument()
-    for (const name of ["Model default system prompt", "Conversation tag", "Author note", "Stop sequences", "Memory note", "Current summary"])
-      expect(screen.getByRole("textbox", { name })).toBeInTheDocument()
+    for (const name of ["Conversation status", "Author note insertion", "Greeting scope", "Preset scope", "Chat preset override", "Chat generation override", "Memory scope", "Turn-taking mode", "Participants", "Directed responder", "Memory character", "Auto summary"]) {
+      const input = screen.getByLabelText(name, { selector: '[role="combobox"]' })
+      expect(input).toHaveAttribute("role", "combobox")
+      expect(input).toHaveAccessibleName(name)
+      expect(input).toBeVisible()
+    }
+    for (const name of ["Model default system prompt", "Conversation tag", "Author note", "Stop sequences", "Memory note", "Current summary"]) {
+      const input = screen.getByLabelText(name, { selector: "input, textarea" })
+      expect(input).toHaveRole("textbox")
+      expect(input).toHaveAccessibleName(name)
+      expect(input).toBeVisible()
+    }
   })
 
   it("stages all six numeric edits until Apply and restores them through owned storage after reopening", async () => {
@@ -226,16 +236,20 @@ describe("ConversationTab real AntD numeric controls", () => {
       ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
       ["Rep pen", "1.35"], ["Threshold", "30"], ["Recent window", "8"]
     ] as const) {
-      const input = screen.getByRole("spinbutton", { name })
+      const input = screen.getByLabelText(name, { selector: "input" })
+      expect(input).toHaveAttribute("role", "spinbutton")
+      expect(input).toBeVisible()
       fireEvent.change(input, { target: { value } })
       fireEvent.blur(input)
       expect(boundary.write).not.toHaveBeenCalled()
       expect(await getChatSettingsForKey(localKey)).toEqual(initialSettings)
     }
-    fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
+    const apply = screen.getByRole("button", { name: "Apply conversation changes" })
+    fireEvent.click(apply)
     await waitFor(async () => expect(await getChatSettingsForKey(localKey)).toMatchObject({ authorNotePosition: { mode: "depth", depth: 5 } }))
-    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Depth" })).toBeEnabled())
-    expect(screen.getByRole("button", { name: "Apply conversation changes" })).toBeDisabled()
+    await waitFor(() => expect(screen.getByLabelText("Depth", { selector: "input" })).toBeEnabled())
+    expect(apply).toBeInTheDocument()
+    expect(apply).toBeDisabled()
     expect(boundary.write).not.toHaveBeenCalled()
     expect(await getChatSettingsForKey(localKey)).toMatchObject({
       authorNotePosition: { mode: "depth", depth: 5 },
@@ -249,7 +263,12 @@ describe("ConversationTab real AntD numeric controls", () => {
     for (const [name, value] of [
       ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
       ["Rep pen", "1.35"], ["Threshold", "30"], ["Recent window", "8"]
-    ]) expect(screen.getByRole("spinbutton", { name })).toHaveValue(value)
+    ]) {
+      const input = screen.getByLabelText(name, { selector: "input" })
+      expect(input).toHaveAttribute("role", "spinbutton")
+      expect(input).toBeVisible()
+      expect(input).toHaveValue(value)
+    }
   }, 10_000)
 
   it("recovers a lost acknowledgement after Cancel and remount without replaying the committed settings PUT", async () => {
@@ -266,7 +285,7 @@ describe("ConversationTab real AntD numeric controls", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Cancel conversation changes" })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: "Cancel conversation changes" }))
     expect(await screen.findByRole("button", { name: "Review previous settings change" })).toBeEnabled()
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Temp" }), { target: { value: "0.66" } })
+    fireEvent.change(screen.getByLabelText("Temp", { selector: "input" }), { target: { value: "0.66" } })
     expect(screen.getByRole("button", { name: "Review previous settings change" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Apply conversation changes" })).toBeDisabled()
     expect(boundary.write).toHaveBeenCalledTimes(1)
@@ -275,15 +294,17 @@ describe("ConversationTab real AntD numeric controls", () => {
     const review = await screen.findByRole("button", { name: "Review previous settings change" })
     await waitFor(() => expect(review).toBeEnabled())
     fireEvent.click(review)
-    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Temp" })).toHaveValue("0.45"))
+    expect(screen.getByLabelText("Temp", { selector: "input" })).toHaveAttribute("role", "spinbutton")
+    expect(screen.getByLabelText("Temp", { selector: "input" })).toBeVisible()
+    await waitFor(() => expect(screen.getByLabelText("Temp", { selector: "input" })).toHaveValue("0.45"))
     expect(screen.getByText(/0.45/, { selector: "pre" })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole("button", { name: "Apply conversation changes" })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
     await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ chatGenerationOverride: { temperature: 0.45 } }))
     await waitFor(() => expect(screen.queryByRole("button", { name: "Review previous settings change" })).not.toBeInTheDocument())
     expect(boundary.write).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Temp" })).toBeEnabled())
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Temp" }), { target: { value: "0.66" } })
+    await waitFor(() => expect(screen.getByLabelText("Temp", { selector: "input" })).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Temp", { selector: "input" }), { target: { value: "0.66" } })
     fireEvent.click(screen.getByRole("button", { name: "Apply conversation changes" }))
     await waitFor(async () => expect(await getChatSettingsForKey(chatKey)).toMatchObject({ chatGenerationOverride: { temperature: 0.66 } }))
     expect(boundary.write).toHaveBeenCalledTimes(2)
