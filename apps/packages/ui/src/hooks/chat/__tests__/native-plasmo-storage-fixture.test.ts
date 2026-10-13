@@ -1,6 +1,7 @@
 import { spyOnStorageGet, spyOnStorageSet, storageOriginal } from "./native-plasmo-storage-fixture"
 import { afterEach, expect, it, vi } from "vitest"
-import { createSafeStorage } from "@/utils/safe-storage"
+import { waitFor } from "@testing-library/react"
+import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 import { requirePersistentStorage } from "@/utils/persistent-storage"
 
 const storage = createSafeStorage({ area: "local" })
@@ -88,4 +89,47 @@ it("restores the captured API for the next independent case", async () => {
   await storage.set("native-runtime-restored", { original: true })
   expect(await storage.get("native-runtime-restored")).toEqual({ original: true })
   expect(window.localStorage.getItem("native-runtime-restored")).not.toBeNull()
+})
+
+const syncStorage = createSafeStorage({ area: "sync" })
+it("holds the captured sync read while sibling local reads remain usable", async () => {
+  await syncStorage.set("native-sync-read", { original: true })
+  await storage.set("native-local-read", { sibling: true })
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const read = spyOnStorageGet("sync").mockImplementation(async function (key) {
+    if (key === "native-sync-read") await held
+    return storageOriginal.get.call(this, key)
+  })
+  let settled = false
+  const pending = syncStorage.get("native-sync-read").then(value => { settled = true; return value })
+  try {
+    await waitFor(() => expect(read).toHaveBeenCalledWith("native-sync-read"))
+    expect(settled).toBe(false)
+    expect(await storage.get("native-local-read")).toEqual({ sibling: true })
+    if (!("hasPersistentBackend" in storage)) expect(read).not.toHaveBeenCalledWith("native-local-read")
+  } finally { release() }
+  expect(await pending).toEqual({ original: true })
+})
+it("holds captured sync publication without intercepting sibling local writes", async () => {
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const write = spyOnStorageSet("sync").mockImplementation(async function (key, value) {
+    if (key === "native-sync-write") await held
+    return storageOriginal.set.call(this, key, value)
+  })
+  let settled = false
+  const pending = syncStorage.set("native-sync-write", { original: true }).then(() => { settled = true })
+  try {
+    await waitFor(() => expect(write).toHaveBeenCalledWith("native-sync-write", { original: true }))
+    expect(window.localStorage.getItem("plasmo-sync:native-sync-write")).toBeNull()
+    expect(settled).toBe(false)
+    await storage.set("native-local-write", { sibling: true })
+    expect(await storage.get("native-local-write")).toEqual({ sibling: true })
+    if (!("hasPersistentBackend" in storage)) expect(write).not.toHaveBeenCalledWith("native-local-write", { sibling: true })
+  } finally { release() }
+  await pending
+  expect(settled).toBe(true)
+  expect(safeStorageSerde.deserializer!(JSON.parse(window.localStorage.getItem("plasmo-sync:native-sync-write")!))).toEqual({ original: true })
+  expect(await syncStorage.get("native-sync-write")).toEqual({ original: true })
 })

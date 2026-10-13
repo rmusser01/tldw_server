@@ -1,10 +1,12 @@
 import { createSafeStorage } from "@/utils/safe-storage"
 import React from "react"
 
-const preferenceKey = "playgroundComposerCasualAdvancedControlsOpen"
+const casualPreferenceKey = "playgroundComposerCasualAdvancedControlsOpen"
 
 /** Existing presentation preference, with session-only recovery on storage failure. */
-export function useCasualComposerDisclosure() {
+export function useCasualComposerDisclosure(
+  preferenceKey: "playgroundComposerCasualAdvancedControlsOpen" | "playgroundComposerAdvancedControlsOpen" = casualPreferenceKey
+) {
   const storage = React.useMemo(() => createSafeStorage(), [])
   const [open, setOpen] = React.useState(false)
   const [status, setStatus] = React.useState<
@@ -45,7 +47,7 @@ export function useCasualComposerDisclosure() {
       mountedRef.current = false
       storage.unwatch(listeners)
     }
-  }, [storage])
+  }, [storage, preferenceKey])
 
   const setExplicitOpen = React.useCallback(
     async (next: boolean) => {
@@ -61,7 +63,7 @@ export function useCasualComposerDisclosure() {
         setStatus("unavailable")
       }
     },
-    [storage]
+    [storage, preferenceKey]
   )
 
   return {

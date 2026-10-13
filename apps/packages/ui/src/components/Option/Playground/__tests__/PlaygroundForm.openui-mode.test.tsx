@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import { createInstance } from "i18next"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"

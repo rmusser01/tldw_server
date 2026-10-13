@@ -1,3 +1,4 @@
+import { spyOnStorageGet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture";
 import React from "react";
 import {
   act,
@@ -12,7 +13,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { MemoryRouter } from "react-router-dom";
-import { Storage } from "@plasmohq/storage";
 import { useStoreMessageOption } from "@/store/option";
 import { COMPOSER_CONSTANTS } from "@/config/ui-constants";
 import {
@@ -333,7 +333,7 @@ describe("actual composer owner verification adapters and deployed recovery boun
               routeIntent: { path: "/chat" },
             })
           : null;
-      const read = vi.spyOn(Storage.prototype, "get");
+      const read = spyOnStorageGet();
       render(
         <MemoryRouter
           initialEntries={[handoff ? "/chat?handoff=" + handoff.id : "/chat"]}

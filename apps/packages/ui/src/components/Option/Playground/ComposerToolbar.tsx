@@ -212,10 +212,12 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
   const ephemeralDisabled = privateChatLocked || isFireFoxPrivateMode
-  const [advancedControlsOpen, setAdvancedControlsOpen] = useStorage(
-    "playgroundComposerAdvancedControlsOpen",
-    false
-  )
+  const {
+    open: advancedControlsOpen,
+    setExplicitOpen: setAdvancedControlsOpen,
+    loading: advancedDisclosureLoading,
+    unavailable: advancedDisclosureUnavailable
+  } = useCasualComposerDisclosure("playgroundComposerAdvancedControlsOpen")
   const {
     open: casualAdvancedControlsOpen,
     setExplicitOpen: setCasualAdvancedControlsOpen,
@@ -1022,7 +1024,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       <div className="border-t border-border/50 pt-2">
         <button
           type="button"
-          onClick={() => setAdvancedControlsOpen(!advancedControlsOpen)}
+          onClick={() => void setAdvancedControlsOpen(!advancedControlsOpen)}
+          disabled={advancedDisclosureLoading}
+          aria-busy={advancedDisclosureLoading}
           aria-expanded={advancedControlsOpen}
           aria-controls={
             advancedControlsOpen ? proAdvancedControlsId : undefined
@@ -1039,6 +1043,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             aria-hidden="true"
           />
         </button>
+        {advancedDisclosureUnavailable ? (
+          <p role="status" className="text-xs text-text-muted">
+            {t(
+              "playground:composer.advancedPreferenceUnavailable",
+              "Display preference unavailable. Advanced controls still work for this visit."
+            )}
+          </p>
+        ) : null}
         {advancedControlsOpen && (
           <div
             id={proAdvancedControlsId}

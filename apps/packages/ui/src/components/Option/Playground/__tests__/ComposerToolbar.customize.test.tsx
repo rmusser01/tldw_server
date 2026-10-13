@@ -1,3 +1,4 @@
+import { spyOnStorageGet, spyOnStorageSet, storageOriginal } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import {
   act,
@@ -27,7 +28,7 @@ const io = vi.hoisted(() => ({
   prompt: vi.fn(),
   realAssistant: false
 }))
-// Actual toolbar/AntD/English/WebUI storage shim; only existing domain editors are leaf doubles.
+// Actual toolbar/AntD/English and captured storage; only existing domain editors are leaf doubles.
 vi.mock("@/components/Common/AssistantSelect", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/components/Common/AssistantSelect")>()
@@ -293,15 +294,15 @@ describe("Casual task-based customization", () => {
   })
 
   it("keeps customization usable for this visit after a failed preference read, without overwriting the unread preference", async () => {
-    const original = Storage.prototype.get
-    vi.spyOn(Storage.prototype, "get").mockImplementation(function (
+    const original = storageOriginal.get
+    spyOnStorageGet("sync").mockImplementation(function (
       key: string
     ) {
       return key === "playgroundComposerCasualAdvancedControlsOpen"
         ? Promise.reject(new Error("read unavailable"))
         : original.call(this, key)
     })
-    const writes = vi.spyOn(Storage.prototype, "set")
+    const writes = spyOnStorageSet("sync")
     mount()
     const region = await openCustomize()
     expect(region).toBeVisible()
@@ -318,7 +319,7 @@ describe("Casual task-based customization", () => {
   it("preserves explicit session customization if saving the display preference fails", async () => {
     mount()
     await waitFor(() => expect(customize()).toBeEnabled())
-    vi.spyOn(Storage.prototype, "set").mockRejectedValueOnce(
+    spyOnStorageSet("sync").mockRejectedValueOnce(
       new Error("write unavailable")
     )
     fireEvent.click(customize())
@@ -335,10 +336,10 @@ describe("Casual task-based customization", () => {
   })
 
   it("keeps a newer watched preference when the initial read resolves late", async () => {
-    const original = Storage.prototype.get
+    const original = storageOriginal.get
     let finish!: (value: boolean) => void
     let held = false
-    vi.spyOn(Storage.prototype, "get").mockImplementation(function (
+    spyOnStorageGet("sync").mockImplementation(function (
       key: string
     ) {
       if (key === "playgroundComposerCasualAdvancedControlsOpen" && !held) {
@@ -571,7 +572,7 @@ describe("Casual task-based customization", () => {
   it("uses the established explicit disclosure preference without mount or mode writes", async () => {
     const store = new Storage()
     await store.set("playgroundComposerCasualAdvancedControlsOpen", true)
-    const writes = vi.spyOn(Storage.prototype, "set")
+    const writes = spyOnStorageSet("sync")
     const value = props()
     const rendered = mount(value)
     await screen.findByRole("region", { name: "Customize chat" })
@@ -597,9 +598,9 @@ describe("Casual task-based customization", () => {
   })
 
   it("waits for the saved disclosure read before accepting a conflicting toggle", async () => {
-    const original = Storage.prototype.get
+    const original = storageOriginal.get
     let finish!: (value: boolean) => void
-    vi.spyOn(Storage.prototype, "get").mockImplementation(function (
+    spyOnStorageGet("sync").mockImplementation(function (
       key: string
     ) {
       if (key === "playgroundComposerCasualAdvancedControlsOpen")
@@ -608,7 +609,7 @@ describe("Casual task-based customization", () => {
         })
       return original.call(this, key)
     })
-    const writes = vi.spyOn(Storage.prototype, "set")
+    const writes = spyOnStorageSet("sync")
     mount()
     expect(customize()).toBeDisabled()
     expect(customize()).toHaveAttribute("aria-busy", "true")
@@ -770,6 +771,7 @@ describe("Casual task-based customization", () => {
     expect(
       screen.queryByRole("button", { name: "Customize chat" })
     ).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
     expect(
       await screen.findByRole("button", { name: "Parameter presets" })
@@ -871,4 +873,79 @@ describe("Casual task-based customization", () => {
     expect(value.setSystemPrompt).not.toHaveBeenCalled()
     expect(value.onToggleTemporaryChat).not.toHaveBeenCalled()
   })
+})
+
+
+it("waits for the original Pro preference before accepting an Advanced toggle", async () => {
+  let release!: (value: boolean) => void
+  const held = new Promise<boolean>(resolve => { release = resolve })
+  let initialRead = true
+  const read = spyOnStorageGet("sync").mockImplementation(function (key) {
+    if (key === "playgroundComposerAdvancedControlsOpen" && initialRead) {
+      initialRead = false
+      return held
+    }
+    return storageOriginal.get.call(this, key)
+  })
+  const writes = spyOnStorageSet("sync")
+  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
+  try {
+    const toggle = screen.getByRole("button", { name: "Advanced controls" })
+    expect(toggle).toBeDisabled()
+    expect(toggle).toHaveAttribute("aria-busy", "true")
+    fireEvent.click(toggle)
+    expect(writes).not.toHaveBeenCalled()
+  } finally { release(false) }
+  await waitFor(() => expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled())
+  expect(read).toHaveBeenCalledWith("playgroundComposerAdvancedControlsOpen")
+  fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible())
+  await waitFor(() => expect(writes).toHaveBeenCalledWith("playgroundComposerAdvancedControlsOpen", true))
+})
+
+
+it("keeps Pro Advanced controls usable for this visit after an unread preference fails", async () => {
+  spyOnStorageGet("sync").mockImplementation(function (key) {
+    return key === "playgroundComposerAdvancedControlsOpen"
+      ? Promise.reject(new Error("Pro preference unavailable"))
+      : storageOriginal.get.call(this, key)
+  })
+  const writes = spyOnStorageSet("sync")
+  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
+  await screen.findByText("Display preference unavailable. Advanced controls still work for this visit.")
+  expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled()
+  fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible())
+  expect(writes).not.toHaveBeenCalled()
+})
+
+
+it("keeps a newer watched Pro choice when the original preference read resolves late", async () => {
+  let release!: (value: boolean) => void
+  const held = new Promise<boolean>(resolve => { release = resolve })
+  let initialRead = true
+  spyOnStorageGet("sync").mockImplementation(function (key) {
+    if (key === "playgroundComposerAdvancedControlsOpen" && initialRead) {
+      initialRead = false
+      return held
+    }
+    return storageOriginal.get.call(this, key)
+  })
+  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
+  try {
+    await act(async () => { await new Storage().set("playgroundComposerAdvancedControlsOpen", true) })
+    await waitFor(() => expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible())
+  } finally { release(false) }
+  await act(async () => { await held })
+  expect(screen.getByRole("button", { name: "Advanced controls" })).toHaveAttribute("aria-expanded", "true")
+  expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible()
+})
+it("retains Pro session controls when saving its display choice fails", async () => {
+  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled())
+  spyOnStorageSet("sync").mockRejectedValueOnce(new Error("Pro display write unavailable"))
+  fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
+  await screen.findByText("Display preference unavailable. Advanced controls still work for this visit.")
+  expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible()
+  expect(screen.getByRole("button", { name: "Advanced controls" })).toHaveAttribute("aria-expanded", "true")
 })
