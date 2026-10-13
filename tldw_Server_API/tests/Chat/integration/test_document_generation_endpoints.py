@@ -1281,6 +1281,37 @@ def test_document_generate_bubbles_service_error(authenticated_client):
     assert FailingStubService.record_calls == 0
 
 
+def test_document_generate_refuses_an_over_quota_user_before_generation(authenticated_client, monkeypatch):
+    """An over-quota user gets the 402 for a sync and an async request, and the service never generates."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    class RecordingStubService:
+        generate_calls = 0
+
+        def __init__(self, db):
+            self._db = db
+
+        def generate_document(self, *args, **kwargs):
+            RecordingStubService.generate_calls += 1
+            return {"success": True, "content": "unused", "metadata": {}}
+
+        def get_generated_documents(self, *args, **kwargs):
+            return []
+
+        def record_streamed_document(self, *args, **kwargs):
+            return None
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: RecordingStubService
+    RecordingStubService.generate_calls = 0
+    refuse_llm_work(monkeypatch)
+
+    for payload in (_make_payload(), {**_make_payload(), "async_generation": True}):
+        response = authenticated_client.post("/api/v1/chat/documents/generate", json=payload)
+        assert_llm_quota_402(response)
+        response.close()
+    assert RecordingStubService.generate_calls == 0
+
+
 def test_document_generate_maps_input_error_from_service(authenticated_client):
 
 

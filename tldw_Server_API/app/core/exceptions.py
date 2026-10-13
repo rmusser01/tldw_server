@@ -2070,3 +2070,29 @@ async def video_processing_exception_handler(
 
 def setup_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(VideoProcessingError, video_processing_exception_handler)
+
+
+class LLMQuotaExceededError(HTTPException):
+    """The user is over an LLM quota: HTTP 402 with a ``limit_exceeded`` body (LLM usage accounting spec §4).
+
+    An ``HTTPException`` and not a ``ChatAPIError``: endpoints report a
+    ``ChatAPIError`` as a provider failure, and most let an ``HTTPException``
+    through unchanged.
+    """
+
+    def __init__(self, *, category: str, current: float, limit: int | float, message: str, retry_after: int) -> None:
+        super().__init__(
+            status_code=402,
+            detail={
+                "error": "limit_exceeded",
+                "category": category,
+                "current": current,
+                "limit": limit,
+                "message": message,
+            },
+            headers={"Retry-After": str(int(retry_after))},
+        )
+        self.category = category
+        self.current = current
+        self.limit = limit
+        self.retry_after = int(retry_after)

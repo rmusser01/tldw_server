@@ -15,6 +15,7 @@ from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
@@ -2217,7 +2218,7 @@ async def _handle_count_tokens(
 @router.post(
     "/messages",
     summary="Anthropic-compatible Messages API",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
     responses={
         status.HTTP_200_OK: {
             "description": "Anthropic-compatible messages JSON response or SSE stream.",
@@ -2248,7 +2249,7 @@ async def create_messages(
 @public_router.post(
     "/v1/messages",
     summary="Anthropic-compatible Messages API",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
     responses={
         status.HTTP_200_OK: {
             "description": "Anthropic-compatible messages JSON response or SSE stream.",

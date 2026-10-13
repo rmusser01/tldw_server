@@ -61,6 +61,38 @@ def test_complete_v2_neutral_sampling_works_with_local_adapter_validation(
     assert response.status_code == expected_status, response.text
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("stream", [False, True])
+def test_complete_v2_refuses_an_over_quota_user_before_any_llm_call(
+    monkeypatch, test_client, auth_headers, populated_character_db, stream
+):
+    """An over-quota user gets the 402, streaming or not, and the provider is never called."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    characters = test_client.get("/api/v1/characters/", headers=auth_headers)
+    assert characters.status_code == 200, characters.text
+    created = test_client.post(
+        "/api/v1/chats/", headers=auth_headers, json={"character_id": characters.json()[0]["id"]}
+    )
+    assert created.status_code == 201, created.text
+    calls: list[dict] = []
+
+    def _recording_completion(**kwargs):
+        calls.append(kwargs)
+        return {"choices": [{"message": {"content": "unused"}}]}
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _recording_completion)
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{created.json()['id']}/complete-v2",
+        headers=auth_headers,
+        json={"provider": "llama", "model": "garden-model", "append_user_message": "Hi", "save_to_db": False, "stream": stream},
+    )
+    assert_llm_quota_402(response)
+    assert calls == []
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("captured_key", ["router-key-a", None], ids=["a-to-b", "absent-to-b"])

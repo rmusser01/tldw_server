@@ -974,3 +974,26 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
     assert agentic_kwargs["agentic"].enable_tools is True
     assert agentic_kwargs["agentic"].max_tool_calls == 9
     assert agentic_kwargs["agentic"].coverage_target == 0.88
+
+
+def test_rag_search_stream_refuses_an_over_quota_user_with_a_real_402(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    """The quota check runs before the streaming response starts, so the client gets a real 402."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_streaming_response(context: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return context
+
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", recording_generate_streaming_response)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_stream_overrides.post("/api/v1/rag/search/stream", json={"query": "q", "enable_generation": True})
+
+    assert_llm_quota_402(resp)
+    assert calls == []
