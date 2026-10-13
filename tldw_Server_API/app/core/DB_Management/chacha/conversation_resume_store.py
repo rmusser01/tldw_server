@@ -624,10 +624,11 @@ class ConversationResumeStore:
             ids = tuple(node["id"] for node in path)
             # Gate text/tool/metadata bytes before fetching complete history payloads.
             if self._db.backend_type == BackendType.POSTGRESQL:
-                budget_query = "SELECT COALESCE(SUM(octet_length(COALESCE(m.content, '')) + octet_length(COALESCE(mm.tool_calls_json, '')) + octet_length(COALESCE(mm.extra_json, ''))), 0) FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id WHERE m.conversation_id = ? AND m.id IN (SELECT jsonb_array_elements_text(CAST(? AS JSONB)))"
+                budget_query = "SELECT COALESCE(SUM(octet_length(COALESCE(m.content, '')) + octet_length(COALESCE(mm.tool_calls_json, '')) + octet_length(COALESCE(mm.extra_json, ''))), 0) AS prompt_bytes FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id WHERE m.conversation_id = ? AND m.id IN (SELECT jsonb_array_elements_text(CAST(? AS JSONB)))"
             else:
-                budget_query = "SELECT COALESCE(SUM(length(CAST(COALESCE(m.content, '') AS BLOB)) + length(CAST(COALESCE(mm.tool_calls_json, '') AS BLOB)) + length(CAST(COALESCE(mm.extra_json, '') AS BLOB))), 0) FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id WHERE m.conversation_id = ? AND m.id IN (SELECT value FROM json_each(?))"
-            if conn.execute(budget_query, (cid, json.dumps(ids))).fetchone()[0] > MAX_ROLEPLAY_PROMPT_BYTES:
+                budget_query = "SELECT COALESCE(SUM(length(CAST(COALESCE(m.content, '') AS BLOB)) + length(CAST(COALESCE(mm.tool_calls_json, '') AS BLOB)) + length(CAST(COALESCE(mm.extra_json, '') AS BLOB))), 0) AS prompt_bytes FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id WHERE m.conversation_id = ? AND m.id IN (SELECT value FROM json_each(?))"
+            prompt_bytes = conn.execute(budget_query, (cid, json.dumps(ids))).fetchone()["prompt_bytes"]
+            if prompt_bytes > MAX_ROLEPLAY_PROMPT_BYTES:
                 raise RoleplayResumeConflictError("resume_context_too_large")
             fresh, content = store._read_history_snapshot(
                 cid,
@@ -923,7 +924,7 @@ class ConversationResumeStore:
                     "history_version": receipt["fence"]["history_version"] - 1,
                     "tail": {
                         "message_id": parent,
-                        "message_version": (parent_row[0] if parent_row is not None else None),
+                        "message_version": (parent_row["version"] if parent_row is not None else None),
                     },
                 }
                 original_intent = self._db.message_store._history_intent_digest(

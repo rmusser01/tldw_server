@@ -282,7 +282,9 @@ def test_corrupted_original_receipt_cannot_claim_another_acknowledgment(resume_d
     append(db, cid, request)
     with db.transaction() as conn:
         authority = json.loads(
-            conn.execute("SELECT history_admission_json FROM messages WHERE id = ?", ("chosen-user",)).fetchone()[0]
+            conn.execute("SELECT history_admission_json FROM messages WHERE id = ?", ("chosen-user",)).fetchone()[
+                "history_admission_json"
+            ]
         )
         receipt = authority["roleplay_resume_v1"]["receipt"]
         if field in {"conversation_id", "message_id", "parent_message_id"}:
@@ -560,7 +562,7 @@ def test_prepare_generation_requires_original_input_authority(resume_db, corrupt
                 "SELECT history_admission_json FROM messages WHERE id = ?",
                 ("chosen-user",),
             ).fetchone()
-            authority = json.loads(row[0])
+            authority = json.loads(row["history_admission_json"])
             if corruption == "version":
                 authority["version"] = True
             elif corruption == "settled":
@@ -936,7 +938,7 @@ def test_original_completion_request_rejects_stored_numeric_coercion(resume_db, 
         raw = conn.execute(
             "SELECT history_admission_json FROM messages WHERE id = ?",
             ("chosen-assistant",),
-        ).fetchone()[0]
+        ).fetchone()["history_admission_json"]
         authority = json.loads(raw)
         stored = authority["roleplay_completion_v1"]["request"]
         for key in path[:-1]:
@@ -1388,9 +1390,9 @@ def test_character_creation_metadata_failure_rolls_back_initial_messages(resume_
     assert db.get_message_by_id("metadata-failed-initial") is None
     assert (
         db.execute_query(
-            "SELECT COUNT(*) FROM conversations WHERE title = ?",
+            "SELECT COUNT(*) AS conversation_count FROM conversations WHERE title = ?",
             ("Atomic metadata failure",),
-        ).fetchone()[0]
+        ).fetchone()["conversation_count"]
         == 0
     )
 
@@ -1485,9 +1487,9 @@ def test_character_creation_failed_initial_insertion_rolls_back(resume_db, monke
         )
     assert (
         db.execute_query(
-            "SELECT COUNT(*) FROM conversations WHERE title = ?",
+            "SELECT COUNT(*) AS conversation_count FROM conversations WHERE title = ?",
             ("Atomic insertion failure",),
-        ).fetchone()[0]
+        ).fetchone()["conversation_count"]
         == 0
     )
 
@@ -1694,3 +1696,44 @@ async def test_actual_saved_placeholder_is_checked_before_h1_input_admission(res
     else:
         assert (await build())[4][-1]["content"] == "Next H1 input"
         assert db.count_messages_for_conversation(cid) == before_count + 1
+
+
+@pytest.mark.parametrize("byte_limit", [3, 4])
+def test_resume_history_byte_gate_precedes_full_payload_read(resume_db, monkeypatch, byte_limit):
+    from tldw_Server_API.app.core.Character_Chat import roleplay_resume_prompt
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
+
+    db, original_cid = resume_db
+    cid = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": db.get_conversation_by_id(original_cid)["character_id"],
+            "title": "Byte gate",
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[{"id": "budget-prior", "sender": "assistant", "content": "😀"}],
+    )
+    assert db.get_message_metadata("budget-prior") is None
+    before = deepcopy(db.get_roleplay_resume_state(cid))
+    request = {"message_id": "budget-input", "content": "Continue", "expected": fence(db, cid)}
+    monkeypatch.setattr(roleplay_resume_prompt, "MAX_ROLEPLAY_PROMPT_BYTES", byte_limit)
+    full_reads = []
+    original_read = db.message_store._read_history_snapshot
+
+    def read(*args, **kwargs):
+        if kwargs.get("include_message_versions") and kwargs.get("selected_ids") is not None:
+            # Isolate the history byte gate from the later full-prompt limit.
+            full_reads.append(kwargs["selected_ids"])
+            raise RoleplayResumeConflictError("full_history_read_boundary")
+        return original_read(*args, **kwargs)
+
+    monkeypatch.setattr(db.message_store, "_read_history_snapshot", read)
+    with pytest.raises(RoleplayResumeConflictError) as caught:
+        append(db, cid, request)
+    assert (caught.value.code, full_reads) == (
+        ("resume_context_too_large", []) if byte_limit == 3 else ("full_history_read_boundary", [("budget-prior",)])
+    )
+    assert db.get_message_by_id("budget-input") is None
+    assert db.count_messages_for_conversation(cid) == 1
+    assert db.get_roleplay_resume_state(cid) == before
