@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import React from "react";
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderComponent, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
@@ -290,6 +291,13 @@ const findCenteredWidthContract = (
       node.className.includes("max-w-[64rem]"),
   );
 
+let queryClient: QueryClient
+beforeEach(() => { queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
+afterEach(() => queryClient.clear())
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
+
 describe("Playground sticky composer layout integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -346,3 +354,8 @@ describe("Playground sticky composer layout integration", () => {
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
 });
+
+vi.mock("@/services/tldw-server", async original => ({
+  ...await original<typeof import("@/services/tldw-server")>(),
+  fetchChatModels: async () => []
+}))

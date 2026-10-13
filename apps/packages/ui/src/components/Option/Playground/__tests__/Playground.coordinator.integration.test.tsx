@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto"
 // @vitest-environment jsdom
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
 import { App } from "antd"
 import { CharacterSelect } from "@/components/Common/CharacterSelect"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -419,7 +419,10 @@ vi.mock("@/services/service-prompts", async importOriginal => ({
     requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: ordinaryCompletion.owner }, release: vi.fn()
   })
 }))
-vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
+vi.mock("@/services/chat-settings", async original => ({
+  ...await original<typeof import("@/services/chat-settings")>(),
+  syncChatSettingsForServerChat: async () => null
+}))
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({ useChatSettingsRecord: () => ({ settings: null, updateSettings: vi.fn(async () => null) }) }))
 
 vi.mock("@/store/artifacts", () => ({
@@ -542,6 +545,13 @@ function prepareSharedClearFixture() {
     { id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }
   ])
 }
+
+let queryClient: QueryClient
+beforeEach(() => { queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
+afterEach(() => queryClient.clear())
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
 
 describe("Playground coordinator integration", () => {
   it.each(["inside", "outside"] as const)("releases the selected owner on shared clear %s the provider", async origin => {
@@ -1636,8 +1646,7 @@ describe("Playground coordinator integration", () => {
     tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }])
     tldwClientState.getCharacter.mockImplementation(async () => { await pending; return { id: 5, name: "Late Robot" } })
     window.history.pushState({}, "", "/chat?settingsServerChatId=robot")
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(<QueryClientProvider client={queryClient}><Playground /><AssistantSelect /></QueryClientProvider>)
+    const view = render(<><Playground /><AssistantSelect /></>)
     try {
       await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled())
       fireEvent.click(await screen.findByRole("button", { name: "Robot" }))
@@ -1668,8 +1677,7 @@ describe("Playground coordinator integration", () => {
     tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }])
     tldwClientState.getCharacter.mockImplementation(async id => ({ id, name: String(id) === "5" ? "Robot" : "New choice" }))
     window.history.pushState({}, "", routeKind !== "hash" ? "/chat?mode=character&characterId=5&chatId=robot&keep=1#anchor" : "/options.html?keep=1#/chat?mode=character&characterId=5&chatId=robot&tab=2")
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(<QueryClientProvider client={queryClient}><Playground /><AssistantSelect /></QueryClientProvider>)
+    const view = render(<><Playground /><AssistantSelect /></>)
     try {
       await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
       await waitFor(async () => expect(await getOwnedAssistant()).toMatchObject({ id: "5", name: "Robot" }))
@@ -1715,8 +1723,7 @@ describe("Playground coordinator integration", () => {
     tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }])
     tldwClientState.getCharacter.mockImplementation(async () => { return { id: 5, name: "Robot" } })
     window.history.pushState({}, "", routeKind === "search" ? "/chat?mode=character&characterId=5&chatId=robot&keep=1#anchor" : "/options.html?keep=1#/chat?mode=character&characterId=5&chatId=robot&tab=2")
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(<QueryClientProvider client={queryClient}><Playground /><Header /></QueryClientProvider>)
+    const view = render(<><Playground /><Header /></>)
     try {
       await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
       await waitFor(async () => expect(await getOwnedAssistant()).toMatchObject({ id: "5", name: "Robot" }))
@@ -1782,8 +1789,7 @@ describe("Playground coordinator integration", () => {
     window.localStorage.clear()
     await setOwnedAssistant({ kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
     useStoreMessageOption.setState({ serverChatId: "robot", historyId: null, messages: [], history: [], serverChatMetaLoaded: true, serverChatCharacterId: 5, serverChatAssistantKind: "character", serverChatAssistantId: "5", temporaryChat: false, streaming: false, isProcessing: false })
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(<App><QueryClientProvider client={queryClient}><CharacterSelect /></QueryClientProvider></App>)
+    const view = render(<App><CharacterSelect /></App>)
     try {
       fireEvent.click(await screen.findByRole("button", { name: /^Robot —/ }))
       fireEvent.click(await screen.findByRole("menuitem", { name: /New choice/ }))
