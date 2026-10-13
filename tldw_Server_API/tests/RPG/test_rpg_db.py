@@ -550,3 +550,29 @@ def test_update_session_metadata_partial_and_cas():
         request_payload_hash="h-s-2", source_type="user",
     )
     assert untouched.session.title == "Act II"  # nosec B101  (COALESCE keeps omitted fields)
+
+
+def test_update_session_authority_settings_cas_and_replay():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    settings = {"import_auto_commit": True, "mcp_auto_commit": False, "model_auto_commit": False, "model_auto_commit_event_types": []}
+    result = repo.update_session_authority_settings(
+        owner_user_id=42, session_id=session.id, authority_settings=settings,
+        expected_version=session.version, idempotency_key="auth-1",
+        request_payload_hash="h-auth-1", source_type="user",
+    )
+    assert result.session.authority_settings["import_auto_commit"] is True  # nosec B101
+    assert result.session.version == session.version + 1  # nosec B101
+    replay = repo.update_session_authority_settings(
+        owner_user_id=42, session_id=session.id, authority_settings=settings,
+        expected_version=session.version, idempotency_key="auth-1",
+        request_payload_hash="h-auth-1", source_type="user",
+    )
+    assert replay.replayed is True  # nosec B101
+    with pytest.raises(RPGConflictError):
+        repo.update_session_authority_settings(
+            owner_user_id=42, session_id=session.id, authority_settings=settings,
+            expected_version=session.version, idempotency_key="auth-2",
+            request_payload_hash="h-auth-2", source_type="user",
+        )

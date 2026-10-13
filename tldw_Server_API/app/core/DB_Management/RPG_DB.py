@@ -908,6 +908,51 @@ class RPGRepository:
             )
             return SessionUpdateResult(session=self._get_session_with_conn(conn, owner_user_id, session_id), replayed=False)
 
+    def update_session_authority_settings(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        *,
+        authority_settings: dict[str, Any],
+        expected_version: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> SessionUpdateResult:
+        self._validate_source_type(source_type)
+        operation_scope = f"session:{session_id}:authority_settings"
+        now = self._now()
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn, owner_user_id=owner_user_id, session_id=session_id, source_type=source_type,
+                operation_scope=operation_scope, idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                replayed_id = int(self._from_json(self._row_value(replay, "response_json"))["session_id"])
+                return SessionUpdateResult(session=self._get_session_with_conn(conn, owner_user_id, replayed_id), replayed=True)
+
+            session = self._get_session_with_conn(conn, owner_user_id, session_id)
+            if session.version != expected_version:
+                raise RPGConflictError("stale_version")
+            cursor = conn.execute(
+                """
+                UPDATE rpg_sessions
+                SET authority_settings_json = ?, version = version + 1, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND version = ?
+                """,
+                (self._to_json(authority_settings), now, session_id, owner_user_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("stale_version")
+            self._insert_idempotency_record(
+                conn, owner_user_id=owner_user_id, session_id=session_id, source_type=source_type,
+                operation_scope=operation_scope, idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash, event_ids=[],
+                response={"session_id": session_id}, created_at=now,
+            )
+            return SessionUpdateResult(session=self._get_session_with_conn(conn, owner_user_id, session_id), replayed=False)
+
     def mark_proposal_applied(
         self,
         owner_user_id: int,
