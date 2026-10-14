@@ -47,8 +47,6 @@ class RateLimitTierConfig:
     evaluations_per_day: int
     total_tokens_per_day: int
     burst_size: int
-    max_cost_per_day: float
-    max_cost_per_month: float
     description: str = ""
 
     @classmethod
@@ -61,8 +59,6 @@ class RateLimitTierConfig:
             evaluations_per_day=data.get("evaluations_per_day", 100),
             total_tokens_per_day=data.get("total_tokens_per_day", 100000),
             burst_size=data.get("burst_size", 5),
-            max_cost_per_day=data.get("max_cost_per_day", 1.0),
-            max_cost_per_month=data.get("max_cost_per_month", 10.0),
             description=data.get("description", "")
         )
 
@@ -268,6 +264,12 @@ class EvaluationsConfigManager:
             try:
                 tier_config = RateLimitTierConfig.from_dict(tier_name, tier_data)
                 self._rate_limit_tiers[tier_name] = tier_config
+                removed = [key for key in ("max_cost_per_day", "max_cost_per_month") if key in tier_data]
+                if removed:
+                    logger.warning(
+                        f"Ignoring {', '.join(removed)} in rate limit tier '{tier_name}': evaluation cost caps were "
+                        "removed; cap LLM spend with limits.llm_cost_per_day_usd / limits.llm_cost_per_month_usd"
+                    )
             except _EVAL_CONFIG_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Invalid rate limit config for tier '{tier_name}': {e}")
 
@@ -486,7 +488,7 @@ class EvaluationsConfigManager:
 
                         required_fields = [
                             "evaluations_per_minute", "evaluations_per_day",
-                            "total_tokens_per_day", "max_cost_per_day"
+                            "total_tokens_per_day"
                         ]
 
                         for field in required_fields:

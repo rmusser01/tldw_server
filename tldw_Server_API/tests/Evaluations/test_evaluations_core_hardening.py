@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.Evaluations.db_adapter import (
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
 from tldw_Server_API.app.core.Evaluations.synthetic_eval_service import SyntheticEvalWorkflowService
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import UnifiedEvaluationService
-from tldw_Server_API.app.core.Evaluations.user_rate_limiter import UserRateLimiter, UserTier
+from tldw_Server_API.app.core.Evaluations.user_rate_limiter import UserRateLimiter
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookPayload, WebhookManager
 from tldw_Server_API.app.core.Evaluations.webhook_security import WebhookSecurityValidator
 
@@ -318,48 +318,16 @@ def test_postgresql_adapter_is_not_constructible_until_implemented() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rate_limiter_cost_reservation_is_atomic(tmp_path, monkeypatch) -> None:
+async def test_daily_cap_reservation_is_atomic_under_concurrency(tmp_path) -> None:
+    """Two concurrent reservations against a daily cap of 1: exactly one is admitted."""
     limiter = UserRateLimiter(db_path=str(tmp_path / "rate_limits.db"))
-    user_id = "cost-user"
-    endpoint = "/api/v1/evaluations/geval"
-    await limiter.upgrade_user_tier(
-        user_id=user_id,
-        new_tier=UserTier.CUSTOM,
-        custom_limits={
-            "evaluations_per_minute": 100,
-            "batch_evaluations_per_minute": 100,
-            "evaluations_per_day": 100,
-            "total_tokens_per_day": 100_000,
-            "burst_size": 0,
-            "max_cost_per_day": 0.05,
-            "max_cost_per_month": 10.0,
-        },
-    )
-
-    barrier = asyncio.Event()
-    waiters = 0
-    original_record_request = limiter._record_request
-
-    async def _delayed_record_request(*args, **kwargs):
-        nonlocal waiters
-        waiters += 1
-        if waiters == 2:
-            barrier.set()
-        await asyncio.wait_for(barrier.wait(), timeout=1)
-        return await original_record_request(*args, **kwargs)
-
-    monkeypatch.setattr(limiter, "_record_request", _delayed_record_request)
-
     results = await asyncio.gather(
-        limiter.check_rate_limit(user_id, endpoint, estimated_cost=0.04),
-        limiter.check_rate_limit(user_id, endpoint, estimated_cost=0.04),
+        limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=1),
+        limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=1),
     )
-
-    allowed_count = sum(1 for allowed, _metadata in results if allowed)
-    denied_metadata = [metadata for allowed, metadata in results if not allowed]
-    assert allowed_count == 1  # nosec B101
-    assert len(denied_metadata) == 1  # nosec B101
-    assert denied_metadata[0]["error"] == "Daily cost limit exceeded"  # nosec B101
+    assert sum(1 for allowed, _metadata in results if allowed) == 1  # nosec B101
+    denied = [metadata for allowed, metadata in results if not allowed]
+    assert len(denied) == 1 and denied[0]["error"] == "Daily evaluation limit exceeded"  # nosec B101
 
 
 def test_synthetic_workflow_requires_user_for_owner_scoped_operations(tmp_path) -> None:

@@ -368,8 +368,6 @@ async def _apply_rate_limit_headers(limiter, user_id: str, response: Response, m
         ):
             if value is not None:
                 response.headers[header] = str(value)
-        response.headers["X-RateLimit-Daily-Cost-Remaining"] = f"{remaining.get('daily_cost', 0):.2f}"
-        response.headers["X-RateLimit-Monthly-Cost-Remaining"] = f"{remaining.get('monthly_cost', 0):.2f}"
         response.headers["RateLimit-Limit"] = str(per_min_limit)
         if isinstance(meta, dict) and "requests_remaining" in meta:
             response.headers["RateLimit-Remaining"] = str(int(meta.get("requests_remaining") or 0))
