@@ -101,7 +101,7 @@ New Pydantic models in `app/api/v1/schemas/rpg_schemas.py`: list envelopes, deta
 
 ## Error handling
 
-Stable codes via the existing `_map_error`: 404 for foreign/missing ids and unknown snapshot versions; 409 `stale_version` (CAS mismatch), `idempotency_key_conflict` (key reuse with different payload hash), `snapshot_version_conflict` (rebuild race); 400 for validation failures (unknown status, unknown event type in the authority whitelist, malformed paging params).
+Stable codes via the existing `_map_error`: 404 for foreign/missing ids and unknown snapshot versions; 409 `stale_version` (CAS mismatch), `idempotency_key_conflict` (key reuse with different payload hash), `snapshot_version_conflict` (rebuild race); 422 for schema-layer request validation failures such as invalid status literals or malformed paging params (FastAPI convention); 400 for service-level `RPGValidationError` such as an unknown event type in the authority whitelist. (amended during implementation: schema-layer rejections surface as 422, not 400)
 
 ## CI artifacts and documentation
 
