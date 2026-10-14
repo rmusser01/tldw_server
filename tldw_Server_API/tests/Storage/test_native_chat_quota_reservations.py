@@ -705,7 +705,8 @@ from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store impo
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 async def main():
-    previous = os.environ['NATIVE_QUOTA_BOOTSTRAP'] == 'prior100'
+    prior = os.environ['NATIVE_QUOTA_BOOTSTRAP']
+    previous = prior != 'fresh'
     if previous:
         path = Path.cwd() / 'users.db'
         apply_authnz_migrations(path, target_version=100)
@@ -714,6 +715,17 @@ async def main():
             assert conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'native_chat_quota_reservations'").fetchone()[0] == 0
             conn.execute('INSERT INTO users (id,uuid,username,email,password_hash,storage_used_mb,is_active) VALUES (?,?,?,?,?,?,?)',
                          (41, '22222222222242228222222222222222', 'preserved', 'preserved@example.invalid', 'fixture-hash', 12, 0))
+            conn.execute('DROP INDEX IF EXISTS idx_sessions_created_at')
+            conn.execute('DROP INDEX IF EXISTS idx_org_members_org_user')
+            if prior == 'preview101':
+                from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import native_quota_schema_statements
+                for statement in native_quota_schema_statements(postgres=False):
+                    conn.execute(statement)
+                conn.execute("INSERT INTO native_chat_quota_reservations (user_id,user_uuid,owner_key,candidate_key,scope_type,size_bytes,state) VALUES (?,?,?,?,?,?,?)",
+                             (41, '22222222222242228222222222222222', 'native:preview', 'retained-preview-charge', 'global', 19, 'active'))
+                conn.execute("INSERT INTO schema_migrations VALUES (101, 'Add native retained chat quota reservations', CURRENT_TIMESTAMP)")
+        if prior == 'admin101':
+            apply_authnz_migrations(path, target_version=101)
     try:
         assert await setup_database()
         assert await bootstrap_single_user_profile()
@@ -737,7 +749,13 @@ async def main():
             if previous:
                 sentinel = await pool.fetchone('SELECT uuid,storage_used_mb FROM users WHERE id = ?', 41)
                 assert sentinel['uuid'] == '22222222222242228222222222222222' and sentinel['storage_used_mb'] == 12
-                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == 101
+            if os.environ['NATIVE_QUOTA_BACKEND'] == 'sqlite':
+                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == 102
+                indexes = await pool.fetchall("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sessions_created_at', 'idx_org_members_org_user')")
+                assert {row['name'] for row in indexes} == {'idx_sessions_created_at', 'idx_org_members_org_user'}
+            if prior == 'preview101':
+                retained = await pool.fetchone("SELECT user_uuid,owner_key,size_bytes,state FROM native_chat_quota_reservations WHERE user_id = ? AND candidate_key = ?", 41, 'retained-preview-charge')
+                assert dict(retained) == {'user_uuid': '22222222222242228222222222222222', 'owner_key': 'native:preview', 'size_bytes': 19, 'state': 'active'}
             await reset_db_pool()
         print('RUNTIME_RESULT=' + json.dumps({'preserved': outcomes, 'prior_user': previous}))
     finally:
@@ -748,7 +766,7 @@ asyncio.run(main())
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("backend, prior", [("sqlite", "fresh"), ("sqlite", "prior100"), ("postgres", "fresh")])
+@pytest.mark.parametrize("backend, prior", [("sqlite", "fresh"), ("sqlite", "prior100"), ("sqlite", "admin101"), ("sqlite", "preview101"), ("postgres", "fresh")])
 def test_native_quota_fresh_upgrade_and_repeated_bootstrap_preserve_charge(
     tmp_path: Path,
     request: pytest.FixtureRequest,
@@ -762,8 +780,8 @@ def test_native_quota_fresh_upgrade_and_repeated_bootstrap_preserve_charge(
     else:
         database_url = f"sqlite:///{tmp_path / 'users.db'}"
     env = _runtime_env(tmp_path, database_url, backend=backend)
-    env.update(USAGE_QUOTAS_ENABLED="1", NATIVE_QUOTA_BOOTSTRAP=prior)
+    env.update(USAGE_QUOTAS_ENABLED="1", NATIVE_QUOTA_BOOTSTRAP=prior, NATIVE_QUOTA_BACKEND=backend)
     assert _run_runtime(tmp_path, env, BOOTSTRAP_SCRIPT) == {
         "preserved": [True, True],
-        "prior_user": prior == "prior100",
+        "prior_user": prior != "fresh",
     }
