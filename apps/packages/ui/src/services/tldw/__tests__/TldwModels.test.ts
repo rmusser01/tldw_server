@@ -703,6 +703,39 @@ describe("TldwModelsService caching", () => {
     expect((await service.getModels(true, { requireFresh: true }))[0].capabilities).toContain("vision")
   })
 
+  it.each([false, true])("shares current network discovery across ordinary and authoritative reads (fresh first: %s)", async (freshFirst) => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const held = deferred<Array<{ id: string; name: string; provider: string }>>()
+    mocks.getModels.mockReturnValue(held.promise)
+    const first = service.getModels(false, freshFirst ? { requireFresh: true, throwOnError: true } : undefined)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledOnce())
+    const second = service.getModels(false, freshFirst ? undefined : { requireFresh: true, throwOnError: true })
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    held.resolve([{ id: "live", name: "Live", provider: "openai" }])
+    const results = await Promise.all([first, second])
+    expect(mocks.getModels).toHaveBeenCalledOnce()
+    expect(results.map(models => models.map(model => model.id))).toEqual([["live"], ["live"]])
+  })
+
+  it("keeps authoritative errors strict when joining an advisory network read", async () => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const held = deferred<never>()
+    mocks.getModels.mockReturnValue(held.promise)
+    const ordinary = service.getModels()
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledOnce())
+    const authoritative = service.getModels(false, { requireFresh: true, throwOnError: true })
+    const rejected = expect(authoritative).rejects.toThrow("Discovery unavailable")
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    held.reject(new Error("Discovery unavailable"))
+    await rejected
+    expect(await ordinary).toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledOnce()
+  })
+
   it("coalesces fresh capability requests and prevents an older discovery from replacing them", async () => {
     const { TldwModelsService } = await importService()
     const service = new TldwModelsService()

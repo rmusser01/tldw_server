@@ -1365,7 +1365,7 @@ it("compact saved roleplay provider failure directs model setup and retains the 
   try {
     await act(async () => { await hook.result.current.onSubmit({ message: "  ORIGINAL COMPACT INPUT  ", image: "" }) })
     const receipt = await h1.roleplayAppend.mock.results[0].value
-    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ state: "accepted_unsent", input_text: "  ORIGINAL COMPACT INPUT  ", input_id: receipt.message_id, roleplay_resume: { append: receipt } })
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ state: "unknown", input_text: "  ORIGINAL COMPACT INPUT  ", input_id: receipt.message_id, roleplay_resume: { append: receipt } })
     expect(h1.roleplayAppend).toHaveBeenCalledOnce()
     expect(h1.roleplayComplete).toHaveBeenCalledOnce()
     expect(h1.controller.getCurrent()).toBe(current)
@@ -1898,7 +1898,7 @@ it.each(["success", "provider failure", "retired provider failure"])("dispatches
   const operation = h1.recover.mock.lastCall?.[2].operation_id
   if (outcome !== "success" && selected.bookmarkScope && selected.view) {
     const entry = (await journal.loadHistoryTurnRecoveries(selected.bookmarkScope, selected.view)).find(value => value.turn.operation_id === operation)
-    expect(entry?.turn).toMatchObject({ state: "accepted_unsent", input_text: "first", input_id: (await h1.roleplayAppend.mock.results[0].value).message_id })
+    expect(entry?.turn).toMatchObject({ state: "unknown", input_text: "first", input_id: (await h1.roleplayAppend.mock.results[0].value).message_id })
     if (operation) await journal.dismissHistoryTurnRecovery(selected.bookmarkScope, selected.view, operation)
   }
   hook.unmount()
@@ -5541,7 +5541,7 @@ it.each(["append", "completion"])("mounted Compact global saved Roleplay rejects
   const { result } = renderHook(() => useMessage())
   await act(async () => { await result.current.onSubmit({ message: "  Original owned input  ", image: "" }) })
   expect(h1.controller.followResult).not.toHaveBeenCalled()
-  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ conversation_id: nativeChatId, input_text: "  Original owned input  ", state: boundary === "append" ? "unknown" : "generated_unsaved" })
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ conversation_id: nativeChatId, input_text: "  Original owned input  ", state: "unknown" })
   expect(h1.dismiss).not.toHaveBeenCalled()
   expect(h1.wire).not.toHaveBeenCalled()
 })

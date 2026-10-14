@@ -7,9 +7,11 @@ import { useQuery } from "@tanstack/react-query"
 import { useStorage } from "@plasmohq/storage/hook"
 import { GenerateCharacterPanel } from "../GenerateCharacterPanel"
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: vi.fn()
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return { ...actual, useQuery: vi.fn(), useQueryClient: () => queryClient }
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: vi.fn()

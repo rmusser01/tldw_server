@@ -54,7 +54,8 @@ vi.mock("@/services/actor-settings", () => ({
 
 // These legacy UI cases declare account/native-view acceptance at the qualifier
 // boundary. The real typed address, source/session checks and H1 fences remain.
-vi.mock("@/hooks/chat/actor-scene-source", () => ({
+vi.mock("@/hooks/chat/actor-scene-source", async (original) => ({
+  ...await original<typeof import("@/hooks/chat/actor-scene-source")>(),
   captureCurrentActorSceneTarget:
     actorSettingsMocks.captureCurrentActorSceneTarget
 }))

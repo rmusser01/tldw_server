@@ -1074,6 +1074,14 @@ const assertNoMobilePanelComposerOverlap = async (
     .toBe('ok');
 };
 
+const assertMobileComposerDraftVisible = async (page: Page) => {
+  await expect.poll(async () => {
+    const input = await page.getByTestId('chat-input').boundingBox();
+    const viewport = await page.locator('[data-testid="playground-chat-composer-region"], [data-testid="playground-chat-composer-dock"]').boundingBox();
+    return Boolean(input && viewport && input.y >= viewport.y - 1 && input.y + input.height <= viewport.y + viewport.height + 1);
+  }, { message: 'Mobile draft should be visible inside its composer scroll area' }).toBe(true);
+};
+
 const MAX_MOBILE_PANEL_HEIGHT_PX = 260;
 
 const assertMobilePanelMeasuredHeight = async (
@@ -2489,7 +2497,10 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(promptSearch).toBeHidden();
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await expectMobileDraftReachable();
+    // Retire earlier composer layout timers before focusing its sibling rail.
+    await page.waitForTimeout(1000);
     await runtimeButton.click();
+    await expect(runtimeButton).toBeFocused();
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expect(runtimeButton).toHaveAttribute('aria-expanded', 'true');
     await expect(contextButton).toHaveAttribute('aria-expanded', 'false');
@@ -2512,6 +2523,8 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
+    await assertMobileComposerDraftVisible(page);
+    await expect(runtimeButton).toBeFocused();
     await assertNoMobilePanelComposerOverlap(
       page,
       'runtime',
@@ -2566,6 +2579,23 @@ test.describe('/chat cockpit real-server parity', () => {
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expectMobileDraftPreserved();
     await expect(mobileRails.getByRole('region', { name: 'Runtime', exact: true })).toBeVisible();
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('reserves composer space below runtime rails on a short mobile viewport', async ({ page, request }) => {
+    const selection = await getConfiguredChatModelSelection(request);
+    await seedRealServerConfig(page, { selectedModel: selection, cockpitLayout: { mode: 'cockpit', contextRailVisible: true, runtimeRailVisible: true, mobilePanel: 'runtime' } });
+    await page.setViewportSize({ width: 390, height: 600 });
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    const rails = await waitForMobileCockpitPanel(page, 'runtime');
+    const panel = rails.getByRole('region', { name: 'Runtime', exact: true });
+    await expect(panel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
+    await fillEditableComposer(page, 'Keep this short-screen draft.');
+    await assertMobileComposerDraftVisible(page);
+    await assertNoMobilePanelComposerOverlap(page, 'runtime', 'short mobile runtime panel should leave composer space');
+    await expect(page.getByTestId('chat-input')).toHaveValue('Keep this short-screen draft.');
+    await panel.getByRole('button', { name: 'Configure MCP tools' }).focus();
+    await expect(panel.getByRole('button', { name: 'Configure MCP tools' })).toBeFocused();
     await assertNoHorizontalOverflow(page);
   });
 

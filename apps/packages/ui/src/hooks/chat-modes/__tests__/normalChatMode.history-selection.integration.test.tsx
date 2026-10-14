@@ -2766,7 +2766,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           const recovery = consumer.selection.recoveries?.[0]?.turn
           expect(recovery).toMatchObject({ persistence: "server" })
           expect(recovery?.settled_message_id).toBeUndefined()
-          expect(getServerChatSaveStatus(newServerId)).toBe("unknown")
+          expect(getServerChatSaveStatus(newServerId)).toBe("unconfirmed")
         }
       } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }
     }

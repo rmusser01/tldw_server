@@ -1,3 +1,5 @@
+import { useConnectionState } from "@/hooks/useConnectionState";
+import { ConnectionPhase } from "@/types/connection";
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
@@ -425,7 +427,9 @@ const PlaygroundContent = () => {
   const onCharacterRouteApplyReady = React.useCallback((apply: ApplyCharacterRoute | null) => {
     setApplyCharacterRoute(() => apply);
   }, []);
-  const { data: readinessChatModels, isFetching: chatModelsFetching, isError: chatModelsError, refetch: refreshCharacterChatModels } = useChatModelCatalog();
+  const catalogConnection = useConnectionState();
+  const catalogConnectionReady = catalogConnection.isConnected && catalogConnection.phase === ConnectionPhase.CONNECTED;
+  const { data: readinessChatModels, isFetching: chatModelsFetching, isError: chatModelsError, refetch: refreshCharacterChatModels } = useChatModelCatalog(catalogConnectionReady);
   const [composerKeyboardInsetPx, setComposerKeyboardInsetPx] =
     React.useState(0)
 
@@ -1036,6 +1040,7 @@ const PlaygroundContent = () => {
     if (retiredRouteLocationRef.current === routeLocationKey || !applyCharacterRoute) return;
     if (
       assistantSelectionMeta?.isLoading ||
+      !catalogConnectionReady ||
       chatModelsFetching ||
       !routeCharacterIntentId ||
       routeCharacterIntentChatId
@@ -1101,6 +1106,7 @@ const PlaygroundContent = () => {
     applyCharacterRoute,
     assistantSelectionMeta?.isCurrent,
     assistantSelectionMeta?.isLoading,
+    catalogConnectionReady,
     chatModelsFetching,
     location.hash,
     location.pathname,

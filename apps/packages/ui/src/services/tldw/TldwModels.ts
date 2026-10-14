@@ -474,7 +474,8 @@ export class TldwModelsService {
     if (requireFresh && this.inFlightFreshFetch) {
       return await this.inFlightFreshFetch.catch(handleError)
     }
-    if (!requireFresh && this.inFlightFetch) {
+    // Share raw network work; authoritative callers keep their own strict error path.
+    if ((!requireFresh || !forceRefresh) && this.inFlightFetch) {
       return await this.inFlightFetch.catch(handleError)
     }
 

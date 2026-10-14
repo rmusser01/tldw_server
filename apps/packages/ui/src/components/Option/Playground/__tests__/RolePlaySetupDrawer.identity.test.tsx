@@ -50,7 +50,8 @@ vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => ({
   useHistorySelectionContext: () => mocks.historySelection
 }))
 
-vi.mock("@/hooks/chat/actor-scene-source", () => ({
+vi.mock("@/hooks/chat/actor-scene-source", async (original) => ({
+  ...await original<typeof import("@/hooks/chat/actor-scene-source")>(),
   captureCurrentActorSceneTarget: mocks.captureCurrentActorSceneTarget
 }))
 
@@ -318,7 +319,7 @@ describe("conversation setup identity", () => {
   it("keeps an already staged persona when protected history appears and explains unavailable Apply", async () => {
     const { onApply, rerender } = renderDrawer()
     const user = await choosePersona()
-    mocks.historySelection = { getSignal: () => undefined }
+    mocks.historySelection = { getSignal: () => undefined, getCurrent: () => ({ owner: null, view: null }) }
     rerender()
     const apply = screen.getByRole("button", { name: "Apply", exact: true })
     expect(apply).toBeDisabled()

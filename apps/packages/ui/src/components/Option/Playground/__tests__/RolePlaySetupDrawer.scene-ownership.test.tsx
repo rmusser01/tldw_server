@@ -227,7 +227,9 @@ describe("actual role-play Scene ownership and original-read Save", () => {
     )
     expect(useActorStore.getState().applied).toBeNull()
     expect(f.onClose).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    const retry = screen.getByRole("button", { name: "Apply", exact: true })
+    await waitFor(() => expect(retry).not.toHaveClass("ant-btn-loading"))
+    await act(async () => { fireEvent.click(retry) })
     await waitFor(() =>
       expect(
         io.get.mock.calls.filter(([key]) => key === ownedKey(target))

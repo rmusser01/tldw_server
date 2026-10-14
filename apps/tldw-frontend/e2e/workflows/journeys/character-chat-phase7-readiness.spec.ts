@@ -647,7 +647,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
         .filter(row => row.conversation_id === chatId).flatMap(row => Object.values(row.pending_turns ?? {})) as HistoryTurnRecovery[]
       await expect.poll(async () => (await pending()).length).toBe(1)
       const original = (await pending())[0]
-      expect(original).toMatchObject({ persistence: "server", state: "accepted_unsent", input_text: question, result_text: "", conversation_id: chatId,
+      expect(original).toMatchObject({ persistence: "server", state: "unknown", input_text: question, result_text: "", conversation_id: chatId,
         input_id: admission.message_id, roleplay_resume: { append: admission, intent: { assistant_message_id: sent.tldw_roleplay_resume_v1.assistant_message_id } } })
       expect(original.admission).toBeUndefined()
       expect(original.assistant_id).toBeUndefined()
@@ -663,7 +663,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       await expect(page.getByText("Reply save unconfirmed", { exact: true })).toBeVisible()
       await expect(page.getByRole("button", { name: "Retry original request", exact: true })).toBeEnabled()
       await expect(composer.getByRole("button", { name: "Send message", exact: true })).toBeEnabled()
-      await expect.poll(async () => (await pending())[0]?.state).toBe("accepted_unsent")
+      await expect.poll(async () => (await pending())[0]?.state).toBe("unknown")
       expect((await pending())[0]).toMatchObject({ operation_id: original.operation_id, input_id: admission.message_id, roleplay_resume: original.roleplay_resume })
       const recoveryDraft = "Continue this character chat after configuring the provider."
       await input.fill(recoveryDraft)

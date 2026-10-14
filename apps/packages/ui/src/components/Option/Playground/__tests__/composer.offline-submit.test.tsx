@@ -50,20 +50,30 @@ if (!callback) throw new Error("Missing actual compact submit callback")
 const source = ts.transpileModule(`const {
   isConnectionReady, connectionReadyRef, connectionGenerationRef, isSending, draftReady, greetingStarting, form, notification, resolveSubmissionIntent, selectedDocuments,
   contextFiles, selectedModel, availableChatModelIds, queueSubmission, stopListening, stopServerDictation, sendCurrentFormMessageRef, t,
-  greetingHistorySelection, isSavedRoleplayConversation
+  greetingHistorySelection, isSavedRoleplayConversation, getSubmitDisabledReason
 } = scope;
 return ${callback.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const compactSubmit = new Function("React", "normalizeChatModelId", "findUnavailableChatModel", "scope", source)
 const makeCompact = (ready: boolean, busy: boolean, imageCommand: boolean) => {
   const web = makeWebDeps(ready, busy, imageCommand)
   const scope = {
-    ...web.deps, isSavedRoleplayConversation, greetingHistorySelection: {getCurrent: () => ({owner:null})} as unknown as Pick<HistorySelectionController, "getCurrent">, greetingStarting: false, connectionReadyRef: { current: ready }, connectionGenerationRef: { current: 0 }, notification: web.deps.notificationApi, contextFiles: [],
+    ...web.deps, getSubmitDisabledReason: vi.fn<() => string | null>(() => null), isSavedRoleplayConversation, greetingHistorySelection: {getCurrent: () => ({owner:null})} as unknown as Pick<HistorySelectionController, "getCurrent">, greetingStarting: false, connectionReadyRef: { current: ready }, connectionGenerationRef: { current: 0 }, notification: web.deps.notificationApi, contextFiles: [],
     availableChatModelIds: new Set(["gpt-test"]), stopListening: vi.fn(async () => {}), stopServerDictation: vi.fn(), sendCurrentFormMessageRef: { current: web.deps.sendMessage }
   }
   return { ...web, scope, submit: compactSubmit({ useCallback: (fn: unknown) => fn }, normalizeChatModelId, findUnavailableChatModel, scope) as (message: string, image: string) => Promise<void> }
 }
 
 describe("unavailable composer submission retains the source", () => {
+  it("keeps the raw compact draft when its admission gate is closed", async () => {
+    const test = makeCompact(true, false, false)
+    test.scope.getSubmitDisabledReason.mockReturnValue("Saving the character opening")
+    await test.submit(test.form.values.message, test.form.values.image)
+    expect(test.deps.resolveSubmissionIntent).not.toHaveBeenCalled()
+    expect(test.deps.queueSubmission).not.toHaveBeenCalled()
+    expect(test.deps.sendMessage).not.toHaveBeenCalled()
+    expect(test.form.reset).not.toHaveBeenCalled()
+    expect(test.form.values).toEqual({ message: "KEEP RAW  ", image: "KEEP IMAGE" })
+  })
   it.each([[false, false], [true, false], [false, true], [true, true]])("full-page offline busy=%s imageCommand=%s does not normalize, queue, reset or dispatch", async (busy, imageCommand) => {
     const test = makeWebDeps(false, busy, imageCommand)
     const hook = renderHook(() => usePlaygroundSubmit(test.deps))

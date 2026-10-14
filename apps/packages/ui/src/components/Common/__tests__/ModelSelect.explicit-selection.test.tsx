@@ -37,19 +37,25 @@ vi.mock("@/hooks/chat/useSelectedModel", () => ({
     }
   }
 }))
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: discovery.failed ? undefined : [
-      { model: "tldw:Gemma:Q4", provider: "openai", nickname: "Hosted Gemma" },
-      { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" }
-    ],
-    isLoading: false,
-    isSuccess: !discovery.failed,
-    isError: discovery.failed,
-    isFetching: false,
-    refetch: discovery.retry
-  })
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQueryClient: () => queryClient,
+    useQuery: () => ({
+      data: discovery.failed ? undefined : [
+        { model: "tldw:Gemma:Q4", provider: "openai", nickname: "Hosted Gemma" },
+        { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" }
+      ],
+      isLoading: false,
+      isSuccess: !discovery.failed,
+      isError: discovery.failed,
+      isFetching: false,
+      refetch: discovery.retry
+    })
+  }
+})
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, initial: unknown) => React.useState(initial)
 }))

@@ -31,7 +31,11 @@ vi.mock("@/hooks/useMessageOption", () => ({
     compareSplitChats: {}
   })
 }))
-vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: [] }) }))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return { ...actual, useQuery: () => ({ data: [] }), useQueryClient: () => queryClient }
+})
 vi.mock("@/components/Common/Playground/Message", () => ({
   PlaygroundMessage: (props: {
     messageId?: string

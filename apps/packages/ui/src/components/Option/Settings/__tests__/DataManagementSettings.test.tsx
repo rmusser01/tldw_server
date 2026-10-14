@@ -79,6 +79,7 @@ describe("DataManagementSettings", () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })

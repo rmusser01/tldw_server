@@ -5648,20 +5648,23 @@ export const PlaygroundForm = ({
   const composerShellRef = React.useRef<HTMLDivElement>(null);
 
   const keepComposerFocusInView = React.useCallback(() => {
-    if (stickyDockEnabled || typeof document === "undefined") return
+    if (typeof document === "undefined") return
     const composerEl = composerShellRef.current
     if (!composerEl) return
     const focused = document.activeElement
+    const railHasFocus = isMobileViewport && mobileCockpitModeActive &&
+      focused instanceof HTMLElement && Boolean(focused.closest('[data-testid="playground-cockpit-mobile-rails"]'))
+    if (stickyDockEnabled && !railHasFocus) return
     const target =
       focused && composerEl.contains(focused)
         ? focused
-        : !focused || focused === document.body
+        : !focused || focused === document.body || railHasFocus
           ? textareaRef.current
           : null
     if (target && composerEl.contains(target)) {
       target.scrollIntoView?.({ block: "nearest", inline: "nearest" })
     }
-  }, [stickyDockEnabled, textareaRef])
+  }, [isMobileViewport, mobileCockpitModeActive, stickyDockEnabled, textareaRef])
 
   const notifyComposerLayoutChange = React.useCallback(() => {
     if (!onComposerLayoutChange) return;
@@ -5793,7 +5796,10 @@ export const PlaygroundForm = ({
     const handleFocusIn = (event: FocusEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (!composerShellRef.current?.contains(target)) return;
+      if (!composerShellRef.current?.contains(target) && !(
+        isMobileViewport && mobileCockpitModeActive && target instanceof HTMLElement &&
+        target.closest('[data-testid="playground-cockpit-mobile-rails"]')
+      )) return;
       keepComposerFocusInView();
       if (typeof window !== "undefined") {
         window.setTimeout(() => {
@@ -5806,7 +5812,7 @@ export const PlaygroundForm = ({
     return () => {
       document.removeEventListener("focusin", handleFocusIn);
     };
-  }, [keepComposerFocusInView]);
+  }, [isMobileViewport, mobileCockpitModeActive, keepComposerFocusInView]);
 
   const previousSendStateRef = React.useRef(isSending);
   React.useEffect(() => {

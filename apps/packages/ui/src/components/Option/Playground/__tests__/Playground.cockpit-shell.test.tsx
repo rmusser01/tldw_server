@@ -103,6 +103,8 @@ const sessionPersistenceState = vi.hoisted(() => ({
 const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
+const connectionState = vi.hoisted(() => ({ isConnected: true, phase: "connected" }))
+vi.mock("@/hooks/useConnectionState", () => ({ useConnectionState: () => connectionState }))
 const recentChatState = vi.hoisted(() => ({
   enabled: false,
   recent: vi.fn(),
@@ -437,6 +439,8 @@ vi.mock("react-router-dom", async () => {
 
 describe("Playground cockpit shell", () => {
   beforeEach(() => {
+    connectionState.isConnected = true
+    connectionState.phase = "connected"
     routeApplyOutcome.value = null
     vi.clearAllMocks();
     recentChatState.enabled = false;
@@ -1004,6 +1008,25 @@ describe("Playground cockpit shell", () => {
     );
     expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2);
     expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledOnce();
+  });
+
+  it('keeps catalog discovery and a character route pending until the connection is ready', async () => {
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=char-route');
+    connectionState.isConnected = false;
+    connectionState.phase = 'checking';
+    const view = render(<Playground />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(tldwServerState.fetchChatModels).not.toHaveBeenCalled();
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    connectionState.isConnected = true;
+    view.rerender(<Playground />);
+    await act(async () => { await Promise.resolve(); });
+    expect(tldwServerState.fetchChatModels).not.toHaveBeenCalled();
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    connectionState.phase = 'connected';
+    view.rerender(<Playground />);
+    await waitFor(() => expect(tldwServerState.fetchChatModels).toHaveBeenCalledOnce());
+    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledOnce());
   });
 
   it('waits for the initial model catalog before applying a fresh character route', async () => {
