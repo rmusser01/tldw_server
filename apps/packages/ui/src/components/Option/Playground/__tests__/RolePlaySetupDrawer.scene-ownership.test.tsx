@@ -181,6 +181,20 @@ describe("actual role-play Scene ownership and original-read Save", () => {
     expect(useActorStore.getState().applied).toBeNull()
   })
 
+  it("disables Scene editing after its acknowledged original account retires", async () => {
+    const f = renderDrawer()
+    const notes = await screen.findByRole("textbox", { name: "Scene notes" })
+    await waitFor(() => expect(notes).toHaveValue(originalScene.notes))
+    expect(notes).toBeEnabled()
+    io.accountRevision++
+    f.rerender(<RolePlaySetupDrawer open beforeState={{ active: false, identity: null,
+      behavior: null, scene: null, generationStyle: null,
+      context: { pinnedCount: 0, hasExternalContext: false } }}
+      historyId={null} serverChatId={null} onApply={f.onApply} onClose={f.onClose} />)
+    expect(screen.getByRole("textbox", { name: "Scene notes" })).toBeDisabled()
+    expect(io.set).not.toHaveBeenCalled()
+  })
+
   it("refuses an unverified account before Scene storage IO", async () => {
     io.accountAvailable = false
     const f = renderDrawer()

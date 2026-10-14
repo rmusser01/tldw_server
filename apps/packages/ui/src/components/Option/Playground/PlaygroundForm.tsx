@@ -94,6 +94,7 @@ import type { DictationModePreference } from "@/hooks/useDictationStrategy";
 import { useMcpTools } from "@/hooks/useMcpTools";
 import { useMobile } from "@/hooks/useMediaQuery";
 // isMac moved to PlaygroundSendControl
+import { hasAcknowledgedServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
 import { getSelectedAssistantOperationRevision, useSelectedAssistant } from "@/hooks/useSelectedAssistant";
 import { useServerCapabilities } from "@/hooks/useServerCapabilities";
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus";
@@ -1810,7 +1811,11 @@ export const PlaygroundForm = ({
         useMcpToolsStore.getState() === toolsState
       const publicationInputsAreCurrent = () =>
         modelIsCurrent() && configurationIsCurrent()
-      const entrySource = captureChatDraftSource()
+      const initialSceneTarget = captureCurrentActorSceneTarget(historySelection)
+      const savedSettingsOnly = options.applyIdentity === false && initialSceneTarget?.address?.kind === "native"
+      const mirrorOwnerKey = savedSettingsOnly && initialSceneTarget.account ? serverChatMirrorOwnerKey({ requestScope: initialSceneTarget.account.requestScope }) : null
+      const sourceHistoryIdCurrent = (current: string | null, original: string | null) => current === original || Boolean(mirrorOwnerKey && initialSceneTarget?.address?.kind === "native" && hasAcknowledgedServerChatMirror({ historyId: current, ownerKey: mirrorOwnerKey, chatId: initialSceneTarget.address.id, scope: initialSceneTarget.address.scope }))
+      const entrySource = captureChatDraftSource(undefined, sourceHistoryIdCurrent)
       const actionRevision = ++assistantActionRevisionRef.current
       if (
         options.onActionStarted?.(actionRevision) === false ||
@@ -1823,7 +1828,13 @@ export const PlaygroundForm = ({
         return false
       const sourceAddress = activeChat.chatDraftAddress
       const sourceRevision = activeChat.chatDraftRevision
-      const originalSceneTarget = captureCurrentActorSceneTarget(historySelection)
+      const originalSceneTarget = savedSettingsOnly ? captureCurrentActorSceneTarget(historySelection, () => true, sourceHistoryIdCurrent) : initialSceneTarget
+      const savedSettingsAreCurrent = () => !savedSettingsOnly || Boolean(
+        originalSceneTarget?.address?.kind === "native" &&
+        originalSceneTarget.isCurrent() &&
+        historySelection?.settingsMode(activeChat.serverChatId,
+          originalSceneTarget.address?.scope) !== "pending"
+      )
       const draftAccount = historySelection?.draftAccount
       const originalAccount =
         draftAccount?.requestScope && draftAccount.isCurrent()
@@ -1845,12 +1856,14 @@ export const PlaygroundForm = ({
       let routeReceiptRejected = false
       const sourceIsCurrent = () =>
         settingsOperation.isCurrent() &&
+        savedSettingsAreCurrent() &&
         !routeReceiptRejected &&
         sourcePreparationIsCurrent() &&
         publicationInputsAreCurrent() &&
         originalAccount?.isCurrent() !== false
       let destinationIsCurrent = () =>
         settingsOperation.isCurrent() &&
+        savedSettingsAreCurrent() &&
         !routeReceiptRejected &&
         sourcePreparationIsCurrent() &&
         configurationIsCurrent() &&
@@ -1875,11 +1888,11 @@ export const PlaygroundForm = ({
               (activeChat.serverChatCharacterId === null ||
                 activeChat.serverChatCharacterId === undefined)
       const nativeCharacter = Boolean(
-        historySelection &&
+        !savedSettingsOnly && historySelection &&
           selection?.kind === "character" &&
           getAssistantSelectionMode(selection) !== "overlay"
       )
-      const replacing =
+      const replacing = !savedSettingsOnly && (
         Boolean(
           nativeCharacter &&
             (options.freshCharacterRoute ||
@@ -1892,7 +1905,7 @@ export const PlaygroundForm = ({
             activeChat.serverChatId ||
               (nativeCharacter &&
                 (activeChat.historyId || historySelection?.getCurrent().owner))
-          ))
+          )))
       let snapshot:
         | Awaited<ReturnType<typeof loadServicePromptSnapshot>>
         | undefined
@@ -7431,6 +7444,7 @@ export const PlaygroundForm = ({
                                   onOpenRolePlaySetup: openRolePlaySetup,
                                 }}
                                 onTrackedAssistantSelection={applyTrackedAssistantSelection}
+                                trackedAssistantSelectionLoading={Boolean(historySelection && composerModelsLoading)}
                               />,
                             )}
                           </div>

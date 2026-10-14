@@ -6427,5 +6427,8 @@
   },
   "assistant_usePersonaOverlay": {
     "message": "Use a persona prompt overlay"
+  },
+  "assistant_trackedModelsLoading": {
+    "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
   }
 }

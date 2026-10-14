@@ -1860,3 +1860,13 @@ it.each(["isLoading", "streaming", "isProcessing"] as const)("prevents empty nat
     expect(selection.refresh).not.toHaveBeenCalled()
   } finally { act(() => useStoreMessageOption.setState(prior, true)) }
 })
+
+it("warns about latest unknown retry while retaining an earlier unsaved reply", () => {
+  const selection = roleplaySelection(false)
+  selection.recoveries[0].turn.state = "unknown"
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  expect(screen.getByText("Reply save unconfirmed")).toBeVisible()
+  expect(screen.getByText(/including while an earlier request is still running/)).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Copy recovered text' })).toBeEnabled()
+})

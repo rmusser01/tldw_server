@@ -200,6 +200,17 @@ describe("CharacterControlsSheet", () => {
     ]
   })
 
+  it("forwards model discovery readiness only to the tracked picker", async () => {
+    const user = userEvent.setup()
+    const f = render(<CharacterControlsSheet onTrackedSelection={mocks.onTrackedSelection} trackedSelectionLoading />)
+    await user.click(screen.getByRole("button", { name: "Start tracked character chat" }))
+    expect(mocks.assistantSelect.mock.lastCall?.[0]).toMatchObject({ selectionModePreference: "tracked", trackedSelectionLoading: true })
+    f.rerender(<CharacterControlsSheet onTrackedSelection={mocks.onTrackedSelection} trackedSelectionLoading={false} />)
+    expect(mocks.assistantSelect.mock.lastCall?.[0]).toMatchObject({ selectionModePreference: "tracked", trackedSelectionLoading: false })
+    const overlay = mocks.assistantSelect.mock.calls.map(([props]) => props).find(props => props.selectionModePreference === "overlay")
+    expect(overlay?.trackedSelectionLoading).toBeUndefined()
+  })
+
   it("shows overlay and tracked actions separately for plain chats", () => {
     render(
       <CharacterControlsSheet

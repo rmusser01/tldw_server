@@ -3,7 +3,7 @@ import { Button, Drawer, Form, Modal, Segmented, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
-import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import { captureCurrentActorSceneTarget, useActorSceneHistoryId } from "@/hooks/chat/actor-scene-source"
 import type { ActorSceneRead } from "@/services/actor-settings"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
@@ -43,6 +43,7 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const [selectedAssistant, , assistantMeta] = useSelectedAssistant(null)
   const accountIsCurrent = assistantMeta?.isCurrent
   const historySelection = useHistorySelectionContext()
+  const { sceneHistoryId, isSceneHistoryIdCurrent } = useActorSceneHistoryId(historySelection, historyId, serverChatId)
   const historySelectionRef = React.useRef(historySelection)
   historySelectionRef.current = historySelection
   const selectionSignal = historySelection?.getSignal()
@@ -86,7 +87,7 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
   const loadedSourceRef = React.useRef<(() => boolean) | null>(null)
   const view = {
     open,
-    historyId,
+    historyId: sceneHistoryId,
     serverChatId,
     characterId: selectedCharacter?.id,
     personaChatActive,
@@ -151,7 +152,7 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     if (!open || personaChatActive) return
     let active = true
     const sourceView = viewRef.current
-    const target = captureCurrentActorSceneTarget(historySelectionRef.current)
+    const target = captureCurrentActorSceneTarget(historySelectionRef.current, () => true, isSceneHistoryIdCurrent)
     const appliedBeforeRead = useActorStore.getState().applied
     const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
     const { isCurrent } = captureChatDraftSource(
@@ -163,7 +164,8 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
         usePlaygroundSessionStore.getState().restoreRevision ===
           restoreRevision &&
         usePlaygroundSessionStore.getState().sourceSelectionRevision ===
-          selectionRevision
+          selectionRevision,
+      isSceneHistoryIdCurrent
     )
     readSourceRef.current = isCurrent
     if (!target || !isCurrent()) {
@@ -240,7 +242,8 @@ export const ActorPopout: React.FC<Props> = ({ open, setOpen }) => {
     form,
     open,
     personaChatActive,
-    historyId,
+    sceneHistoryId,
+    isSceneHistoryIdCurrent,
     serverChatId,
     selectedCharacter?.id,
     draftRevision,

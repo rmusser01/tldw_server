@@ -3,7 +3,7 @@ import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
-import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import { captureCurrentActorSceneTarget, useActorSceneHistoryId } from "@/hooks/chat/actor-scene-source"
 import type { ActorSceneRead } from "@/services/actor-settings"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
@@ -194,6 +194,7 @@ export const CurrentChatModelSettings = ({
   const [selectedAssistant, , assistantMeta] = useSelectedAssistant(null)
   const accountIsCurrent = assistantMeta?.isCurrent
   const historySelection = useHistorySelectionContext()
+  const { sceneHistoryId, isSceneHistoryIdCurrent } = useActorSceneHistoryId(historySelection, historyId, serverChatId)
   const selectionSignal = historySelection?.getSignal()
   const captureSelectionFence = historySelection?.fence
   const selectedCharacterId = selectedCharacter?.id ?? null
@@ -224,7 +225,7 @@ export const CurrentChatModelSettings = ({
   const readSourceRef = React.useRef<(() => boolean) | null>(null)
   const loadedSourceRef = React.useRef<(() => boolean) | null>(null)
   const panelKey = JSON.stringify([
-    open, historyId, serverChatId, serverChatCharacterId, selectedCharacterId, personaChatActive,
+    open, sceneHistoryId, serverChatId, serverChatCharacterId, selectedCharacterId, personaChatActive,
     draftRevision, restoreRevision, selectionRevision, readRevision, settingsScope
   ])
   const panel = { key: panelKey, selectionSignal, captureSelectionFence, accountIsCurrent }
@@ -234,7 +235,7 @@ export const CurrentChatModelSettings = ({
   const renderedPanel = panelRef.current
   const viewKey = JSON.stringify([
     open,
-    historyId,
+    sceneHistoryId,
     serverChatId,
     serverChatCharacterId,
     selectedCharacterId,
@@ -448,7 +449,8 @@ export const CurrentChatModelSettings = ({
         () =>
           selectionIsCurrent() &&
           !selectionSignal?.aborted &&
-          (sceneOnly || (accountIsCurrent?.() ?? true))
+          (sceneOnly || (accountIsCurrent?.() ?? true)),
+        isSceneHistoryIdCurrent
       )
       const canPublish = () =>
         mountedRef.current &&
@@ -550,6 +552,7 @@ export const CurrentChatModelSettings = ({
       renderedPanel,
       renderedModelRevision,
       historyId,
+      isSceneHistoryIdCurrent,
       personaChatActive,
       sceneOnly,
       serverChatId,
@@ -573,7 +576,7 @@ export const CurrentChatModelSettings = ({
     if (saving || conversationDraftRef.current.pending || !isEditorCurrent()) return
     const revision = editRevisionRef.current
     const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
-    const source = captureChatDraftSource(() => selectionIsCurrent() && (accountIsCurrent?.() ?? true))
+    const source = captureChatDraftSource(() => selectionIsCurrent() && (accountIsCurrent?.() ?? true), isSceneHistoryIdCurrent)
     const canSelect = () => mountedRef.current && panelRef.current === renderedPanel &&
       editRevisionRef.current === revision && source.isCurrent() &&
       useStoreMessageOption.getState().selectedModelRevision === renderedModelRevision
@@ -606,7 +609,7 @@ export const CurrentChatModelSettings = ({
       cancelText: t("keepEditing", "Keep editing"),
       onOk: change
     })
-  }, [accountIsCurrent, captureSelectionFence, composerModels, isDirty, isEditorCurrent, modal, renderedPanel, renderedModelRevision, saving, setSelectedModel, t])
+  }, [isSceneHistoryIdCurrent, accountIsCurrent, captureSelectionFence, composerModels, isDirty, isEditorCurrent, modal, renderedPanel, renderedModelRevision, saving, setSelectedModel, t])
 
   const retryModelSave = useCallback(async () => {
     const receipt = modelSaveError
@@ -658,7 +661,7 @@ export const CurrentChatModelSettings = ({
       const sourceView = renderedView
       const target = personaChatActive
         ? null
-        : captureCurrentActorSceneTarget(historySelection)
+        : captureCurrentActorSceneTarget(historySelection, () => true, isSceneHistoryIdCurrent)
       const appliedBeforeRead = useActorStore.getState().applied
       const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
       const { isCurrent } = captureChatDraftSource(
@@ -671,7 +674,8 @@ export const CurrentChatModelSettings = ({
           usePlaygroundSessionStore.getState().restoreRevision ===
             restoreRevision &&
           usePlaygroundSessionStore.getState().sourceSelectionRevision ===
-            selectionRevision
+            selectionRevision,
+        isSceneHistoryIdCurrent
       )
       if (!isCurrent() || (!personaChatActive && !target))
         throw new Error("stale_selection")

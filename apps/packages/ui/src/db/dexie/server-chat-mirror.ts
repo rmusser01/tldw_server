@@ -19,33 +19,44 @@ export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "
   ])
 }
 
+type MirrorBinding = { chatId: string; ownerKey: string; scope?: ChatScope }
+const mirrorBindingKey = ({ chatId, ownerKey, scope }: MirrorBinding) => JSON.stringify([ownerKey, chatId, scope?.type ?? "global", scope?.type === "workspace" ? scope.workspaceId : null])
+// Cache provenance only; callers must retain their original server ownership guards.
+const acknowledgedMirrorIds = new Map<string, string>()
+export const hasAcknowledgedServerChatMirror = ({ historyId, ...binding }: MirrorBinding & { historyId: string | null }) => historyId !== null && acknowledgedMirrorIds.get(mirrorBindingKey(binding)) === historyId
+
 export const linkServerChatMirror = async ({
   chatId, title, ownerKey, currentHistoryId, legacyHistoryId, scope, signal, validate_lease
 }: {
   chatId: string; title: string; ownerKey: string
   currentHistoryId?: string | null; legacyHistoryId?: string | null; scope?: ChatScope
-} & HistoryOperationOptions): Promise<string> => runChatPersistenceTransaction(signal, async () => {
+} & HistoryOperationOptions): Promise<string> => {
   const namespace = { server_scope_type: scope?.type ?? "global" as const,
     server_workspace_id: scope?.type === "workspace" ? scope.workspaceId : undefined }
-  const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
-  const sameNamespace = (history: import("./types").HistoryInfo) =>
-    !history.server_scope_type || (history.server_scope_type === namespace.server_scope_type &&
-      (history.server_workspace_id ?? undefined) === namespace.server_workspace_id)
-  const owned = candidates.find(history => history.server_scope_key === ownerKey && sameNamespace(history))
-  const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
-  const canLinkCurrent = current && sameNamespace(current) && (!current.server_chat_id || current.server_chat_id === chatId) &&
-    (current.server_scope_key === ownerKey ||
-      (!current.server_scope_key && current.id === legacyHistoryId))
-  const history = owned || (canLinkCurrent ? current : undefined)
-  if (history) {
-    await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
-    return history.id
-  }
-  const id = generateID()
-  await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
-    message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
-  return id
-}, undefined, validate_lease)
+  const receiptKey = mirrorBindingKey({ chatId, ownerKey, scope })
+  const localId = await runChatPersistenceTransaction(signal, async () => {
+    const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
+    const sameNamespace = (history: import("./types").HistoryInfo) =>
+      !history.server_scope_type || (history.server_scope_type === namespace.server_scope_type &&
+        (history.server_workspace_id ?? undefined) === namespace.server_workspace_id)
+    const owned = candidates.find(history => history.server_scope_key === ownerKey && sameNamespace(history))
+    const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
+    const canLinkCurrent = current && sameNamespace(current) && (!current.server_chat_id || current.server_chat_id === chatId) &&
+      (current.server_scope_key === ownerKey ||
+        (!current.server_scope_key && current.id === legacyHistoryId))
+    const history = owned || (canLinkCurrent ? current : undefined)
+    if (history) {
+      await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
+      return history.id
+    }
+    const id = generateID()
+    await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
+      message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
+    return id
+  }, undefined, validate_lease)
+  acknowledgedMirrorIds.set(receiptKey, localId)
+  return localId
+}
 
 /**
  * Delete this owner's local copies of a server chat once the chat itself is

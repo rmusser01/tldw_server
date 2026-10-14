@@ -116,6 +116,7 @@ export type ComposerToolbarProps = {
   onFocusConnectionCard: () => void
   contextItems?: ComposerContextItem[]
   rolePlayActions?: ComposerToolbarRolePlayActions
+  trackedAssistantSelectionLoading?: boolean
   onTrackedAssistantSelection?: (
     selection: AssistantSelection,
     isCurrent?: () => boolean
@@ -716,13 +717,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       <AssistantSelect
         variant="dropdown"
         onTrackedSelection={props.onTrackedAssistantSelection}
+        trackedSelectionLoading={props.trackedAssistantSelectionLoading}
         showLabel
         onOpenChange={handleAssistantPickerOpen}
         iconClassName="h-4 w-4"
         className="text-text-muted hover:text-text"
       />
     ),
-    [props.onTrackedAssistantSelection, handleAssistantPickerOpen]
+    [props.onTrackedAssistantSelection, props.trackedAssistantSelectionLoading, handleAssistantPickerOpen]
   )
 
   const rolePlaySetupButton = React.useMemo(() => {

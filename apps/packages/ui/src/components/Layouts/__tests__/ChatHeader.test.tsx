@@ -290,6 +290,13 @@ describe("ChatHeader shortcut toggle", () => {
     expect(screen.queryByText("Saved on server")).not.toBeInTheDocument()
   })
 
+  it.each(["server", "temporary", "serverFailed"] as const)("keeps %s status labels readable with semantic backgrounds", persistenceKind => {
+    render(<ChatHeader {...createProps({ temporaryChat: persistenceKind === "temporary", persistenceKind, themeMode: "light" })} />)
+    const badge = screen.getByTestId("chat-header-persistence-badge")
+    expect(badge.classList.contains("text-text")).toBe(true)
+    expect(badge.className).toContain(persistenceKind === "server" ? "bg-success/10" : "bg-warn/10")
+  })
+
   it("labels a chat whose server write was acknowledged as saved on server", () => {
     render(
       <ChatHeader

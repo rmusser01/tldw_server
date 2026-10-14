@@ -16,6 +16,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 
 type CharacterControlsSheetProps = {
+  trackedSelectionLoading?: boolean
   onTrackedSelection?: (
     selection: AssistantSelection,
     isCurrent?: () => boolean
@@ -38,6 +39,7 @@ const resolveAssistantModeLabel = (
 }
 
 export const CharacterControlsSheet = ({
+  trackedSelectionLoading = false,
   onTrackedSelection,
   onRequestClose
 }: CharacterControlsSheetProps) => {
@@ -301,6 +303,7 @@ export const CharacterControlsSheet = ({
               selectionModePreference="tracked"
               initialTab={trackedPickerTab}
               onTrackedSelection={handleTrackedSelection}
+              trackedSelectionLoading={trackedSelectionLoading}
               onSelectionComplete={handleTrackedSelectionComplete}
             />
           </div>

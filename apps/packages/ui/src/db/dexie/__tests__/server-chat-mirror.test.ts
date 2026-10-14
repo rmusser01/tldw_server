@@ -34,6 +34,24 @@ const row = (id: string, historyId: string, content: string, serverMessageId?: s
 const incoming = (id: string, content: string, version = 1) => ({ id, serverMessageId: id, serverMessageVersion: version, role: "user" as const, isBot: false, name: "You", message: content, images: [], sources: [], createdAt: 1 })
 const link = (ownerKey: string, extra = {}) => linkServerChatMirror({ chatId: "chat-1", title: "Cedar", ownerKey, ...extra })
 
+describe("acknowledged mirror aliases", () => {
+  it("admits only the committed exact owner, CID, scope and alias", async () => {
+    const mirror = await import("../server-chat-mirror")
+    const binding = { ownerKey: "scene-receipt-owner", chatId: "scene-receipt-chat", scope: { type: "workspace" as const, workspaceId: "7" } }
+    const id = await linkServerChatMirror({ ...binding, title: "Scene receipt" })
+    expect(mirror.hasAcknowledgedServerChatMirror({ ...binding, historyId: id })).toBe(true)
+    for (const changed of [{ ownerKey: "other" }, { chatId: "other" }, { scope: { type: "global" as const } }, { scope: { type: "workspace" as const, workspaceId: "8" } }, { historyId: "unacknowledged" }]) expect(mirror.hasAcknowledgedServerChatMirror({ ...binding, historyId: id, ...changed })).toBe(false)
+  })
+  it("does not publish a mirror receipt when the transaction aborts after its row operation", async () => {
+    const mirror = await import("../server-chat-mirror")
+    const binding = { ownerKey: "scene-aborted-owner", chatId: "scene-aborted-chat" }
+    const control = new AbortController()
+    state.beforeRead = () => control.abort()
+    try { await expect(linkServerChatMirror({ ...binding, title: "Aborted receipt", signal: control.signal })).rejects.toThrow(); expect(mirror.hasAcknowledgedServerChatMirror({ ...binding, historyId: "history-1" })).toBe(false) }
+    finally { state.beforeRead = null }
+  })
+})
+
 describe("owned server Chat mirror", () => {
   beforeEach(() => { state.histories.clear(); state.messages.clear(); state.compareStates.clear(); state.beforeRead = null; state.afterDelete = null })
   it("removes only the owner's copies of a deleted server chat, with their messages", async () => {

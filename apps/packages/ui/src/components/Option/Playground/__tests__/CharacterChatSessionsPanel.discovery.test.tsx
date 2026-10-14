@@ -699,3 +699,27 @@ describe("verified draft owner request-scope reuse", () => {
     expect(old.isCurrent()).toBe(false);
   });
 });
+
+it("discovers all six interleaved character histories across a 2000-conversation library", async () => {
+  rows = Array.from({ length: 2000 }, (_, index) => chat(`scale-${index}`, 7 + index % 6, {
+    character_name: `Character ${7 + index % 6}`,
+  }))
+  const mounted = mount({ activeCharacterId: 7, activeCharacterName: "Character 7" })
+  for (let character = 7; character < 13; character++) {
+    if (character !== 7) mounted.rerenderPanel({ activeCharacterId: character, activeCharacterName: `Character ${character}` })
+    const selected = rows.filter(row => row.character_id === character)
+    await screen.findByText(`Session ${selected[0].id}`)
+    await fullView()
+    await screen.findByText(`Session ${selected[24].id}`)
+    for (let offset = 25; offset < selected.length; offset += 25) {
+      fireEvent.click(screen.getByRole("button", { name: "Next sessions page" }))
+      await screen.findByText(`Session ${selected[offset].id}`)
+    }
+    const last = selected.at(-1)!
+    fireEvent.click(screen.getByRole("button", { name: `Resume Session ${last.id}` }))
+    expect(io.select).toHaveBeenLastCalledWith(expect.objectContaining({ id: last.id, character_id: character }))
+    expect(io.list).toHaveBeenCalledWith(expect.objectContaining({ character_id: character, offset: 325, limit: 25 }), expect.objectContaining({ requestScope: expect.objectContaining({ userId: "A" }) }))
+  }
+  expect(io.select).toHaveBeenCalledTimes(6)
+  mounted.unmount()
+}, 20000)

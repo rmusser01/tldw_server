@@ -1,3 +1,4 @@
+import { recordServerChatHistoryEvidence } from "@/store/server-chat-save-status"
 import { parseRoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
@@ -561,7 +562,7 @@ export function useHistorySelection(
     },
     [install, invalidate, publish]
   )
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (onSettled?: (isCurrent: () => boolean) => void) => {
     const current = live.current
     if (!current.owner || !current.view || !current.bookmarkScope || !ownerLeaseValid(current.owner)) return false
     const operation = invalidate()
@@ -589,6 +590,10 @@ export function useHistorySelection(
       if (operation.epoch === epoch.current)
         publish({ ...live.current, status: "error", error: errorCode(error) })
       return false
+    } finally {
+      onSettled?.(() => mounted.current && operation.epoch === epoch.current &&
+        ownerLeaseValid(current.owner!) && live.current.owner === current.owner &&
+        live.current.bookmarkScope === current.bookmarkScope && sameView(live.current.view, current.view))
     }
   }, [install, invalidate, publish])
   const refreshEditedMessage = useCallback(
@@ -1392,7 +1397,9 @@ export function useHistorySelection(
   const [recoveries, setRecoveries] = useState<
     Array<{ scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }>
   >([])
+  const recoveryReadRevision = useRef(0)
   const refreshRecovery = useCallback(async () => {
+    const revision = ++recoveryReadRevision.current
     if (!mounted.current) return
     const current = live.current
     const owner = current.owner
@@ -1413,23 +1420,24 @@ export function useHistorySelection(
     const token = epoch.current
     const stillCurrent = () =>
       mounted.current &&
-      token === epoch.current &&
+      token === epoch.current && revision === recoveryReadRevision.current &&
       sameView(live.current.view, view) &&
       live.current.owner === owner &&
       live.current.bookmarkScope === scope &&
       (owner.kind !== "native" ||
         (live.current.settingsQualified && owner.validate_lease()))
     try {
+      if (owner.kind === "native") recordServerChatHistoryEvidence(owner.conversation_id, "unconfirmed", stillCurrent)
       const entries = await loadHistoryTurnRecoveries(scope, view)
       if (stillCurrent()) {
-        setRecoveries(
-          entries.filter(
-            (entry) =>
-              entry.scope.profile_id === scope.profile_id &&
-              entry.turn.owner_key === view.owner_key &&
-              entry.turn.conversation_id === view.conversation_id
-          )
-        )
+        const ownedEntries = entries.filter(entry =>
+          entry.scope.profile_id === scope.profile_id && entry.turn.owner_key === view.owner_key &&
+          entry.turn.conversation_id === view.conversation_id)
+        setRecoveries(ownedEntries)
+        if (owner.kind === "native") recordServerChatHistoryEvidence(owner.conversation_id,
+          ownedEntries.some(entry => entry.turn.persistence === "server" && entry.turn.state !== "refused" &&
+            entry.turn.outcome !== "complete" && !entry.turn.roleplay_resume?.completion?.saved)
+            ? "unconfirmed" : "confirmed", stillCurrent)
         setRecoveryError(null)
       }
     } catch (error) {

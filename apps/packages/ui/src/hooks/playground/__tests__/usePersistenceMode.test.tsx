@@ -230,7 +230,7 @@ describe("actual compact history switch semantics", () => {
   )
 })
 
-import { beginServerChatWrite, resetServerChatSaveStatus } from "@/store/server-chat-save-status"
+import { beginServerChatWrite, resetServerChatSaveStatus, recordServerChatHistoryEvidence } from "@/store/server-chat-save-status"
 import { getChatPersistenceCopy, resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
 
 const renderReceipt = (params: {
@@ -272,11 +272,12 @@ describe("usePersistenceMode labels (CS-03 / XS-05, #3104)", () => {
     )
   })
 
-  it("labels a chat opened from the server as saved on server before any new write", () => {
+  it("keeps a cold server-linked chat unconfirmed until owned history is acknowledged", () => {
     const { result } = renderReceipt({ serverChatId: "chat-from-history" })
-
+    expect(result.current.persistenceKind).toBe("serverUnconfirmed")
+    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Save status unconfirmed")
+    act(() => recordServerChatHistoryEvidence("chat-from-history", "confirmed", () => true))
     expect(result.current.persistenceKind).toBe("server")
-    expect(getChatPersistenceCopy(translate, result.current.persistenceKind).pill).toBe("Saved on server")
   })
 
   it("does not claim the server while a server write is pending", () => {
@@ -343,7 +344,7 @@ describe("resolveChatPersistenceKind", () => {
     [{ temporaryChat: true, serverChatId: "c", serverSaveStatus: "saved" }, "temporary"],
     [{ temporaryChat: false, serverChatId: null, serverSaveStatus: "unknown" }, "local"],
     [{ temporaryChat: false, serverChatId: "  ", serverSaveStatus: "saved" }, "local"],
-    [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "unknown" }, "server"],
+    [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "unknown" }, "serverUnconfirmed"],
     [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "saved" }, "server"],
     [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "saving" }, "serverSaving"],
     [{ temporaryChat: false, serverChatId: "c", serverSaveStatus: "failed" }, "serverFailed"]

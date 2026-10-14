@@ -115,6 +115,7 @@ const nativeSetupFixture = vi.hoisted(() => ({
   controller: null as null | {
     getCurrent: () => SettingsSelectionState
     getSignal: () => AbortSignal
+    settingsMode: (chatId: string | null) => "ordinary" | "pending"
     reset: () => void
     fence: () => () => boolean
     draftAccount: {
@@ -2018,6 +2019,10 @@ const prepareNativeSource = () => {
   nativeSetupFixture.controller = {
     getCurrent: () => current,
     getSignal: () => selectionController.signal,
+    settingsMode: (chatId) => !chatId ? "ordinary" :
+      current.owner?.kind === "native" && current.owner.conversation_id === chatId &&
+      current.view?.conversation_id === chatId && current.owner.validate_lease()
+        ? "ordinary" : "pending",
     reset,
     fence: () => {
       const captured = epoch
@@ -2208,7 +2213,7 @@ const openOwnedStartupPreview = async () => {
 
 const openActualSceneDrawer = async (
   kind: "native" | "fresh" | "neutral fresh" = "native",
-  options: { temporary?: boolean; nonempty?: boolean; persona?: boolean } = {}
+  options: { temporary?: boolean; nonempty?: boolean; persona?: boolean; unavailableFreshModel?: boolean } = {}
 ) => {
   const f = prepareQualifiedSceneSource(
     kind === "native" ? "native" : "fresh",
@@ -2245,6 +2250,10 @@ const openActualSceneDrawer = async (
       name: "Persona guide",
       metadata: { selectionMode: "tracked" }
     } satisfies AssistantSelection
+  }
+  if (options.unavailableFreshModel) {
+    f.source.selectedModel = null
+    nativeSetupFixture.models = []
   }
   nativeSetupFixture.realDrawer = true
   const original: ActorSceneRecord = {
@@ -2795,6 +2804,89 @@ describe("PlaygroundForm role-play starter", () => {
     }
   )
 
+  it("keeps the original native Scene read current when its acknowledged mirror hydrates while held", async () => {
+    const f = prepareQualifiedSceneSource("native")
+    nativeSetupFixture.realDrawer = true
+    const original = { value: { ...createDefaultActorSettings(), notes: "Held original Scene" }, updatedAt: 1730000000000 }
+    const key = "actorSettings:owned:"+f.target.key
+    sceneBucket.records.set(key, original)
+    const held = sceneSelectionGate<void>()
+    sceneBucket.get.mockImplementationOnce(async readKey => { await held.promise; return structuredClone(sceneBucket.records.get(readKey)) })
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+      await waitFor(() => expect(sceneBucket.get).toHaveBeenCalledOnce())
+      const mirror = await import("@/db/dexie/server-chat-mirror")
+      const alias = await mirror.linkServerChatMirror({ chatId: f.source.serverChatId!, title: "Held Scene mirror", ownerKey: mirror.serverChatMirrorOwnerKey({ requestScope: f.requestScope }), scope: { type: "global" } })
+      act(() => { f.source.historyId = alias; view.rerender(<PlaygroundForm droppedFiles={[]} />) })
+      await act(async () => { held.resolve(); await held.promise })
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Scene notes" })).toHaveValue(original.value.notes))
+      expect(sceneBucket.get).toHaveBeenCalledOnce()
+      expect(screen.getByRole("textbox", { name: "Scene notes" })).toBeEnabled()
+    } finally { held.resolve(); view.unmount() }
+  })
+
+  it.each(["unacknowledged", "owner", "CID", "scope"])("refuses a native Scene alias outside its original receipt (%s)", async mismatch => {
+    const f = await openActualSceneDrawer("native")
+    const mirror = await import("@/db/dexie/server-chat-mirror")
+    const alias = mismatch === "unacknowledged" ? "raw-unacknowledged-13679" : await mirror.linkServerChatMirror({ chatId: mismatch === "CID" ? "other-native" : f.source.serverChatId!, title: "Foreign alias", ownerKey: mismatch === "owner" ? "other-owner" : mirror.serverChatMirrorOwnerKey({ requestScope: f.requestScope }), scope: mismatch === "scope" ? { type: "workspace", workspaceId: "7" } : { type: "global" } })
+    try {
+      act(() => { f.source.historyId = alias; f.view.rerender(<PlaygroundForm droppedFiles={[]} />) })
+      expect(screen.getByRole("button", { name: "Apply", exact: true })).toBeDisabled()
+      expect(sceneBucket.records.get(f.key)).toEqual(f.original)
+      expect(saveActorSettingsMock).not.toHaveBeenCalled()
+    } finally { f.view.unmount() }
+  })
+
+  it.each(["staged", "held save"])("preserves the original native Scene across acknowledged mirror hydration (%s)", async phase => {
+    const f = await openActualSceneDrawer("native")
+    const mirror = await import("@/db/dexie/server-chat-mirror")
+    const alias = await mirror.linkServerChatMirror({ chatId: f.source.serverChatId!, title: "Scene mirror hydration", ownerKey: mirror.serverChatMirrorOwnerKey({ requestScope: f.requestScope }), scope: { type: "global" } })
+    const held = sceneSelectionGate<void>()
+    const persist = sceneBucket.set.getMockImplementation()!
+    if (phase === "held save") sceneBucket.set.mockImplementationOnce(async (...args) => { await held.promise; return persist(...args) })
+    try {
+      if (phase === "held save") { await f.user.click(screen.getByRole("button", { name: "Apply", exact: true })); await waitFor(() => expect(sceneBucket.set).toHaveBeenCalledOnce()) }
+      act(() => { f.source.historyId = alias; f.view.rerender(<PlaygroundForm droppedFiles={[]} />) })
+      if (phase === "staged") {
+        await waitFor(() => expect(screen.getByRole("textbox", { name: "Scene notes" })).toHaveValue("Staged connected Scene"))
+        await f.user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+      }
+      await act(async () => { held.resolve(); await held.promise })
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Role-play setup", exact: true })).not.toBeInTheDocument())
+      expect(sceneBucket.records.get(f.key)?.value.notes).toBe("Staged connected Scene")
+      expect(f.source.chatDraftAddress).toBe(f.address)
+      expect(f.source.chatDraftRevision).toBe(f.revision)
+    } finally { held.resolve(); await Promise.allSettled(nativeSetupFixture.drawerApplications); f.view.unmount() }
+  })
+
+  it("applies a saved owned Scene without an unrelated fresh model or catalog", async () => {
+    const originalModels = nativeSetupFixture.models
+    const f = await openActualSceneDrawer("native", { unavailableFreshModel: true })
+    const initialScope = nativeSetupFixture.settings!.activeSettingsScope
+    try {
+      await f.user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+      await act(async () => { await nativeSetupFixture.selectionApply })
+      expect(saveActorSettingsMock).toHaveBeenCalledOnce()
+      expect(sceneBucket.records.get(f.key)).toEqual(expect.objectContaining({
+        value: { ...f.original.value, notes: "Staged connected Scene" }
+      }))
+      expect(f.source.chatDraftAddress).toBe(f.address)
+      expect(f.source.chatDraftRevision).toBe(f.revision)
+      expect(f.source.serverChatId).toBe("native-current")
+      expect(f.source.selectedModel).toBeNull()
+      expect(nativeSetupFixture.settings!.activeSettingsScope).toBe(initialScope)
+      expect(f.reset).not.toHaveBeenCalled()
+      expect(nativeSetupFixture.snapshot).not.toHaveBeenCalled()
+      expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+    } finally {
+      await Promise.allSettled(nativeSetupFixture.drawerApplications)
+      f.view.unmount()
+      nativeSetupFixture.models = originalModels
+    }
+  })
+
   it.each(["native", "fresh", "neutral fresh"] as const)(
     "Form Drawer action ownership admits one unchanged hydrated %s Apply",
     async (kind) => {
@@ -2983,7 +3075,7 @@ describe("PlaygroundForm role-play starter", () => {
   it.each(["before Apply", "during preparation"] as const)(
     "Form Drawer action ownership retires on an external same-address action %s",
     async (boundary) => {
-      const f = await openActualSceneDrawer()
+      const f = await openActualSceneDrawer("fresh")
       const originalWait =
         sceneSelectionGate<
           Awaited<ReturnType<typeof nativeSetupFixture.snapshot>>
@@ -3065,7 +3157,7 @@ describe("PlaygroundForm role-play starter", () => {
   )
 
   it("Form Drawer action ownership permits Retry after its own failed preparation", async () => {
-    const f = await openActualSceneDrawer()
+    const f = await openActualSceneDrawer("fresh")
     nativeSetupFixture.snapshot.mockRejectedValueOnce(
       new Error("Declared physical snapshot preparation failure")
     )
@@ -3179,7 +3271,7 @@ describe("PlaygroundForm role-play starter", () => {
   )
 
   it.each(["owned receipt", "later external restore"] as const)(
-    "Form route receipt ownership carries the actual hydrated Drawer through %s",
+    "Form saved settings preserves the hydrated Drawer without replacing its route: %s",
     async (retirement) => {
       const originalHref = window.location.href
       window.history.replaceState(
@@ -3210,11 +3302,10 @@ describe("PlaygroundForm role-play starter", () => {
           screen.getByRole("button", { name: "Apply", exact: true })
         )
         await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledOnce())
-        expect(receipt.events).toHaveLength(1)
-        expect(receipt.events[0].restoreRevision).toBe(originalRestore)
-        expect(receipt.acknowledgements).toEqual([true])
+        expect(receipt.events).toHaveLength(0)
+        expect(receipt.acknowledgements).toEqual([])
         expect(usePlaygroundSessionStore.getState().restoreRevision).toBe(
-          originalRestore + 1
+          originalRestore
         )
         expect(leasesAtSave).toEqual([true])
         expect(saveParams?.target?.key).toBe(f.target.key)
@@ -3234,7 +3325,7 @@ describe("PlaygroundForm role-play starter", () => {
           act(() => usePlaygroundSessionStore.getState().cancelPendingRestore())
           f.view.rerender(<PlaygroundForm droppedFiles={[]} />)
           expect(usePlaygroundSessionStore.getState().restoreRevision).toBe(
-            originalRestore + 2
+            originalRestore + 1
           )
           expect(saveParams?.validate_lease?.()).toBe(false)
         }

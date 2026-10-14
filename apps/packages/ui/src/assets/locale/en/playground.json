@@ -593,7 +593,9 @@
       "serverCharacterHintTitle": "Create a default assistant character",
       "serverCharacterHintBody": "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server.",
       "serverInlineTitle": "Saved on your server",
-      "serverInlineBody": "This chat is saved on your tldw server and on this device, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations."
+      "serverInlineBody": "This chat is saved on your tldw server and on this device, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations.",
+      "serverUnconfirmedPill": "Save status unconfirmed",
+      "serverUnconfirmed": "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again."
     },
     "conversationTags": "Conversation tags",
     "stateHelp": "Default state is “in-progress.” Update it as the conversation progresses.",
@@ -1399,7 +1401,9 @@
     "regenerationRefusedTitle": "New reply refused",
     "regenerationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.",
     "regenerationUnknownTitle": "New reply unconfirmed",
-    "regenerationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
+    "regenerationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically.",
+    "roleplayReplyUnconfirmedMessage": "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message.",
+    "roleplayInputUnconfirmedMessage": "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input."
   },
   "standaloneHtml": {
     "recoveryUnavailable": "Recovery unavailable. Keep this tab open or download your draft.",

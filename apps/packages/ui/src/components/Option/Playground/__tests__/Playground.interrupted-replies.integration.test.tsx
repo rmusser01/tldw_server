@@ -236,9 +236,9 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       await startSend(view, "Explain the owned keyboard Stop")
       await waitForStreamedText("Partial answer")
       const source = useStoreMessageOption.getState()
-      const stop = screen.getByRole("button", {
+      const stop = await screen.findByRole("button", {
         name: control === "form" ? "Stop Streaming" : "Stop streaming response"
-      })
+      }, HARNESS_WAIT)
       stop.focus()
       await view.user.keyboard("{Enter}")
       await waitForChatIdle()

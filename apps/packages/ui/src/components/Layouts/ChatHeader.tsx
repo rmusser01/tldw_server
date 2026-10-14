@@ -141,10 +141,12 @@ export function ChatHeader({
     : persistenceCopy.description
   const persistenceBadgeClass =
     resolvedPersistenceKind === "server"
-      ? "border-success/40 bg-success/10 text-success"
+      ? "border-success/40 bg-success/10 text-text"
+      : resolvedPersistenceKind === "serverUnconfirmed"
+        ? "border-warn/50 bg-warn/10 text-text"
       : resolvedPersistenceKind === "temporary" ||
           resolvedPersistenceKind === "serverFailed"
-        ? "border-warn/50 bg-warn/10 text-warn"
+        ? "border-warn/50 bg-warn/10 text-text"
         : "border-border bg-surface2 text-text-muted"
   const canEditTitle =
     showChatTitle && !temporaryChat && historyId && historyId !== "temp"
@@ -263,7 +265,7 @@ export function ChatHeader({
     <header
       data-istemporary-chat={temporaryChat}
       data-ischat-route="true"
-      className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"
+      className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur"
     >
       <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2">
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">

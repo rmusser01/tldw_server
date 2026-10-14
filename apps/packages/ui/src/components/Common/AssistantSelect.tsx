@@ -41,6 +41,7 @@ type Props = {
   initialTab?: AssistantSelectTab
   selection?: AssistantSelection | null
   onSelectionChange?: (selection: AssistantSelection) => void | Promise<void>
+  trackedSelectionLoading?: boolean
   onTrackedSelection?: (
     selection: AssistantSelection,
     isCurrent?: () => boolean
@@ -131,6 +132,7 @@ export const AssistantSelect: React.FC<Props> = ({
   selection,
   onSelectionChange,
   onTrackedSelection,
+  trackedSelectionLoading = false,
   onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common", "playground"])
@@ -209,6 +211,9 @@ export const AssistantSelect: React.FC<Props> = ({
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
     initialTab ?? selectedAssistant?.kind ?? "character"
   )
+  const waitingForTrackedModels = Boolean(trackedSelectionLoading && onTrackedSelection &&
+    !onSelectionChange && requestedSelectionMode === "tracked" &&
+    !(activeTab === "persona" && trackedPersonaUnavailable))
   React.useEffect(() => {
     if (initialTab) setActiveTab(initialTab)
   }, [initialTab])
@@ -598,7 +603,7 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
-      if (selectionPending || trackedSelectionPendingRef.current) return
+      if (selectionPending || waitingForTrackedModels || trackedSelectionPendingRef.current) return
       const nextMode =
         pendingSelectionModeIntentRef.current ?? selectionModeIntentRef.current
       if (isProtectedTrackedPersonaUnavailable(Boolean(historySelection), entry.kind, nextMode)) return
@@ -702,6 +707,7 @@ export const AssistantSelect: React.FC<Props> = ({
       historySelection,
       publishSelectionModeIntent,
       selectionPending,
+      waitingForTrackedModels,
       effectiveAssistantState.mode,
       clearActiveServerChat,
       onSelectionChange,
@@ -867,8 +873,11 @@ export const AssistantSelect: React.FC<Props> = ({
   ) : (
     <div
       data-testid="assistant-select-menu"
-      aria-busy={selectionPending}
+      aria-busy={selectionPending || waitingForTrackedModels}
       className="max-h-80 overflow-y-auto px-2 py-2">
+      {waitingForTrackedModels && <p role="status" className="px-2 pb-2 text-sm text-text-muted">
+        {t("option:assistant.trackedModelsLoading", "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker.")}
+      </p>}
       {activeTab === "persona" && trackedPersonaUnavailable && (
         <div className="px-2 pb-2 text-sm text-text-muted">
           <p id={personaGuidanceId} role="status">
@@ -915,7 +924,7 @@ export const AssistantSelect: React.FC<Props> = ({
               <button
                 type="button"
                 aria-label={entry.name}
-                disabled={selectionPending || (entry.kind === "persona" && trackedPersonaUnavailable)}
+                disabled={selectionPending || waitingForTrackedModels || (entry.kind === "persona" && trackedPersonaUnavailable)}
                 aria-describedby={entry.kind === "persona" && trackedPersonaUnavailable ? personaGuidanceId : undefined}
                 className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
                   isActive

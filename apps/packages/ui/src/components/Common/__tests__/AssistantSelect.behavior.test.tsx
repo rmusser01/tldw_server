@@ -230,6 +230,48 @@ const renderAssistantSelect = (
 }
 
 describe("AssistantSelect behavior", () => {
+  it("keeps tracked choices disabled until model discovery settles without retiring intent", async () => {
+    mocks.historySelection = {}
+    mocks.listAllCharacters.mockResolvedValueOnce([{ id: "loading-card", name: "Loading Card" }])
+    const tracked = vi.fn().mockResolvedValue(true)
+    const user = userEvent.setup()
+    const f = renderAssistantSelect({ onTrackedSelection: tracked, trackedSelectionLoading: true })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    const card = await screen.findByRole("button", { name: "Loading Card", exact: true })
+    expect(card).toBeDisabled()
+    expect(screen.getByRole("status")).toHaveTextContent("Loading models before tracked chat selection")
+    expect(tracked).not.toHaveBeenCalled()
+    f.rerenderAssistantSelect({ onTrackedSelection: tracked, trackedSelectionLoading: false })
+    await waitFor(() => expect(card).toBeEnabled())
+    await user.click(card)
+    await waitFor(() => expect(tracked).toHaveBeenCalledOnce())
+    expect(tracked.mock.calls[0][0].metadata.selectionMode).toBe("tracked")
+  })
+
+  it("keeps unsupported persona guidance independent of model loading", async () => {
+    mocks.historySelection = {}
+    mocks.listPersonaProfiles.mockResolvedValueOnce([{ id: "persona-loading", name: "Persona Loading" }])
+    const user = userEvent.setup()
+    renderAssistantSelect({ initialTab: "persona", onTrackedSelection: vi.fn(), trackedSelectionLoading: true })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    expect(await screen.findByRole("button", { name: "Persona Loading", exact: true })).toBeDisabled()
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+    expect(screen.getByRole("status")).toHaveTextContent("Tracked persona chat is unavailable here")
+    const overlay = screen.getByRole("button", { name: "Use a persona prompt overlay" })
+    expect(overlay).toBeEnabled()
+    await user.click(overlay)
+    expect(screen.getByRole("button", { name: "Persona Loading", exact: true })).toBeEnabled()
+  })
+
+  it("keeps an ordinary overlay selectable while tracked model discovery is loading", async () => {
+    mocks.historySelection = {}
+    mocks.listAllCharacters.mockResolvedValueOnce([{ id: "overlay-card", name: "Overlay Card" }])
+    const user = userEvent.setup()
+    renderAssistantSelect({ selectionModePreference: "overlay", trackedSelectionLoading: true, onTrackedSelection: vi.fn() })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    expect(await screen.findByRole("button", { name: "Overlay Card", exact: true })).toBeEnabled()
+  })
+
   it("uses the actual compact sheet and picker without fallback writes after refusal or outer close", async () => {
     let decide!: (accepted: boolean) => void
     let current!: () => boolean

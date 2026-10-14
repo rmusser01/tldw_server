@@ -2,6 +2,7 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Header } from "../Header"
+import { resetServerChatSaveStatus } from "@/store/server-chat-save-status"
 
 const clearChatMock = vi.fn()
 const setTemporaryChatMock = vi.fn()
@@ -15,7 +16,7 @@ const messageOptionState = {
   historyId: "history-1",
   temporaryChat: false,
   setTemporaryChat: setTemporaryChatMock,
-  serverChatId: null
+  serverChatId: null as string | null
 }
 
 let selectedCharacter: { id: string; name: string } | null = null
@@ -96,15 +97,17 @@ vi.mock("../ChatHeader", () => ({
     onStartSavedChat,
     onStartTemporaryChat,
     onStartCharacterChat,
-    activeCharacterName
+    activeCharacterName, persistenceKind
   }: {
     onOpenCommandPalette?: () => void
     onStartSavedChat?: () => void
     onStartTemporaryChat?: () => void
     onStartCharacterChat?: () => void
+    persistenceKind?: string
     activeCharacterName?: string | null
   }) => (
     <div>
+      <output data-testid="header-persistence">{persistenceKind}</output>
       <button type="button" onClick={() => onOpenCommandPalette?.()}>
         Open command palette
       </button>
@@ -145,8 +148,16 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 describe("Header character mode sequencing", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetServerChatSaveStatus()
+    messageOptionState.serverChatId = null
     selectedCharacter = null
     locationPathname = "/chat"
+  })
+
+  it("does not call cold server-linked history saved without current acknowledgement", () => {
+    messageOptionState.serverChatId = "cold-unconfirmed-chat"
+    render(<Header />)
+    expect(screen.getByTestId("header-persistence")).toHaveTextContent("serverUnconfirmed")
   })
 
   it("enters character mode and opens selection before scene controls when no character is active", () => {

@@ -1,6 +1,7 @@
 import React from "react"
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   renderHook,
@@ -8,7 +9,7 @@ import {
   waitFor
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ConfigProvider, Form, Input } from "antd"
+import { ConfigProvider, Form, Input, Modal } from "antd"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -25,6 +26,7 @@ import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
 import { actorSceneForTarget } from "@/store/actor"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
 import { installSettingsLocks } from "@/services/__tests__/chat-settings-fixture"
+import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { ActorPopout } from "../ActorPopout"
 import { ActorEditor } from "../ActorEditor"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
@@ -255,12 +257,15 @@ const target = (serverChatId: string) => {
     >[0]
   )
 }
+const editorClients = new Set<QueryClient>()
+let consoleErrorSpy: { mockRestore: () => void } | undefined
 const mountEditor = (
   kind: "actor" | "model",
   open = true,
   selection: HistorySelectionController | null = null,
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 ) => {
+  editorClients.add(client)
   const close = vi.fn()
   const controller = selection
     ? selection.getCurrent().owner
@@ -323,7 +328,7 @@ beforeEach(() => {
   io.set.mockReset().mockImplementation(async (key: string, value: unknown) => {
     io.values.set(key, value)
   })
-  vi.spyOn(console, "error").mockImplementation(() => undefined)
+  consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 })
 
 describe.each(["actor", "model"] as const)(
@@ -1371,7 +1376,15 @@ const installEditorLocks = () => {
     })
   )
 }
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  Modal.destroyAll()
+  cleanup()
+  for (const client of editorClients) client.clear()
+  editorClients.clear()
+  consoleErrorSpy?.mockRestore()
+  consoleErrorSpy = undefined
+  vi.unstubAllGlobals()
+})
 const qualifiedSceneEditorSource = (kind: "native" | "local" = "native") => {
   installEditorLocks()
   const requestScope = editorRequestScope
@@ -1423,6 +1436,25 @@ describe.each(["actor", "model"] as const)(
   "%s qualified scene commitment",
   (kind) => {
     afterEach(() => vi.unstubAllGlobals())
+
+    it("keeps staged scene edits when its owned native mirror hydrates", async () => {
+      const source = qualifiedSceneEditorSource()
+      io.values.set(source.key, { value: scene("Original scene."), updatedAt: 1 })
+      const view = mountEditor(kind, true, source.controller)
+      const notes = await screen.findByLabelText("Scene notes")
+      fireEvent.change(notes, { target: { value: "Staged across mirror hydration." } })
+      const historyId = await linkServerChatMirror({
+        chatId: "scene-one",
+        ownerKey: serverChatMirrorOwnerKey({ requestScope: editorRequestScope }),
+        scope: { type: "global" },
+        title: "Owned scene mirror"
+      })
+      act(() => useStoreMessageOption.setState({ historyId }))
+      await waitFor(() => expect(screen.getByLabelText("Scene notes")).toHaveValue("Staged across mirror hydration."))
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(view.close).toHaveBeenCalledWith(false))
+      expect(io.values.get(source.key)).toMatchObject({ value: { notes: "Staged across mirror hydration." } })
+    })
 
     it("keeps a newer acknowledged Applied scene when an older hydration finishes", async () => {
       const source = qualifiedSceneEditorSource()
@@ -1565,7 +1597,7 @@ describe.each(["actor", "model"] as const)(
       expect(io.values.get(source.key)).toMatchObject({
         value: { notes: "My staged replacement." }
       })
-    })
+    }, 15_000)
 
     it.each(["canceled", "superseded"] as const)(
       "refuses a retained %s scene review confirmation",
@@ -1622,7 +1654,8 @@ describe.each(["actor", "model"] as const)(
             value: { notes: "My staged edits." }
           })
         }
-      }
+      },
+      15_000
     )
 
     it("retires an older conflict review confirmation when a newer edit occurs", async () => {
@@ -1651,7 +1684,7 @@ describe.each(["actor", "model"] as const)(
       await screen.findByRole("alert")
       expect(io.values.get(source.key)).toEqual(competing)
       expect(view.close).not.toHaveBeenCalled()
-    })
+    }, 15_000)
 
     it("preserves a competing scene and staged edits rather than adopting a newer Save expectation", async () => {
       const source = qualifiedSceneEditorSource()

@@ -154,9 +154,15 @@ vi.mock("antd", async (importOriginal) => {
   }
 })
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] })
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQuery: () => ({ data: [] }),
+    useQueryClient: () => queryClient
+  }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({

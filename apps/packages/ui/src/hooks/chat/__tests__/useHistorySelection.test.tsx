@@ -1,5 +1,7 @@
 import { useSidepanelChatFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/routes/sidepanel-chat-freshness"
 import React from "react"
+import userEvent from "@testing-library/user-event"
+import { getServerChatSaveStatus, resetServerChatSaveStatus } from "@/store/server-chat-save-status"
 import { useChatHistoryFreshness } from "../useChatHistoryFreshness"
 import {
   act,
@@ -2929,4 +2931,83 @@ it("explicitly refreshes empty native history after settlement without widening 
   expect(mocks.capture).toHaveBeenCalledTimes(2)
   expect(mocks.dismissRecovery).not.toHaveBeenCalled()
   hook.unmount()
+})
+
+it.each(['settlement', 'capture failure', 'later focus', 'retired account'])("returns owned keyboard focus after empty recovery refresh: %s", async outcome => {
+  const { HistorySelectionReview } = await import("@/components/Common/Playground/HistorySelectionReview")
+  let leaseCurrent = true
+  const native = { kind: "native" as const, conversation_id: "chat", scope: { type: "global" as const }, request_scope: { userId: 1, config: { serverUrl: "https://owned-refresh.test", authMode: "single-user" as const } }, validate_lease: () => leaseCurrent }
+  const retained = [{ scope: { profile_id: "profile", client_session_id: "old-writer" }, turn: { operation_id: "unknown-original", owner_key: "owner", conversation_id: "chat", persistence: "server", state: "unknown", selection_digest: "original", request_context_digest: "original-command", created_at: 1, input_text: "original input", input_images: [], result_text: "" } }]
+  mocks.recoveries.mockResolvedValue(retained)
+  let reads = 0, release!: () => void
+  const held = new Promise<void>(done => { release = done })
+  mocks.capture.mockImplementation(async (_source, view) => {
+    if (++reads > 1) { await held; if (outcome === 'capture failure') throw new Error('capture_unavailable') }
+    const source = reads === 1 ? { ...snapshot, source_digest: "empty", nodes: [] } : snapshot
+    const bound = { ...view, owner_key: "owner" }
+    const selected = resolveHistorySelection(source, bound, "send", "")
+    if (selected.status !== 'ready') throw Error('fixture_selection_failed')
+    return { status: 'captured', view: bound, snapshot: source, rows: selected.rows, selected_content: selected.rows.map(row => ({ id: row.id, revision: row.revision, message: row.preview, images: [] })), purpose: 'send', storage_context_digest: 'storage' }
+  })
+  let controller!: HistorySelectionController
+  function RecoveryView() { const selection = useHistorySelection(); React.useLayoutEffect(() => { controller = selection }, [selection]); return <><button>Other control</button><HistorySelectionReview selection={selection} /></> }
+  const mounted = render(<RecoveryView />)
+  try {
+    await act(async () => { await controller.open(native) })
+    const refresh = await screen.findByRole('button', { name: 'Refresh history', exact: true })
+    refresh.focus()
+    await userEvent.setup().keyboard('{Enter}')
+    await waitFor(() => expect(reads).toBe(2))
+    if (outcome === 'later focus' || outcome === 'retired account') screen.getByRole('button', { name: 'Other control' }).focus()
+    if (outcome === 'retired account') leaseCurrent = false
+    await act(async () => { release(); await held })
+    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveFocus())
+    else if (outcome === 'capture failure') await waitFor(() => expect(screen.getByRole('alert').closest('[tabindex="-1"]')).toHaveFocus())
+    else expect(screen.getByRole('button', { name: 'Other control' })).toHaveFocus()
+  } finally { release(); mounted.unmount() }
+})
+
+it.each(['settled', 'unresolved', 'read failure', 'retired lease'])("projects only current owned cold history evidence: %s", async outcome => {
+  resetServerChatSaveStatus()
+  let current = true, entered!: () => void, release!: () => void
+  const ready = new Promise<void>(done => { entered = done })
+  const held = new Promise<void>(done => { release = done })
+  const native = { kind: 'native' as const, conversation_id: 'chat', scope: { type: 'global' as const }, request_scope: { userId: 1, config: { serverUrl: 'https://cold-history.test', authMode: 'single-user' as const } }, validate_lease: () => current }
+  mocks.recoveries.mockImplementation(async (scope, view) => {
+    entered(); await held
+    if (outcome === 'read failure') throw Error('journal_read_unavailable')
+    return outcome === 'unresolved' ? [{ scope, turn: { persistence: 'server', owner_key: view.owner_key, conversation_id: view.conversation_id, state: 'unknown', input_text: 'Original retained input', input_images: [], result_text: '', operation_id: 'unknown-completion' } }] : []
+  })
+  const hook = renderHook(() => useHistorySelection())
+  try {
+    await act(async () => { await hook.result.current.open(native) })
+    await ready
+    if (outcome === 'retired lease') current = false
+    await act(async () => { release(); await held })
+    if (outcome === 'settled') await waitFor(() => expect(getServerChatSaveStatus('chat')).toBe('saved'))
+    else if (outcome === 'retired lease') expect(getServerChatSaveStatus('chat')).not.toBe('saved')
+    else await waitFor(() => expect(getServerChatSaveStatus('chat')).toBe('unconfirmed'))
+  } finally { release(); hook.unmount(); resetServerChatSaveStatus() }
+})
+
+it("an older empty journal read cannot replace newer unresolved cold status", async () => {
+  resetServerChatSaveStatus()
+  const native = { kind: 'native' as const, conversation_id: 'chat', scope: { type: 'global' as const }, request_scope: { userId: 1, config: { serverUrl: 'https://cold-history.test', authMode: 'single-user' as const } }, validate_lease: () => true }
+  let entered!: () => void, release!: () => void, reads = 0
+  const ready = new Promise<void>(done => { entered = done })
+  const oldRead = new Promise<void>(done => { release = done })
+  mocks.recoveries.mockImplementation(async (scope, view) => {
+    if (++reads === 1) { entered(); await oldRead; return [] }
+    return [{ scope, turn: { persistence: 'server', owner_key: view.owner_key, conversation_id: view.conversation_id, state: 'unknown', input_text: 'Retained original', input_images: [], result_text: '', operation_id: 'unknown-completion' } }]
+  })
+  const hook = renderHook(() => useHistorySelection())
+  try {
+    await act(async () => { await hook.result.current.open(native) })
+    await ready
+    await act(async () => { await hook.result.current.refreshRecovery() })
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+    await act(async () => { release(); await oldRead })
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+    expect(hook.result.current.recoveries).toHaveLength(1)
+  } finally { release(); hook.unmount(); resetServerChatSaveStatus() }
 })

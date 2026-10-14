@@ -4459,5 +4459,17 @@
   },
   "characterChatReadiness_character_description": {
     "message": "Choose an available model with a configured provider, then choose the character for your new chat."
+  },
+  "historySelection_roleplayReplyUnconfirmedMessage": {
+    "message": "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message."
+  },
+  "historySelection_roleplayInputUnconfirmedMessage": {
+    "message": "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input."
+  },
+  "composer_persistence_serverUnconfirmedPill": {
+    "message": "Save status unconfirmed"
+  },
+  "composer_persistence_serverUnconfirmed": {
+    "message": "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again."
   }
 }

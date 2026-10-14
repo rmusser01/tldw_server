@@ -1,7 +1,8 @@
 {
   "assistant": {
     "trackedPersonaUnavailable": "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.",
-    "usePersonaOverlay": "Use a persona prompt overlay"
+    "usePersonaOverlay": "Use a persona prompt overlay",
+    "trackedModelsLoading": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
   },
   "newChat": "New Chat",
   "selectAPrompt": "Select a Prompt",

@@ -90,6 +90,7 @@ export function HistorySelectionReview({
   } | null>(null)
   const latestAction = React.useRef<HTMLButtonElement>(null)
   const branchAction = React.useRef<HTMLButtonElement>(null)
+  const refreshAction = React.useRef<HTMLButtonElement>(null)
   const recoveryFocus = React.useRef<(() => void) | null>(null)
   const mounted = React.useRef(true)
   React.useEffect(() => {
@@ -226,7 +227,7 @@ export function HistorySelectionReview({
       setRecoveryAction(null)
     }
   }, [selection, renderedSource])
-  const recoverSendChoice = async (choice: "latest" | "branch") => {
+  const recoverSendChoice = async (choice: "latest" | "branch" | "refresh") => {
     const origin = selection.view
     if (
       !mounted.current ||
@@ -247,7 +248,7 @@ export function HistorySelectionReview({
     setOpenRecoveryError(null)
     recoveryFocus.current?.()
     const initiator =
-      choice === "latest" ? latestAction.current : branchAction.current
+      choice === "latest" ? latestAction.current : choice === "branch" ? branchAction.current : refreshAction.current
     let focusOwned = Boolean(initiator && document.activeElement === initiator)
     let frame: number | null = null
     const leaveFocus = (event: Event) => {
@@ -277,12 +278,16 @@ export function HistorySelectionReview({
           (document.activeElement === initiator ||
             (!initiator.isConnected && document.activeElement === document.body))
         cancel()
-        if (owned) focusComposer()
+        if (owned) {
+          if (choice === "refresh") (trigger.current ?? refreshAction.current ?? errorRegion.current)?.focus()
+          else focusComposer()
+        }
       })
     }
     try {
       if (choice === "latest")
         await selection.loadLatest(origin, renderedSource.isCurrent, onAccepted)
+      else if (choice === "refresh") await selection.refresh(onAccepted)
       else selection.branchHere(origin, renderedSource.isCurrent, onAccepted)
     } finally {
       if (frame === null) cancel()
@@ -560,16 +565,16 @@ export function HistorySelectionReview({
           <p className="font-medium">{entry.turn.roleplay_resume.completion?.saved
             ? text("savedRoleplayReplyTitle", "Reply saved")
             : entry.turn.state === "refused" ? text("roleplayMessageRefusedTitle", "Message not added")
-            : entry.turn.roleplay_resume.completion ? text("roleplayReplyUnsavedTitle", "Reply not saved")
+            : entry.turn.roleplay_resume.completion && entry.turn.state !== "unknown" ? text("roleplayReplyUnsavedTitle", "Reply not saved")
             : entry.turn.roleplay_resume.append ? text("roleplayReplyUnconfirmedTitle", "Reply save unconfirmed")
             : text("roleplayInputUnconfirmedTitle", "Message save unconfirmed")}</p>
           <p>{entry.turn.roleplay_resume.completion?.saved
             ? text("savedRoleplayReplyMessage", "This reply is saved in the original conversation. Open it when you are ready.")
             : entry.turn.state === "refused" ? text("roleplayMessageRefused", "The server refused this request before adding your message. Your input is retained here.")
-            : entry.turn.roleplay_resume.completion ? text("roleplayReplyUnsaved", "Your message is saved. The reply was generated but could not be saved. Copy it or explicitly retry the original request; earlier replies will remain available.")
+            : entry.turn.roleplay_resume.completion && entry.turn.state !== "unknown" ? text("roleplayReplyUnsaved", "Your message is saved. The reply was generated but could not be saved. Copy it or explicitly retry the original request; earlier replies will remain available.")
             : entry.turn.roleplay_resume.append
-              ? text("roleplayReplyUnconfirmedMessage", "Your message is saved. Any reply that arrived is retained here. Retry checks the original request without adding another message.")
-              : text("roleplayInputUnconfirmedMessage", "The server may have received this message. Retry checks the original request. Your input is retained here.")}</p>
+              ? text("roleplayReplyUnconfirmedMessage", "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message.")
+              : text("roleplayInputUnconfirmedMessage", "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input.")}</p>
         </>
       ) : (entry.turn.action === "edit_resend" ||
         entry.turn.action === "regenerate") &&
@@ -979,12 +984,12 @@ export function HistorySelectionReview({
           nodes.length === 0 && recoveries.some(entry =>
             entry.turn.persistence === "server" && entry.turn.owner_key === selection.view?.owner_key &&
             entry.turn.conversation_id === selection.view?.conversation_id) && (
-          <Button variant="text" disabled={sendInProgress || Boolean(retrying || openingRecovery || recoveryAction?.pending)}
+          <Button ref={refreshAction} variant="text" disabled={sendInProgress || Boolean(retrying || openingRecovery || recoveryAction?.pending)}
             onClick={() => {
               const state = useStoreMessageOption.getState()
               if (mounted.current && !state.isLoading && !state.streaming && !state.isProcessing && !editorOpen() &&
                 renderedSource.isCurrent() && renderedSelectionIsCurrent() && selection.owner?.kind === "native" && selection.owner.validate_lease())
-                void selection.refresh()
+                void recoverSendChoice("refresh")
             }}>
             {text("refresh", "Refresh history")}
           </Button>

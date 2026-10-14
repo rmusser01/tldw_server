@@ -292,7 +292,7 @@ export const SidepanelForm = ({
     if (connectionReadyRef.current && !isConnectionReady) connectionGenerationRef.current += 1
     connectionReadyRef.current = isConnectionReady
   }, [isConnectionReady])
-  const { data: chatModels } = useChatModelCatalog(isConnectionReady)
+  const { data: chatModels, isFetching: chatModelsLoading } = useChatModelCatalog(isConnectionReady)
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
       {
@@ -4951,6 +4951,7 @@ export const SidepanelForm = ({
       >
         {characterControlsOpen && <CharacterControlsSheet
           onTrackedSelection={handleTrackedAssistantSelection}
+          trackedSelectionLoading={Boolean(greetingHistorySelection && isConnectionReady && chatModelsLoading)}
           onRequestClose={() => setCharacterControlsOpen(false)}
         />}
       </Modal>

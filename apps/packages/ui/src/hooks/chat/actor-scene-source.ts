@@ -1,3 +1,5 @@
+import { useCallback } from "react"
+import { hasAcknowledgedServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useStoreMessageOption } from "@/store/option"
 import {
   captureActorSettingsTarget,
@@ -69,6 +71,30 @@ export const captureCurrentActorSceneTarget = (
     accountIsCurrent,
     isCurrent
   })
+}
+
+/** A committed local mirror is an alias of the same qualified native scene. */
+export const useActorSceneHistoryId = (
+  controller: HistorySelectionController | null,
+  historyId: string | null,
+  serverChatId: string | null
+) => {
+  const target = captureCurrentActorSceneTarget(controller)
+  const address = target?.address?.kind === "native" && target.address.id === serverChatId
+    ? target.address : null
+  const ownerKey = address && target?.account
+    ? serverChatMirrorOwnerKey({ requestScope: target.account.requestScope }) : null
+  const scopeType = address?.scope.type
+  const workspaceId = address?.scope.type === "workspace" ? address.scope.workspaceId : null
+  const isSceneHistoryIdCurrent = useCallback(
+    (current: string | null, original: string | null) => current === original || Boolean(
+      ownerKey && serverChatId && hasAcknowledgedServerChatMirror({
+        historyId: current, ownerKey, chatId: serverChatId,
+        scope: scopeType === "workspace" ? { type: "workspace", workspaceId: workspaceId! } : { type: "global" }
+      })
+    ), [ownerKey, serverChatId, scopeType, workspaceId]
+  )
+  return { sceneHistoryId: ownerKey ? null : historyId, isSceneHistoryIdCurrent }
 }
 
 /** Read once before command preparation; defaults remain staged until an explicit scene Save. */

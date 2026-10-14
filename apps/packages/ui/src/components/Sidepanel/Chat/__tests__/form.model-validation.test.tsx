@@ -103,6 +103,11 @@ const catalogDataName = (catalogQuery.name as ts.ObjectBindingPattern).elements
   .find((element) => element.propertyName?.getText(ast) === "data")
   ?.name.getText(ast)
 if (!catalogDataName) throw new Error("Missing sidebar model catalog data")
+const trackedLoadingNode = nodes.find((node): node is ts.JsxAttribute =>
+  ts.isJsxAttribute(node) && node.name.getText(ast) === "trackedSelectionLoading")
+if (!trackedLoadingNode?.initializer || !ts.isJsxExpression(trackedLoadingNode.initializer) || !trackedLoadingNode.initializer.expression)
+  throw new Error("Missing actual compact tracked picker loading binding")
+const trackedLoadingExpression = trackedLoadingNode.initializer.expression.getText(ast)
 const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
@@ -129,7 +134,7 @@ const compiled = ts.transpileModule(
     ${effects}
     const submit = ${initializer("submitCurrentRequest")};
     const inline = ${initializer("composerInlineMessagesNode")};
-    return { submit, inline, catalogReady: ${catalogDataName} !== undefined };
+    return { submit, inline, catalogReady: ${catalogDataName} !== undefined, trackedSelectionLoading: ${trackedLoadingExpression} };
   }
 `,
   { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }
@@ -176,6 +181,7 @@ const useSidebarValidation = new Function(
   submit: (message: string, image: string) => Promise<void>
   inline: React.ReactNode
   catalogReady: boolean
+  trackedSelectionLoading: boolean
 }
 
 function Harness({
@@ -192,7 +198,7 @@ function Harness({
   const form = useSimpleForm({ initialValues: { message: text, image } })
   const [selectedModel, setSelectedModel] = React.useState(model)
   mocks.useMessage.mockReturnValue({ selectedModel, setSelectedModel: async (next: string) => { setSelectedModel(next); return true } })
-  const { submit, inline, catalogReady } = useSidebarValidation({
+  const { submit, inline, catalogReady, trackedSelectionLoading } = useSidebarValidation({
     form,
     selectedModel,
     isSending: busy,
@@ -213,6 +219,7 @@ function Harness({
       <output data-testid="model-catalog">
         {catalogReady ? "ready" : "pending"}
       </output>
+      <output data-testid="tracked-selection-loading">{String(trackedSelectionLoading)}</output>
       {inline}
     </>
   )
@@ -231,6 +238,25 @@ const waitForCatalog = () =>
   )
 
 describe("sidebar model validation", () => {
+  it.each(["failed", "offline"])("ends compact tracked waiting when discovery is %s", async mode => {
+    if (mode === "failed") mocks.fetchChatModels.mockRejectedValueOnce(new Error("Declared model discovery failure"))
+    renderHarness(<Harness protectedHistory connected={mode !== "offline"} />)
+    if (mode === "failed") await waitFor(() => expect(queryClient.getQueryCache().find({ queryKey: ["playground:chatModels"], exact: false })?.state.status).toBe("error"))
+    await waitFor(() => expect(screen.getByTestId("tracked-selection-loading")).toHaveTextContent("false"))
+    expect(screen.getByLabelText("Message")).toHaveValue("keep my draft")
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
+  it("holds compact tracked waiting only through its actual model fetch", async () => {
+    let settle!: (value: typeof models) => void
+    mocks.fetchChatModels.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+    renderHarness(<Harness protectedHistory />)
+    await waitFor(() => expect(screen.getByTestId("tracked-selection-loading")).toHaveTextContent("true"))
+    await act(async () => { settle(models) })
+    await waitForCatalog()
+    expect(screen.getByTestId("tracked-selection-loading")).toHaveTextContent("false")
+  })
+
   it.each([false, true])("refuses loaded protected persona before direct or queued preparation (busy=%s)", async busy => {
     renderHarness(<Harness model="ready-model" busy={busy} protectedHistory personaMode="tracked" />)
     await waitForCatalog()

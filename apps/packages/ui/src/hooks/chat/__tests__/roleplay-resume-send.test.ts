@@ -466,6 +466,77 @@ describe("saved Roleplay user workflow", () => {
     expect(io.complete).toHaveBeenCalledOnce()
     expect(io.legacy).not.toHaveBeenCalled()
   })
+
+  it("does not redispatch an unfinished same-input completion through ordinary Send", async () => {
+    const mounted = await prepare()
+    io.complete.mockImplementationOnce(async (_id, _body, options) => {
+      options.onDispatch?.()
+      throw new Error("response lost while provider is running")
+    })
+    await sendNativeHistoryCharacter(mounted.params).catch(() => undefined)
+    await sendNativeHistoryCharacter(mounted.params).catch(() => undefined)
+    expect(io.complete).toHaveBeenCalledOnce()
+    expect(io.append).toHaveBeenCalledOnce()
+  })
+  it("refuses ordinary Send while its original dispatched completion is held", async () => {
+    const mounted = await prepare()
+    let reject!: (error: Error) => void
+    const held = new Promise((_resolve, fail) => { reject = fail })
+    io.complete.mockImplementationOnce((_id, _body, options) => {
+      options.onDispatch?.()
+      return held
+    })
+    const pending = sendNativeHistoryCharacter(mounted.params).catch(error => error)
+    try {
+      await waitFor(() => expect(io.complete).toHaveBeenCalledOnce())
+      const [entry] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "cold-held-read" }, mounted.view)
+      expect(entry.turn.state).toBe("unknown")
+      await expect(sendNativeHistoryCharacter(mounted.params)).rejects.toMatchObject({ cause: { message: "roleplay_resume_review_required" } })
+      expect(io.complete).toHaveBeenCalledOnce()
+      expect(io.append).toHaveBeenCalledOnce()
+    } finally {
+      reject(new Error("Declared held completion response lost"))
+      await pending
+    }
+  })
+
+  it("retains unknown completion dispatch through a cold journal read", async () => {
+    const mounted = await prepare()
+    io.complete.mockImplementationOnce(async (_id, _body, options) => {
+      options.onDispatch?.()
+      throw new Error("completion response lost")
+    })
+    await sendNativeHistoryCharacter(mounted.params).catch(() => undefined)
+    const [entry] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "cold-read" }, mounted.view)
+    expect(entry.turn.state).toBe("unknown")
+  })
+  it("persists completion uncertainty before handing off to transport", async () => {
+    const mounted = await prepare()
+    const complete = io.complete.getMockImplementation()!
+    let stateAtHandoff: string | undefined
+    io.complete.mockImplementationOnce(async (...args) => {
+      const [entry] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "cold-read" }, mounted.view)
+      stateAtHandoff = entry.turn.state
+      return complete(...args)
+    })
+    await sendNativeHistoryCharacter(mounted.params)
+    expect(stateAtHandoff).toBe("unknown")
+  })
+
+  it("keeps latest retry outcome unknown while preserving an earlier unsaved reply", async () => {
+    const mounted = await prepare()
+    const complete = io.complete.getMockImplementation()!
+    io.complete.mockImplementationOnce(async (...args) => {
+      const response = await complete(...args)
+      return { ...response, saved: false, assistant_message_id: null, assistant_content: "Earlier retained reply", tldw_roleplay_resume_v1: { ...response.tldw_roleplay_resume_v1, assistant_message_version: null, fence: null, unsaved_reason: "persistence_unavailable" } }
+    })
+    await sendNativeHistoryCharacter(mounted.params)
+    const [original] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "reopen" }, mounted.view)
+    io.complete.mockImplementationOnce(async (_id, _body, options) => { options.onDispatch?.(); throw Error("latest retry response lost") })
+    await sendSavedRoleplay({ ...mounted.params, retry: original }).catch(() => undefined)
+    const [cold] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "cold-read" }, mounted.view)
+    expect(cold.turn).toMatchObject({ state: "unknown", result_text: "Earlier retained reply", roleplay_resume: { completion: { saved: false, assistant_content: "Earlier retained reply" } } })
+  })
   it("retries a lost append response with the exact original input and assistant IDs", async () => {
     const mounted = await prepare()
     const append = io.append.getMockImplementation()!
@@ -491,7 +562,7 @@ describe("saved Roleplay user workflow", () => {
       options.onDispatch?.()
       return acknowledged
     })
-    await sendNativeHistoryCharacter(mounted.params)
+    await sendSavedRoleplay({ ...mounted.params, retry: original })
     expect(io.append.mock.calls[1][1]).toEqual(originalInput)
     expect(
       io.complete.mock.calls[0][1].tldw_roleplay_resume_v1.assistant_message_id
@@ -510,12 +581,13 @@ describe("saved Roleplay user workflow", () => {
       "completion response lost"
     )
     const originalRequest = structuredClone(io.complete.mock.calls[0][1])
+    const [original] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "reopen" }, mounted.view)
     io.detail.mockRejectedValue(new Error("fresh detail forbidden"))
     io.complete.mockImplementationOnce(async (_id, _request, options) => {
       options.onDispatch?.()
       return acknowledged
     })
-    await sendNativeHistoryCharacter(mounted.params)
+    await sendSavedRoleplay({ ...mounted.params, retry: original })
     expect(io.append).toHaveBeenCalledOnce()
     expect(io.complete.mock.calls[1][1]).toEqual(originalRequest)
     expect(io.detail).toHaveBeenCalledOnce()
@@ -574,7 +646,8 @@ describe("saved Roleplay user workflow", () => {
         detail: { status: "resume_conflict", code: "history_changed" }
       }
     })
-    await sendNativeHistoryCharacter(mounted.params).catch(() => undefined)
+    const [original] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "reopen" }, mounted.view)
+    await sendSavedRoleplay({ ...mounted.params, retry: original }).catch(() => undefined)
     const [entry] = await loadHistoryTurnRecoveries(
       { profile_id: "profile", client_session_id: "reopen" },
       mounted.view
@@ -674,7 +747,7 @@ describe("saved Roleplay user workflow", () => {
         detail: { status: "resume_conflict", code: "history_changed" }
       }
     })
-    await sendNativeHistoryCharacter(mounted.params).catch(() => undefined)
+    await sendSavedRoleplay({ ...mounted.params, retry: original }).catch(() => undefined)
     const [entry] = await loadHistoryTurnRecoveries(
       { profile_id: "profile", client_session_id: "reopen" },
       mounted.view

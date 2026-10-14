@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { readStore } from "../../../extension/tests/e2e/utils/history-selection";
 import type { HistoryBookmark } from "../../../packages/ui/src/db/dexie/types";
 /**
@@ -3273,4 +3274,194 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
   });
+});
+
+test('refreshes a real empty native source after late settlement without replay or changing its boundary', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const model = await getConfiguredChatModelSelection(request);
+  const created = await apiPost<any>(request, '/api/v1/chats/', { title: `Empty refresh 13673 ${Date.now()}`, state: 'in-progress', source: 'e2e' });
+  expect(created.status).toBe(201);
+  const id = String(created.body.id);
+  const firstCapture = page.waitForResponse(response => new URL(response.url()).pathname.includes('/history/selection') && response.status() === 200);
+  await openDesktopChatCockpit(page, model, { persistedServerChatId: id });
+  const captured = await (await firstCapture).json();
+  expect(captured.status).toBe('captured');
+  expect(captured.snapshot.nodes).toEqual([]);
+  await expect.poll(async () => ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id).length).toBeGreaterThan(0);
+  const original = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id).at(-1)!;
+  const recovery = { operation_id: crypto.randomUUID(), origin_view: original.view, owner_key: original.owner_key,
+    conversation_id: id, selection_digest: 'synthetic-original-empty', request_context_digest: 'synthetic-original-command',
+    created_at: Date.now(), input_text: '  Synthetic original uncertain input 13673  ', input_images: [], result_text: '', state: 'unknown', persistence: 'server' };
+  await page.evaluate(async ({ original, recovery }) => {
+    const opening = indexedDB.open('PageAssistDatabase');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
+    const tx = db.transaction('historySelections', 'readwrite');
+    tx.objectStore('historySelections').put({ ...original, pending_turns: { ...original.pending_turns, [recovery.operation_id]: recovery } });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error); });
+    db.close();
+  }, { original, recovery });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const refresh = page.getByRole('button', { name: 'Refresh history', exact: true });
+  await expect(refresh).toBeVisible();
+  await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveCount(0);
+  const attempts: string[] = [];
+  const observe = (hit: Request) => { const path = new URL(hit.url()).pathname; if (hit.method() === 'POST' && (path.endsWith('/messages') || path.endsWith('/completions') || path.endsWith('/complete-v2'))) attempts.push(path); };
+  page.on('request', observe);
+  try {
+    const user = await apiPost<any>(request, `/api/v1/chats/${id}/messages`, { role: 'user', content: recovery.input_text });
+    expect(user.status).toBe(201);
+    const answer = await apiPost<any>(request, `/api/v1/chats/${id}/messages`, { role: 'assistant', content: 'Synthetic late saved reply 13673', parent_message_id: user.body.id });
+    expect(answer.status).toBe(201);
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname.includes('/history/selection') && response.status() === 200);
+    await refresh.focus();
+    await refresh.press("Enter");
+    const current = await (await refreshed).json();
+    expect(current.snapshot.nodes).toHaveLength(2);
+    expect(current.view.cursor).toEqual({ kind: 'empty' });
+    await expect(page.getByRole("button", { name: "Review conversation history", exact: true })).toBeFocused();
+    await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
+    await expect(page.getByRole('list', { name: 'Complete source messages', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
+    const records = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id);
+    expect(records.flatMap(row => Object.values(row.pending_turns ?? {})).find(turn => turn.operation_id === recovery.operation_id)).toEqual(recovery);
+    expect(attempts).toEqual([]);
+  } finally { page.removeListener('request', observe); }
+});
+
+test('qualifies chat draft, keyboard semantics and both themes at narrow widths and renderer zoom', async ({ page, request }, testInfo) => {
+  test.setTimeout(120_000);
+  const model = await getConfiguredChatModelSelection(request);
+  await openDesktopChatCockpit(page, model);
+  const input = page.getByTestId('chat-input');
+  const draft = '  Acceptance matrix draft\nTrailing spaces  ';
+  await input.fill(draft);
+  const cells: unknown[] = [];
+  const violationsByCell: unknown[] = [];
+  for (const width of [320, 390, 1280]) for (const theme of ['light', 'dark']) for (const rendererZoom of [1, 2]) {
+    await page.evaluate(() => { document.documentElement.style.zoom = '1'; });
+    await page.setViewportSize({ width, height: 960 });
+    if (await page.evaluate(() => document.documentElement.classList.contains('dark')) !== (theme === 'dark')) await page.getByTestId('playground-chat-shell').getByTestId('chat-header-theme-toggle').click();
+    await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(theme === 'dark');
+    await page.evaluate(zoom => { document.documentElement.style.zoom = String(zoom); }, rendererZoom);
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue(draft);
+    await expect(input).toHaveAccessibleName(/message/i);
+    await input.focus();
+    await expect(input).toBeFocused();
+    const send = page.getByRole('button', { name: /send message/i });
+    await expect(send).toBeEnabled();
+    await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).length)).toBe(0);
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    const violations = results.violations.map(issue => ({ id: issue.id, impact: issue.impact, targets: issue.nodes.map(node => node.target), nodes: issue.nodes.map(node => ({ target: node.target, html: node.html, summary: node.failureSummary, checks: node.any.map(check => check.data) })) }));
+    cells.push({ width, theme, rendererZoom, draftPreserved: true, violations });
+    await testInfo.attach(`chat-${width}-${theme}-renderer-${rendererZoom}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+    if (violations.length) violationsByCell.push({ width, theme, rendererZoom, violations });
+  }
+  await testInfo.attach('chat-acceptance-matrix', { body: JSON.stringify({ cells, limits: 'CSS renderer zoom is a layout stress check; native browser-toolbar zoom and physical assistive technology remain unrun. No participant results or server-load claim.' }), contentType: 'application/json' });
+  expect(violationsByCell).toEqual([]);
+});
+
+for (const format of ['v2', 'png'] as const) test('imports a real '+format+' card and preserves greeting, two turns and reviewed Scene settings across reopen', async ({ page, request }, testInfo) => {
+  test.setTimeout(180_000);
+  const model = await getConfiguredChatModelSelection(request);
+  const name = 'Disposable imported '+format+' '+Date.now();
+  let seed: DisposableCharacter | null = null;
+  let imported: DisposableCharacter | null = null;
+  try {
+    seed = await createDisposableCharacter(request, name);
+    const exported = await request.get(serverUrl+'/api/v1/characters/'+seed.id+'/export?format='+format, { headers: apiHeaders() });
+    expect(exported.status()).toBe(200);
+    const buffer = await exported.body();
+    const renamedSeed = await request.put(serverUrl+"/api/v1/characters/"+seed.id+"?expected_version="+seed.version, { headers: apiHeaders(), data: { name: name+" export seed" } });
+    expect(renamedSeed.ok()).toBe(true);
+    seed.version = (await renamedSeed.json()).version;
+    await cleanupDisposableCharacter(request, seed); seed = null;
+    await openDesktopChatCockpit(page, model);
+    await page.goto('/characters', { waitUntil: 'domcontentloaded' });
+    const chooserEvent = page.waitForEvent('filechooser', { timeout: 5_000 }).catch(() => null);
+    await page.getByRole('button', { name: "Import character", exact: true }).click();
+    const chooser = await chooserEvent;
+    if (!chooser) await testInfo.attach('public-import-dom', { body: JSON.stringify(await page.getByTestId('character-import-dropzone').evaluate(node => ({ markup: node.outerHTML, buttons: node.querySelectorAll('button').length, inputs: node.querySelectorAll('input[type=file]').length }))), contentType: 'application/json' });
+    expect(chooser, 'Public Import must open its native file chooser').not.toBeNull();
+    await chooser!.setFiles({ name: format === 'png' ? 'synthetic-card.png' : 'synthetic-card.json', mimeType: format === 'png' ? 'image/png' : 'application/json', buffer });
+    const preview = page.getByRole('dialog', { name: 'Import preview' });
+    await expect(preview).toContainText(format === "png" ? "synthetic-card.png" : name);
+    const importResponse = page.waitForResponse(r => r.request().method() === 'POST' && /\/api\/v1\/characters\/import\/?$/.test(new URL(r.url()).pathname));
+    await preview.getByRole('button', { name: /Confirm import/i }).click();
+    expect((await importResponse).ok()).toBe(true);
+    await preview.getByRole('button', { name: 'OK', exact: true }).click();
+    const records = await apiGet<any>(request, '/api/v1/characters?limit=1000');
+    const record = extractCharacters(records.body).find(row => row.name === name && !row.deleted);
+    expect(record?.id).toBeTruthy();
+    imported = { id: String(record.id), name, firstMessage: record.first_message, version: record.version ?? 1 };
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible();
+    await selectAssistantFromRuntimeRail(page, { tab: 'Characters', assistantName: name });
+    await page.getByRole('button', { name: 'Start with this greeting', exact: true }).click();
+    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(imported.firstMessage);
+    const chatId = await waitForPersistedServerChatId(page);
+    for (const prompt of ['Imported card first turn '+format, 'Imported card second turn '+format]) {
+      const turn = await sendChatTurnAndCapture(page, prompt);
+      expect(turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === '/api/v1/chats/'+chatId+'/roleplay/messages')?.status).toBe(201);
+      expect(turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === '/api/v1/chats/'+chatId+'/complete-v2')?.status).toBe(200);
+    }
+    const canonical = await apiGet<any>(request, '/api/v1/chats/'+chatId+'/messages?include_metadata=true&render_placeholders=false');
+    expect(canonical.body.messages).toHaveLength(5);
+    expect(canonical.body.messages[0].content).toBe(imported.firstMessage);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText('Imported card second turn '+format);
+    const customize = page.getByRole('button', { name: 'Customize chat', exact: true });
+    if (await customize.isVisible() && await customize.getAttribute('aria-expanded') === 'false') await customize.click();
+    await page.getByTestId('composer-role-play-setup').click();
+    const scene = page.getByRole('dialog', { name: 'Role-play setup', exact: true });
+    await expect(scene).toBeVisible();
+    const notes = 'Reviewed imported Scene '+format;
+    const notesInput = scene.getByRole('textbox', { name: 'Scene notes', exact: true });
+    await expect(notesInput).toBeEditable();
+    await notesInput.fill(notes);
+    await expect(notesInput).toHaveValue(notes);
+    const sceneCapture = captureAllApiCalls(page);
+    await scene.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(scene).toBeHidden();
+    const sceneCalls = await sceneCapture.stop();
+    await testInfo.attach("scene-apply-io", { body: JSON.stringify(sceneCalls.map(call => ({ method: call.method, path: new URL(call.url).pathname, status: call.status, requestContainsOwnNote: JSON.stringify(call.requestBody ?? null).includes(notes), responseContainsOwnNote: JSON.stringify(call.responseBody ?? null).includes(notes) }))), contentType: "application/json" });
+    await page.getByTestId('composer-role-play-setup').click();
+    await expect(scene.getByRole('textbox', { name: 'Scene notes', exact: true })).toHaveValue(notes);
+    await scene.getByRole('button', { name: 'Cancel', exact: true }).click();
+    const afterReview = await apiGet<any>(request, '/api/v1/chats/'+chatId+'/messages?include_metadata=true&render_placeholders=false');
+    expect(afterReview.body.messages).toEqual(canonical.body.messages);
+    await testInfo.attach('imported-card-journey', { body: JSON.stringify({ format, rows: 5, turns: 2, coldReopen: true, sceneNotesReview: true, limits: 'Scene settings review/change does not establish a saved frozen model or provider override. No packaged extension or physical AT claim.' }), contentType: 'application/json' });
+  } finally {
+    await cleanupDisposableCharacter(request, seed);
+    await cleanupDisposableCharacter(request, imported);
+  }
+});
+
+
+test('qualifies settled persistence badge contrast in both themes', async ({ page, request }, testInfo) => {
+  const model = await getConfiguredChatModelSelection(request);
+  const created = await apiPost<any>(request, '/api/v1/chats/', { title: 'Badge contrast '+Date.now(), state: 'in-progress', source: 'e2e' });
+  expect(created.status).toBe(201);
+  const id = String(created.body.id);
+  const user = await apiPost<any>(request, '/api/v1/chats/'+id+'/messages', { role: 'user', content: 'Synthetic saved badge question' });
+  expect(user.status).toBe(201);
+  expect((await apiPost<any>(request, '/api/v1/chats/'+id+'/messages', { role: 'assistant', content: 'Synthetic saved badge reply', parent_message_id: user.body.id })).status).toBe(201);
+  await openDesktopChatCockpit(page, model, { persistedServerChatId: id });
+  const shell = page.getByTestId('playground-chat-shell');
+  const badge = page.getByTestId('chat-header-persistence-badge');
+  const evidence: unknown[] = [];
+  for (const kind of ['server', 'temporary']) {
+    if (kind === 'temporary') await page.getByRole('button', { name: 'Temporary chat (on this device)', exact: true }).click();
+    await expect(badge).toHaveText(kind === 'server' ? 'Saved on server' : 'Temporary');
+    for (const theme of ['light', 'dark']) {
+      if (await page.evaluate(() => document.documentElement.classList.contains('dark')) !== (theme === 'dark')) await shell.getByTestId('chat-header-theme-toggle').click();
+      await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(theme === 'dark');
+      await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).length)).toBe(0);
+      const results = await new AxeBuilder({ page }).include('[data-testid="chat-header-persistence-badge"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+      expect(results.violations).toEqual([]);
+      evidence.push({ kind, theme, styles: await badge.evaluate(node => { const css = getComputedStyle(node);return { color: css.color, background: css.backgroundColor, fontSize: css.fontSize }; }), violations: [] });
+    }
+  }
+  await testInfo.attach('settled-badge-contrast', { body: JSON.stringify({ evidence, limits: 'Saved and Temporary are actual runtime states. Failed shares the warning background/foreground projection qualified by mounted header tests; no forced runtime save failure or physical AT claim.' }), contentType: 'application/json' });
 });

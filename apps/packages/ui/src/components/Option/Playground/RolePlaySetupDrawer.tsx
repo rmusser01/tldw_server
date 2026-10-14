@@ -12,7 +12,7 @@ import { getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable, type A
 import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import type { ModelSettingsOperation } from "@/hooks/chat/model-settings-operation"
-import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import { captureCurrentActorSceneTarget, useActorSceneHistoryId } from "@/hooks/chat/actor-scene-source"
 import type { ActorSettingsTarget } from "@/utils/actor-settings-target"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
@@ -190,6 +190,9 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     activeAttemptRef.current = null
     applyingRef.current = false
   }
+  // Copy updates must not reload the owned scene over staged edits.
+  const translationRef = React.useRef(t)
+  translationRef.current = t
   const scopeRef = React.useRef({ open, historyId, serverChatId })
   scopeRef.current = { open, historyId, serverChatId }
   React.useEffect(() => {
@@ -218,6 +221,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     (state) => state.sourceSelectionRevision
   )
   const historySelection = useHistorySelectionContext()
+  const { sceneHistoryId, isSceneHistoryIdCurrent } = useActorSceneHistoryId(historySelection, historyId, serverChatId)
   const personaIdentityUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), stagedIdentity?.kind, getAssistantSelectionMode(stagedIdentity))
   const historySelectionRef = React.useRef(historySelection)
   historySelectionRef.current = historySelection
@@ -225,7 +229,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   const captureSelectionFence = historySelection?.fence
   const sceneView = {
     open,
-    historyId,
+    historyId: sceneHistoryId,
     serverChatId,
     characterId,
     draftRevision,
@@ -369,7 +373,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     const hadAuthority = applyIsCurrent()
     const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
     const sourceView = sceneViewRef.current
-    const target = captureCurrentActorSceneTarget(historySelectionRef.current)
+    const target = captureCurrentActorSceneTarget(historySelectionRef.current, () => true, isSceneHistoryIdCurrent)
     const draftAccount = historySelectionRef.current?.draftAccount
     const account =
       draftAccount?.requestScope &&
@@ -384,7 +388,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
           : undefined
     const source = useStoreMessageOption.getState()
     const propsMatchSource =
-      source.historyId === historyId && source.serverChatId === serverChatId
+      isSceneHistoryIdCurrent(source.historyId, scopeRef.current.historyId) && source.serverChatId === serverChatId
     const viewIsCurrent = () =>
       Object.keys(sourceView).every(
         (key) =>
@@ -393,7 +397,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             sourceView[key as keyof typeof sourceView]
       )
     const sourceGuard = captureChatDraftSource(
-      () => !cancelled && selectionIsCurrent() && viewIsCurrent()
+      () => !cancelled && selectionIsCurrent() && viewIsCurrent(), isSceneHistoryIdCurrent
     )
     const sourceIsCurrent = sourceGuard.isCurrent
     const isCurrent: RolePlayApplyGuard = Object.assign(
@@ -442,7 +446,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     if (!target || !propsMatchSource || !isCurrent()) {
       setLoading(false)
       setSceneLoadError(
-        t(
+        translationRef.current(
           "playground:composer.sceneLoadError",
           "Scene settings could not be loaded. Existing chat setup was left unchanged."
         )
@@ -479,7 +483,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         console.error("Failed to load role-play scene settings", error)
         if (isCurrent()) {
           setSceneLoadError(
-            t(
+            translationRef.current(
               "playground:composer.sceneLoadError",
               "Scene settings could not be loaded. Existing chat setup was left unchanged."
             )
@@ -498,7 +502,8 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     }
   }, [
     characterId,
-    historyId,
+    sceneHistoryId,
+    isSceneHistoryIdCurrent,
     open,
     serverChatId,
     draftRevision,
@@ -632,7 +637,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         mountedRef.current &&
         lifetimeRef.current.revision === lifetimeRevision &&
         scopeRef.current.open &&
-        scopeRef.current.historyId === historyId &&
+        isSceneHistoryIdCurrent(scopeRef.current.historyId, historyId) &&
         scopeRef.current.serverChatId === serverChatId
       try {
         let application = settingsApplicationRef.current
@@ -676,6 +681,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             sceneTarget: target,
             expectedRecord: sameTarget ? original.originalRecord : null
           }
+          const destinationHistoryIdCurrent = (current: string | null, original: string | null) => target.address?.kind === "native" ? isSceneHistoryIdCurrent(current, original) : current === original
           const restoreRevision =
             usePlaygroundSessionStore.getState().restoreRevision
           const acknowledgedView = sceneViewRef.current
@@ -687,9 +693,9 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             const current = useStoreMessageOption.getState()
             const props = scopeRef.current
             const propsMatch =
-              (props.historyId === historyId &&
+              (destinationHistoryIdCurrent(props.historyId, historyId) &&
                 props.serverChatId === serverChatId) ||
-              (props.historyId === next.historyId &&
+              (destinationHistoryIdCurrent(props.historyId, next.historyId) &&
                 props.serverChatId === next.serverChatId)
             return (
               mountedRef.current &&
@@ -712,7 +718,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               ) &&
               props.open &&
               propsMatch &&
-              current.historyId === next.historyId &&
+              destinationHistoryIdCurrent(current.historyId, next.historyId) &&
               current.serverChatId === next.serverChatId &&
               usePlaygroundSessionStore.getState().restoreRevision ===
                 restoreRevision
@@ -723,7 +729,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             const applyIsCurrent = captureApplyGuard?.() ?? (() => true)
             const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
             acknowledgedSourceIsCurrent = captureChatDraftSource(
-              () => applyIsCurrent() && selectionIsCurrent()
+              () => applyIsCurrent() && selectionIsCurrent(), destinationHistoryIdCurrent
             ).isCurrent
             dismissalSourceRef.current = acknowledgedSourceIsCurrent
           }
@@ -863,6 +869,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     },
     [
       closeAndReturnFocus,
+      isSceneHistoryIdCurrent,
       captureApplyGuard,
       captureSelectionFence,
       characterId,
@@ -1211,7 +1218,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       {modalContextHolder}
       <fieldset
         ref={contentRef}
-        disabled={saving || loading || Boolean(sceneLoadError)}
+        disabled={saving || loading || Boolean(sceneLoadError) || !isDraftCurrent()}
         className="min-w-0 space-y-4"
         data-testid="role-play-setup-drawer">
         {loading && !sceneDraft ? (

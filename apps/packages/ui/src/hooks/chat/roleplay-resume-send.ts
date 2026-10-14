@@ -92,7 +92,9 @@ export const sendSavedRoleplay = async (
   let retainedResultTexts: string[] = []
   let resultText = "",
     appendDispatched = false,
-    completionDispatched = false
+    completionDispatched = false,
+    completionWasUnconfirmed = false,
+    completionConfirmed = false
   let journalStarted = false,
     settled = false,
     loadedRecovery = false
@@ -211,20 +213,13 @@ export const sendSavedRoleplay = async (
           value.turn.state !== "refused" &&
           value.turn.outcome !== "complete"
       )
-      entry = unfinished.find(
-        (value) =>
-          value.turn.input_text === params.message &&
-          !value.turn.input_images.length
-      )
-      if (
-        unfinished.length &&
-        (!entry || unfinished.length > 1 || entry.turn.result_text)
-      )
+      if (unfinished.length)
         throw new Error("roleplay_resume_review_required")
     }
     if (entry) {
       loadedRecovery = true
       protocol = parseRoleplayResumeRecovery(entry.turn.roleplay_resume)
+      completionWasUnconfirmed = entry.turn.state === "unknown" && Boolean(protocol.append)
       if (
         entry.turn.owner_key !== originView.owner_key ||
         entry.turn.conversation_id !== owner.conversation_id ||
@@ -359,6 +354,13 @@ export const sendSavedRoleplay = async (
       protocol!.intent,
       protocol!.append!
     )
+    // Persist uncertainty before transport so cold recovery never implies an unsent reply.
+    await retain("unknown")
+    if (!nextTransportIsCurrent()) {
+      await retain(completionWasUnconfirmed ? "unknown" : "accepted_unsent")
+      await showRecovery()
+      return false
+    }
     const raw = await tldwClient.completeCharacterChatTurn(
       owner.conversation_id,
       request,
@@ -377,6 +379,7 @@ export const sendSavedRoleplay = async (
       request,
       raw
     )
+    completionConfirmed = true
     resultText = receipt.assistant_content
     protocol = { ...protocol!, completion: receipt }
     if (receipt.saved) await finishSaved()
@@ -403,18 +406,17 @@ export const sendSavedRoleplay = async (
         !resultText &&
         entry.turn.state !== "unknown" &&
         isDefinitiveRoleplayResumeRefusal(error)
+      const failureState: HistoryTurnRecovery["state"] = freshDefinitiveRefusal
+        ? "refused"
+        : !completionConfirmed && (completionDispatched || completionWasUnconfirmed)
+          ? "unknown"
+          : settled || resultText
+            ? "generated_unsaved"
+            : protocol.append
+              ? "accepted_unsent"
+              : appendDispatched || loadedRecovery ? "unknown" : "dispatching"
       try {
-        await retain(
-          freshDefinitiveRefusal
-            ? "refused"
-            : settled || resultText
-              ? "generated_unsaved"
-              : protocol.append
-                ? "accepted_unsent"
-                : appendDispatched || loadedRecovery
-                  ? "unknown"
-                  : "dispatching"
-        )
+        await retain(failureState)
         await showRecovery()
       } catch {
         if (resultText) {
@@ -422,7 +424,7 @@ export const sendSavedRoleplay = async (
             entry.scope,
             entry.turn.origin_view,
             {
-              ...projection("generated_unsaved"),
+              ...projection(failureState),
               ...(protocol.completion?.saved
                 ? {
                     outcome: "complete",

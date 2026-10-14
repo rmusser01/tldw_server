@@ -187,6 +187,15 @@ describe("ComposerToolbar web search", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("forwards settled tracked model discovery to the existing assistant control", () => {
+    const tracked = vi.fn()
+    const props = createProps({ isProMode: true, onTrackedAssistantSelection: tracked, trackedAssistantSelectionLoading: true })
+    const f = render(<ComposerToolbar {...props} />)
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({ onTrackedSelection: tracked, trackedSelectionLoading: true })
+    f.rerender(<ComposerToolbar {...props} trackedAssistantSelectionLoading={false} />)
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({ onTrackedSelection: tracked, trackedSelectionLoading: false })
+  })
+
   it("passes the active chat route to system prompt assist", () => {
     render(
       <ComposerToolbar

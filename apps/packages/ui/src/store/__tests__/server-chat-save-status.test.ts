@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   beginServerChatWrite,
+  recordServerChatHistoryEvidence,
   getServerChatSaveStatus,
   resetServerChatSaveStatus,
   trackServerChatWrite
@@ -136,5 +137,34 @@ describe("server chat save status", () => {
     expect(getServerChatSaveStatus("42")).toBe("failed")
     expect(getServerChatSaveStatus("chat-2")).toBe("saved")
     expect(getServerChatSaveStatus("chat-3")).toBe("unknown")
+  })
+})
+
+describe('owner-verified history evidence', () => {
+  beforeEach(() => resetServerChatSaveStatus())
+  it('cannot retain saved confidence after its original owner lease retires', () => {
+    let current = true
+    recordServerChatHistoryEvidence('chat', 'confirmed', () => current)
+    expect(getServerChatSaveStatus('chat')).toBe('saved')
+    current = false
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+  })
+  it('keeps unresolved journal evidence above an earlier write acknowledgement', () => {
+    beginServerChatWrite('chat')('saved')
+    recordServerChatHistoryEvidence('chat', 'unconfirmed', () => true)
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+  })
+  it('keeps a live write pending until its owned journal is reconciled', () => {
+    const finish = beginServerChatWrite('chat')
+    recordServerChatHistoryEvidence('chat', 'unconfirmed', () => true)
+    expect(getServerChatSaveStatus('chat')).toBe('saving')
+    finish('saved')
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+    recordServerChatHistoryEvidence('chat', 'confirmed', () => true)
+    expect(getServerChatSaveStatus('chat')).toBe('saved')
+  })
+  it('refuses publication by a retired reader', () => {
+    recordServerChatHistoryEvidence('chat', 'confirmed', () => false)
+    expect(getServerChatSaveStatus('chat')).toBe('unknown')
   })
 })
