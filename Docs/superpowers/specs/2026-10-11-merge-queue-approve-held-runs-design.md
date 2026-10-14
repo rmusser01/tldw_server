@@ -1,7 +1,8 @@
 # Merge queue for `dev`: approve the held gate runs instead of dispatching them
 
 - **Date:** 2026-10-11
-- **Status:** Draft for owner review. Nothing here is implemented.
+- **Status:** Approved by the owner on 2026-10-14, with D1-D3 as recommended. Not implemented yet. Plan:
+  `Docs/superpowers/plans/2026-10-14-merge-queue-approve-held-runs.md`.
 - **Amends:** `Docs/superpowers/specs/2026-10-04-merge-queue-design.md` (TASK-13462, ADR-063), merged switched off in
   #3188. Sections of that spec are cited as "old 4.2" and so on. Anything this document does not mention stays as written
   there.
@@ -92,8 +93,15 @@ completed, so a tick can no longer retry its own gate directly. Instead:
 GitHub only starts a `workflow_dispatch` run for a workflow file that exists on `main`, and `merge-queue.yml` does not
 yet. The kick is therefore hosted by `security-required.yml`, which does: a dispatch on `refs/heads/dev` with
 `queue_kick=true` skips every gate job and runs only a `queue-kick` job with the queue's permissions. On any other ref,
-or without the flag, the workflow behaves as today. The kick job has its own concurrency group with
-`cancel-in-progress: false`, so one kick never cancels another mid-run; GitHub keeps one running and one pending.
+or without the flag, the workflow behaves as today. Every gate workflow's concurrency group is pinned with
+`cancel-in-progress: true`, which would let a second kick cancel a running one. For a kick it is false instead
+(`cancel-in-progress: ${{ github.event.inputs.queue_kick != 'true' }}`), so one kick never cancels another mid-run;
+GitHub keeps one running and one pending. A hand dispatch of `security-required.yml` on `dev` without the flag still
+cancels a running kick; nothing does that in normal use, and the next queue event recovers. (Planning correction,
+2026-10-14: the draft gave the kick job its own group, which cannot stop the workflow-level group cancelling it.)
+
+The tick itself shrinks to what a kick needs: `actions: write`, no checkout, one `gh api` dispatch. It no longer fires
+on a `workflow_dispatch` run: the queue dispatches no gate, and a dispatched gate's result does not count (S5).
 
 The queue also sends a kick when it rebases a PR but cannot see the new head in time, or loses a race to another queue
 run, exactly where the chatbook queue does.
@@ -111,6 +119,11 @@ required name. See decision D2.
 
 **Section 6, the `BEHIND` row** becomes: rebase, wait for the new head, dispatch the license status, approve the six held
 gate runs, delete the other held runs, cancel the old head's live runs, comment once.
+
+**Section 6, the stuck row** (added at planning, 2026-10-14; strike it if unwanted): before evicting a green PR as
+stuck, the queue asks `compare/dev...<head>` and rebases instead when `dev` has commits the head lacks. Right after a
+merge the next PR's merge state can still read up to date while its green runs are hours old; tldw_chatbook evicted
+#3070 twice that way on 2026-10-11 (TASK-34948, PR #3103).
 
 **Section 7, actions.** The rules of the chatbook spec's sections 7 and 8 apply as written there, with "the required
 check" read as "each of the six gate contexts". The ones that matter most:
@@ -182,6 +195,8 @@ Rollback at any step: `gh variable set MERGE_QUEUE --body off`.
   rewrite workflow files; such a PR is evicted with the hand-rebase steps (old section 7).
 
 ## 9. Owner decisions
+
+Decided by the owner on 2026-10-14: all three as recommended.
 
 | # | Decision | Recommendation |
 |---|----------|----------------|
