@@ -1,27 +1,34 @@
-// Request-history persistence micro-benchmark — addRequestHistory (TASK-13520, Batch W0 Stage 2).
+// Request-history persistence micro-benchmark — addRequestHistory
+// (TASK-13520, Batch W0 Stage 2; re-targeted in TASK-13522, Batch W2 Stage 1).
 //
-// Measures how much localStorage write traffic `addRequestHistory` produces when
-// 50 requests with 100 KiB bodies are recorded against jsdom localStorage:
-// every add re-reads, re-redacts (deep-copies) and re-serializes the ENTIRE
-// accumulated history, so total `setItem` bytes grow quadratically
-// (sum_{i=1..50} i * ~100 KiB ≈ 127 MiB attempted for a ~5 MiB final history).
+// Measures how much localStorage write traffic `addRequestHistory` produces
+// when 50 requests with 100 KiB bodies are recorded against jsdom localStorage.
 //
-// jsdom caps localStorage at 5,000,000 code units, so with 100 KiB bodies the
-// final two writes exceed the quota and `addRequestHistory` swallows the
-// QuotaExceededError. The bench therefore reports BOTH attempted bytes (the
-// metric that captures the quadratic rewrite) and landed bytes, plus the
-// deterministic quota-error count; this is an environment artifact, not part of
-// the measured code path.
+// Pre-W2 (recorded in Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md, Family C2):
+// every add re-read, re-redacted (deep-copied) and re-serialized the ENTIRE
+// accumulated history synchronously — 50 setItem calls attempting ≈ 130.8 MB
+// for a 4.93 MB final history (quadratic rewrite), with the last two writes
+// exceeding jsdom's 5,000,000-code-unit localStorage quota.
+//
+// Post-W2 (TASK-13522 Stage 1): adds buffer into a module-level array with
+// redaction + 2 KB responseBody truncation applied once at insert, and persist
+// in one batched setItem per FLUSH_DEBOUNCE_MS trailing-debounce window
+// (requestIdleCallback when available; jsdom lacks it, so the setTimeout
+// fallback fires directly). The harness therefore awaits one debounce window
+// after the add loop to observe and measure the flush. Expected shape: ≤ 1
+// small setItem per run (≈ 2 KB per entry, so no quota errors) and attempted ≈
+// landed bytes.
 //
 // Method:
-//   - 50 `addRequestHistory` calls, each carrying a 102,400-char requestBody
+//   - 50 `addRequestHistory` calls, each carrying a 102,400-char responseBody
 //     (all entries byte-length identical for deterministic totals).
 //   - Passthrough spy on `Storage.prototype.setItem` (jsdom's Storage is a
 //     WebIDL proxy; spying the `localStorage` instance stores the spy as a
 //     named data entry instead of intercepting — see the sibling workspace
 //     bench for the same finding).
-//   - Repeated 3x in-process (localStorage cleared between runs) for
-//     reproducibility; counts/bytes are deterministic, duration informational.
+//   - Repeated 3x in-process (localStorage cleared AND the history module's
+//     buffer reset between runs) for reproducibility; counts/bytes are
+//     deterministic, duration informational.
 //
 // This is a measurement harness, not a regression gate: assertions only
 // sanity-check that counters are finite, non-negative and non-zero and that the
@@ -33,27 +40,37 @@
 // Run: cd apps/tldw-frontend && bun run vitest run lib/__tests__/history.bench.test.ts
 import { describe, expect, it, vi } from "vitest"
 
-import { addRequestHistory, type RequestHistoryItem } from "@web/lib/history"
+import {
+  FLUSH_DEBOUNCE_MS,
+  addRequestHistory,
+  clearRequestHistory,
+  type RequestHistoryItem
+} from "@web/lib/history"
 
 const HISTORY_KEY = "tldw-request-history"
 const REQUESTS = 50
 const BODY_BYTES = 100 * 1024
 const MEASUREMENT_RUNS = 3
+// Real-time wait past the trailing debounce so the batched flush lands before
+// metrics are collected (jsdom has no requestIdleCallback; the timer fallback
+// fires directly).
+const FLUSH_SETTLE_MS = FLUSH_DEBOUNCE_MS + 150
 
 const textEncoder = new TextEncoder()
 const utf8Bytes = (value: string): number => textEncoder.encode(value).length
 
 const bodyBlob = "x".repeat(BODY_BYTES)
 
-// All entries serialize to identical byte lengths (padded ids, fixed fields),
-// so per-run totals are deterministic.
+// All entries serialize to identical byte lengths (padded ids, fixed fields,
+// fixed 2 KB truncation cap), so per-run totals are deterministic.
 const makeRequest = (index: number): RequestHistoryItem => ({
   id: `bench-req-${String(index).padStart(2, "0")}`,
   method: "POST",
   url: "/api/v1/playground/completions",
   timestamp: "2026-10-06T00:00:00.000Z",
   requestHeaders: { "content-type": "application/json" },
-  requestBody: { blob: bodyBlob },
+  requestBody: { prompt: "bench" },
+  responseBody: { blob: bodyBlob },
   status: 200,
   ok: true,
   duration_ms: 12
@@ -87,6 +104,9 @@ describe("request history bench (addRequestHistory 50x with 100 KiB bodies)", ()
       const runs: RunMetrics[] = []
       for (let run = 1; run <= MEASUREMENT_RUNS; run += 1) {
         localStorage.clear()
+        // Reset the history module's in-memory buffer too, so each run starts
+        // from the same empty state (the buffer survives localStorage.clear).
+        clearRequestHistory()
         setItemSpy.mockClear()
 
         const startedAt = performance.now()
@@ -94,6 +114,8 @@ describe("request history bench (addRequestHistory 50x with 100 KiB bodies)", ()
           addRequestHistory(makeRequest(index))
         }
         const durationMs = performance.now() - startedAt
+        // Let the trailing-debounce flush land so it is measured.
+        await new Promise((resolve) => setTimeout(resolve, FLUSH_SETTLE_MS))
 
         let setItemBytesLanded = 0
         let setItemCallsLanded = 0
@@ -139,16 +161,21 @@ describe("request history bench (addRequestHistory 50x with 100 KiB bodies)", ()
           `[history.bench] run ${run} ${JSON.stringify(metrics)}`
         )
 
-        // The harness drove the intended path: one setItem attempt per add,
-        // history persisted under the expected key with full-size bodies.
-        expect(setItemCallsAttempted).toBe(REQUESTS)
+        // The harness drove the intended path: the whole 50-request burst is
+        // coalesced into exactly one batched setItem per debounce window (the
+        // settle wait guarantees it landed), and stored response bodies are
+        // truncated at insert (2 KB cap, head kept).
+        expect(setItemCallsAttempted).toBe(1)
         expect(finalHistoryEntries).toBeGreaterThan(0)
         expect(finalHistoryEntries).toBeLessThanOrEqual(REQUESTS)
         const finalHistory = JSON.parse(
           localStorage.getItem(HISTORY_KEY) || "[]"
-        ) as Array<{ requestBody?: { blob?: string } }>
+        ) as Array<{ responseBody?: unknown }>
         for (const entry of finalHistory) {
-          expect(entry.requestBody?.blob).toBe(bodyBlob)
+          const stored = String(entry.responseBody)
+          expect(stored.startsWith('{"blob":"xxxx')).toBe(true)
+          expect(stored).toMatch(/…\[truncated \d+ chars\]$/)
+          expect(stored.length).toBeLessThanOrEqual(2048)
         }
 
         // Measurement-recorded sanity assertions: finite, non-negative, non-zero.
