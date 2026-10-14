@@ -228,8 +228,9 @@ describe("PromptAssistComposerAction real shell wiring", () => {
       "onSelectModel={() => setOpenModelSettings(true)}"
     )
     expect(sidepanelFormSource).toMatch(
-      /\{openModelSettings && \([\s\S]*<CurrentChatModelSettings/
+      /\{modelSettingsPresent && \([\s\S]*<CurrentChatModelSettings/
     )
+    expect(sidepanelFormSource).toContain("afterClose={completeModelSettingsClose}")
     expect(currentChatModelSettingsSource).toContain("<ModelBasicsTab")
     expect(modelBasicsTabSource).toContain('defaultValue: "API / model"')
   })

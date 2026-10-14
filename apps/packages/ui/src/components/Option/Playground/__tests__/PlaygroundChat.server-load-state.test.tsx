@@ -70,28 +70,34 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: { queryKey?: unknown[] }) => {
-    const key = Array.isArray(queryKey) ? queryKey[0] : undefined
-    if (key === "playground:chatModels") {
-      return {
-        data: queryState.chatModels,
-        isFetched: queryState.chatModelsFetched,
-        isSuccess: queryState.chatModelsFetched,
-        isFetching: !queryState.chatModelsFetched,
-        isError: false,
-        refetch: vi.fn()
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQueryClient: () => queryClient,
+    useQuery: ({ queryKey }: { queryKey?: unknown[] }) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : undefined
+      if (key === "playground:chatModels") {
+        return {
+          data: queryState.chatModels,
+          isFetched: queryState.chatModelsFetched,
+          isSuccess: queryState.chatModelsFetched,
+          isFetching: !queryState.chatModelsFetched,
+          isError: false,
+          refetch: vi.fn()
+        }
       }
-    }
-    if (key === "playground:providersStatus") {
-      return {
-        data: queryState.providersStatus,
-        refetch: vi.fn()
+      if (key === "playground:providersStatus") {
+        return {
+          data: queryState.providersStatus,
+          refetch: vi.fn()
+        }
       }
+      return { data: [] }
     }
-    return { data: [] }
   }
-}))
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: string) => [key === "chatUserDisplayName" ? "" : false, vi.fn()]

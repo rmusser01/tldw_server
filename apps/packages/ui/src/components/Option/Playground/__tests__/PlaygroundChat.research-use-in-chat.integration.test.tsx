@@ -76,12 +76,26 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: Record<string, any>) => {
-    const key = Array.isArray(options.queryKey) ? options.queryKey[0] : null
-    if (key === "playground:chat-linked-research-runs") {
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQueryClient: () => queryClient,
+    useQuery: (options: Record<string, any>) => {
+      const key = Array.isArray(options.queryKey) ? options.queryKey[0] : null
+      if (key === "playground:chat-linked-research-runs") {
+        return {
+          data: { runs: queryState.linkedRuns },
+          isSuccess: true,
+          isError: false,
+          status: "success",
+          errorUpdatedAt: 0,
+          dataUpdatedAt: 1
+        }
+      }
       return {
-        data: { runs: queryState.linkedRuns },
+        data: [],
         isSuccess: true,
         isError: false,
         status: "success",
@@ -89,16 +103,8 @@ vi.mock("@tanstack/react-query", () => ({
         dataUpdatedAt: 1
       }
     }
-    return {
-      data: [],
-      isSuccess: true,
-      isError: false,
-      status: "success",
-      errorUpdatedAt: 0,
-      dataUpdatedAt: 1
-    }
   }
-}))
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [false]

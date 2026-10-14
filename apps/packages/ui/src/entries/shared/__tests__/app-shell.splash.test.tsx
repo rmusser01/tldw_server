@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/hooks/useTheme", () => ({
@@ -42,6 +42,18 @@ vi.mock("@/components/Common/SplashScreen/SplashOverlay", () => {
 
 import { SPLASH_TRIGGER_EVENT } from "@/services/splash-events"
 import { AppShell } from "../AppShell"
+import { useSetting } from "@/hooks/useSetting"
+import { clearSetting } from "@/services/settings/registry"
+import {
+  SPLASH_DISABLED_SETTING,
+  SPLASH_ENABLED_CARD_NAMES_SETTING,
+  SPLASH_DURATION_SECONDS_SETTING
+} from "@/services/settings/ui-settings"
+
+const SplashPreference = () => {
+  const [disabled, , meta] = useSetting(SPLASH_DISABLED_SETTING)
+  return <output aria-label="Splash preference">{meta.isLoading ? "Loading" : String(disabled)}</output>
+}
 
 const Router: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <>{children}</>
@@ -61,7 +73,10 @@ const setDocumentVisibility = (state: DocumentVisibilityState) => {
 }
 
 describe("AppShell splash integration", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await clearSetting(SPLASH_DISABLED_SETTING)
+    await clearSetting(SPLASH_ENABLED_CARD_NAMES_SETTING)
+    await clearSetting(SPLASH_DURATION_SECONDS_SETTING)
     localStorage.clear()
     setDocumentVisibility("visible")
   })
@@ -106,15 +121,18 @@ describe("AppShell splash integration", () => {
     localStorage.setItem("tldw_splash_disabled", "true")
     render(
       <AppShell router={Router} direction="ltr" emptyDescription="No data">
-        <div>App content</div>
+        <SplashPreference />
       </AppShell>
     )
 
     expect(screen.queryByTestId("splash-overlay")).not.toBeInTheDocument()
 
-    window.dispatchEvent(
-      new CustomEvent(SPLASH_TRIGGER_EVENT, { detail: { force: true } })
-    )
+    await waitFor(() => expect(screen.getByLabelText("Splash preference")).toHaveTextContent("true"))
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(SPLASH_TRIGGER_EVENT, { detail: { force: true } })
+      )
+    })
 
     await waitFor(() => {
       expect(screen.getByTestId("splash-overlay")).toBeInTheDocument()

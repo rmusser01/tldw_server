@@ -266,6 +266,15 @@ export class NotesPage extends BasePage {
     await exportMenuItem.hover()
 
     await expect(this.printExportMenuItem).toBeVisible({ timeout: 10_000 })
+    // The entering flyout can move after visibility, before pointer actionability settles.
+    await expect.poll(() => this.printExportMenuItem.evaluate(async (item) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      for (let ancestor: Element | null = item; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.getAnimations().some((animation) => animation.playState === "running" || animation.pending)) return false
+      }
+      return true
+    }), { timeout: 10_000, message: "Print flyout finishes entering before pointer export" }).toBe(true)
+    await this.printExportMenuItem.hover()
     await this.printExportMenuItem.click()
   }
 

@@ -197,6 +197,14 @@ const serverChatHistoryState = vi.hoisted(() => ({
   ],
 }));
 
+vi.mock("@/hooks/useConnectionState", async (original) => {
+  const actual = await original<typeof import("@/hooks/useConnectionState")>()
+  return {
+    ...actual,
+    useConnectionState: () => ({ isConnected: true, phase: "connected" })
+  }
+})
+
 const tldwServerState = vi.hoisted(() => ({
   fetchChatModels: vi.fn(async (): Promise<any[]> => [
     {

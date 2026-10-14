@@ -155,17 +155,23 @@ vi.mock("@/store/ui-mode", () => ({
     selector({ mode: actionPresentation.mode })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey: unknown[] }) =>
-    options.queryKey[0] === "playground:chat-linked-research-runs"
-      ? {
-          data: { runs: researchState.runs },
-          isSuccess: true,
-          dataUpdatedAt: 1,
-          errorUpdatedAt: 0
-        }
-      : { data: [], isFetched: true, refetch: vi.fn() }
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQueryClient: () => queryClient,
+    useQuery: (options: { queryKey: unknown[] }) =>
+      options.queryKey[0] === "playground:chat-linked-research-runs"
+        ? {
+            data: { runs: researchState.runs },
+            isSuccess: true,
+            dataUpdatedAt: 1,
+            errorUpdatedAt: 0
+          }
+        : { data: [], isFetched: true, refetch: vi.fn() }
+  }
+})
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({

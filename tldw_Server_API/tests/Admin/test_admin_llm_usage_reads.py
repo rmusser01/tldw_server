@@ -281,7 +281,7 @@ class _PgTokensDb:
         q = str(query).lower()
         if "count(*) as total_users" in q:
             return {"total_users": 1, "active_users": 1, "verified_users": 1, "admin_users": 0, "new_users_30d": 1}
-        if "sum(storage_used_mb)" in q:
+        if "native_chat_quota_reservations" in q and "as total_used_mb" in q:
             return {"total_used_mb": 1.0, "avg_used_mb": 1.0, "max_used_mb": 1.0}
         if "count(distinct user_id) as unique_users" in q:
             return {"active_sessions": 0, "unique_users": 0}

@@ -26,10 +26,17 @@ import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
 import { actorSceneForTarget } from "@/store/actor"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
 import { installSettingsLocks } from "@/services/__tests__/chat-settings-fixture"
+import { db } from "@/db/dexie/schema"
 import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { ActorPopout } from "../ActorPopout"
 import { ActorEditor } from "../ActorEditor"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
+
+vi.mock("@/db/dexie/schema", async (original) => {
+  const actual = await original<typeof import("@/db/dexie/schema")>()
+  const { createMemoryDexie } = await import("@/components/Option/Playground/__tests__/harness/memory-dexie")
+  return { ...actual, db: createMemoryDexie() }
+})
 
 const io = vi.hoisted(() => ({
   persistent: true,
@@ -303,6 +310,7 @@ const mountEditor = (
 }
 
 beforeEach(() => {
+  ;(db as unknown as ReturnType<typeof import("@/components/Option/Playground/__tests__/harness/memory-dexie").createMemoryDexie>).resetAll()
   useStoreChatModelSettings.getState().reset()
   useActorEditorPrefs.getState().setEditorMode("simple")
   io.persistent = true

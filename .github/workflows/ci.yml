@@ -703,6 +703,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -756,6 +757,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -811,6 +813,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -2359,6 +2362,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -2412,6 +2416,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -2467,6 +2472,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -3855,6 +3861,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -3908,6 +3915,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -3963,6 +3971,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -5262,6 +5271,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -5315,6 +5325,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -5370,6 +5381,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -6660,6 +6672,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -6713,6 +6726,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -6768,6 +6782,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-

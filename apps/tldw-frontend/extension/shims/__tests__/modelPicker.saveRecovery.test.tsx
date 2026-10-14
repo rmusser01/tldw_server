@@ -61,6 +61,7 @@ if (!inlineSource) throw new Error("Missing Compact inline composer")
 const compactInline = new Function("React", "ModelSelect", "normalizeChatModelId", "findUnavailableChatModel",
   ts.transpileModule(`return function(selectedModel) {
     const isConnectionReady = true, isProMode = false, streaming = false;
+    const personaSubmitDisabledReason = null;
     const availableChatModelIds = new Set(["openai:new-model"]);
     const form = { errors: {} };
     return ${inlineSource};

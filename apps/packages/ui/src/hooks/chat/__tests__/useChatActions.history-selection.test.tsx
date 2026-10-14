@@ -3184,7 +3184,7 @@ it.each(["current", "history", "account", "draft", "unmount"])("first native rol
     const operation = h1.recover.mock.lastCall?.[2].operation_id
     if (operation) cleanup = [selected.bookmarkScope, selected.view, operation]
     const entry = (await actual.loadHistoryTurnRecoveries(selected.bookmarkScope, selected.view)).find(value => value.turn.operation_id === operation)
-    expect(entry?.turn).toMatchObject({ state: "accepted_unsent", input_text: "  FIRST ORIGINAL PROVIDER INPUT  ", input_id: receipt.message_id, roleplay_resume: { append: receipt } })
+    expect(entry?.turn).toMatchObject({ state: "unknown", input_text: "  FIRST ORIGINAL PROVIDER INPUT  ", input_id: receipt.message_id, roleplay_resume: { append: receipt } })
     expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
     expect(createChatMock).toHaveBeenCalledOnce()
     expect(h1.roleplayAppend).toHaveBeenCalledOnce()
@@ -3247,7 +3247,7 @@ it.each(["current", "retired scene", "retired history", "retired account", "reti
     const recovered = (await actual.loadHistoryTurnRecoveries(current.bookmarkScope, current.view))
       .find(entry => entry.turn.operation_id === operation)
     const receipt = await h1.roleplayAppend.mock.results[0].value
-    expect(recovered?.turn).toMatchObject({ state: "accepted_unsent", input_text: inputText, input_id: receipt.message_id, roleplay_resume: { append: receipt } })
+    expect(recovered?.turn).toMatchObject({ state: "unknown", input_text: inputText, input_id: receipt.message_id, roleplay_resume: { append: receipt } })
     expect(h1.roleplayAppend).toHaveBeenCalledOnce()
     expect(h1.roleplayComplete).toHaveBeenCalledOnce()
     if (sceneState === "retired history") expect(h1.controller.getCurrent()).not.toBe(current)
