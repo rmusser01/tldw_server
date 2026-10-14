@@ -23,14 +23,15 @@ Executed 2026-10-14: (1) WS teardown now awaits background-task cancellation wit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+WS teardown now cancels all four background tasks synchronously (preserving the quota-release-before-await invariant), then awaits each cancellation bounded by WS_SHUTDOWN_TIMEOUT_MS (500ms test-mode / 5s prod) before socket close - the Testing_Known_Issues.md recommendation implemented. 5 resolver unit tests + heartbeat suite: 7 passed. Sweep coverage doc maps X-01/X-02/S-01..S-06 to owning suites with explicit manual residuals. Review: Approved (3 minors fixed: S-06 wording, blank line, this record). Bandit on sandbox.py: 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
 - [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
