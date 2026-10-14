@@ -7,7 +7,7 @@
 4. [Components](#components)
 5. [Data Flow](#data-flow)
 6. [Deployment Options](#deployment-options)
-7. [Monitoring & Operations](#monitoring-operations)
+7. [Monitoring & Operations](#monitoring--operations)
 
 ## System Overview
 

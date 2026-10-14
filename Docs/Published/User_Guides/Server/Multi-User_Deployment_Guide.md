@@ -15,7 +15,7 @@
 6. [Migration from Single-User](#migration-from-single-user)
 7. [Production Deployment](#production-deployment)
 8. [Security Hardening](#security-hardening)
-9. [Monitoring & Maintenance](#monitoring-maintenance)
+9. [Monitoring & Maintenance](#monitoring--maintenance)
 10. [Troubleshooting](#troubleshooting)
 
 ---

@@ -1,7 +1,7 @@
 # LLM usage accounting: record and gate every LLM call at one point
 
 - **Date:** 2026-10-09 (revised 2026-10-10 after an independent review against the code; see [Review changes](#review-changes))
-- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a (#3230) merged; PR 2b in progress.
+- **Status:** Approved; PR 1a (#3222) and PR 1b (#3224) merged; PR 2a (#3230) merged; PR 2b (#3234) merged; PR 3 in progress.
 - **Backlog:** TASK-13437 (gate LLM tokens/month at every LLM entry point) and TASK-13436 (evaluation cost caps per user, re-scoped below). Both are follow-ups of spec 2, TASK-13434.
 - **Builds on:** `Docs/Design/2026-10-02-usage-quota-posture-design.md` (spec 2) and ADR-064. Quotas are per-user `limits.*` values, resolved by `quota_resolver.user_quota`. Nothing is enforced unless `USAGE_QUOTAS_ENABLED` is on, `0` blocks, and errors fail open.
 
@@ -345,6 +345,8 @@ These change in one commit, because `for_tier`, the YAML and the dataclass must 
 - **Docs:** the cost-cap clause in `Docs/User_Guides/Server/Production_Hardening_Checklist.md:48`, with its `Docs/Published` mirror.
 
 Evaluation LLM spend is capped by the general LLM quotas from then on.
+
+Found while building PR 3, and removed with the rest: the `X-RateLimit-Daily-Cost-Remaining` and `X-RateLimit-Monthly-Cost-Remaining` response headers (`evaluations_auth.py`) and the dead `X-RateLimit-Cost-Remaining` line; the `rate_limit_source` value `legacy_cost_only`, now `legacy_local`; the positional `cost` of `_reserve_request_usage` and `record_actual_usage`; `config_manager`'s required `max_cost_per_day`; the CLI default; the frontend's `daily_cost` and `monthly_cost`; two more mirrored docs. `upgrade_user_tier` ignores `max_cost_*` in `custom_limits` with a warning, and an old `evaluations_config.yaml` that still sets them loads with a warning per tier.
 
 ### 9. Reporting
 
