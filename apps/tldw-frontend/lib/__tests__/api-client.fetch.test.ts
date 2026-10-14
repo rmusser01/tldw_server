@@ -626,6 +626,56 @@ describe("fetch-backed WebUI api client", () => {
     expect(window.location.href).toBe("http://localhost:3000/chat")
   })
 
+  it.each([
+    { method: "get", url: "/llm/models/metadata", deadline: 60_000 },
+    { method: "get", url: "/llm/models/metadata?refresh=1", deadline: 60_000 },
+    { method: "get", url: "http://127.0.0.1:8000/api/v1/llm/models/metadata", deadline: 60_000 },
+    { method: "post", url: "/slides/jobs", deadline: 120_000 },
+    { method: "get", url: "/generic-resource", deadline: 30_000 },
+    { method: "get", url: "/llm/models/metadata", deadline: 5_000, override: 5_000 }
+  ])("uses $deadline ms for actual $method $url requests", async ({ method, url, deadline, override }) => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"))
+        })
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { apiClient } = await loadApiModule()
+    const config = { timeout: override }
+    const request = method === "post"
+      ? apiClient.post(url, {}, config)
+      : apiClient.get(url, config)
+    const assertion = expect(request).rejects.toMatchObject({
+      name: "ApiError",
+      message: "Request timed out"
+    })
+    await vi.advanceTimersByTimeAsync(deadline - 1)
+    expect(getFetchCall(fetchMock).init.signal?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await assertion
+    expect(getFetchCall(fetchMock).init.signal?.aborted).toBe(true)
+  })
+
+  it.each(["17", "Wed, 14 Oct 2026 12:00:17 GMT"])(
+    "keeps Retry-After %s in web error seconds",
+    async (retryAfter) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date("2026-10-14T12:00:00Z"))
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+        jsonResponse({ detail: "Rate limited" }, { status: 429, headers: { "Retry-After": retryAfter } })
+      ))
+      const { apiClient } = await loadApiModule()
+      await expect(apiClient.get("/rate-limited")).rejects.toMatchObject({
+        name: "ApiError",
+        status: 429,
+        retryAfter: 17
+      })
+    }
+  )
+
   it("supports timeout cancellation and caller-provided abort signals", async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {

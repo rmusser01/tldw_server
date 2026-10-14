@@ -12,8 +12,8 @@ Integrating current dev PR3238 exposed that ordinary api.get/post pass URL separ
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Behavioral timer regressions reproduce missing floors on incoming dev
-- [ ] #2 All web request callers use the actual path for shared timeout policy without new transport abstraction
+- [x] #1 Behavioral timer regressions reproduce missing floors on incoming dev
+- [x] #2 All web request callers use the actual path for shared timeout policy without new transport abstraction
 - [ ] #3 Existing API behavior and connected source/type/build verification pass; final independent reviews and exact-head CI precede merge
 <!-- AC:END -->
 
@@ -21,6 +21,11 @@ Integrating current dev PR3238 exposed that ordinary api.get/post pass URL separ
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR assessment: no new ADR; existing shared transport StageA plan in incoming PR3238 governs intended parity and frozen web error semantics; ADR069 remains Proposed contract-package boundary, not promoted. Minimal fix is data flow into existing deriveRequestTimeout. Related parent TASK13458 and final CI plan13685. Reviewer A confirmed ordinary request config lacks URL; actual request URL is already resolved before creating signal.
+Plan: Docs/Design/IMPLEMENTATION_PLAN_web_timeout_path_13690.md. Merge-preserving rebase complete on6cbf1e943: normal flattening caused historical chat conflicts because the branch contains30 integration merges; correct --rebase-merges preserves them. Whole-tree comparison vs93994cf shows only four incoming transport/plan/task paths changed, all previous chat/backend/fixture source unchanged. Incoming TASK13526 lacks leading YAML delimiter; restore known canonical backup metadata and use backlog-py to preserve all new upstream notes and ADR069 Proposed correction. Behavioral6-case RED now exercises actualGET/POST paths, metadata query/absoluteURL, generic30s and explicit5s override.
+Behavioral RED verified on actual incoming6cb code:4 floor cases fail because signal already aborted,28 pass includinggeneric30s/positiveoverride/caller cancellation. Minimal3-line repair adds resolved requestUrl to private signal helper and its solecaller; resolved URL includes /api/v1 even when callers use /llm or /slides. Do not pass rawcallerpath because shared path predicates require actual APIprefix.
+Minimal resolvedURL fix GREEN: actualwebfetch34cases including6 deadline+2RetryAfter formats, total7API/path/refresh timeout suites81pass. No frontendrequestwrapper or auth/error changes. Complete3configurationScene112 qualification unaffected byrebase; originalchat/backend/fixtures exactbyte-identicalto939 aftermerge-preserving rebase. Finalproductionbuild,types,readonlydelta reviews running. TS-onlyproductionchange: Bandit prior67productionfiles0new and fixture1line0new remain current; noPythonchange fromlatestdevtransport.
+Final exactworking-source production build passes:97productionhashes match source+owned artifact,969emittedJSONmanifests/1134physicalstaticreferences,0missing. Build l86jhxirQAbtXh5lmtcBx. Tokens590.2/600KB and heaviest868.9/900KB. WebUI types pass; two changed TS files lint0errors0warnings0ignored0new. Both readonlyreviewers confirm minimalURLfinding addressed/no actionable delta issue. Guarded preview19769 nowPID41946/newbuild; all23realcockpit acceptance cases executing zero retries. Nativeproduction/backend and allprevious fixtures unchanged bywhole-tree rebase comparison.
+All23finalproductioncockpit cases pass with0skips/flaky/errors/retries, includingactualv2 card import/greeting/two turns/Scene/reopen andmobilefocus/userdata recovery. Original9conversations28rows deepEqualtrue;4originalcompactrows unchanged;97productionhashes still match. Five-file normal hooks pass. Final exactcommitted-head independentreviews/GitHubstatuses/merge remain Stage3.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
