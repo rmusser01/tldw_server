@@ -3,6 +3,7 @@ import { usePageAssist } from "@/context"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { focusComposer } from "@/hooks/useComposerFocus"
+import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
@@ -525,14 +526,13 @@ export function HistorySelectionReview({
         serverChatId: entry.turn.conversation_id,
         setMessages: useStoreMessageOption.getState().setMessages
       })
-    } catch {
-      if (sourceIsCurrent())
-        setOpenRecoveryError(
-          text(
-            "roleplayRetryFailed",
-            "The original request could not be confirmed. Its input and any reply are still retained here."
-          )
-        )
+    } catch (error) {
+      if (sourceIsCurrent()) {
+        const recovery = classifyCharacterChatFailureRecovery(error, t)
+        setOpenRecoveryError(recovery.kind === "transient"
+          ? text("roleplayRetryFailed", "The original request could not be confirmed. Its input and any reply are still retained here.")
+          : recovery.message)
+      }
     } finally {
       setController((current) => (current === abort ? null : current))
       if (useStoreMessageOption.getState().detachedHistoryResponse === activity)

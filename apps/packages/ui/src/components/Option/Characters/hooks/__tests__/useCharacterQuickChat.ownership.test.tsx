@@ -88,6 +88,39 @@ const start = async (result: ReturnType<typeof renderHook<ReturnType<typeof useC
 }
 
 describe("Character Quick Chat owned lifetime", () => {
+  it.each(["current", "retired before review", "retired during review"])("shows guarded roleplay provider guidance for a %s popup failure", async boundary => {
+    const { NativeHistoryRoleplaySendError } = await import("@/hooks/chat/native-character-preflight")
+    const { loadHistoryTurnRecoveries } = await import("@/db/dexie/history-selection")
+    const turns = held<Awaited<ReturnType<typeof loadHistoryTurnRecoveries>>>()
+    let sourceCurrent = boundary !== "retired before review"
+    mocks.nativeSend.mockImplementationOnce(async params => {
+      mocks.selection = { status: "ready", bookmarkScope: { profile_id: "p", client_session_id: "client" },
+        view: { conversation_id: "quick-session", owner_key: "popup-owner" }, owner: { kind: "native", conversation_id: "quick-session", validate_lease: () => true }, capture: { status: "captured" } }
+      params.setServerChatId("quick-session")
+      throw new NativeHistoryRoleplaySendError(Object.assign(new Error("HTTP 401"), { status: 401,
+        details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: "The selected provider credentials could not be authenticated." } } } }), () => sourceCurrent)
+    })
+    const hook = renderHook(() => useCharacterQuickChat(deps))
+    await start(hook.result)
+    vi.mocked(loadHistoryTurnRecoveries).mockClear().mockImplementationOnce(() => turns.promise)
+    let sending!: Promise<void>
+    try {
+      act(() => { sending = hook.result.current.sendQuickChatMessage() })
+      await waitFor(() => expect(mocks.nativeSend).toHaveBeenCalledOnce())
+      if (boundary !== "retired before review") {
+        await waitFor(() => expect(loadHistoryTurnRecoveries).toHaveBeenCalledOnce())
+        if (boundary === "retired during review") sourceCurrent = false
+      }
+      await act(async () => { turns.resolve([]); await sending })
+      expect(hook.result.current.quickChatDraft).toBe("  exact draft\ntrailing spaces  ")
+      if (boundary === "current") expect(hook.result.current.quickChatError).toContain("Open model settings")
+      else expect(hook.result.current.quickChatError).toBeNull()
+      if (boundary === "retired before review") expect(loadHistoryTurnRecoveries).not.toHaveBeenCalled()
+      expect(mocks.nativeSend).toHaveBeenCalledOnce()
+      expect(mocks.deleteChat).not.toHaveBeenCalled()
+    } finally { turns.resolve([]); await sending; hook.unmount(); vi.mocked(loadHistoryTurnRecoveries).mockReset().mockResolvedValue([]) }
+  })
+
   it("freezes the popup's own scene before retention while main New remains irrelevant", async () => {
     const original = { ...createDefaultActorSettings(), notes: "Private original scene" }
     let stored = original

@@ -10,7 +10,8 @@ import { captureActorSceneSendForTarget } from "@/hooks/chat/actor-scene-source"
 import { chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { sendNativeHistoryCharacter } from "@/hooks/chat/native-history-character-send"
-import { nativeCharacterPreflightMessage, validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
+import { NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
+import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { useStoreChatModelSettings } from "@/store/model"
 import { loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
@@ -276,10 +277,14 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
         persistence.clearDraft()
       }
     } catch (error) {
-      if (!popupCurrent() || request.current !== operation) return
-      await reviewOutcome(() => popupCurrent() && request.current === operation)
-      if (!popupCurrent() || request.current !== operation) return
-      setQuickChatError(nativeCharacterPreflightMessage(error, t) || (error instanceof Error ? error.message : String(error)))
+      const failureIsCurrent = () => popupCurrent() && request.current === operation &&
+        !(error instanceof NativeHistoryRoleplaySendError && !error.isCurrent())
+      if (!failureIsCurrent()) return
+      await reviewOutcome(failureIsCurrent)
+      if (!failureIsCurrent()) return
+      const preflightMessage = nativeCharacterPreflightMessage(error, t)
+      const recovery = !preflightMessage && error instanceof NativeHistoryRoleplaySendError ? classifyCharacterChatFailureRecovery(error, t) : null
+      setQuickChatError(preflightMessage || recovery?.message || (error instanceof Error ? error.message : String(error)))
     } finally {
       if (popupCurrent() && request.current === operation) { request.current = null; setQuickChatSending(false) }
     }

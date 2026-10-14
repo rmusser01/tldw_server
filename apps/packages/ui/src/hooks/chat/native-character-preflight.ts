@@ -125,10 +125,18 @@ export class NativeHistorySettingsReadError extends Error {
   }
 }
 
+/** A delegated roleplay failure keeps its accepted source without asserting admission certainty. */
+export class NativeHistoryRoleplaySendError extends Error {
+  constructor(cause: unknown, readonly isCurrent: () => boolean) {
+    super(cause instanceof Error ? cause.message : "Saved roleplay request failed", { cause })
+  }
+}
+
 export const nativeCharacterPreflightMessage = (
   error: unknown,
   t: (key: string, fallback: string, options?: { setting: string }) => string
 ): string | null => {
+  if (error instanceof NativeHistoryRoleplaySendError) return nativeCharacterPreflightMessage(error.cause, t)
   const code = error instanceof Error ? error.message : '';
   if (code === 'actor_settings_unavailable') return t(
     'playground:composer.sceneLoadError',

@@ -10,6 +10,7 @@ import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fi
 import { roleplayDetail, roleplayAppend, roleplayCompletion, captureRoleplayFixtureRows } from "./roleplay-resume-fixture"
 import { captureChatDraftSource, chatDraftAddressForReceipt } from "../chat-draft-transition"
 import type { HistoryLoadReceipt } from "../useHistorySelection"
+import type { HistoryViewSelectionV1 } from "@/types/history-selection"
 import { captureActorSceneSend, captureActorSceneSendForTarget } from "../actor-scene-source"
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
@@ -697,6 +698,11 @@ beforeEach(async () => {
   } })
   const { useStoreMessageOption: draftStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
   actualDraftStore = draftStore
+  draftStore.setState({ serverChatId: null, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatSource: null })
+  messageStoreState.value.serverChatId = null
+  messageStoreState.value.serverChatCharacterId = null
+  messageStoreState.value.serverChatAssistantKind = null
+  messageStoreState.value.serverChatSource = null
   draftStore.getState().startNewChatDraft(false)
   messageStoreState.draftFields = bridgeDraftFields
   const { memory } = await import("./local-history-fixture")
@@ -3154,6 +3160,113 @@ it("a refused first native turn preserves acknowledged bound creation and its ex
   expect(h1.dismiss).not.toHaveBeenCalled()
   mounted.hook.unmount()
   mounted.selection.unmount()
+})
+
+it.each(["current", "history", "account", "draft", "unmount"])("first native roleplay provider failure reports only for its %s accepted binding", async boundary => {
+  const mounted = await mountedNativeOpening()
+  const actual = await vi.importActual<typeof import("@/db/dexie/history-selection")>("@/db/dexie/history-selection")
+  h1.recover.mockImplementation(actual.saveHistoryTurnRecovery)
+  h1.roleplayComplete.mockImplementationOnce(async (_id, _body, options) => {
+    options.onDispatch?.()
+    if (boundary === "history") mounted.selection.result.current.beginLoad()
+    if (boundary === "account") h1.auth.abort()
+    if (boundary === "draft") mounted.draftStore.setState(state => ({ chatDraftRevision: state.chatDraftRevision + 1 }))
+    if (boundary === "unmount") mounted.hook.unmount()
+    throw Object.assign(new Error("HTTP 401"), { status: 401,
+      details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: "The selected provider credentials could not be authenticated." } } } })
+  })
+  let cleanup: Parameters<typeof actual.dismissHistoryTurnRecovery> | undefined
+  try {
+    await act(async () => { await mounted.hook.result.current.onSubmit({ message: "  FIRST ORIGINAL PROVIDER INPUT  ", image: "" }) })
+    const selected = mounted.selection.result.current.getCurrent()
+    if (!selected.bookmarkScope || !selected.view || selected.owner?.kind !== "native") throw new Error("expected accepted native owner")
+    const receipt = await h1.roleplayAppend.mock.results[0].value
+    const operation = h1.recover.mock.lastCall?.[2].operation_id
+    if (operation) cleanup = [selected.bookmarkScope, selected.view, operation]
+    const entry = (await actual.loadHistoryTurnRecoveries(selected.bookmarkScope, selected.view)).find(value => value.turn.operation_id === operation)
+    expect(entry?.turn).toMatchObject({ state: "accepted_unsent", input_text: "  FIRST ORIGINAL PROVIDER INPUT  ", input_id: receipt.message_id, roleplay_resume: { append: receipt } })
+    expect(mounted.draftStore.getState().chatDraftAddress).toMatchObject({ kind: "native", id: nativeChatId })
+    expect(createChatMock).toHaveBeenCalledOnce()
+    expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+    expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    if (boundary === "current") expect(mounted.options.notification.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Character chat model setup needs attention.", description: expect.stringContaining("Open model settings") }))
+    else expect(mounted.options.notification.error).not.toHaveBeenCalled()
+  } finally {
+    mounted.hook.unmount()
+    mounted.selection.unmount()
+    if (cleanup) await actual.dismissHistoryTurnRecovery(...cleanup)
+  }
+})
+
+it.each(["current", "retired scene", "retired history", "retired account", "retired draft", "unmounted"])("saved roleplay provider failure with %s shows settings recovery while retaining original accepted input", async sceneState => {
+  const inputText = `  ORIGINAL ROLEPLAY INPUT ${sceneState}  `
+  createdNativeChat({ id: nativeChatId, character_id: 12 })
+  const current = h1.controller.getCurrent()
+  const state = h1.roleplayState.get(nativeChatId)!
+  state.tail = current.view.cursor.message_id
+  const capture = (view: HistoryViewSelectionV1) => {
+    const result = captureFor(view)
+    result.snapshot.fences.history = String(state.historyVersion)
+    return result
+  }
+  current.capture = capture(current.view)
+  h1.capture.mockImplementation(async (_id, request) => capture(request.view))
+  installAcceptedSource(current, null)
+  actualDraftStore.setState({ serverChatCharacterId: "12", serverChatAssistantKind: "character" })
+  messageStoreState.value.serverChatCharacterId = "12"
+  messageStoreState.value.serverChatAssistantKind = "character"
+  const address = actualDraftStore.getState().chatDraftAddress
+  let leaseCurrent = true
+  current.owner.validate_lease = () => leaseCurrent
+  let sceneCurrent = true
+  const sceneCapture = captureActorSceneSend(h1.controller, () => sceneCurrent)
+  if (!sceneCapture) throw new Error("fixture requires captured native scene")
+  const actorSceneSend = await sceneCapture.read()
+  const actual = await vi.importActual<typeof import("@/db/dexie/history-selection")>("@/db/dexie/history-selection")
+  h1.recover.mockImplementation(actual.saveHistoryTurnRecovery)
+  h1.roleplayComplete.mockImplementationOnce(async (_id, _body, options) => {
+    options.onDispatch?.()
+    if (sceneState === "retired scene") sceneCurrent = false
+    if (sceneState === "retired history") h1.controller.retireSameTuple()
+    if (sceneState === "retired account") leaseCurrent = false
+    if (sceneState === "retired draft") actualDraftStore.setState(state => ({ chatDraftRevision: state.chatDraftRevision + 1 }))
+    if (sceneState === "unmounted") hook.unmount()
+    throw Object.assign(new Error("HTTP 401"), { status: 401,
+      details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: "The selected provider credentials could not be authenticated." } } } })
+  })
+  const options = { ...createHookOptions(), historyId: null, serverChatCharacterId: "12",
+    selectedCharacter: { id: "12", name: "Saved" },
+    selectedAssistant: { kind: "character", id: "12", name: "Saved", metadata: { selectionMode: "tracked" } } }
+  const hook = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+  let operation: string | undefined
+  try {
+    await act(async () => { await hook.result.current.onSubmit({ message: inputText, image: "", actorSceneSend }) })
+    operation = h1.recover.mock.lastCall?.[2].operation_id
+    const recovered = (await actual.loadHistoryTurnRecoveries(current.bookmarkScope, current.view))
+      .find(entry => entry.turn.operation_id === operation)
+    const receipt = await h1.roleplayAppend.mock.results[0].value
+    expect(recovered?.turn).toMatchObject({ state: "accepted_unsent", input_text: inputText, input_id: receipt.message_id, roleplay_resume: { append: receipt } })
+    expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+    expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+    if (sceneState === "retired history") expect(h1.controller.getCurrent()).not.toBe(current)
+    else expect(h1.controller.getCurrent()).toBe(current)
+    expect(actualDraftStore.getState().chatDraftAddress).toBe(address)
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(h1.live).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    if (sceneState === "current" || sceneState === "retired scene") {
+    expect(options.notification.error).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Character chat model setup needs attention.",
+      description: expect.stringContaining("Open model settings")
+    }))
+    } else expect(options.notification.error).not.toHaveBeenCalled()
+  } finally {
+    hook.unmount()
+    if (operation) await actual.dismissHistoryTurnRecovery(current.bookmarkScope, current.view, operation)
+  }
 })
 
 it("native sampler retires an actual same-ID H1 read without recapture or dispatch", async () => {

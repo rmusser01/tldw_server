@@ -76,6 +76,7 @@ const controller = () =>
   }) as unknown as HistorySelectionController
 
 beforeEach(() => {
+  roleplayRetry.send.mockReset()
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(480)
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320)
 })
@@ -1554,6 +1555,22 @@ it("a saved original Roleplay reply can be explicitly opened without an Edit or 
   expect(screen.queryByText(/Edited reply saved/)).toBeNull()
 })
 
+
+it("original roleplay retry gives provider setup guidance without changing its accepted recovery", async () => {
+  useStoreMessageOption.getState().startNewChatDraft()
+  const selection = roleplaySelection(false)
+  const original = structuredClone(selection.recoveries)
+  roleplayRetry.send.mockRejectedValueOnce(Object.assign(new Error("HTTP 401"), { status: 401,
+    details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: "The selected provider credentials could not be authenticated." } } } }))
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByRole("button", { name: "Retry original request" }))
+  await screen.findByText("Open model settings and configure the selected model provider. Your character chat state and draft are kept so you can return and try again.")
+  expect(roleplayRetry.send).toHaveBeenCalledOnce()
+  expect(selection.recoveries).toEqual(original)
+  expect(useStoreMessageOption.getState().isProcessing).toBe(false)
+  expect(useStoreMessageOption.getState().streaming).toBe(false)
+  expect(screen.getByRole("button", { name: "Retry original request" })).toBeEnabled()
+})
 
 it("Retry owns shared response activity and keeps dismissal disabled until its original attempt settles", async () => {
   useStoreMessageOption.getState().startNewChatDraft()

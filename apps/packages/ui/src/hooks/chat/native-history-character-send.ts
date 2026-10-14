@@ -52,7 +52,7 @@ import {
 } from "@/services/tldw/TldwApiClient"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
-import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistoryEditRefusal, NativeHistorySettingsReadError, validateNativeCharacterConfiguration } from "./native-character-preflight"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistoryEditRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 
@@ -492,18 +492,24 @@ export const sendNativeHistoryCharacter = async (
         (creationHandle && owner.scope?.type !== "workspace"))
     ) {
       const { sendSavedRoleplay } = await import("./roleplay-resume-send")
-      const saved = await sendSavedRoleplay({
-        controller,
-        signal: snapshot.scopeSignal,
-        originIsCurrent: preparingIsCurrent,
-        sourceIsCurrent: () =>
-          authValid() && params.sourceIsCurrent?.() !== false && draftIsCurrent(),
-        serverChatId: owner.conversation_id,
-        message: params.message,
-        image: params.image,
-        unsupportedContext: params.unsupportedContext,
-        setMessages: params.setMessages
-      })
+      let saved: boolean
+      try {
+        saved = await sendSavedRoleplay({
+          controller,
+          signal: snapshot.scopeSignal,
+          originIsCurrent: preparingIsCurrent,
+          sourceIsCurrent: () =>
+            authValid() && params.sourceIsCurrent?.() !== false && draftIsCurrent(),
+          serverChatId: owner.conversation_id,
+          message: params.message,
+          image: params.image,
+          unsupportedContext: params.unsupportedContext,
+          setMessages: params.setMessages
+        })
+      } catch (error) {
+        if (error instanceof NativeHistoryBranchRefusal || error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError) throw error
+        throw new NativeHistoryRoleplaySendError(error, () => preparingIsCurrent() && draftIsCurrent())
+      }
       if (saved && creationHandle)
         await markChatCreationSettled(creationHandle, owner.conversation_id)
       return

@@ -7,10 +7,11 @@
  */
 import { type Page, type Request } from "@playwright/test"
 import { test, expect, skipIfServerUnavailable } from "../../utils/fixtures"
-import { captureAllApiCalls, expectNoApiCall } from "../../utils/api-assertions"
+import { captureAllApiCalls } from "../../utils/api-assertions"
 import { ChatPage } from "../../utils/page-objects"
 import { fetchWithApiKey, TEST_CONFIG, waitForConnection } from "../../utils/helpers"
-import { captureStreamedResponseBody, waitForStreamComplete } from "../../utils/journey-helpers"
+import { waitForStreamComplete } from "../../utils/journey-helpers"
+import { parseRoleplayResumeAppendRequest, parseRoleplayResumeAppendReceipt, parseRoleplayResumeCompletionRequest, parseRoleplayResumeCompletionReceipt } from "../../../../packages/ui/src/services/tldw/roleplay-resume"
 
 import { readStore } from "../../../../extension/tests/e2e/utils/history-selection"
 import type { HistoryBookmark, HistoryTurnRecovery } from "../../../../packages/ui/src/db/dexie/types"
@@ -41,7 +42,7 @@ type BlockedModelScenario = {
   expectedSelector: RegExp
 }
 
-const NATIVE_COMPLETION_PATH = /^\/api\/v1\/chat\/completions$/
+const ROLEPLAY_COMPLETION_PATH = /\/api\/v1\/chats\/[^/]+\/complete-v2$/
 
 const LOCAL_OR_SIMULATION_RISK_PROVIDERS = new Set([
   "local",
@@ -553,9 +554,9 @@ async function expectSelectedCharacter(
     .toBe(true)
 }
 
-function nativeCompletionCallPredicate(url: string, method = "POST"): boolean {
+function roleplayCompletionCallPredicate(url: string, method = "POST"): boolean {
   const parsed = new URL(url)
-  return method === "POST" && NATIVE_COMPLETION_PATH.test(parsed.pathname)
+  return method === "POST" && ROLEPLAY_COMPLETION_PATH.test(parsed.pathname)
 }
 
 async function clickPrimaryComposerAction(page: Page, name: RegExp): Promise<void> {
@@ -565,73 +566,45 @@ async function clickPrimaryComposerAction(page: Page, name: RegExp): Promise<voi
 }
 
 test.describe("Character Chat Phase 7 real-backend readiness", () => {
-  test("blocks Character Chat SEND for a real unusable/no-provider model without calling complete-v2", async ({
-    authedPage: page,
-    serverInfo,
-  }) => {
+  test("refuses tracked character setup for a real unusable model before native admission and keeps the draft", async ({ authedPage: page, serverInfo }) => {
     skipIfServerUnavailable(serverInfo)
-
     const scenario = await findBlockedModelScenario()
-    test.skip(
-      !scenario,
-      "Real backend exposes only usable chat models; no no-provider/unusable model state is available for send-gating verification.",
-    )
+    test.skip(!scenario, "The real backend exposes no unusable model for setup-refusal verification.")
     if (!scenario) return
-
     const character = await createCharacterViaApi()
-    try {
-      await test.step(`Open Character Chat with ${scenario.label}`, async () => {
-        await openCharacterChatWithCharacter(page, character.name, scenario.modelKey)
-      })
-
-      await test.step("Verify all visible readiness surfaces agree on blocked setup state", async () => {
-        const readiness = page.getByTestId("character-chat-readiness-panel")
-        await expect(readiness).toBeVisible({ timeout: 30_000 })
-        await expect(readiness).toContainText(scenario.expectedReadiness)
-
-        await expect(readiness).toHaveAttribute("role", "status")
-        await expect(readiness).toHaveAttribute(
-          "aria-label",
-          "Character Chat setup status",
-        )
-        await expect(readiness).toContainText(scenario.expectedStatus)
-
-        const modelSelector = page.getByTestId("model-selector").first()
-        await expect(modelSelector).toHaveAttribute(
-          "aria-label",
-          scenario.expectedSelector,
-        )
-
-        const input = page.getByPlaceholder(/type a message/i).first()
-        const composerForm = page.locator("form").filter({ has: input }).last()
-        await expect(
-          composerForm.getByRole("button", { name: /open model settings/i }).first(),
-        ).toBeVisible()
-      })
-
-      await test.step("Click blocked primary action and verify draft/character are preserved", async () => {
-        const draft = "Phase 7 send gating should keep this draft."
-        const input = page.getByPlaceholder(/type a message/i).first()
-        await input.fill(draft)
-
-        const noCompleteV2 = expectNoApiCall(
-          page,
-          {
-            method: "POST",
-            url: NATIVE_COMPLETION_PATH,
-          },
-          1_500,
-        )
-
-        await clickPrimaryComposerAction(page, /open model settings/i)
-        await noCompleteV2
-
-        await expect(input).toHaveValue(draft)
-        await expectSelectedCharacter(page, character.name)
-      })
-    } finally {
-      await deleteCharacterViaApi(character)
+    const mutationAttempts: string[] = []
+    const observeMutations = (request: Request) => {
+      const path = new URL(request.url()).pathname
+      if (request.method() === "POST" && (/\/api\/v1\/chats\/?$/.test(path) || /\/(?:roleplay\/messages|complete-v2|chat\/completions)$/.test(path))) mutationAttempts.push(path)
     }
+    page.on("request", observeMutations)
+    try {
+      await seedSelectedModel(page, scenario.modelKey)
+      await page.goto("/chat?mode=character", { waitUntil: "domcontentloaded" })
+      await waitForConnection(page)
+      const chat = new ChatPage(page)
+      await chat.waitForReady()
+      await expect(page.getByTestId("playground-active-chat-mode")).toContainText(/Character Chat/i)
+      const input = await chat.getChatInput()
+      const draft = "Phase 7 blocked setup should keep this draft."
+      await input.fill(draft)
+      await chat.openConversationControls()
+      const selector = page.getByTestId("character-select").first()
+      await expect(selector).toHaveAccessibleName("Select character or persona")
+      await expect(page.getByTestId("model-selector").first()).toHaveAttribute("aria-label", scenario.expectedSelector)
+      await selector.click()
+      const picker = page.getByTestId("assistant-select-panel")
+      const choice = picker.getByRole("button", { name: character.name, exact: true })
+      await expect(choice).toBeVisible()
+      await choice.click()
+      await expect(page.getByText("Choose an available model with a configured provider before starting this character chat. Your current chat and draft are still here.", { exact: true })).toBeVisible()
+      await expect(picker).toBeVisible()
+      await expect(choice).toBeVisible()
+      await expect(selector).toHaveAccessibleName("Select character or persona")
+      await expect(input).toHaveValue(draft)
+      expect(mutationAttempts).toEqual([])
+      expect(await readStore(page, "historySelections")).toEqual([])
+    } finally { page.off("request", observeMutations); await deleteCharacterViaApi(character) }
   })
 
   test("shows model-settings recovery for a real backend provider/configuration failure", async ({ authedPage: page, serverInfo }, testInfo) => {
@@ -644,68 +617,84 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
     try {
       await openCharacterChatWithCharacter(page, character.name, failureModel)
       const input = page.getByPlaceholder(/type a message/i).first()
+      const composer = page.locator("form").filter({ has: input }).last()
       const question = "Trigger the real provider configuration failure."
       await input.fill(question)
-      const completed = page.waitForResponse(response => nativeCompletionCallPredicate(response.url(), response.request().method()))
+      const admitted = page.waitForResponse(response => response.request().method() === "POST" &&
+        /\/api\/v1\/chats\/[^/]+\/roleplay\/messages$/.test(new URL(response.url()).pathname))
+      const completed = page.waitForResponse(response => roleplayCompletionCallPredicate(response.url(), response.request().method()))
       await clickPrimaryComposerAction(page, /send/i)
+      const appendResponse = await admitted
+      expect(appendResponse.status()).toBe(201)
+      const chatId = new URL(appendResponse.url()).pathname.split("/")[4]
+      const originalInput = parseRoleplayResumeAppendRequest(appendResponse.request().postDataJSON())
+      expect(originalInput.content).toBe(question)
+      const admission = parseRoleplayResumeAppendReceipt(chatId, originalInput, await appendResponse.json())
       const response = await completed
-      expect(response.status()).toBe(502)
-      const sent = response.request().postDataJSON()
-      const qualifiedModel = failureModel.replace(/^tldw:/, "")
-      const separator = qualifiedModel.indexOf(":")
-      expect(sent).toMatchObject({ model: separator >= 0 ? qualifiedModel.slice(separator + 1) : qualifiedModel,
-        ...(separator >= 0 ? { api_provider: qualifiedModel.slice(0, separator) } : {}),
-        stream: true, save_to_db: true, tldw_history_selection_v1: { version: 1 } })
-      const chatId = sent.conversation_id
-      expect(chatId).toEqual(expect.any(String))
-      expect(sent.tldw_history_selection_v1.conversation_id).toBe(chatId)
-      expect(sent.messages).toEqual([{ role: "user", content: question }])
+      expect(response.status()).toBe(401)
+      const sent = parseRoleplayResumeCompletionRequest(response.request().postDataJSON())
+      expect(new URL(response.url()).pathname).toBe(`/api/v1/chats/${chatId}/complete-v2`)
+      expect(sent).toMatchObject({ stream: false, save_to_db: true, include_character_context: true, append_user_message: false,
+        tldw_roleplay_resume_v1: { input_message_id: admission.message_id, input_message_version: admission.message_version, expected: admission.fence } })
       const safeMessage = "The selected provider credentials could not be authenticated."
-      expect(await response.json()).toEqual({ detail: { error_code: "provider_authentication_failed", message: safeMessage } })
-      await waitForStreamComplete(page, 90_000)
-      const banner = page.getByTestId("playground-chat-error-banner")
-      await expect(banner).toBeVisible()
-      await expect(banner.getByRole("heading")).toHaveText("Character chat model setup needs attention.")
-      const failedMessage = page.getByRole("log", { name: /chat messages/i }).getByRole("article").last()
-      await failedMessage.getByRole("button", { name: "Show technical details", exact: true }).click()
-      const technicalDetails = failedMessage.locator("pre")
-      await expect(technicalDetails).toContainText("provider_authentication_failed")
-      await expect(technicalDetails).toContainText(safeMessage)
+      expect(await response.json()).toEqual({ detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: safeMessage } } })
+      await expect(page.getByText("Character chat model setup needs attention.", { exact: true })).toBeVisible()
+      await expect(page.getByText("Reply save unconfirmed", { exact: true })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Retry original request", exact: true })).toBeEnabled()
+      await expect(composer.getByRole("button", { name: "Send message", exact: true })).toBeEnabled()
+      await expect(page.getByText("Reply save unconfirmed", { exact: true })).toBeVisible()
       const pending = async () => ((await readStore(page, "historySelections")) as HistoryBookmark[])
         .filter(row => row.conversation_id === chatId).flatMap(row => Object.values(row.pending_turns ?? {})) as HistoryTurnRecovery[]
       await expect.poll(async () => (await pending()).length).toBe(1)
-      const original = await pending()
-      expect(original[0]).toMatchObject({ persistence: "server", state: "unknown", input_text: question, result_text: "", conversation_id: chatId })
-      expect(original[0].admission).toBeUndefined()
-      expect(original[0].input_id).toBeUndefined()
-      expect(original[0].assistant_id).toBeUndefined()
-      await expect(page.getByText("User admission outcome unknown", { exact: true })).toBeVisible()
+      const original = (await pending())[0]
+      expect(original).toMatchObject({ persistence: "server", state: "accepted_unsent", input_text: question, result_text: "", conversation_id: chatId,
+        input_id: admission.message_id, roleplay_resume: { append: admission, intent: { assistant_message_id: sent.tldw_roleplay_resume_v1.assistant_message_id } } })
+      expect(original.admission).toBeUndefined()
+      expect(original.assistant_id).toBeUndefined()
       const canonical = await fetchJson<{ messages: CanonicalTurnMessage[] }>(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)
       expect(canonical.ok).toBe(true)
       expect(canonical.body!.messages).toHaveLength(1)
-      expect(canonical.body!.messages[0]).toMatchObject({ content: question, sender: "user", conversation_id: chatId, parent_message_id: null })
-      const noRetry = expectNoApiCall(page, { method: "POST", url: NATIVE_COMPLETION_PATH }, 500)
-      await banner.getByRole("button", { name: "Retry chat", exact: true }).click()
-      await noRetry
-      expect(await pending()).toEqual(original)
+      expect(canonical.body!.messages[0]).toMatchObject({ id: admission.message_id, content: question, sender: "user", conversation_id: chatId, parent_message_id: null })
+      const retried = page.waitForResponse(reply => roleplayCompletionCallPredicate(reply.url(), reply.request().method()))
+      await page.getByRole("button", { name: "Retry original request", exact: true }).click()
+      const retry = await retried
+      expect(retry.status()).toBe(401)
+      expect(retry.request().postDataJSON()).toEqual(sent)
+      await expect(page.getByText("Reply save unconfirmed", { exact: true })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Retry original request", exact: true })).toBeEnabled()
+      await expect(composer.getByRole("button", { name: "Send message", exact: true })).toBeEnabled()
+      await expect.poll(async () => (await pending())[0]?.state).toBe("accepted_unsent")
+      expect((await pending())[0]).toMatchObject({ operation_id: original.operation_id, input_id: admission.message_id, roleplay_resume: original.roleplay_resume })
       const recoveryDraft = "Continue this character chat after configuring the provider."
       await input.fill(recoveryDraft)
-      await banner.getByRole("button", { name: "Edit provider", exact: true }).click()
+      await page.getByRole("button", { name: "Current Chat Model Settings", exact: true }).click()
       const settings = page.getByRole("dialog", { name: "Current Chat Model Settings", exact: true })
       await expect(settings).toBeVisible()
       await settings.getByRole("button", { name: "Close", exact: true }).click()
       await expect(settings).toBeHidden()
       await expect(input).toHaveValue(recoveryDraft)
       await expectSelectedCharacter(page, character.name)
-      expect(await pending()).toEqual(original)
+      expect((await pending())[0]).toMatchObject({ operation_id: original.operation_id, input_id: admission.message_id, roleplay_resume: original.roleplay_resume })
+      const retained = (await pending())[0]
       await page.reload({ waitUntil: "domcontentloaded" })
       await waitForConnection(page)
-      await expect(page.getByText("User admission outcome unknown", { exact: true })).toBeVisible()
-      expect(await pending()).toEqual(original)
-      const calls = (await capture.stop()).filter(call => nativeCompletionCallPredicate(call.url, call.method))
-      expect(calls).toHaveLength(1)
-      await testInfo.attach("native-character-provider-recovery.json", { body: JSON.stringify({ request: sent, recovery: original, canonical: canonical.body!.messages }, null, 2), contentType: "application/json" })
-    } finally { await capture.stop(); await deleteCharacterViaApi(character) }
+      const retainedOutcomes = page.locator("summary").filter({ hasText: /^Retained outcomes \(1\)$/ })
+      const retainedPanel = page.locator("details").filter({ has: retainedOutcomes })
+      await expect(retainedPanel).toHaveJSProperty("open", false)
+      await retainedOutcomes.click()
+      await expect(retainedPanel).toHaveJSProperty("open", true)
+      await expect(page.getByText("Reply save unconfirmed", { exact: true })).toBeVisible()
+      expect((await pending())[0]).toEqual(retained)
+      const calls = await capture.stop()
+      expect(calls.filter(call => roleplayCompletionCallPredicate(call.url, call.method))).toHaveLength(2)
+      expect(calls.filter(call => call.method === "POST" && /\/roleplay\/messages$/.test(new URL(call.url).pathname))).toHaveLength(1)
+      expect(calls.filter(call => call.method === "POST" && /\/api\/v1\/chat\/completions$/.test(new URL(call.url).pathname))).toHaveLength(0)
+      expect((await fetchJson<{ messages: CanonicalTurnMessage[] }>(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).body!.messages).toEqual(canonical.body!.messages)
+      await testInfo.attach("native-character-provider-recovery.json", { body: JSON.stringify({ request: sent, admission, recovery: retained, canonical: canonical.body!.messages }, null, 2), contentType: "application/json" })
+    } finally {
+      await capture.stop()
+      await deleteCharacterViaApi(character)
+    }
   })
 
   test("saves a versioned native turn when a real callable character model is available", async ({ authedPage: page, serverInfo }, testInfo) => {
@@ -716,56 +705,51 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
     const character = await createCharacterViaApi()
     const completionRequests: Request[] = []
     const captureCompletion = (request: Request) => {
-      if (nativeCompletionCallPredicate(request.url(), request.method())) completionRequests.push(request)
+      if (roleplayCompletionCallPredicate(request.url(), request.method())) completionRequests.push(request)
     }
     page.on("request", captureCompletion)
     try {
+      const capturedSelection = page.waitForResponse(response => response.request().method() === "POST" &&
+        /\/api\/v1\/chat\/conversations\/[^/]+\/history\/selection$/.test(new URL(response.url()).pathname))
       await openCharacterChatWithCharacter(page, character.name, callableModel)
       await expect(page.getByTestId("character-chat-readiness-panel")).toBeHidden()
       const question = "Reply with one short sentence for Phase 7."
       const answer = "onboarding UAT ready. The mock provider returned a deterministic success response."
       const chat = new ChatPage(page)
-      const readCompletionBody = await captureStreamedResponseBody(page, "/api/v1/chat/completions")
-      const completed = page.waitForResponse(response => nativeCompletionCallPredicate(response.url(), response.request().method()))
+      const admitted = page.waitForResponse(response => response.request().method() === "POST" &&
+        /\/api\/v1\/chats\/[^/]+\/roleplay\/messages$/.test(new URL(response.url()).pathname))
+      const completed = page.waitForResponse(response => roleplayCompletionCallPredicate(response.url(), response.request().method()))
       await page.getByPlaceholder(/type a message/i).first().fill(question)
       await clickPrimaryComposerAction(page, /send/i)
       const completion = await completed
       expect(completion.status()).toBe(200)
-      const sent = completion.request().postDataJSON()
+      const appendResponse = await admitted
+      expect(appendResponse.status()).toBe(201)
+      const chatId = new URL(appendResponse.url()).pathname.split("/")[4]
+      const originalSelection = await (await capturedSelection).json()
+      expect(originalSelection.view).toMatchObject({ owner_key: expect.stringMatching(/^native-history-v1:sha256:/), conversation_id: chatId, cursor: { kind: "empty" } })
+      expect(originalSelection.snapshot).toMatchObject({ owner_key: originalSelection.view.owner_key, conversation_id: chatId })
+      expect(originalSelection.snapshot.source_digest).toMatch(/^sha256:[0-9a-f]{64}$/)
+      const ownerKey = originalSelection.view.owner_key
+      const originalInput = parseRoleplayResumeAppendRequest(appendResponse.request().postDataJSON())
+      expect(originalInput.content).toBe(question)
+      expect(originalInput.expected.tail).toEqual({ message_id: null, message_version: null })
+      const admission = parseRoleplayResumeAppendReceipt(chatId, originalInput, await appendResponse.json())
+      const sent = parseRoleplayResumeCompletionRequest(completion.request().postDataJSON())
+      expect(sent).toMatchObject({ stream: false, save_to_db: true, include_character_context: true, append_user_message: false,
+        tldw_roleplay_resume_v1: { input_message_id: admission.message_id, input_message_version: admission.message_version, expected: admission.fence } })
+      const settlement = parseRoleplayResumeCompletionReceipt(chatId, sent, await completion.json())
       const qualifiedModel = callableModel.replace(/^tldw:/, "")
       const separator = qualifiedModel.indexOf(":")
-      expect(sent).toMatchObject({ model: separator >= 0 ? qualifiedModel.slice(separator + 1) : qualifiedModel,
-        ...(separator >= 0 ? { api_provider: qualifiedModel.slice(0, separator) } : {}),
-        stream: true, save_to_db: true, tldw_history_selection_v1: { version: 1 } })
-      const chatId = sent.conversation_id
-      expect(chatId).toEqual(expect.any(String))
-      expect(sent.tldw_history_selection_v1.conversation_id).toBe(chatId)
-      expect(sent.messages).toEqual([{ role: "user", content: question }])
+      expect(settlement).toMatchObject({ character_id: character.id, saved: true, assistant_content: answer,
+        ...(separator >= 0 ? { provider: qualifiedModel.slice(0, separator), model: qualifiedModel.slice(separator + 1) } : { model: qualifiedModel }) })
       await waitForStreamComplete(page, 90_000)
-      await expect.poll(async () => (await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
-
-      const frames = (await readCompletionBody()).split("\n")
-        .filter(line => line.startsWith("data: ") && line.slice(6) !== "[DONE]")
-        .map(line => JSON.parse(line.slice(6)))
-      const admission = frames.find(frame => frame.tldw_history_admission_v1)?.tldw_history_admission_v1
-      const settlement = frames.find(frame => frame.tldw_message_id)
-      expect(admission).toMatchObject({ version: 1, conversation_id: chatId,
-        owner_key: sent.tldw_history_selection_v1.owner_key,
-        selection_digest: sent.tldw_history_selection_v1.selection_digest,
-        messages: sent.tldw_history_selection_v1.messages,
-        originating_selection_revision: sent.tldw_history_selection_v1.selection_revision })
-      expect(admission.owner_key).toMatch(/^native-history-v1:sha256:/)
-      expect(admission.input_message_id).toEqual(expect.any(String))
-      expect(admission.input_message_id).not.toBe("")
-      expect(settlement).toMatchObject({ tldw_conversation_id: chatId,
-        tldw_user_message_id: admission.input_message_id, tldw_message_id: expect.any(String) })
-      expect(settlement.tldw_message_id).not.toBe("")
-      expect(settlement.tldw_message_id).not.toBe(admission.input_message_id)
-      expect(frames.map(frame => frame.choices?.[0]?.delta?.content ?? "").join("")).toBe(answer)
+      await expect(page.getByTestId("character-chat-readiness-panel")).toBeHidden()
+      expect((await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
       let saved: CanonicalTurnMessage[] = []
       await expect.poll(async () => { saved = (await fetchJson<{ messages: CanonicalTurnMessage[] }>(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).body!.messages; return saved.length }).toBe(2)
-      const user = saved.find(row => row.id === admission.input_message_id)!
-      const assistant = saved.find(row => row.id === settlement.tldw_message_id)!
+      const user = saved.find(row => row.id === admission.message_id)!
+      const assistant = saved.find(row => row.id === settlement.assistant_message_id)!
       expect(user).toMatchObject({ content: question, sender: "user", conversation_id: chatId, parent_message_id: null })
       expect(assistant).toMatchObject({ content: answer, conversation_id: chatId, parent_message_id: user.id })
       expect(["assistant", character.name.toLowerCase()]).toContain(assistant.sender.toLowerCase())
@@ -773,14 +757,14 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       let bookmarks: HistoryBookmark[] = []
       await expect.poll(async () => {
         bookmarks = ((await readStore(page, "historySelections")) as HistoryBookmark[]).filter(row =>
-          row.conversation_id === chatId && row.owner_key === admission.owner_key &&
+          row.conversation_id === chatId && row.owner_key === ownerKey &&
           row.view.cursor.kind === "after_message" && row.view.cursor.message_id === assistant.id)
         return bookmarks.length
       }).toBe(1)
       const bookmark = bookmarks[0]
       expect(bookmark.view.interpretation).toEqual({ kind: "parent_graph_v1" })
       const reference = { profile_id: bookmark.profile_id, client_session_id: bookmark.client_session_id,
-        owner_key: admission.owner_key, conversation_id: chatId, owner_kind: "native" }
+        owner_key: ownerKey, conversation_id: chatId, owner_kind: "native" }
       await page.goto("/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)), { waitUntil: "domcontentloaded" })
       await waitForConnection(page)
       await chat.waitForReady()

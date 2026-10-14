@@ -1346,6 +1346,37 @@ const nativeAdmission = (request: any) => ({
     request.tldw_history_selection_v1.selection_revision
 })
 
+it("compact saved roleplay provider failure directs model setup and retains the original accepted input", async () => {
+  installSavedRoleplayFixture()
+  const current = h1.controller.getCurrent()
+  const state = h1.roleplayState.get(nativeChatId)!
+  current.capture.snapshot.fences.history = String(state.historyVersion)
+  h1.capture.mockImplementation(async (_id, request) => {
+    const captured = captureFor(request.view)
+    captured.snapshot.fences.history = String(state.historyVersion)
+    return captured
+  })
+  h1.roleplayComplete.mockImplementationOnce(async (_id, _body, options) => {
+    options.onDispatch?.()
+    throw Object.assign(new Error("HTTP 401"), { status: 401,
+      details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: "The selected provider credentials could not be authenticated." } } } })
+  })
+  const hook = renderHook(() => useMessage())
+  try {
+    await act(async () => { await hook.result.current.onSubmit({ message: "  ORIGINAL COMPACT INPUT  ", image: "" }) })
+    const receipt = await h1.roleplayAppend.mock.results[0].value
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ state: "accepted_unsent", input_text: "  ORIGINAL COMPACT INPUT  ", input_id: receipt.message_id, roleplay_resume: { append: receipt } })
+    expect(h1.roleplayAppend).toHaveBeenCalledOnce()
+    expect(h1.roleplayComplete).toHaveBeenCalledOnce()
+    expect(h1.controller.getCurrent()).toBe(current)
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    expect(mocks.notification.error).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Character chat model setup needs attention.", description: expect.stringContaining("Open model settings")
+    }))
+  } finally { hook.unmount() }
+})
+
 it.each(["current", "navigation", "account", "owner lease"])("compact native settings-read feedback belongs to its %s source", async boundary => {
   installSavedRoleplayFixture()
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
@@ -1807,7 +1838,7 @@ it.each([false, true])(
   }
 )
 
-it("dispatches first native creation through a real controller epoch and accepted bind", async () => {
+it.each(["success", "provider failure", "retired provider failure"])("dispatches first native %s through a real controller epoch and accepted bind", async outcome => {
   const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
   actual.useStoreMessageOption.getState().startNewChatDraft(false)
   actual.useStoreMessageOption.setState({ historyId: null, serverChatId: null })
@@ -1838,6 +1869,13 @@ it("dispatches first native creation through a real controller epoch and accepte
     yield { tldw_history_admission_v1: nativeAdmission(request) }
     yield { tldw_message_id: "native-result", tldw_conversation_id: nativeChatId }
   })
+  const journal = await vi.importActual<typeof import("@/db/dexie/history-selection")>("@/db/dexie/history-selection")
+  h1.recover.mockImplementation(journal.saveHistoryTurnRecovery)
+  if (outcome !== "success") h1.roleplayComplete.mockImplementationOnce(async (_id, _body, options) => {
+    options.onDispatch?.()
+    if (outcome === "retired provider failure") selection.result.current.beginLoad()
+    throw Object.assign(new Error("HTTP 401"), { status: 401, details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed", message: "The selected provider credentials could not be authenticated." } } } })
+  })
   const hook = renderHook(() => useMessage())
   await act(async () => { await hook.result.current.onSubmit({ message: "first", image: "" }) })
   expect(sourceCurrent()).toBe(false)
@@ -1854,6 +1892,15 @@ it("dispatches first native creation through a real controller epoch and accepte
   expect(boundScene.originalRecord?.value).toEqual(sourceRecord!.value)
   expect(mocks.getActorScene).toHaveBeenCalledOnce()
   expect(JSON.stringify(h1.roleplayComplete.mock.calls[0][1])).not.toContain(originalScene.notes)
+  if (outcome === "provider failure") expect(mocks.notification.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Character chat model setup needs attention.", description: expect.stringContaining("Open model settings") }))
+  else expect(mocks.notification.error).not.toHaveBeenCalled()
+  const selected = selection.result.current.getCurrent()
+  const operation = h1.recover.mock.lastCall?.[2].operation_id
+  if (outcome !== "success" && selected.bookmarkScope && selected.view) {
+    const entry = (await journal.loadHistoryTurnRecoveries(selected.bookmarkScope, selected.view)).find(value => value.turn.operation_id === operation)
+    expect(entry?.turn).toMatchObject({ state: "accepted_unsent", input_text: "first", input_id: (await h1.roleplayAppend.mock.results[0].value).message_id })
+    if (operation) await journal.dismissHistoryTurnRecovery(selected.bookmarkScope, selected.view, operation)
+  }
   hook.unmount()
   selection.unmount()
 })

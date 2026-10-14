@@ -1,6 +1,6 @@
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
-import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import { bindActorSceneAfterLoad, captureActorSceneSend, type ActorSceneSend } from "./actor-scene-source"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
@@ -73,7 +73,7 @@ import {
 import { type UploadedFile } from "@/db/dexie/types"
 import { buildAssistantErrorContent, decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
-import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
+import { buildCharacterChatAssistantErrorContent, classifyCharacterChatFailureRecovery } from "./useCharacterChatMode"
 import { detectCharacterMood } from "@/utils/character-mood"
 import { WEBUI_CHARACTER_CHAT_SOURCE } from "@/utils/character-chat-session"
 import {
@@ -3843,6 +3843,14 @@ export const useChatActions = ({
             useStoreMessageOption.getState().chatDraftRevision ===
               renderedDraftRevision
         )
+        // Saved roleplay owns its captured history, independent of the live scene.
+        preparationSourceIsCurrent = () =>
+          resumeSource.isCurrent() &&
+          historyOriginIsCurrent?.() === true &&
+          currentHistorySelection?.owner?.kind === "native" &&
+          currentHistorySelection.owner.validate_lease() &&
+          historySelection?.getCurrent().owner === currentHistorySelection.owner &&
+          historySelection.getCurrent().view === currentHistorySelection.view
         setIsProcessing(true)
         try {
           const { sendSavedRoleplay } = await import("./roleplay-resume-send")
@@ -4995,10 +5003,14 @@ export const useChatActions = ({
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
       if ((!preparingOriginalScene || preparationSourceIsCurrent() ||
-        ((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError) && e.isCurrent())) && (!historyRegenerate || historyRegenerate.isOriginCurrent()) && (!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
+        ((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError || e instanceof NativeHistoryRoleplaySendError) && e.isCurrent())) && (!historyRegenerate || historyRegenerate.isOriginCurrent()) && (!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError || e instanceof NativeHistoryRoleplaySendError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
+        const preflightMessage = nativeCharacterPreflightMessage(e, t)
+        const roleplayRecovery = !historyRegenerate && !preflightMessage && (e instanceof NativeHistoryRoleplaySendError || isSavedRoleplayConversation(historySelection))
+          ? classifyCharacterChatFailureRecovery(e, t)
+          : null
         notification.error({
-          message: t("error"),
-          description: historyRegenerate ? nativeRegenerationFeedback(e, t) : nativeCharacterPreflightMessage(e, t) ?? errorMessage
+          message: roleplayRecovery?.summary ?? t("error"),
+          description: historyRegenerate ? nativeRegenerationFeedback(e, t) : preflightMessage ?? roleplayRecovery?.message ?? errorMessage
         })
       }
       // If this turn still owns the shared controller (e.g. a pre-stream failure

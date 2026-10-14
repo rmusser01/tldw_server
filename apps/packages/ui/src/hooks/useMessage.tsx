@@ -14,7 +14,7 @@ import {
   createSelectedForkAction,
   withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils";
-import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
@@ -36,7 +36,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
-import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
+import { buildCharacterChatAssistantErrorContent, classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode";
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
 import { detectCharacterMood } from "@/utils/character-mood";
 import { useStorage } from "@plasmohq/storage/hook";
@@ -2929,15 +2929,15 @@ export const useMessage = () => {
               error instanceof NativeHistorySettingsReadError) &&
             !error.isCurrent()
           )
-        )
+        ) {
+          const preflightMessage = nativeCharacterPreflightMessage(error, t)
+          const recovery = preflightMessage ? null : classifyCharacterChatFailureRecovery(error, t)
           notification.error({
-            message: t("error"),
-            description:
-              nativeCharacterPreflightMessage(error, t) ??
-              (error instanceof Error
-                ? error.message
-                : "Saved roleplay could not be continued.")
+            message: recovery?.summary ?? t("error"),
+            description: preflightMessage ?? recovery?.message ??
+              (error instanceof Error ? error.message : "Saved roleplay could not be continued.")
           })
+        }
         return chatSubmitFailed(
           error instanceof Error
             ? error.message
@@ -3482,10 +3482,14 @@ export const useMessage = () => {
                   description: t("sidepanel:greetingPicker.changedHelp", "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.")
                 });
               } catch (error) {
-                if (!greetingSeed && !((error instanceof NativeHistoryBranchRefusal || error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError) && !error.isCurrent())) notification.error({
-                  message: t("error"),
-                  description: nativeCharacterPreflightMessage(error, t) ?? (error instanceof Error ? error.message : "Native history completion failed")
-                });
+                if (!greetingSeed && !((error instanceof NativeHistoryBranchRefusal || error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError || error instanceof NativeHistoryRoleplaySendError) && !error.isCurrent())) {
+                  const preflightMessage = nativeCharacterPreflightMessage(error, t)
+                  const recovery = !preflightMessage && error instanceof NativeHistoryRoleplaySendError ? classifyCharacterChatFailureRecovery(error, t) : null
+                  notification.error({
+                    message: recovery?.summary ?? t("error"),
+                    description: preflightMessage ?? recovery?.message ?? (error instanceof Error ? error.message : "Native history completion failed")
+                  })
+                }
                 if (releaseNormalControllerIfOwned()) {
                   setAbortController(null);
                   setIsProcessing(false);
