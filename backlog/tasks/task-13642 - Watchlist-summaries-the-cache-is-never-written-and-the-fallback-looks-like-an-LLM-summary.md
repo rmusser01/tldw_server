@@ -24,6 +24,7 @@ summarize_items_for_output (app/services/outputs_service.py) persists cached_sum
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the PR review of TASK-13636/13637: after an enrichment failure (a quota refusal or any other error), the per-phase metadata (summary_status, grouping_status, group_summary_status) stays pending next to enrichment_status failed; set them to failed (or skipped) with the overall status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

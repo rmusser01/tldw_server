@@ -22,6 +22,7 @@ With raise_on_error=True the audio_analyze stage (app/services/audio_jobs_worker
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the PR review of TASK-13636/13637: the audio stage passes failure_code to fail_job but not SummaryProviderError.code, so provider failures record no error code; forward it (e.g. missing_model, authentication, rate_limit) when classifying retries.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
