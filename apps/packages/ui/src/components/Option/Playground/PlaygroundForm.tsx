@@ -1,3 +1,4 @@
+import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
 import { shallow } from "zustand/shallow";
 import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSaveFeedback";
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
@@ -731,10 +732,22 @@ export const PlaygroundForm = ({
   const [viewportHeightPx, setViewportHeightPx] = React.useState(() =>
     typeof window === "undefined" ? 0 : window.innerHeight,
   );
-  const [openModelSettings, setOpenModelSettings] = React.useState(false);
+  const modelSettingsDialog = useModelSettingsOverlayState();
+  const { open: openModelSettings, setOpen: setModelSettingsOpen, afterClose: finishModelSettingsClose, isCurrent: modelSettingsCloseIsCurrent } = modelSettingsDialog;
   const [modelSettingsScopeOverride, setModelSettingsScopeOverride] =
     React.useState<string | null>(null);
-  const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const modelSettingsReturnFocusRef = React.useRef<{ selector: string; isCurrent: () => boolean } | null>(null);
+  const captureModelSettingsFocusSourceRef = React.useRef<(() => (() => boolean)) | null>(null);
+  const setOpenModelSettings = React.useCallback<React.Dispatch<React.SetStateAction<boolean>>>((requested) => {
+    setModelSettingsOpen(current => {
+      const nextOpen = typeof requested === "function" ? requested(current) : requested;
+      if (nextOpen) {
+        setModelSettingsScopeOverride(null);
+        modelSettingsReturnFocusRef.current = null;
+      }
+      return nextOpen;
+    });
+  }, [setModelSettingsOpen]);
   const modelSelectorReturnFocusSelectorRef = React.useRef<string | null>(null);
   const modelSelectorFocusFrameRef = React.useRef<number | null>(null);
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
@@ -1334,23 +1347,19 @@ export const PlaygroundForm = ({
   ]);
 
   const restoreModelSettingsFocus = React.useCallback(() => {
-    const returnFocusSelector = modelSettingsReturnFocusSelectorRef.current;
-    if (!returnFocusSelector) return;
-    modelSettingsReturnFocusSelectorRef.current = null;
+    const target = modelSettingsReturnFocusRef.current;
+    if (!target) return;
+    modelSettingsReturnFocusRef.current = null;
+    const closeIsCurrent = modelSettingsCloseIsCurrent;
+    scheduleFocusFirstVisibleElement(target.selector, undefined, () =>
+      closeIsCurrent() && target.isCurrent());
+  }, [modelSettingsCloseIsCurrent]);
 
-    scheduleFocusFirstVisibleElement(returnFocusSelector);
-  }, []);
-
-  const setOpenModelSettingsWithFocusRestore = React.useCallback(
-    (nextOpen: boolean) => {
-      setOpenModelSettings(nextOpen);
-      if (!nextOpen) {
-        setModelSettingsScopeOverride(null);
-        restoreModelSettingsFocus();
-      }
-    },
-    [restoreModelSettingsFocus],
-  );
+  const completeModelSettingsClose = React.useCallback(() => {
+    if (!finishModelSettingsClose()) return;
+    setModelSettingsScopeOverride(null);
+    restoreModelSettingsFocus();
+  }, [finishModelSettingsClose, restoreModelSettingsFocus]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1365,21 +1374,21 @@ export const PlaygroundForm = ({
     if (typeof window === "undefined") return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<ModelSettingsOpenDetail>).detail;
-      modelSettingsReturnFocusSelectorRef.current = normalizeFocusSelector(
-        detail?.returnFocusSelector,
-      );
+      const selector = normalizeFocusSelector(detail?.returnFocusSelector);
+      const isCurrent = captureModelSettingsFocusSourceRef.current?.();
+      modelSettingsReturnFocusRef.current = selector && isCurrent ? { selector, isCurrent } : null;
       setModelSettingsScopeOverride(
         typeof detail?.settingsScope === "string" && detail.settingsScope.trim()
           ? detail.settingsScope.trim()
           : null,
       );
-      setOpenModelSettings(true);
+      setModelSettingsOpen(true);
     };
     window.addEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     return () => {
       window.removeEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     };
-  }, []);
+  }, [setModelSettingsOpen]);
 
   React.useEffect(() => {
     if (!modeAnnouncement) return;
@@ -1702,6 +1711,15 @@ export const PlaygroundForm = ({
   const captureSelectionFence = historySelection?.fence;
   const resetSelectedHistory = historySelection?.reset;
   const assistantOwnerIsCurrent = assistantMeta?.isCurrent;
+  captureModelSettingsFocusSourceRef.current = () => {
+    const historyIsCurrent = captureSelectionFence?.() ?? (() => true);
+    const owner = historySelection?.getCurrent().owner;
+    const modelRevision = useStoreMessageOption.getState().selectedModelRevision;
+    return captureChatDraftSource(() => assistantActionMountedRef.current &&
+      historyIsCurrent() && (assistantOwnerIsCurrent?.() ?? true) &&
+      (owner?.kind !== "native" || owner.validate_lease()) &&
+      useStoreMessageOption.getState().selectedModelRevision === modelRevision).isCurrent;
+  }
   const assistantActionRevisionRef = React.useRef(0);
   React.useLayoutEffect(() => {
     if (characterChatSendBlocker?.active) assistantActionRevisionRef.current++;
@@ -4224,7 +4242,7 @@ export const PlaygroundForm = ({
     setWebSearch(!webSearch);
   }, [setWebSearch, webSearch]);
   const handleOpenModelSettings = React.useCallback(() => {
-    modelSettingsReturnFocusSelectorRef.current = null;
+    modelSettingsReturnFocusRef.current = null;
     closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
   }, [closeComposerPopoversExcept, setOpenModelSettings]);
@@ -7830,11 +7848,12 @@ export const PlaygroundForm = ({
             />
           </React.Suspense>
         )}
-        {openModelSettings && (
+        {modelSettingsDialog.present && (
           <React.Suspense fallback={null}>
             <LazyCurrentChatModelSettings
               open={openModelSettings}
-              setOpen={setOpenModelSettingsWithFocusRestore}
+              setOpen={setOpenModelSettings}
+              afterClose={completeModelSettingsClose}
               settingsScope={modelSettingsScopeOverride}
               isOCREnabled={useOCR}
             />

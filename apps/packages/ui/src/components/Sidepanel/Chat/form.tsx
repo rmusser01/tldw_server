@@ -1474,6 +1474,8 @@ export const SidepanelForm = ({
     setOpenActorSettings,
     openModelSettings,
     setOpenModelSettings,
+    modelSettingsPresent,
+    completeModelSettingsClose,
     documentGeneratorOpen,
     setDocumentGeneratorOpen,
     documentGeneratorSeed,
@@ -4915,10 +4917,11 @@ export const SidepanelForm = ({
         </div>
       </div>
       {/* Mount heavy overlays only when open to avoid keystroke-time rerenders. */}
-      {openModelSettings && (
+      {modelSettingsPresent && (
         <CurrentChatModelSettings
           open={openModelSettings}
           setOpen={setOpenModelSettings}
+          afterClose={completeModelSettingsClose}
           isOCREnabled={useOCR}
         />
       )}

@@ -2197,6 +2197,19 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeInspector.getByText(restoredTemperature, { exact: true })).toBeVisible();
       await expect(compositionPreview).toContainText(`Temperature: ${restoredTemperature}`);
 
+      for (const dismissal of ['Close', 'Escape'] as const) {
+        await modelSettingsTrigger.click();
+        await expect(modelSettingsDialog).toBeVisible();
+        if (dismissal === 'Close') {
+          await modelSettingsDialog.getByRole('button', { name: 'Close', exact: true }).click();
+        } else {
+          await page.keyboard.press('Escape');
+        }
+        await expect(modelSettingsDialog).toBeHidden();
+        await expect(modelSettingsTrigger).toBeFocused({ timeout: 5_000 });
+        await expect(runtimeInspector.getByText(restoredTemperature, { exact: true })).toBeVisible();
+      }
+
       await assertRuntimeMcpRailState(runtimeInspector);
       const mcpSettingsTrigger = runtimeInspector.locator('[data-cockpit-mcp-settings-trigger]');
       await mcpSettingsTrigger.click();

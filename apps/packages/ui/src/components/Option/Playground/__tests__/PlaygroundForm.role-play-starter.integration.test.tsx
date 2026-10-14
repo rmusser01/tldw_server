@@ -1224,8 +1224,10 @@ vi.mock("../ComposerToolbar", async importOriginal => {
     sendControl,
     rolePlayActions,
     contextItems,
-    setSelectedSystemPrompt
+    setSelectedSystemPrompt,
+    onOpenModelSettings
   }: {
+    onOpenModelSettings?: () => void
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
@@ -1236,6 +1238,7 @@ vi.mock("../ComposerToolbar", async importOriginal => {
   }) => (
     <div data-testid="composer-toolbar">
       <span data-testid="composer-context-items">{JSON.stringify(contextItems?.map(item => ({label: item.label, value: item.value})))}</span>
+      <button type="button" onClick={onOpenModelSettings}>Open default model settings</button>
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
@@ -1534,8 +1537,18 @@ vi.mock("../useMobileComposerViewport", () => ({
   })
 }))
 
+const modelSettingsBoundary = vi.hoisted(() => ({ enabled: false, afterClose: null as null | (() => void) }))
 vi.mock("@/components/Common/Settings/CurrentChatModelSettings", () => ({
-  CurrentChatModelSettings: () => null
+  CurrentChatModelSettings: ({ open, setOpen, afterClose, settingsScope }: {
+    open: boolean; setOpen: (value: boolean) => void; afterClose?: () => void; settingsScope?: string | null
+  }) => {
+    React.useEffect(() => {
+      if (modelSettingsBoundary.enabled && !open) modelSettingsBoundary.afterClose = afterClose ?? null
+    }, [open, afterClose])
+    return modelSettingsBoundary.enabled ? <section data-testid="held-model-editor" data-open={String(open)} data-scope={settingsScope ?? ""}>
+      <button onClick={() => setOpen(false)}>Close held model editor</button>
+    </section> : null
+  }
 }))
 
 vi.mock("@/components/Common/Settings/ActorPopout", () => ({
@@ -1808,6 +1821,8 @@ vi.mock("@/hooks/playground", () => ({
 }))
 
 beforeEach(async () => {
+  modelSettingsBoundary.enabled = false
+  modelSettingsBoundary.afterClose = null
   await seedLocalFork(false)
   nativeSetupFixture.localOwner = await getLocalHistoryOwner("history-1", {
     profileId: "profile",
@@ -4963,6 +4978,70 @@ describe("PlaygroundForm role-play starter", () => {
       }
     }
   )
+
+  it("clears an explicit scope when the default composer opener reopens during close", async () => {
+    prepareNativeSource()
+    modelSettingsBoundary.enabled = true
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      act(() => window.dispatchEvent(new CustomEvent("tldw:open-model-settings", {
+        detail: { settingsScope: "openai:previous" }
+      })))
+      await screen.findByTestId("held-model-editor")
+      await user.click(screen.getByRole("button", { name: "Close held model editor" }))
+      const completion = modelSettingsBoundary.afterClose
+      if (!completion) throw new Error("expected held native close completion")
+      await user.click(screen.getByRole("button", { name: "Open default model settings" }))
+      const editor = screen.getByTestId("held-model-editor")
+      expect(editor).toHaveAttribute("data-open", "true")
+      expect(editor).toHaveAttribute("data-scope", "")
+      act(() => completion())
+      expect(editor).toHaveAttribute("data-open", "true")
+      expect(editor).toHaveAttribute("data-scope", "")
+    } finally { view.unmount() }
+  })
+
+  it.each(["current", "history", "account", "draft", "model", "reopen", "unmount"])("returns model settings focus only for its %s close owner", async boundary => {
+    prepareNativeSource()
+    modelSettingsBoundary.enabled = true
+    const user = userEvent.setup()
+    const open = (scope = "openai:original") => window.dispatchEvent(new CustomEvent("tldw:open-model-settings", {
+      detail: { settingsScope: scope, returnFocusSelector: "[data-testid='model-settings-opener']" }
+    }))
+    const view = render(<>
+      <button data-testid="model-settings-opener" onClick={() => open()}>Open owned model settings</button>
+      <button>Another task</button>
+      <PlaygroundForm droppedFiles={[]} />
+    </>)
+    const opener = screen.getByRole("button", { name: "Open owned model settings" })
+    await user.click(opener)
+    const editor = await screen.findByTestId("held-model-editor")
+    await user.click(screen.getByRole("button", { name: "Close held model editor" }))
+    expect(editor).toHaveAttribute("data-open", "false")
+    expect(editor).toHaveAttribute("data-scope", "openai:original")
+    const completion = modelSettingsBoundary.afterClose
+    if (!completion) throw new Error("expected held native close completion")
+    screen.getByRole("button", { name: "Another task" }).focus()
+    const frames: FrameRequestCallback[] = []
+    const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frames.push(callback); return frames.length })
+    try {
+      if (boundary === "reopen") act(() => { open("openai:new") })
+      act(() => completion())
+      if (boundary === "history") act(() => nativeSetupFixture.controller!.reset())
+      if (boundary === "account") nativeSetupFixture.ownerCurrent = false
+      if (boundary === "draft") act(() => playgroundFormMessageOptionState.value.startNewChatDraft())
+      if (boundary === "model") act(() => playgroundFormMessageOptionState.value.setSelectedModel("openai:gpt-4.1"))
+      if (boundary === "unmount") view.unmount()
+      act(() => frames.splice(0).forEach(callback => callback(0)))
+      if (boundary === "current") expect(opener).toHaveFocus()
+      else if (boundary !== "unmount") expect(screen.getByRole("button", { name: "Another task" })).toHaveFocus()
+      if (boundary === "reopen") {
+        expect(screen.getByTestId("held-model-editor")).toHaveAttribute("data-open", "true")
+        expect(screen.getByTestId("held-model-editor")).toHaveAttribute("data-scope", "openai:new")
+      } else expect(screen.queryByTestId("held-model-editor")).toBeNull()
+    } finally { view.unmount(); frame.mockRestore() }
+  })
 
   it.each(["click", "Tab"])("preserves outside focus when an externally opened real picker departs by %s", async departure => {
     nativeSetupFixture.realModelPicker = true

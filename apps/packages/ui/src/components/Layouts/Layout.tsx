@@ -1,3 +1,4 @@
+import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
@@ -129,7 +130,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   )
   const { t } = useTranslation(["option", "common", "settings"])
   const navigate = useNavigate()
-  const [openModelSettings, setOpenModelSettings] = useState(false)
+  const modelSettingsDialog = useModelSettingsOverlayState()
+  const { open: openModelSettings, setOpen: setOpenModelSettings, retire: retireModelSettings } = modelSettingsDialog
   const { isLoading: migrationLoading } = useMigration()
   const { demoEnabled } = useDemoMode()
   const [showChatSidebar] = useChatSidebar()
@@ -143,6 +145,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     location.search,
     location.hash
   ])
+  React.useEffect(() => {
+    retireModelSettings()
+  }, [sidebarRouteKey, hideHeader, retireModelSettings])
   const pendingSidebarOpenRef = React.useRef<string | null>(null)
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const isChatScreen = location.pathname === "/chat"
@@ -560,11 +565,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             </Drawer>
           )}
 
-          {!hideHeader && openModelSettings && (
+          {!hideHeader && modelSettingsDialog.present && (
             <Suspense fallback={null}>
               <CurrentChatModelSettings
                 open={openModelSettings}
                 setOpen={setOpenModelSettings}
+                afterClose={modelSettingsDialog.afterClose}
                 useDrawer
                 isOCREnabled={useOCR}
               />

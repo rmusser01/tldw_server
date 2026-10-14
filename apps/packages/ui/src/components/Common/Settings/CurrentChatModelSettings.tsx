@@ -56,6 +56,7 @@ type Props = {
   setOpen: (open: boolean) => void
   useDrawer?: boolean
   isOCREnabled?: boolean
+  afterClose?: () => void
   settingsScope?: string | null
 }
 
@@ -143,7 +144,8 @@ export const CurrentChatModelSettings = ({
   setOpen,
   useDrawer,
   isOCREnabled,
-  settingsScope
+  settingsScope,
+  afterClose
 }: Props) => {
   const { t } = useTranslation("common")
   const [modal, modalContextHolder] = Modal.useModal()
@@ -1269,6 +1271,7 @@ export const CurrentChatModelSettings = ({
         placement="right"
         open={open}
         onClose={requestClose}
+        afterOpenChange={visible => { if (!visible) afterClose?.() }}
         size={500}
         title={t("currentChatModelSettings")}>
         {renderBody()}
@@ -1282,6 +1285,7 @@ export const CurrentChatModelSettings = ({
       open={open}
       onOk={requestClose}
       onCancel={requestClose}
+      afterClose={afterClose}
       style={{ top: "1rem", paddingBottom: 0 }}
       styles={{
         container: { maxHeight: "calc(100dvh - 2rem)", display: "flex", flexDirection: "column" },
