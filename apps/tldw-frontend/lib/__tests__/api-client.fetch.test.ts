@@ -44,7 +44,17 @@ function jsonResponse(
   })
 }
 
+// History persistence is debounced (WP-15 / TASK-13522): lib/api buffers
+// entries in lib/history and flushes them in one batched write. Track the
+// fresh module instance each test creates (vi.resetModules re-evaluates it)
+// so helpers flush the exact buffer that lib/api records into.
+type HistoryModule = typeof import("@web/lib/history")
+const historyModules: HistoryModule[] = []
+
 function storedRequestHistory() {
+  // Land any pending debounced writes first, so assertions read what is
+  // actually at rest rather than a pre-flush empty store.
+  historyModules[historyModules.length - 1]?.flushRequestHistory()
   return JSON.parse(localStorage.getItem("tldw-request-history") || "[]")
 }
 
@@ -64,6 +74,10 @@ function getFetchCall(fetchMock: ReturnType<typeof vi.fn>, index = 0) {
 
 async function loadApiModule() {
   vi.resetModules()
+  // Import history BEFORE api so both share the same fresh post-reset
+  // instance of the module (api's static import resolves into the new
+  // registry entry this dynamic import creates).
+  historyModules.push(await import("@web/lib/history"))
   return import("@web/lib/api")
 }
 
@@ -88,6 +102,12 @@ describe("fetch-backed WebUI api client", () => {
   })
 
   afterEach(() => {
+    // Cancel any pending debounced flush on the history module instances this
+    // test created, so a straggler real-time timer can never write phantom
+    // history into a later test's storage.
+    for (const historyModule of historyModules.splice(0)) {
+      historyModule.clearRequestHistory()
+    }
     vi.useRealTimers()
     process.env = { ...ORIGINAL_ENV }
   })
