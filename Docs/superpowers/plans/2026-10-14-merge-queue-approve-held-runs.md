@@ -40,6 +40,9 @@ recommended). It amends `Docs/superpowers/specs/2026-10-04-merge-queue-design.md
   `evict-rebase-unmoved`).
 - `MERGE_QUEUE` stays unset through the merge of this work. Nothing changes for any PR until the owner switches it.
 - Python 3.11: no backslash inside an f-string's `{...}` expression; build such pieces in a variable first.
+- Dispatch inputs are strings: `queue_kick` is `type: string` and compared as `github.event.inputs.queue_kick == 'true'`.
+- A cancelled gate run is restarted at most once per gate per head; any other completed gate run without its check is
+  one failure. Nothing is re-run on every wake.
 - Task records only through backlog-py (`PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd . task ...`).
 - Every pytest call runs from the implementation worktree root with the server venv:
   `PATH=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin:$PATH python -m pytest ...` (contract tests shell
@@ -48,20 +51,30 @@ recommended). It amends `Docs/superpowers/specs/2026-10-04-merge-queue-design.md
 ## Review Focus
 
 1. A held run of a non-gate workflow (`ci.yml`, 200+ jobs) on the rebased head must never be approved, including on
-   the start and `_decide` approval paths, and must be deleted. Test: Task 3 Step 1
-   `test_rebase_dispatches_the_license_then_approves_exactly_the_six_gates_then_cleans_up_then_cancels`, Task 4 Step 1
+   the start and `_decide` approval paths, and must be deleted. Tests (Task 1): Part C
+   `test_rebase_dispatches_the_license_then_approves_exactly_the_six_gates_then_cleans_up_then_cancels`, Part D
    `test_decide_never_approves_a_non_gate_held_run`.
 2. A run held for another actor (an agent's push awaiting a person) or with a fork as head repository must never be
-   approved. Test: Task 2 Step 1 `test_only_the_queues_own_held_gate_runs_are_approvable`.
-3. A transient GitHub error during approve, re-run or the stuck-path compare must fail the run and disarm nobody.
-   Test: Task 2 Step 1 `test_a_transient_approve_error_raises_and_disarms_nobody`, Task 4 Step 1
-   `test_a_transient_rerun_error_fails_the_run_and_disarms_nobody`, `test_a_failed_behind_check_never_disarms`.
+   approved. Test (Task 1, Part B): `test_only_the_queues_own_held_gate_runs_are_approvable`.
+3. A transient GitHub error during approve, re-run or the compare check must fail the run and disarm nobody. Tests
+   (Task 1): Part B `test_a_transient_approve_error_raises_and_disarms_nobody`, Part D
+   `test_a_transient_rerun_error_fails_the_run_and_disarms_nobody` and `test_a_failed_behind_check_never_disarms`,
+   Part E `test_a_github_side_error_on_approve_or_rerun_fails_the_run_and_disarms_nobody`.
 4. A kick must not cancel a running kick, and a `queue_kick=true` dispatch on any ref other than `dev` must run the
-   gate as today. Test: Task 6 Step 1 `test_security_required_kick_skips_every_gate_job_only_on_dev` and
+   gate as today. Tests (Task 3): `test_security_required_kick_skips_every_gate_job_only_on_dev` and
    `test_a_kick_never_cancels_a_running_kick`.
-5. A gate run someone dispatched by hand on the front head (live, green or failed) must neither stall the line nor
-   satisfy or fail a context. Test: Task 1 Step 1 `test_a_dispatched_gate_run_is_ignored_whoever_started_it` and
-   `test_a_dispatched_runs_check_does_not_count`.
+5. Nothing may be re-run on every wake: a gate run that finished without its check, or a run that keeps being
+   cancelled, must end in an eviction, not hold the line (review findings M2, m1). A gate run someone dispatched by
+   hand must neither stall the line nor satisfy or fail a context. Tests (Task 1): Part A
+   `test_a_dispatched_gate_run_is_ignored_whoever_started_it` and
+   `test_a_completed_gate_run_without_its_check_is_one_failure_unless_cancelled_or_held`, Part D
+   `test_a_green_gate_run_without_its_check_is_retried_once_then_evicted`,
+   `test_start_restarts_a_cancelled_run_of_a_missing_gate_once_then_evicts` and
+   `test_a_retry_attempt_that_ends_cancelled_is_restarted_once_then_evicted`.
+
+Revised 2026-10-14 after an independent review that applied the first draft to a copy of the repository: tasks 1-4 of
+that draft are folded into Task 1 (they could not each end green), the restart and no-check caps, the green-row compare,
+license-first retry order and the post-rebase wake were added, and every existing test the change breaks is listed.
 
 ---
 
@@ -69,17 +82,18 @@ recommended). It amends `Docs/superpowers/specs/2026-10-04-merge-queue-design.md
 
 | File | Responsibility | Task |
 |---|---|---|
-| `Helper_Scripts/ci/merge_queue.py` | the queue: read, decide, act | 1-5 |
-| `tldw_Server_API/tests/CI/test_merge_queue_rules.py` | pure decision table | 1, 4 |
-| `tldw_Server_API/tests/CI/test_merge_queue_actions.py` | action layer and run loop against a fake `gh` | 1-5 |
-| `.github/workflows/security-required.yml` | kick inputs, `queue-kick` job, gates skip on a kick, kick-safe concurrency | 6 |
-| `.github/workflows/{backend,coverage,e2e,frontend}-required.yml`, `container-build-check.yml` | `queue-tick` sends a kick | 6 |
-| `.github/workflows/frontend-required.yml` | name guard without the bot exemption (D2) | 6 |
-| `tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py` | tick and kick shapes | 6 |
-| `tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py` | name guard | 6 |
-| `tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py` | trigger digest, job list, tick/kick exemptions, concurrency | 6 |
-| `Docs/Development/CI_REQUIRED_GATES.md`, `AGENTS.md`, `CLAUDE.md`, `Docs/ADR/063-in-repo-merge-queue.md` (+ `Docs/Published` copy), `Docs/superpowers/specs/2026-10-04-merge-queue-design.md` | docs | 7 |
-| `backlog/tasks/task-<N> - ...md` | task record | 0, 7 |
+| `Helper_Scripts/ci/merge_queue.py` | the queue: read, decide, act | 1 |
+| `tldw_Server_API/tests/CI/test_merge_queue_rules.py` | pure decision table | 1 |
+| `tldw_Server_API/tests/CI/test_merge_queue_actions.py` | action layer and run loop against a fake `gh` | 1, 2 |
+| `.github/workflows/security-required.yml` | kick inputs, `queue-kick` job, gates skip on a kick, kick-safe concurrency | 3 |
+| `.github/workflows/{backend,coverage,e2e,frontend}-required.yml`, `container-build-check.yml` | `queue-tick` sends a kick | 3 |
+| `.github/workflows/frontend-required.yml` | name guard without the bot exemption (D2) | 3 |
+| `tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py` | tick and kick shapes | 3 |
+| `tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py` | name guard | 3 |
+| `tldw_Server_API/tests/CI/test_admin_ui_vitest_ratchet_workflow.py` | the protected-name guard's truth table | 3 |
+| `tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py` | trigger digest, job list, tick/kick exemptions, concurrency, gate `if` pins | 3 |
+| `Docs/Development/CI_REQUIRED_GATES.md`, `AGENTS.md`, `CLAUDE.md`, `Docs/ADR/063-in-repo-merge-queue.md` (+ `Docs/Published` copy), `Docs/superpowers/specs/2026-10-04-merge-queue-design.md` | docs | 4 |
+| `backlog/tasks/task-<N> - ...md` | task record | 0, 4 |
 
 `.github/workflows/merge-queue.yml` does not change.
 
@@ -139,10 +153,20 @@ git add backlog/ && git commit -q -m "chore(backlog): TASK-<N> merge queue appro
 
 ---
 
-### Task 1: Read layer — only `pull_request` runs count
+### Task 1: The script — approve, re-run and kick instead of dispatch
+
+One task with one green gate. The read layer, the primitives, the rebase path and the decision loop are tied together
+through `apply` and `run`, so the existing tests cannot be green part-way (review finding M5). Parts A-D each add code
+and their own new tests, and each ends by running **only those new tests, by exact name**; they pass on their own.
+Part E fixes every existing test the change breaks, from a complete list, deletes the dead code, and runs the whole
+queue test set: that is the gate. Commit once, at the end of Part E. The task review covers the whole task.
+
+#### Part A: Read layer — only `pull_request` runs count
 
 Removes everything that existed to make dispatches work (`base_sha`, `queue_only_dispatch`, `silent_green`, `baseRef`)
-and stops dispatched runs from counting, either as a check or as a stand-in.
+and stops dispatched runs from counting, either as a check or as a stand-in. A completed gate `pull_request` run that
+reported no check now counts as one failure unless it was cancelled or is held: a renamed gate job, a startup failure or
+a timeout then gets one retry and is evicted on the second, instead of being re-run on every wake (review finding M2).
 
 **Files:**
 - Modify: `Helper_Scripts/ci/merge_queue.py` (`Context`, `CONTEXTS`, `PrState`, `PR_FIELDS`, `_parse_pr`,
@@ -155,11 +179,11 @@ and stops dispatched runs from counting, either as a check or as a stand-in.
   `required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tuple[CheckRun, ...]` (pull_request
   runs only). `Context` has exactly `name`, `workflow`, `kind`. `PrState` no longer has `base_sha`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step A1: Write the failing tests**
 
 In `test_merge_queue_actions.py`, change the `_run_of` default event to `pull_request` (dispatched runs no longer
 count, so every existing test that means "a run of this gate" must say `pull_request`; tests that mean a dispatch pass
-`event="workflow_dispatch"` explicitly):
+`event="workflow_dispatch"` explicitly; Part E lists them):
 
 ```python
 def _run_of(workflow, rid, status="in_progress", conclusion=None, event="pull_request", **extra):
@@ -167,7 +191,8 @@ def _run_of(workflow, rid, status="in_progress", conclusion=None, event="pull_re
             "conclusion": conclusion, "html_url": f"https://run/{rid}", **extra}
 ```
 
-Drop `base` from `_node` (and the `baseRef` key) and `rebased_base` from `FakeGh`. Add these tests:
+Drop `base` from `_node` (and the `baseRef` key) and `rebased_base` from `FakeGh`. Add these tests (they call the read
+layer directly, so they do not depend on Parts B-D):
 
 ```python
 @pytest.mark.parametrize("actor", ["github-actions[bot]", "someone"])
@@ -178,20 +203,33 @@ def test_a_dispatched_gate_run_is_ignored_whoever_started_it(actor, status, conc
     line as in flight nor fail a context."""
     run = _run_of("e2e-required.yml", 77, status, conclusion, event="workflow_dispatch",
                   actor={"login": actor}, triggering_actor={"login": actor}, check_suite_id=770)
-    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, **_green({E2E: None}))
-    decision = _run(gh, "dry")[0][1]
-    assert (decision.kind, decision.contexts) == ("start", (E2E,))
+    assert mq.required_run_stand_ins([run], ()) == ()
 
 
 def test_a_dispatched_runs_check_does_not_count():
     """A dispatched run reports its check on the head commit, but the check is not in the PR's rollup (S5):
-    a green one must not read as passed, a red one must not read as failed."""
+    a green one must not read as passed, a red one must not read as failed. A pull_request run's check counts."""
     dispatched = _run_of("e2e-required.yml", 77, "completed", "success", event="workflow_dispatch", check_suite_id=770)
-    checks = _checks({E2E: None}) + [_check(E2E, "success", suite=770)]
-    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [dispatched]}, checks={OLD: checks},
-                statuses={OLD: [_status()]})
-    decision = _run(gh, "dry")[0][1]
-    assert (decision.kind, decision.contexts) == ("start", (E2E,))
+    pr_run = _run_of("backend-required.yml", 78, "completed", "success", check_suite_id=780)
+    from_dispatch = mq.CheckRun(E2E, "completed", "success", NOW, "u", 770)
+    from_pr = mq.CheckRun(BACKEND, "completed", "failure", NOW, "u", 780)
+    unlisted = mq.CheckRun(SECURITY, "completed", "success", NOW, "u", 999)
+    assert mq.counted((from_dispatch, from_pr, unlisted), [dispatched, pr_run]) == (from_pr, unlisted)
+
+
+@pytest.mark.parametrize(("conclusion", "stands_in"), [
+    ("success", True), ("neutral", True), ("skipped", True), ("failure", True), ("startup_failure", True),
+    ("timed_out", True), ("cancelled", False), ("action_required", False),
+])
+def test_a_completed_gate_run_without_its_check_is_one_failure_unless_cancelled_or_held(conclusion, stands_in):
+    """Review finding M2: a run that finished without reporting its check (a renamed gate job, a startup
+    failure) must count as a failure, so it is retried once and then evicted, not re-run on every wake.
+    A cancelled run is restarted instead (Part D), and a held run is approved."""
+    run = _run_of("e2e-required.yml", 70, "completed", conclusion, check_suite_id=700, updated_at="2026-10-04T11:00:00Z")
+    stand_ins = mq.required_run_stand_ins([run], ())
+    assert [(c.context, c.conclusion) for c in stand_ins] == ([(E2E, "failure")] if stands_in else [])
+    reported = (mq.CheckRun(E2E, "completed", "success", NOW, "u", 700),)
+    assert mq.required_run_stand_ins([run], reported) == (), "a run whose suite reported the check speaks through it"
 ```
 
 In `test_merge_queue_rules.py`, replace `test_the_seven_required_contexts_and_how_each_is_started` and drop
@@ -215,13 +253,12 @@ def test_the_seven_required_contexts() -> None:
     assert mq.REPO.count("/") == 1 and mq.BASE == "dev"
 ```
 
-- [ ] **Step 2: Run them to see them fail**
+- [ ] **Step A2: Run them to see them fail**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "dispatched or seven_required"`
-Expected: FAIL (`GATE_WORKFLOWS` missing; dispatched runs still counted; kind `dispatch` not `start` — the `start`
-kind arrives in Task 4, so `test_a_dispatched_*` stay red until then; that is expected).
+Run: `python -m pytest -q -p no:cacheprovider "tldw_Server_API/tests/CI/test_merge_queue_rules.py::test_the_seven_required_contexts" tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "test_a_dispatched_gate_run_is_ignored_whoever_started_it or test_a_dispatched_runs_check_does_not_count or test_a_completed_gate_run_without_its_check_is_one_failure_unless_cancelled_or_held"`
+Expected: FAIL (`GATE_WORKFLOWS` and `counted` missing; a dispatched or green-without-check run still stands in wrongly).
 
-- [ ] **Step 3: Implement**
+- [ ] **Step A3: Implement**
 
 Replace the `Context` dataclass and the lines after `CONTEXTS`:
 
@@ -261,6 +298,8 @@ LICENSE = next(c for c in CONTEXTS if c.kind == "status")
 In `PrState`, delete the `base_sha` field and its docstring line, and change `head_ref`'s docstring to "The head
 branch name.". In `PR_FIELDS`, delete the `baseRef { target { oid } }` line and the comment above `PR_FIELDS`. In
 `_parse_pr`, delete the `base_sha=` argument. In `read_pr`'s docstring, delete ", and dev's tip with it".
+`BROKEN_RUN_CONCLUSIONS` is no longer read by `required_run_stand_ins`; Part D's `_retry_gate` stops reading it too,
+so delete the constant in Part E if nothing else uses it.
 
 Replace `required_run_stand_ins` and `read_contexts`, and add `counted` above them:
 
@@ -283,41 +322,47 @@ def counted(checks: tuple[CheckRun, ...], runs: list[dict]) -> tuple[CheckRun, .
     return tuple(c for c in checks if c.suite_id is None or c.suite_id not in not_counted)
 
 
+# A completed run with one of these conclusions is no result: a cancelled run is restarted, a
+# held one approved. Any other completed run that reported no check is a failure of its gate.
+NO_RESULT_CONCLUSIONS = frozenset({"cancelled", "action_required"})
+
+
 def required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tuple[CheckRun, ...]:
     """Gate `pull_request` runs on a head that have not reported their check, as stand-ins.
 
     - A LIVE run stands in as an in-flight check: each gate is a needs-gated job with no check run
       until the jobs before it finish, so an in-flight front PR would otherwise look like it has
       no run.
-    - A COMPLETED run that failed (`BROKEN_RUN_CONCLUSIONS`) with no check run for its context in
-      its check suite stands in as one failure: a startup failure, e.g. a broken workflow file on
-      the branch, would otherwise read as "no run". A failed run whose suite DID report the check
-      is not a gate failure (its queue-tick may have failed); that check run already speaks for it.
+    - A COMPLETED run with no check run for its context in its check suite stands in as one
+      failure, whatever it concluded, unless it was cancelled or is held (`NO_RESULT_CONCLUSIONS`):
+      a startup failure, a timeout before the gate job, or a gate job the branch renamed or removed
+      would otherwise read as "no run" and be started again on every wake. As a failure it is
+      retried once and then evicted. A run whose suite DID report the check is judged by that check
+      (a failed run whose queue-tick failed is not a gate failure).
 
     Only `pull_request` runs stand in: a dispatched gate run can never satisfy a context (spec
     S5), whoever started it, so waiting on one would only stall the line. A workflow-run
-    conclusion is only ever read as a failure here, never as a merge signal. The run executing
-    this script (GITHUB_RUN_ID) is never counted. The license gate runs on `dev`, not on this
-    head, so it has no stand-in.
+    conclusion is only ever read as a failure here, never as a merge signal. The license gate runs
+    on `dev`, not on this head, so it has no stand-in.
 
     Args:
         runs: The workflow runs on the head, from `runs_on`.
-        checks: The gate contexts' check runs on that head.
+        checks: The gate contexts' counted check runs on that head.
 
     Returns:
-        One stand-in per live run and per failed run that reported no check.
+        One stand-in per live run and per completed run that reported no check.
     """
     by_workflow = {c.workflow: c for c in CONTEXTS if c.kind == "check"}
     reported = {(c.context, c.suite_id) for c in checks if c.suite_id is not None}
     stand_ins = []
     for run in runs:
         ctx = by_workflow.get(_workflow_name(run))
-        if ctx is None or run.get("id") == _own_run_id() or run.get("event") != "pull_request":
+        if ctx is None or run.get("event") != "pull_request":
             continue
         url = run.get("html_url", "")
         if run.get("status") in LIVE_RUN_STATUSES:
             stand_ins.append(CheckRun(ctx.name, run["status"], None, None, url))
-        elif (run.get("status") == "completed" and run.get("conclusion") in BROKEN_RUN_CONCLUSIONS
+        elif (run.get("status") == "completed" and run.get("conclusion") not in NO_RESULT_CONCLUSIONS
               and (ctx.name, run.get("check_suite_id")) not in reported):
             stand_ins.append(CheckRun(ctx.name, "completed", "failure", _ts(run.get("updated_at")), url))
     return tuple(stand_ins)
@@ -344,39 +389,14 @@ def read_contexts(gh: GhApi, sha: str) -> tuple[CheckRun, ...]:
     return checks + required_run_stand_ins(runs, checks) + read_statuses(gh, sha)
 ```
 
-`dispatch_request` read `ctx.base_sha` and `pr.base_sha`; until Task 3 deletes it, its body becomes:
+The queue no longer runs inside a gate run (Part D's ticks only send a kick), so `required_run_stand_ins` drops the
+`run.get("id") == _own_run_id()` exclusion; `_own_run_id` stays for the cancel loop in Part C.
 
-```python
-    if ctx.kind == "status":
-        return ctx.workflow, BASE, {"pr": str(pr.number)}
-    return ctx.workflow, pr.head_ref, {}
-```
+- [ ] **Step A4: Run the Part A tests**
 
-Delete the tests that
-existed only for removed fields: `test_dev_tip_is_read_together_with_the_pr_state`,
-`test_an_unknown_dev_tip_dispatches_nothing_and_fails_the_run`,
-`test_rebase_dispatches_with_the_dev_tip_read_alongside_the_new_head`,
-`test_a_queue_dispatched_run_that_finished_green_without_its_check_is_a_failure_not_a_reason_to_redispatch` (with
-its `_queue_run` helper), and in `test_a_hand_started_frontend_diagnostic_is_not_a_run_of_the_required_context` keep
-only the dispatched case (it is now covered for every gate by the new parametrized test; delete it if it duplicates).
-Rewrite `test_a_queue_dispatched_run_that_reported_its_check_is_judged_by_the_check` as
-`test_a_dispatched_runs_check_does_not_count` above (delete the old one).
+Run the command of Step A2. Expected: PASS.
 
-- [ ] **Step 4: Run the read-layer tests**
-
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "seven_required or stand_in or broken or live or other_runs or own_run or queue_tick_failure"`
-Expected: PASS. (The full actions file stays red until Task 4; that is expected.)
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Helper_Scripts/ci/merge_queue.py tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py
-git commit -q -m "ci(merge-queue): only pull_request gate runs count; drop the dispatch-only fields (TASK-<N>)"
-```
-
----
-
-### Task 2: GitHub primitives — approve, re-run, strike, kick (ported)
+#### Part B: GitHub primitives — approve, re-run, strike, kick (ported)
 
 Each function here is ported from tldw_chatbook `scripts/merge_queue.py` at `2716b844e1`; the code below is the port,
 already adapted. Where the chatbook text says "the required check", read "a gate".
@@ -386,7 +406,7 @@ already adapted. Where the chatbook text says "the required check", read "a gate
 - Test: `tldw_Server_API/tests/CI/test_merge_queue_actions.py`
 
 **Interfaces:**
-- Consumes: `GATE_WORKFLOWS`, `LICENSE` (Task 1).
+- Consumes: `GATE_WORKFLOWS`, `LICENSE` (Part A).
 - Produces (exact signatures later tasks call):
   - `class CommentRefused(GhError)`
   - `_transient(exc: GhError) -> bool`
@@ -404,7 +424,13 @@ already adapted. Where the chatbook text says "the required check", read "a gate
   - `_going_again(gh, run_id: int) -> bool`
   - `_rerun(gh, pr, run: dict, failed_only: bool, log, sleep, now: Callable) -> str` (`started`/`pending`/`refused`)
 
-- [ ] **Step 1: Extend the fake and write the failing tests**
+- [ ] **Step B1: Extend the fake and write the failing tests**
+
+Change `FakeGh`'s default `rebase_error_text="rebase refused"` to `rebase_error_text="gh: rebase refused (HTTP 422)"`.
+The ported `_transient` reads an error with no `gh: ` line as a network failure (that is how gh reports one), so the old
+default would now take the transient path in every rebase test; a real refusal always carries `gh: ... (HTTP 4xx)`.
+Never change `_transient` to make a test pass: "an outage never disarms" depends on it (review finding M3). Keep
+`dispatch_refused`, `dispatch_status` and `DISPATCH_ERRORS`: the license-refusal test still uses them.
 
 In `FakeGh.__init__` add keyword arguments `approve_error=None, rerun_error=None, run_status=None, behind_by=None`
 and store them (`self.run_status = run_status or {}`, `self.run_reads = {}`, `self.behind_by = behind_by or {}`). Add a
@@ -475,6 +501,11 @@ def _held(rid, workflow="backend-required.yml", actor="github-actions[bot]", eve
     return {"id": rid, "path": f".github/workflows/{workflow}", "event": event, "status": "completed",
             "conclusion": "action_required", "triggering_actor": {"login": actor},
             "head_repository": {"full_name": repo or mq.REPO}, "html_url": f"https://run/{rid}"}
+
+
+def _six_held(first=31):
+    """The six gate workflows' held runs on a queue-rebased head."""
+    return [_held(first + i, workflow) for i, workflow in enumerate(GATE_FILES)]
 
 
 def _pr_state(**kw):
@@ -634,12 +665,12 @@ def test_comment_once_removes_its_own_copy_when_a_racing_run_posted_first():
     assert ("delete-comment", "50") in gh.calls
 ```
 
-- [ ] **Step 2: Run them to see them fail**
+- [ ] **Step B2: Run them to see them fail**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "approv or strike or evict_comments or disarm or wake or wait_for_run or rerun or comment_once"`
+Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "test_only_the_queues_own_held_gate_runs_are_approvable or test_approve_held_runs_approves_only_the_queues_gate_runs or test_a_transient_approve_error_raises_and_disarms_nobody or test_a_refused_approval_of_a_run_no_longer_held_stands_down or test_a_refused_approval_strikes_then_evicts_after_the_gap or test_a_strike_inside_the_gap_neither_warns_again_nor_evicts or test_evict_comments_first_then_disarms or test_a_failed_disarm_of_a_pr_still_armed_raises_but_an_already_disarmed_pr_is_fine or test_wake_dispatches_the_kick_on_dev_and_nothing_else or test_wait_for_run_returns_once_the_run_completes_and_gives_up_after_the_bound or test_rerun_refusals or test_a_rerun_answered_with_an_error_while_a_racing_run_re_ran_it_stands_down or test_a_held_rerun_is_approved or test_comment_once_removes_its_own_copy_when_a_racing_run_posted_first"`
 Expected: FAIL with `AttributeError` (`_queue_held`, `_strike`, `wake`, ... do not exist).
 
-- [ ] **Step 3: Implement**
+- [ ] **Step B3: Implement**
 
 Replace the constants block from `# Who a run started with GITHUB_TOKEN belongs to` down to `WORKFLOW_REFUSAL = ...`:
 
@@ -660,7 +691,8 @@ KICK_WORKFLOW = "security-required.yml"
 RERUN_REFUSALS = ("HTTP 409", "HTTP 422")
 RERUN_REFUSAL_403_TEXT = "month ago"
 # How long a kick waits for the run that sent it to complete before deciding. The kick's job
-# timeout is 10 minutes; the wait plus one front's worst case must fit.
+# timeout is 15 minutes (as merge-queue.yml's); the wait plus one front's worst case (an UNKNOWN
+# settle, a rebase's polls, re-runs of up to six gates) must fit.
 # ponytail: a run still live after this is a GitHub fault; the kick decides anyway and the next event recovers.
 WAIT_RUN_TRIES = 30
 WAIT_RUN_DELAY_S = 6.0
@@ -677,7 +709,7 @@ STRIKE_GAP = timedelta(minutes=10)
 WORKFLOW_REFUSAL = ("workflow", "permission")
 ```
 
-Keep `BRANCH_REFUSALS` (insert it back after `QUEUE_ACTOR`) until Task 3 deletes it with `_dispatch_contexts`.
+`BRANCH_REFUSALS` goes with that block; its only reader, `_dispatch_contexts`, is deleted in Part C.
 
 Change `COMMENTS_QUERY`'s node selection to `nodes { databaseId body createdAt }`.
 
@@ -689,7 +721,7 @@ class CommentRefused(GhError):
 ```
 
 Replace `comment_once`, `_evict` and `dispatch` with the following block (keep `_best_effort` as it is; leave
-`dispatch_request` and `_dispatch_contexts` for Task 3 to delete). This block is the port; keep its comments:
+`dispatch_request` and `_dispatch_contexts` for Part C to delete). This block is the port; keep its comments:
 
 ```python
 def _transient(exc: GhError) -> bool:
@@ -1056,21 +1088,11 @@ def _rerun(gh: GhApi, pr: PrState, run: dict, failed_only: bool, log: Callable[[
 
 Note `has_comment` above reads with the wall clock only to reuse `marker_age`; it never compares the age.
 
-- [ ] **Step 4: Run the primitive tests**
+- [ ] **Step B4: Run the Part B tests**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "approv or strike or evict_comments or disarm or wake or wait_for_run or rerun or comment_once"`
-Expected: PASS.
+Run the command of Step B2. Expected: PASS.
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add Helper_Scripts/ci/merge_queue.py tldw_Server_API/tests/CI/test_merge_queue_actions.py
-git commit -q -m "ci(merge-queue): approve, re-run, strike and kick primitives ported from the chatbook queue (TASK-<N>)"
-```
-
----
-
-### Task 3: The rebase path
+#### Part C: The rebase path
 
 Spec section 6, `BEHIND` row: rebase, wait for the new head, dispatch the license gate, approve the six held gate runs,
 delete the other held runs, cancel the old head's live runs, comment once.
@@ -1081,17 +1103,13 @@ delete the other held runs, cancel the old head's live runs, comment once.
 - Test: `tldw_Server_API/tests/CI/test_merge_queue_actions.py`
 
 **Interfaces:**
-- Consumes: Task 2 primitives.
+- Consumes: Part B primitives.
 - Produces: `_rebase(gh, pr, log, sleep, now: Callable[[], datetime]) -> bool`;
   `cleanup_approval_runs(gh, pr, log) -> None` (never deletes a gate's held run).
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step C1: Write the failing tests**
 
 ```python
-def _six_held(first=31):
-    return [_held(first + i, workflow) for i, workflow in enumerate(GATE_FILES)]
-
-
 def test_rebase_dispatches_the_license_then_approves_exactly_the_six_gates_then_cleans_up_then_cancels():
     held, ci = _six_held(), _held(40, "ci.yml")
     old_live, queue_run = _run_of("backend-required.yml", 11), _run_of("merge-queue.yml", 12)
@@ -1168,31 +1186,30 @@ def test_cleanup_deletes_only_the_queues_non_gate_held_runs():
     gh = FakeGh([_node(1)], runs={OLD: runs})
     mq.cleanup_approval_runs(gh, _pr_state(), lambda m: None)
     assert gh.calls == [("delete", "40")]
+
+
+def test_a_failure_after_the_rebase_took_effect_wakes_a_kick_and_fails_the_run():
+    """Review improvement I5: the new head's gate runs are held, and nothing else would wake the queue
+    to approve them if this run dies after the branch moved."""
+    gh = FakeGh([_node(1)], dispatch_refused={LICENSE_GATE}, dispatch_status=502)
+    with pytest.raises(mq.GhError):
+        _run(gh)
+    assert [c[1] for c in gh.dispatched()] == [LICENSE_GATE, "security-required.yml"]
+    assert not any(c[0] in ("disarm", "comment") for c in gh.calls)
 ```
 
-Delete these tests (their behaviour is gone): `test_rebase_dispatches_only_after_the_new_head_appears`,
-`test_rebase_whose_head_never_moves_dispatches_nothing`, `test_rebase_dispatches_before_cancelling_and_spares_the_queue`,
-`_as_tick_of`, `test_a_tick_dispatches_its_own_workflow_last_after_everything_else`,
-`test_a_tick_retrying_its_own_gate_comments_before_the_dispatch_that_cancels_it`,
-`test_outside_a_gate_run_the_comment_follows_the_dispatches`, `test_rebase_deletes_the_new_heads_empty_approval_runs`,
-`test_cleanup_deletes_only_bot_approval_runs`, `test_repeated_rebase_failure_evicts`,
-`test_a_dispatch_refused_after_a_rebase_evicts_on_the_new_head`. Rewrite
-`test_on_mode_rebases_front_only_and_starts_exactly_the_seven_contexts` to assert the front alone is rebased (PR 2 gets
-no call) and the license dispatch plus six approvals happen, using `runs={NEW: _six_held()}`. In
-`test_rebase_refused_on_conflict_evicts`, `test_first_rebase_failure_warns_without_evicting` and
-`test_any_other_rebase_refusal_still_gets_one_retry`, change expected call orders from disarm-then-comment to
-comment-then-disarm; the "one retry" test now expects a warning comment and no eviction inside the gap.
+Existing tests this part breaks are fixed in Part E, from its list.
 
-- [ ] **Step 2: Run them to see them fail**
+- [ ] **Step C2: Run them to see them fail**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "rebase or cleanup"`
+Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "test_rebase_dispatches_the_license_then_approves_exactly_the_six_gates_then_cleans_up_then_cancels or test_a_rebase_whose_gates_are_not_all_held_in_time_wakes_a_kick or test_rebase_approves_only_after_the_new_head_appears or test_a_rebase_whose_head_never_moves_strikes_and_wakes or test_a_transient_rebase_error_with_the_head_moved_stands_down_and_with_it_unmoved_fails_the_run or test_repeated_rebase_failure_evicts_only_after_the_strike_gap or test_cleanup_deletes_only_the_queues_non_gate_held_runs or test_a_failure_after_the_rebase_took_effect_wakes_a_kick_and_fails_the_run"`
 Expected: FAIL (the old `_rebase` dispatches; `cleanup_approval_runs` deletes gate runs).
 
-- [ ] **Step 3: Implement**
+- [ ] **Step C3: Implement**
 
-Delete `_dispatch_contexts`, `dispatch_request` and `BRANCH_REFUSALS`. `apply`'s dispatch/retry branch still calls
-`_dispatch_contexts` until Task 4 replaces `apply`, so the dispatch-era tests stay red between Task 3 and Task 4; that is
-expected. Replace `_rebase` and `cleanup_approval_runs`; add the two helpers:
+Delete `_dispatch_contexts`, `dispatch_request` and `_host_workflow` (it existed only for the "host workflow last" rule,
+which goes with the dispatches; review finding m5). `apply`'s dispatch/retry branch still calls `_dispatch_contexts`
+until Part D replaces `apply`. Replace `_rebase` and `cleanup_approval_runs`; add the two helpers:
 
 ```python
 def _wake_if_moved(gh: GhApi, pr: PrState, sleep: Callable[[float], None]) -> bool:
@@ -1292,12 +1309,18 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
             Action("evict", "rebase onto dev was accepted but the branch never moved, twice at least 10 minutes apart",
                    slug="rebase-unmoved"), True, log, now,
         )
-    old_runs = runs_on(gh, pr.head_sha)
-    # Spec 4.4: the license status first, so each gate's await_license finds it (when
-    # LICENSE_FIRST_CI_ENABLED is true). Then the gates: approving their held runs is what makes
-    # their checks count (S4). Then the other held runs go (D1), then the old head's live runs.
-    dispatch_license(gh, rebased, log)
-    approved = _approve_gates(gh, rebased.head_sha, log, sleep)
+    try:
+        old_runs = runs_on(gh, pr.head_sha)
+        # Spec 4.4: the license status first, so each gate's await_license finds it (when
+        # LICENSE_FIRST_CI_ENABLED is true). Then the gates: approving their held runs is what makes
+        # their checks count (S4). Then the other held runs go (D1), then the old head's live runs.
+        dispatch_license(gh, rebased, log)
+        approved = _approve_gates(gh, rebased.head_sha, log, sleep)
+    except GhError:
+        # The branch has moved and its gate runs are held: nothing else would wake the queue to
+        # approve them. The kick finds an up-to-date head and approves, so this cannot chain.
+        _wake_best_effort(gh, log)
+        raise
     cleanup_approval_runs(gh, rebased, log)
     for run in old_runs:
         if run.get("status") not in LIVE_RUN_STATUSES:
@@ -1341,24 +1364,14 @@ def cleanup_approval_runs(gh: GhApi, pr: PrState, log: Callable[[str], None]) ->
                      lambda rid=run["id"]: gh.rest("DELETE", f"repos/{REPO}/actions/runs/{rid}"))
 ```
 
-In `apply`, change the rebase branch to `return _rebase(gh, pr, log, sleep, now)` (Task 4 changes `apply`'s `now` to a
+In `apply`, change the rebase branch to `return _rebase(gh, pr, log, sleep, now)` (Part D changes `apply`'s `now` to a
 callable; until then pass `lambda: now`).
 
-- [ ] **Step 4: Run the rebase tests**
+- [ ] **Step C4: Run the Part C tests**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "rebase or cleanup"`
-Expected: PASS.
+Run the command of Step C2. Expected: PASS.
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add Helper_Scripts/ci/merge_queue.py tldw_Server_API/tests/CI/test_merge_queue_actions.py
-git commit -q -m "ci(merge-queue): a rebase approves the six held gate runs and dispatches only the license (TASK-<N>)"
-```
-
----
-
-### Task 4: Start, retry, the decision step and the run loop
+#### Part D: Start, retry, the decision step and the run loop
 
 **Files:**
 - Modify: `Helper_Scripts/ci/merge_queue.py` (`Action`, `decide_front`, `apply`, `run`, `main`; new `_gate_runs`,
@@ -1366,13 +1379,13 @@ git commit -q -m "ci(merge-queue): a rebase approves the six held gate runs and 
 - Test: `tldw_Server_API/tests/CI/test_merge_queue_rules.py`, `tldw_Server_API/tests/CI/test_merge_queue_actions.py`
 
 **Interfaces:**
-- Consumes: Tasks 1-3.
+- Consumes: Parts A-C.
 - Produces: action kinds `wait`, `rebase`, `start`, `retry`, `evict` (slug `young` on the young-head wait);
   `apply(gh, pr, action, log, sleep, now: Callable[[], datetime]) -> bool`;
   `run(gh, mode, now=..., sleep=..., log=..., wait_run: int | None = None) -> list[tuple[int, Action]]`;
   `main()` reads `WAIT_RUN` (digits only).
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step D1: Write the failing tests**
 
 In `test_merge_queue_rules.py`, in `test_decide_front_table` change every expected `"dispatch"` to `"start"` and add
 three rows (with ids `future-dated-head-starts`, `slightly-ahead-head-waits` and the existing young row keeps `wait`):
@@ -1408,13 +1421,33 @@ def test_decide_never_approves_a_non_gate_held_run():
     assert ("approve", "40") not in gh.calls
 
 
-def test_start_re_runs_the_newest_cancelled_pull_request_run_of_a_missing_gate_in_full():
-    cancelled = _run_of("e2e-required.yml", 70, "completed", "cancelled", created_at="2026-10-04T11:00:00Z")
-    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [cancelled]}, run_status={70: ["in_progress"]},
+def test_start_restarts_a_cancelled_run_of_a_missing_gate_once_then_evicts():
+    """Review finding m1: a cancelled run says nothing about the PR, so it is restarted in full, once per
+    gate per head; a second cancellation on the same head evicts instead of restarting forever."""
+    def cancelled():
+        return _run_of("e2e-required.yml", 70, "completed", "cancelled", created_at="2026-10-04T11:00:00Z")
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [cancelled()]}, run_status={70: ["in_progress"]},
                 **_green({E2E: None}))
     assert _run(gh)[0][1].kind == "start"
     assert ("rerun", "70", "all") in gh.calls
+    assert gh.calls[-1][0] == "comment" and f"merge-queue:restart-{E2E}:{OLD}" in gh.calls[-1][2]
     assert not gh.dispatched(), "a gate is never dispatched"
+    again = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [cancelled()]},
+                   comments={1: [f"<!-- merge-queue:restart-{E2E}:{OLD} -->\nx"]}, **_green({E2E: None}))
+    _run(again)
+    assert [c[0] for c in again.calls] == ["comment", "disarm"]
+    assert f"merge-queue:evict-rerun:{OLD}" in again.calls[0][2]
+
+
+def test_start_restarts_a_run_whose_gate_job_was_cancelled_whatever_the_run_concluded():
+    """Review point n1: a run can conclude `failure` (another job failed) while its gate job was
+    cancelled; the context is missing, and the run is restarted once like a cancelled run."""
+    run = _run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)
+    checks = _checks({E2E: None}) + [_check(E2E, "cancelled", suite=700)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, checks={OLD: checks},
+                statuses={OLD: [_status()]}, run_status={70: ["in_progress"]})
+    assert _run(gh)[0][1].kind == "start"
+    assert ("rerun", "70", "all") in gh.calls
 
 
 def test_start_approves_a_held_gate_run_the_decide_step_could_not_approve():
@@ -1460,6 +1493,54 @@ def test_a_broken_runs_second_retry_on_the_same_head_evicts():
     _run(gh)
     assert [c[0] for c in gh.calls] == ["comment", "disarm"]
     assert f"merge-queue:evict-failed-twice:{OLD}" in gh.calls[0][2]
+
+
+def test_a_green_gate_run_without_its_check_is_retried_once_then_evicted():
+    """Review finding M2: a PR whose own workflow copy renamed its gate job finishes green with no check.
+    That is one failure: re-run once in full, then evicted, never re-run on every wake."""
+    def silent():
+        return _run_of("e2e-required.yml", 70, "completed", "success", check_suite_id=700)
+    first = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [silent()]}, run_status={70: ["in_progress"]},
+                   **_green({E2E: None}))
+    assert _run(first)[0][1].kind == "retry"
+    assert ("rerun", "70", "all") in first.calls
+    marker = f"<!-- merge-queue:retry-{E2E}:{OLD} -->\nx"
+    second = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [silent()]}, comments={1: [marker]},
+                    **_green({E2E: None}))
+    _run(second)
+    assert [c[0] for c in second.calls] == ["comment", "disarm"]
+    assert f"merge-queue:evict-failed-twice:{OLD}" in second.calls[0][2]
+
+
+def test_a_retry_attempt_that_ends_cancelled_is_restarted_once_then_evicted():
+    """Review finding m1: a retry that keeps ending cancelled (a gate hitting its timeout) must not be
+    re-run on every wake."""
+    def state(comments):
+        run = _run_of("e2e-required.yml", 70, "completed", "cancelled", check_suite_id=700)
+        checks = _checks({E2E: None}) + [_check(E2E, "failure", suite=700)]
+        return FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, checks={OLD: checks},
+                      statuses={OLD: [_status()]}, comments={1: comments}, run_status={70: ["in_progress"]})
+    retried = f"<!-- merge-queue:retry-{E2E}:{OLD} -->\nx"
+    first = state([retried])
+    _run(first)
+    assert ("rerun", "70", "all") in first.calls
+    assert f"merge-queue:restart-{E2E}:{OLD}" in first.calls[-1][2]
+    second = state([retried, f"<!-- merge-queue:restart-{E2E}:{OLD} -->\ny"])
+    second.run_status = {}
+    _run(second)
+    assert [c[0] for c in second.calls] == ["comment", "disarm"]
+    assert f"merge-queue:evict-rerun:{OLD}" in second.calls[0][2]
+
+
+def test_a_failed_license_is_dispatched_again_before_any_gate_is_re_run():
+    """Review finding m2: with LICENSE_FIRST_CI_ENABLED a gate waits for the license status, so the
+    license goes first on a retry as it does on a start."""
+    failed = _run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)
+    checks = _checks({E2E: None}) + [_check(E2E, "failure", suite=700)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [failed]}, checks={OLD: checks},
+                statuses={OLD: [_status("failure")]}, run_status={70: ["in_progress"]})
+    assert _run(gh)[0][1].contexts == (E2E, LICENSE)
+    assert [c[0] for c in gh.calls if c[0] in ("dispatch", "rerun")] == ["dispatch", "rerun"]
 
 
 def test_a_failed_gate_whose_run_is_still_live_is_left_for_its_kick():
@@ -1514,6 +1595,14 @@ def test_an_old_green_head_up_to_date_with_dev_is_still_evicted_as_stuck():
     assert (decision.kind, decision.slug) == ("evict", "stuck")
 
 
+def test_a_fresh_green_head_that_dev_has_moved_past_is_rebased_at_once():
+    """Review finding m3: the stale merge state also hides a head whose green runs are minutes old;
+    auto-merge cannot fire on a head that is behind, so waiting would hold the line."""
+    gh = FakeGh([_node(1, state="CLEAN")], behind_by={OLD: 3}, **_green())
+    decision = _run(gh)[0][1]
+    assert decision.kind == "rebase" and gh.calls[0] == ("rebase", "PR_1", OLD)
+
+
 def test_a_failed_behind_check_never_disarms():
     gh = FakeGh([_node(1, state="CLEAN")], behind_by={OLD: mq.GhError("gh: Server Error (HTTP 502)")}, **_old_green())
     with pytest.raises(mq.GhError):
@@ -1551,33 +1640,14 @@ def test_main_passes_only_a_numeric_wait_run(monkeypatch):
         assert seen.get("wait") == expected, value
 ```
 
-Delete or rewrite the remaining dispatch-era action tests:
+Existing tests this part breaks are fixed in Part E, from its list.
 
-| Test | Do |
-|---|---|
-| `test_dispatch_requests_per_context` | delete |
-| `test_no_run_at_all_dispatches_all_seven_with_their_inputs` | delete (covered by the no-run strike test above) |
-| `test_missing_contexts_only_are_dispatched` | rewrite: missing E2E with a cancelled e2e run is re-run; nothing dispatched |
-| `test_first_failure_retries_only_the_failed_contexts` | delete (covered above) |
-| `test_a_failed_license_status_retries_only_the_license_gate_on_dev` | keep; expect comment kind `retry-frontend-license-policy/trusted/dev` |
-| `test_a_failure_is_retried_while_other_contexts_are_still_running` | rewrite with a failed e2e run (re-run) while backend is live |
-| `test_a_second_retry_on_the_same_head_dispatches_without_a_second_comment` | delete (covered by the broken-run second-retry test) |
-| `test_disarm_failure_still_comments` | delete (covered in Task 2) |
-| `test_a_hand_started_frontend_diagnostic_is_not_a_run_of_the_required_context`, `test_two_failed_hand_diagnostics_do_not_evict_a_green_pr` | keep with `event="workflow_dispatch"` explicit; expectation unchanged (ignored) |
-| `test_a_run_that_appeared_since_the_decision_stops_only_that_contexts_dispatch` | rewrite: a run that appeared for E2E since the decision means no rerun/approve for E2E |
-| `test_nothing_is_dispatched_or_said_when_every_targeted_context_already_started` | keep, with `start` |
-| `test_a_dispatch_refused_by_the_pr_branch_evicts_and_the_line_moves_on` | delete |
-| `test_a_github_side_dispatch_error_fails_the_run_and_disarms_nobody` | rewrite for a 502 on approve and on rerun |
-| `test_armed_fork_gets_one_comment_and_is_never_queued`, `test_bot_authored_prs_are_never_queued` | keep; text from the new `UNQUEUED_NOTES` |
+- [ ] **Step D2: Run them to see them fail**
 
-Every test that asserted an eviction's call order `disarm, comment` now asserts `comment, disarm`.
+Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "test_a_young_head_wait_is_marked_young or test_decide_front_table or test_decide_approves_held_gate_runs_first_so_they_read_as_running or test_decide_never_approves_a_non_gate_held_run or test_start_restarts_a_cancelled_run_of_a_missing_gate_once_then_evicts or test_start_approves_a_held_gate_run_the_decide_step_could_not_approve or test_start_restarts_a_run_whose_gate_job_was_cancelled_whatever_the_run_concluded or test_start_dispatches_a_missing_license_on_dev_and_nothing_for_the_gates_that_have_runs or test_start_with_no_run_at_all_warns_then_evicts_after_the_gap or test_first_failure_re_runs_the_failed_jobs_of_that_gates_run_and_comments_once or test_a_broken_runs_second_retry_on_the_same_head_evicts or test_a_green_gate_run_without_its_check_is_retried_once_then_evicted or test_a_retry_attempt_that_ends_cancelled_is_restarted_once_then_evicted or test_a_failed_license_is_dispatched_again_before_any_gate_is_re_run or test_a_failed_gate_whose_run_is_still_live_is_left_for_its_kick or test_a_refused_rerun_evicts or test_a_transient_rerun_error_fails_the_run_and_disarms_nobody or test_an_old_green_head_that_dev_has_moved_past_is_rebased_not_evicted_as_stuck or test_an_old_green_head_up_to_date_with_dev_is_still_evicted_as_stuck or test_a_fresh_green_head_that_dev_has_moved_past_is_rebased_at_once or test_a_failed_behind_check_never_disarms or test_a_kick_waits_for_its_run_before_reading_the_line or test_a_young_head_is_waited_out_once_then_started or test_main_passes_only_a_numeric_wait_run"`
+Expected: FAIL (`start` kind missing, `_start` missing, `wait_run` unknown).
 
-- [ ] **Step 2: Run them to see them fail**
-
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py`
-Expected: FAIL on the new tests (`start` kind missing, `_start` missing, `wait_run` unknown).
-
-- [ ] **Step 3: Implement**
+- [ ] **Step D3: Implement**
 
 `Action`: docstring kinds become `wait`, `rebase`, `start`, `retry` or `evict`; `slug` doc adds "`young` on the
 young-head wait".
@@ -1594,6 +1664,12 @@ young-head wait".
         return Action("start", f"no counted run on the up-to-date head: {', '.join(missing)}", contexts=missing)
 ```
 
+and give the green wait row a slug, so `_decide` can check it against `dev` (review finding m3):
+
+```python
+        return Action("wait", "green; auto-merge should fire", slug="green")
+```
+
 Add after `cleanup_approval_runs`:
 
 ```python
@@ -1603,13 +1679,45 @@ def _gate_runs(gh: GhApi, sha: str) -> list[dict]:
     return sorted(runs, key=lambda r: r.get("created_at") or "", reverse=True)
 
 
+def _restart_cancelled(gh: GhApi, pr: PrState, ctx: Context, run: dict, links: tuple[str, ...],
+                       log: Callable[[str], None], sleep: Callable[[float], None], now: Callable[[], datetime]) -> bool:
+    """Re-run a cancelled gate run in full, once per gate per head (the `restart-<context>` marker).
+
+    A cancelled run says nothing about the PR (a timeout, a person, a superseded run), so it is
+    restarted rather than counted as a failure. A second cancellation on the same head evicts:
+    a gate that keeps being cancelled, such as one that hits its job timeout, would otherwise be
+    restarted on every wake and hold the line forever (review finding m1).
+
+    Returns:
+        True if the PR was evicted.
+    """
+    kind = f"restart-{ctx.name}"
+    if has_comment(gh, pr.number, kind, pr.head_sha):
+        if _going_again(gh, run["id"]):
+            log(f"  #{pr.number}: run {run['id']} was restarted by a racing queue run; standing down")
+            return False
+        return _evict(gh, pr, Action("evict", f"{ctx.name} was cancelled again after the queue restarted it",
+                                     links, "rerun"), log)
+    outcome = _rerun(gh, pr, run, False, log, sleep, now)
+    if outcome == "refused":
+        return _evict(gh, pr, Action("evict", f"GitHub refused to restart the cancelled {ctx.name} run; push a "
+                                     "commit, or close and reopen the PR", links, "no-run"), log)
+    comment_once(gh, pr.number, kind, pr.head_sha,
+                 f"Merge queue: {ctx.name}'s run on `{pr.head_sha[:10]}` was cancelled; restarting it once.", log)
+    if outcome == "pending":
+        _wake_best_effort(gh, log)
+    return False
+
+
 def _start(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], None],
            sleep: Callable[[float], None], now: Callable[[], datetime]) -> bool:
     """Get the named missing contexts going on an up-to-date head (spec 4.1, start).
 
-    The license is dispatched on dev. A gate's held run is approved; with none, its newest
-    completed pull_request run (cancelled, or finished without reporting its check) is re-run in
-    full. A dispatch would not count (S5), so a gate with neither gets a `no-run` strike. It looks
+    The license is dispatched on dev. A gate's held run is approved; with none, its newest completed
+    pull_request run (cancelled, or whose gate job was cancelled) is restarted once (`_restart_cancelled`). (A run that finished
+    without reporting its check is a failure stand-in, so its context is failed, not missing, and
+    goes through `_retry_gate`.) A dispatch would not count (S5), so a gate with neither gets a
+    `no-run` strike. It looks
     again for up to HELD_RUN_POLLS x HELD_RUN_POLL_S first: a head's age is its commit date, not
     its push, so its runs may not be listed yet.
 
@@ -1639,18 +1747,14 @@ def _start(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], 
                 log(f"  #{pr.number}: a {name} run appeared on {pr.head_sha[:10]}; standing down for it")
                 del pending[workflow]
                 continue
-            # A missing context's completed runs were cancelled or never reported its check (a failed
-            # or green one would have made it failed or passed). A run held for someone else is theirs.
+            # A missing context's completed runs ended with no counted result for it: the run, or its
+            # gate job, was cancelled (any other completed run without the check is a failure stand-in,
+            # Part A; review point n1). A run held for someone else is theirs, never ours to touch.
             redo = next((r for r in mine if r.get("status") == "completed" and not _is_held(r)), None)
             if redo is None:
                 continue
-            outcome = _rerun(gh, pr, redo, False, log, sleep, now)
-            if outcome == "refused":
-                return _evict(gh, pr, Action(
-                    "evict", f"GitHub refused to re-run the {name} run, and there is no other run to start; "
-                    "push a commit, or close and reopen the PR", slug="no-run"), log)
-            if outcome == "pending":
-                _wake_best_effort(gh, log)
+            if _restart_cancelled(gh, pr, BY_NAME[name], redo, (), log, sleep, now):
+                return True
             del pending[workflow]
     if not pending:
         return False
@@ -1673,7 +1777,8 @@ def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], lo
     GitHub only re-runs a completed run; a run still live is left for that kick. A run held again
     (its re-run's approval failed) is approved. One retry per gate per head: a run that failed
     without reporting its check keeps its run id when re-run, so its failures never add up to two;
-    the `retry-<context>` marker caps it instead. A cancelled retry is re-run without counting.
+    the `retry-<context>` marker caps it instead. A retry attempt that ended cancelled is restarted
+    once (`_restart_cancelled`), not counted.
 
     Returns:
         True if the PR was evicted.
@@ -1684,8 +1789,11 @@ def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], lo
     suite = failed[-1].suite_id if failed else None
     runs = [r for r in _gate_runs(gh, pr.head_sha) if _workflow_name(r) == ctx.workflow]
     run = next((r for r in runs if suite is not None and r.get("check_suite_id") == suite), None)
-    if run is None:  # a broken run's stand-in: its failed run reported no check
-        run = next((r for r in runs if r.get("conclusion") in BROKEN_RUN_CONCLUSIONS), None)
+    if run is None:  # a stand-in failure: a completed run that reported no check (Part A)
+        reported = {c.suite_id for c in pr.checks if c.context == ctx.name and c.suite_id is not None}
+        run = next((r for r in runs if r.get("status") == "completed"
+                    and r.get("conclusion") not in NO_RESULT_CONCLUSIONS
+                    and r.get("check_suite_id") not in reported), None)
     if run is None:
         return _evict(gh, pr, Action("evict", f"{ctx.name} failed and its run cannot be found to re-run",
                                      links, "rerun"), log)
@@ -1694,14 +1802,18 @@ def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], lo
         return False
     if _queue_held(run):
         return _approve_strictly(gh, pr, run, log, now)
-    cancelled = run.get("conclusion") == "cancelled"
+    if run.get("conclusion") == "cancelled":
+        return _restart_cancelled(gh, pr, ctx, run, links, log, sleep, now)
     kind = f"retry-{ctx.name}"
-    if not cancelled and has_comment(gh, pr.number, kind, pr.head_sha):
+    if has_comment(gh, pr.number, kind, pr.head_sha):
         if _going_again(gh, run["id"]):
             log(f"  #{pr.number}: run {run['id']} was re-run by a racing queue run; standing down")
             return False
-        return _evict(gh, pr, Action("evict", f"{ctx.name} failed again after its retry", links, "failed-twice"), log)
-    outcome = _rerun(gh, pr, run, suite is not None and not cancelled, log, sleep, now)
+        why = f"{ctx.name} failed again after its retry"
+        if suite is None:  # review point n4: the run reported no check at all
+            why += " (its run ended without reporting the check; was the gate job renamed or removed?)"
+        return _evict(gh, pr, Action("evict", why, links, "failed-twice"), log)
+    outcome = _rerun(gh, pr, run, suite is not None, log, sleep, now)
     if outcome == "refused":
         return _evict(gh, pr, Action("evict", f"{ctx.name} failed once and GitHub refused to re-run it",
                                      links, "rerun"), log)
@@ -1721,7 +1833,10 @@ def _retry(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None], s
         True if the PR was evicted.
     """
     listed = "".join(f"\n- {u}" for u in action.links)
-    for name in action.contexts:
+    # The license first, as on a start (spec 4.4): with LICENSE_FIRST_CI_ENABLED a gate's
+    # await_license waits for it. (Re-enabling license-first also needs a gate the license refused
+    # to be re-run in full: a failed-jobs re-run keeps the old await_license verdict.)
+    for name in sorted(action.contexts, key=lambda n: BY_NAME[n].kind != "status"):
         ctx = BY_NAME[name]
         if ctx.kind == "status":
             dispatch_license(gh, pr, log)
@@ -1793,9 +1908,10 @@ def _decide(gh: GhApi, pr: PrState, mode: str, now: Callable[[], datetime],
         approve_held_runs(gh, pr.head_sha, log)
     pr = replace(pr, checks=read_contexts(gh, pr.head_sha))
     action = decide_front(pr, now())
-    if action.slug == "stuck":
-        # Right after a merge the next PR's merge state can still read up to date while its green
-        # runs are hours old (tldw_chatbook #3070, TASK-34948). Ask GitHub before evicting.
+    if action.slug in ("stuck", "green"):
+        # Right after a merge the next PR's merge state can still read up to date (tldw_chatbook
+        # #3070, TASK-34948). Auto-merge cannot fire on a head that is behind, so a green head is
+        # checked against dev before the queue waits on it or evicts it as stuck. One GET.
         compare = gh.rest("GET", f"repos/{REPO}/compare/{BASE}...{pr.head_sha}?per_page=1") or {}
         if compare.get("behind_by", 0) > 0:
             action = Action("rebase", "behind dev (its merge state had not caught up yet)", contexts=ALL_CONTEXTS)
@@ -1916,27 +2032,254 @@ UNQUEUED_NOTES = {
 Update the module docstring: "Runs inside GitHub Actions with the built-in GITHUB_TOKEN (merge-queue.yml, and the
 queue-kick job of security-required.yml that a failed gate's queue-tick dispatches)." Point "Spec:" at both specs.
 
-- [ ] **Step 4: Run the whole queue test set**
+- [ ] **Step D4: Run the Part D tests**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py`
-Expected: PASS, except `test_main_drives_the_real_gh_argv_end_to_end` and `test_gh_argument_typing` (rewritten in
-Task 5).
+Run the command of Step D2. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+#### Part E: Every existing test the change breaks, the dead code, and the gate
+
+The list below is complete for `test_merge_queue_rules.py` and `test_merge_queue_actions.py`: it is the set of tests
+that failed when the review applied Parts A-D to a copy of the repository (2026-10-14), plus the dispatch-era tests
+whose behaviour is gone. Nothing outside it may be edited to make the gate pass; if another test fails, stop and
+report it.
+
+- [ ] **Step E1: Delete the tests whose behaviour is gone**
+
+From `test_merge_queue_actions.py` delete: `test_dev_tip_is_read_together_with_the_pr_state`,
+`test_dispatch_requests_per_context`, `test_no_run_at_all_dispatches_all_seven_with_their_inputs`,
+`test_first_failure_retries_only_the_failed_contexts`, `test_an_unknown_dev_tip_dispatches_nothing_and_fails_the_run`,
+`test_rebase_dispatches_with_the_dev_tip_read_alongside_the_new_head`, `test_repeated_rebase_failure_evicts`,
+`test_rebase_dispatches_only_after_the_new_head_appears`, `test_rebase_whose_head_never_moves_dispatches_nothing`,
+`test_rebase_dispatches_before_cancelling_and_spares_the_queue`, `_as_tick_of`,
+`test_a_tick_dispatches_its_own_workflow_last_after_everything_else`,
+`test_a_tick_retrying_its_own_gate_comments_before_the_dispatch_that_cancels_it`,
+`test_outside_a_gate_run_the_comment_follows_the_dispatches`, `test_rebase_deletes_the_new_heads_empty_approval_runs`,
+`test_a_second_retry_on_the_same_head_dispatches_without_a_second_comment`, `test_disarm_failure_still_comments`,
+`test_a_hand_started_frontend_diagnostic_is_not_a_run_of_the_required_context` (covered for every gate by
+`test_a_dispatched_gate_run_is_ignored_whoever_started_it`), `test_own_run_is_not_counted_as_live` (the queue no
+longer runs inside a gate run), `_queue_run` together with BOTH of its users,
+`test_a_queue_dispatched_run_that_finished_green_without_its_check_is_a_failure_not_a_reason_to_redispatch` and the
+parametrized `test_other_runs_without_the_check_are_not_failures` (its decorator calls `_queue_run` at import, so
+deleting the helper alone breaks collection of the whole file; it is replaced below),
+`test_a_queue_dispatched_run_that_reported_its_check_is_judged_by_the_check`,
+`test_a_dispatch_refused_by_the_pr_branch_evicts_and_the_line_moves_on`,
+`test_a_dispatch_refused_after_a_rebase_evicts_on_the_new_head`, the helpers `_dispatch_call` and `ALL_SEVEN`, and
+the constant `DEV` (nothing uses it afterwards). Keep `DISPATCH_ERRORS` and FakeGh's `dispatch_refused` / `dispatch_status`.
+
+- [ ] **Step E2: Change these tests, exactly as given**
+
+1. `test_the_license_context_is_read_from_the_commit_status_history`: in its parametrize list, the three rows that
+   expect `"dispatch"` (ids `no-status-is-missing`, `a-pending-older-than-15-minutes-is-a-lost-run`,
+   `other-contexts-are-ignored`) expect `"start"`.
+2. `test_a_live_run_of_another_workflow_is_not_a_required_context`: `("dispatch", (E2E,))` becomes `("start", (E2E,))`.
+3. `test_a_pr_disarmed_since_the_decision_gets_no_checks`: `["dispatch"]` becomes `["start"]`.
+4. `test_nothing_is_dispatched_or_said_when_every_targeted_context_already_started`: ids `["start", "retry"]`, and
+   `in ("dispatch", "retry")` becomes `in ("start", "retry")`.
+5. `test_run_that_failed_without_reporting_its_check_counts_as_a_failure_of_that_context`: replace
+   `assert once.dispatched() == [_dispatch_call("security-required")]` with
+   `assert ("rerun", "31", "all") in once.calls and not once.dispatched()`; in its docstring, "which would dispatch
+   forever" becomes "which would be started forever".
+6. `test_two_failed_hand_diagnostics_do_not_evict_a_green_pr`: add `event="workflow_dispatch"` to its `_run_of(...)`.
+7. `test_a_failed_license_status_retries_only_the_license_gate_on_dev`: its last assertion becomes
+
+   ```python
+    assert comment[2] == (f"<!-- merge-queue:retry-{LICENSE}:{OLD} -->\nMerge queue: {LICENSE} failed once on "
+                          f"`{OLD[:10]}`; dispatched the license gate on `dev` again.")
+   ```
+8. `test_evicted_front_hands_over_in_the_same_run`: `assert gh.calls[0] == ("disarm", "PR_1")` becomes
+   `assert [c[0] for c in gh.calls[:2]] == ["comment", "disarm"]`.
+9. `test_a_rebase_across_workflow_changes_evicts_at_once_with_the_hand_rebase_steps`:
+   `assert gh.calls[1] == ("disarm", "PR_1")` becomes `assert gh.calls[1][0] == "comment" and gh.calls[2] == ("disarm", "PR_1")`.
+10. `test_first_rebase_failure_warns_without_evicting`: its last assertion becomes
+    `assert "rebasing onto dev failed (gh: rebase refused (HTTP 422)); will retry" in body`.
+11. `test_any_other_rebase_refusal_still_gets_one_retry`: `"will retry once"` becomes `"will retry"`.
+12. `test_a_refused_license_dispatch_fails_the_run_and_disarms_nobody`: its last assertion becomes
+    `assert [c[1] for c in gh.dispatched()] == ([LICENSE_GATE, "security-required.yml"] if state == "BEHIND" else [LICENSE_GATE])`
+    (after a rebase took effect, a failed run wakes a kick: Part C).
+13. The autouse fixture `_no_real_run_id`: its docstring becomes "Isolate GITHUB_RUN_ID and GITHUB_WORKFLOW_REF from
+    the CI run executing these tests; a rebase never cancels the run executing the queue."
+14. Replace these five tests with the code below: `test_missing_contexts_only_are_dispatched`,
+    `test_a_failure_is_retried_while_other_contexts_are_still_running`,
+    `test_on_mode_rebases_front_only_and_starts_exactly_the_seven_contexts`,
+    `test_a_run_that_appeared_since_the_decision_stops_only_that_contexts_dispatch`,
+    `test_a_github_side_dispatch_error_fails_the_run_and_disarms_nobody`; and add the replacement for
+    `test_other_runs_without_the_check_are_not_failures`:
+
+```python
+def test_missing_contexts_are_started_without_any_gate_dispatch():
+    cancelled = _run_of("container-build-check.yml", 71, "completed", "cancelled")
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [cancelled]}, run_status={71: ["in_progress"]},
+                **_green({CONTAINER: "cancelled"}, statuses=[]))
+    decision = _run(gh)[0][1]
+    assert (decision.kind, decision.contexts) == ("start", (CONTAINER, LICENSE))
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+    assert ("rerun", "71", "all") in gh.calls
+
+
+def test_a_failure_is_retried_while_other_contexts_are_still_running():
+    """Only a failed gate wakes the queue: waiting for the others would lose the retry."""
+    failed = _run_of("backend-required.yml", 60, "completed", "failure", check_suite_id=600)
+    checks = _checks({BACKEND: None, E2E: None}) + [_check(BACKEND, "failure", suite=600)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [failed, _run_of("e2e-required.yml", 70)]},
+                checks={OLD: checks}, statuses={OLD: [_status()]}, run_status={60: ["in_progress"]})
+    decision = _run(gh)[0][1]
+    assert (decision.kind, decision.contexts) == ("retry", (BACKEND,))
+    assert ("rerun", "60", "failed") in gh.calls and not gh.dispatched()
+
+
+def test_on_mode_rebases_the_front_only():
+    runs = {OLD: [
+        _run_of("backend-required.yml", 11),
+        _run_of("ci.yml", 12),
+        _run_of("pre-commit.yml", 13, "completed", "success"),
+        _run_of("merge-queue.yml", 14, "completed", "success"),
+    ], NEW: _six_held()}
+    gh = FakeGh([_node(1), _node(2, armed="2026-10-04T11:00:00Z")], runs=runs)
+    _run(gh)
+    assert [c for c in gh.calls if c[0] == "rebase"] == [("rebase", "PR_1", OLD)]
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+    assert [c for c in gh.calls if c[0] == "cancel"] == [("cancel", "11"), ("cancel", "12")]
+    comment = next(c for c in gh.calls if c[0] == "comment")
+    assert comment[1] == 1 and f"<!-- merge-queue:rebased:{NEW} -->" in comment[2]
+    assert "approved its 6 required gates" in comment[2]
+    assert all(c[1] != "PR_2" for c in gh.calls if c[0] in ("rebase", "disarm"))
+
+
+def test_a_run_that_appeared_since_the_decision_stops_only_that_contexts_retry():
+    """merge-queue.yml and a kick can decide the same retry for one head. The second re-reads the live
+    runs first and leaves the contexts already started."""
+    checks = _checks({BACKEND: None, E2E: None}) + [_check(BACKEND, "failure", suite=600),
+                                                    _check(E2E, "failure", suite=700)]
+    runs = [_run_of("backend-required.yml", 60, "completed", "failure", check_suite_id=600),
+            _run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)]
+    gh = FakeGh([_node(1, state="BLOCKED")], checks={OLD: checks}, statuses={OLD: [_status()]}, runs={OLD: runs},
+                late_runs={OLD: [_run_of("backend-required.yml", 88)]}, run_status={70: ["in_progress"]})
+    decision = _run(gh)[0][1]
+    assert (decision.kind, decision.contexts) == ("retry", (BACKEND, E2E))
+    assert [c for c in gh.calls if c[0] == "rerun"] == [("rerun", "70", "failed")]
+    comment = next(c for c in gh.calls if c[0] == "comment")
+    assert f"merge-queue:retry-{E2E}:{OLD}" in comment[2]
+
+
+@pytest.mark.parametrize("path", ["approve", "rerun"])
+@pytest.mark.parametrize("error", ["gh: Server Error (HTTP 502)", "gh: API rate limit exceeded (HTTP 403)"])
+def test_a_github_side_error_on_approve_or_rerun_fails_the_run_and_disarms_nobody(path, error):
+    """A 5xx or rate limit is GitHub's error, not the PR's: the run fails before any disarm, so the next
+    event retries, and nothing behind the front is touched."""
+    nodes = [_node(1, state="BLOCKED")] + [_node(i, armed=f"2026-10-04T1{i}:00:00Z", state="BLOCKED") for i in range(2, 6)]
+    if path == "approve":
+        gh = FakeGh(nodes, runs={OLD: [_held(35, "e2e-required.yml")]}, approve_error=error, **_green({E2E: None}))
+    else:
+        checks = _checks({E2E: None}) + [_check(E2E, "failure", suite=700)]
+        gh = FakeGh(nodes, runs={OLD: [_run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)]},
+                    checks={OLD: checks}, statuses={OLD: [_status()]}, rerun_error=error)
+    with pytest.raises(mq.GhError):
+        _run(gh)
+    assert not any(c[0] in ("disarm", "comment") for c in gh.calls)
+    assert not any(c[0] == "rebase" for c in gh.calls), "nothing behind the front was touched"
+
+
+@pytest.mark.parametrize(("run", "kind"), [
+    (_run_of("frontend-required.yml", 31, "completed", "success", event="workflow_dispatch", check_suite_id=731,
+             actor={"login": "someone"}), "start"),
+    (_run_of("frontend-required.yml", 31, "completed", "cancelled", check_suite_id=731), "start"),
+    (_run_of("frontend-required.yml", 31, "completed", "success", check_suite_id=731), "retry"),
+    (_run_of("frontend-required.yml", 31, "completed", "skipped", check_suite_id=731), "retry"),
+], ids=["a-dispatch-is-ignored", "cancelled-is-no-run", "green-without-its-check-fails", "skipped-without-its-check-fails"])
+def test_what_a_gate_run_without_its_check_means(run, kind):
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [dict(run)]}, **_green({"frontend-required": None}))
+    decision = _run(gh, "dry")[0][1]
+    assert (decision.kind, decision.contexts) == (kind, ("frontend-required",))
+```
+
+15. The two `gh` boundary tests:
+
+Rewrite `test_gh_argument_typing`:
+
+```python
+def test_gh_argument_typing():
+    seen = []
+    gh = mq.Gh(runner=lambda args: (seen.append(args), "{}")[1])
+    gh.graphql("query { x }", number=5, id="X")
+    mq.wake(gh, 42)
+    mq.dispatch_license(gh, _pr_state(number=7), lambda m: None)
+    gh.rest("POST", f"repos/{mq.REPO}/actions/runs/31/approve")
+    gh.rest("POST", f"repos/{mq.REPO}/actions/runs/31/rerun-failed-jobs")
+    graphql_args, kick_args, license_args, approve_args, rerun_args = seen
+    assert graphql_args[graphql_args.index("-F") + 1] == "number=5" and "id=X" in graphql_args
+    assert kick_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/workflows/security-required.yml/dispatches",
+                         "-f", "ref=dev", "-f", "inputs[queue_kick]=true", "-f", "inputs[wait_run]=42"]
+    assert license_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/workflows/frontend-license-gate.yml/dispatches",
+                            "-f", "ref=dev", "-f", "inputs[pr]=7"]
+    assert approve_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/runs/31/approve"]
+    assert rerun_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/runs/31/rerun-failed-jobs"]
+```
+
+Rewrite `test_main_drives_the_real_gh_argv_end_to_end` for a BEHIND front PR whose new head has the six held gate runs
+and one held `ci.yml` run. Keep the existing `fake_subprocess_run` shape, add `monkeypatch.setattr(mq,
+"HELD_RUN_POLL_S", 0)`, and add these two branches to it, before its generic `elif args[2] == "GET":` branch:
+
+```python
+    held = [_held(31 + i, workflow) for i, workflow in enumerate(GATE_FILES)] + [_held(40, "ci.yml")]
+    ...
+        elif args[2] == "GET" and f"head_sha={NEW}&status=action_required" in args[3]:
+            out = {"total_count": len(held), "workflow_runs": list(held)}
+        elif args[2] == "POST" and args[3].endswith("/approve"):
+            rid = int(args[3].split("/runs/")[1].split("/")[0])
+            held[:] = [r for r in held if r["id"] != rid]  # GitHub starts it; it is no longer held
+            out = None
+```
+
+(`args` is `argv[1:]`, so `args[2]` is the HTTP method and `args[3]` the path.) Its docstring becomes "main() through
+the real Gh and _run_gh down to the subprocess argv, with canned JSON for a BEHIND front PR: line query, context reads,
+pinned-head rebase, poll reread, the license dispatch, the six approvals, the non-gate cleanup, comment." Delete
+everything after `assert mq.main() == 0` except the `repo = f"repos/{owner}/{name}"` line (the old `seen[:-1] == [...]`
+list, its helpers and the two assertions after it all go), and put these assertions there instead; in `argv` the
+method is index 3 and a GraphQL query index 4:
+
+```python
+    mutating = [a for a in seen if a[3:4] in (["POST"], ["DELETE"]) or a[4:5] == [f"query={mq.REBASE_MUTATION}"]]
+    assert mutating[0] == ["gh", "api", "graphql", "-f", f"query={mq.REBASE_MUTATION}", "-f", "id=PR_7", "-f", f"oid={OLD}"]
+    assert mutating[1] == ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/frontend-license-gate.yml/dispatches",
+                           "-f", "ref=dev", "-f", "inputs[pr]=7"]
+    assert [a[4] for a in mutating[2:8]] == [f"{repo}/actions/runs/{31 + i}/approve" for i in range(6)]
+    assert mutating[8] == ["gh", "api", "-X", "DELETE", f"{repo}/actions/runs/40"]
+    assert mutating[9][:6] == ["gh", "api", "-X", "POST", f"{repo}/issues/7/comments", "-f"]
+    assert mutating[9][6].startswith(f"body=<!-- merge-queue:rebased:{NEW} -->\nMerge queue: this PR is next.")
+    assert len(mutating) == 10
+    assert "| #7 | rebase | behind dev |" in summary.read_text(encoding="utf-8")
+```
+
+- [ ] **Step E3: Delete the dead code in the script**
+
+Delete `BROKEN_RUN_CONCLUSIONS` (no reader is left after Parts A and D) and confirm with
+`grep -n "BROKEN_RUN_CONCLUSIONS\|_host_workflow\|dispatch_request\|_dispatch_contexts\|BRANCH_REFUSALS\|base_sha\|queue_only_dispatch\|silent_green" Helper_Scripts/ci/merge_queue.py`
+printing nothing. Update the module docstring: "Runs inside GitHub Actions with the built-in GITHUB_TOKEN
+(merge-queue.yml, and the queue-kick job of security-required.yml that a failed gate's queue-tick dispatches)." and
+point "Spec:" at both specs.
+
+- [ ] **Step E4: The gate**
+
+Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py tldw_Server_API/tests/CI/test_merge_queue_workflow.py`
+Expected: every test passes. A failure not explained by this task's list is a defect in the code, not a test to edit:
+fix the code, or stop and report.
+
+- [ ] **Step E5: Commit**
 
 ```bash
 git add Helper_Scripts/ci/merge_queue.py tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py
-git commit -q -m "ci(merge-queue): start and retry approve or re-run gates; kicks, young-head wait and stuck guard (TASK-<N>)"
+git commit -q -m "ci(merge-queue): approve and re-run gates instead of dispatching them; kicks, restart caps, stale-state guard (TASK-<N>)"
 ```
+
 
 ---
 
-### Task 5: Guards — never dispatch a check context; real `gh` argv
+### Task 2: Guards — never dispatch a check context
 
 **Files:**
 - Test: `tldw_Server_API/tests/CI/test_merge_queue_actions.py`
 
-- [ ] **Step 1: Write the guard tests and rewrite the two argv tests**
+- [ ] **Step 1: Write the guard tests**
 
 ```python
 def test_the_queue_never_dispatches_a_check_context():
@@ -1979,62 +2322,10 @@ def test_no_scenario_dispatches_anything_but_the_license_and_the_kick(scenario):
     _assert_only_allowed_dispatches(gh)
 ```
 
-Rewrite `test_gh_argument_typing`:
-
-```python
-def test_gh_argument_typing():
-    seen = []
-    gh = mq.Gh(runner=lambda args: (seen.append(args), "{}")[1])
-    gh.graphql("query { x }", number=5, id="X")
-    mq.wake(gh, 42)
-    mq.dispatch_license(gh, _pr_state(number=7), lambda m: None)
-    gh.rest("POST", f"repos/{mq.REPO}/actions/runs/31/approve")
-    gh.rest("POST", f"repos/{mq.REPO}/actions/runs/31/rerun-failed-jobs")
-    graphql_args, kick_args, license_args, approve_args, rerun_args = seen
-    assert graphql_args[graphql_args.index("-F") + 1] == "number=5" and "id=X" in graphql_args
-    assert kick_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/workflows/security-required.yml/dispatches",
-                         "-f", "ref=dev", "-f", "inputs[queue_kick]=true", "-f", "inputs[wait_run]=42"]
-    assert license_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/workflows/frontend-license-gate.yml/dispatches",
-                            "-f", "ref=dev", "-f", "inputs[pr]=7"]
-    assert approve_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/runs/31/approve"]
-    assert rerun_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/runs/31/rerun-failed-jobs"]
-```
-
-Rewrite `test_main_drives_the_real_gh_argv_end_to_end` for a BEHIND front PR whose new head has the six held gate runs
-and one held `ci.yml` run. Keep the existing `fake_subprocess_run` shape, add `monkeypatch.setattr(mq,
-"HELD_RUN_POLL_S", 0)`, and add these two branches to it, before its generic `elif args[2] == "GET":` branch:
-
-```python
-    held = [_held(31 + i, workflow) for i, workflow in enumerate(GATE_FILES)] + [_held(40, "ci.yml")]
-    ...
-        elif args[2] == "GET" and f"head_sha={NEW}&status=action_required" in args[3]:
-            out = {"total_count": len(held), "workflow_runs": list(held)}
-        elif args[2] == "POST" and args[3].endswith("/approve"):
-            rid = int(args[3].split("/runs/")[1].split("/")[0])
-            held[:] = [r for r in held if r["id"] != rid]  # GitHub starts it; it is no longer held
-            out = None
-```
-
-(`args` is `argv[1:]`, so `args[2]` is the HTTP method and `args[3]` the path.) Then assert the **mutating** argv in
-order; in `argv` the method is index 3 and a GraphQL query index 4:
-
-```python
-    mutating = [a for a in seen if a[3:4] in (["POST"], ["DELETE"]) or a[4:5] == [f"query={mq.REBASE_MUTATION}"]]
-    assert mutating[0] == ["gh", "api", "graphql", "-f", f"query={mq.REBASE_MUTATION}", "-f", "id=PR_7", "-f", f"oid={OLD}"]
-    assert mutating[1] == ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/frontend-license-gate.yml/dispatches",
-                           "-f", "ref=dev", "-f", "inputs[pr]=7"]
-    assert [a[4] for a in mutating[2:8]] == [f"{repo}/actions/runs/{31 + i}/approve" for i in range(6)]
-    assert mutating[8] == ["gh", "api", "-X", "DELETE", f"{repo}/actions/runs/40"]
-    assert mutating[9][:6] == ["gh", "api", "-X", "POST", f"{repo}/issues/7/comments", "-f"]
-    assert mutating[9][6].startswith(f"body=<!-- merge-queue:rebased:{NEW} -->\nMerge queue: this PR is next.")
-    assert len(mutating) == 10
-    assert "| #7 | rebase | behind dev |" in summary.read_text(encoding="utf-8")
-```
-
 - [ ] **Step 2: Run, then mutation-check each guard**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_actions.py -k "dispatch or argv or argument"`
-Expected: PASS.
+Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_rules.py tldw_Server_API/tests/CI/test_merge_queue_actions.py`
+Expected: PASS (the whole file, including the two new guard tests).
 
 Mutation check (do it, then revert with `git checkout -- Helper_Scripts/ci/merge_queue.py`):
 1. In `_start`, add `dispatch(gh, "backend-required.yml", pr.head_ref)` as the first line. Expected:
@@ -2045,19 +2336,26 @@ Mutation check (do it, then revert with `git checkout -- Helper_Scripts/ci/merge
    `test_cleanup_deletes_only_the_queues_non_gate_held_runs` FAILS.
 4. In `_approve_strictly`, change `if _transient(exc): raise` to `if False: raise`. Expected:
    `test_a_transient_approve_error_raises_and_disarms_nobody` FAILS.
-5. In `_decide`, delete the stuck `compare` block. Expected: the stuck rebase test FAILS.
+5. In `_decide`, delete the `compare` block. Expected: `test_an_old_green_head_that_dev_has_moved_past_is_rebased_not_evicted_as_stuck`
+   and `test_a_fresh_green_head_that_dev_has_moved_past_is_rebased_at_once` FAIL.
+6. In `_restart_cancelled`, replace `if has_comment(gh, pr.number, kind, pr.head_sha):` with `if False:`. Expected:
+   `test_start_restarts_a_cancelled_run_of_a_missing_gate_once_then_evicts` and
+   `test_a_retry_attempt_that_ends_cancelled_is_restarted_once_then_evicted` FAIL.
+7. In `required_run_stand_ins`, change `not in NO_RESULT_CONCLUSIONS` to `in ("failure", "startup_failure", "timed_out")`.
+   Expected: `test_a_green_gate_run_without_its_check_is_retried_once_then_evicted` and
+   `test_a_completed_gate_run_without_its_check_is_one_failure_unless_cancelled_or_held` FAIL.
 Record each mutation and its failing test in the task notes.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add tldw_Server_API/tests/CI/test_merge_queue_actions.py
-git commit -q -m "test(merge-queue): guard that no check context is ever dispatched; real gh argv for approve and kick (TASK-<N>)"
+git commit -q -m "test(merge-queue): guard that no check context is ever dispatched (TASK-<N>)"
 ```
 
 ---
 
-### Task 6: Workflows — the kick, the ticks, the frontend name guard
+### Task 3: Workflows — the kick, the ticks, the frontend name guard
 
 **Files:**
 - Modify: `.github/workflows/security-required.yml`, `.github/workflows/backend-required.yml`,
@@ -2069,7 +2367,7 @@ git commit -q -m "test(merge-queue): guard that no check context is ever dispatc
 
 **Interfaces:**
 - Consumes: `mq.KICK_WORKFLOW == "security-required.yml"`, input names `queue_kick` and `wait_run`, env `WAIT_RUN`
-  read by `main()` (Task 4).
+  read by `main()` (Task 1, Part D).
 
 - [ ] **Step 1: Write the failing workflow tests**
 
@@ -2083,13 +2381,16 @@ KICK_RUN = (
 )
 
 
-@pytest.mark.parametrize("name", GATES)
+# All six gate workflows. GATES above leaves out frontend-required.yml, which its own test file covers.
+TICK_GATES = {**GATES, "frontend-required.yml": "frontend-required"}
+
+
+@pytest.mark.parametrize("name", TICK_GATES)
 def test_queue_tick_only_sends_a_kick(name):
     """Spec 4.6: the tick cannot re-run its own still-running run, so it asks a kick on dev to wait
     for it and run the queue. It needs nothing but `actions: write` and no checkout."""
     jobs = _wf(name)["jobs"]
-    gate = GATES[name]
-    assert jobs[gate]["name"] == gate, "the gate job's name is the required context"
+    gate = TICK_GATES[name]
     tick = dict(jobs["queue-tick"])
     tick.pop("if")
     assert tick == {
@@ -2107,7 +2408,7 @@ def test_queue_tick_only_sends_a_kick(name):
     }
 
 
-@pytest.mark.parametrize("name", GATES)
+@pytest.mark.parametrize("name", TICK_GATES)
 def test_queue_tick_runs_only_after_a_failed_gate_on_a_same_repo_pull_request(name):
     condition = _wf(name)["jobs"]["queue-tick"]["if"]
     events = [("workflow_dispatch", ""), ("pull_request", "owner/repo"), ("pull_request", "fork/repo"),
@@ -2117,7 +2418,7 @@ def test_queue_tick_runs_only_after_a_failed_gate_on_a_same_repo_pull_request(na
         events, ("failure", "success", "skipped", "cancelled"), ("", "off", "dry", "on"), (False, True)
     ):
         values = {
-            f"needs.{GATES[name]}.result": result,
+            f"needs.{TICK_GATES[name]}.result": result,
             "vars.MERGE_QUEUE": mode,
             "github.event_name": event,
             "github.event.pull_request.head.repo.full_name": head_repo,
@@ -2149,8 +2450,9 @@ def test_the_kick_job_is_the_queue_job_reading_wait_run():
     queue = _wf("merge-queue.yml")["jobs"]["queue"]
     steps = [dict(step) for step in queue["steps"]]
     steps[1] = dict(steps[1], env={**steps[1]["env"], "WAIT_RUN": "${{ github.event.inputs.wait_run }}"})
-    assert job == {"name": "Merge queue kick", "runs-on": "ubuntu-latest", "timeout-minutes": 10,
+    assert job == {"name": "Merge queue kick", "runs-on": "ubuntu-latest", "timeout-minutes": queue["timeout-minutes"],
                    "permissions": queue["permissions"], "steps": steps}
+    assert queue["timeout-minutes"] == 15, "a kick may wait 3 minutes and then re-run up to six gates"
 
 
 def test_security_required_kick_skips_every_gate_job_only_on_dev():
@@ -2159,7 +2461,8 @@ def test_security_required_kick_skips_every_gate_job_only_on_dev():
     jobs = _wf("security-required.yml")["jobs"]
     for job_id in ("changes", "security-required"):
         condition = jobs[job_id]["if"]
-        assert "github.event.inputs.queue_kick == 'true' && github.ref == 'refs/heads/dev'" in " ".join(condition.split())
+        assert ("always() && !cancelled() && (github.event.inputs.queue_kick != 'true' || "
+                "github.ref != 'refs/heads/dev') &&") in " ".join(condition.split())
     kick = {"github.event.inputs.queue_kick": "true", "github.ref": "refs/heads/dev"}
     other_ref = {"github.event.inputs.queue_kick": "true", "github.ref": "refs/heads/feat/x"}
     unflagged = {"github.event.inputs.queue_kick": "", "github.ref": "refs/heads/dev"}
@@ -2176,10 +2479,16 @@ def test_a_kick_never_cancels_a_running_kick():
     assert concurrency["cancel-in-progress"] == "${{ github.event.inputs.queue_kick != 'true' }}"
 ```
 
-Every other test in this file that evaluates `security-required.yml`'s `changes` or gate `if` (the `_rows` /
-`_outcome` tables) must add `"github.event.inputs.queue_kick": ""` and `"github.ref": "refs/pull/1/merge"` to its
-`values` (the evaluator raises `KeyError` on an unset name, by design). Add them to the shared base row so every gate
-gets them; the other gates ignore extra names.
+The evaluator raises `KeyError` on any name a condition reads that the test did not set, by design, so every existing
+test in this file that evaluates `security-required.yml`'s `changes` or gate `if` must set the two new names. Make these
+changes, exactly:
+
+- In the `_rows` / `_outcome` table, add `"github.event.inputs.queue_kick": ""` and `"github.ref": "refs/pull/1/merge"`
+  to the values every row starts from (the other gates ignore extra names).
+- In `test_every_gate_turns_a_license_wait_that_did_not_pass_red`, add the same two entries to the `values` dict
+  inside the loop and to the `passing` dict (it builds its own dicts, not the table's rows).
+- In `test_gate_declares_an_optional_base_sha_dispatch_input`, replace `assert set(inputs) == {"base_sha"}` with
+  `assert set(inputs) == ({"base_sha", "queue_kick", "wait_run"} if name == "security-required.yml" else {"base_sha"})`.
 
 In `test_merge_queue_frontend_required.py`, replace `test_name_guard_exempts_only_the_queue_actor`:
 
@@ -2193,27 +2502,155 @@ def test_every_dispatch_publishes_the_diagnostic_name():
     assert "github.actor" not in WORKFLOW.read_text(encoding="utf-8")
 ```
 
-Replace that file's tick tests `test_queue_tick_runs_only_after_a_failed_gate_with_the_queue_enabled`,
+In the same file, `test_nothing_else_in_the_workflow_depends_on_who_dispatched_it` changes
+`assert rendered.count("github.actor") == 1` to `== 0`, and its docstring becomes "Nothing in the workflow depends on
+who dispatched it: every dispatch publishes the diagnostic name." Replace that file's tick tests
+`test_queue_tick_runs_only_after_a_failed_gate_with_the_queue_enabled`,
 `test_queue_tick_is_the_queue_job_with_a_shorter_budget`,
 `test_queue_tick_checkout_is_pinned_like_every_other_checkout_in_the_workflow` and
-`test_queue_tick_is_outside_every_needs_and_holds_the_only_write_scopes` by one test that asserts the tick holds only
-`actions: write`, has no checkout, and is in no job's `needs` (the full shape is pinned in the gate-workflows file).
+`test_queue_tick_is_outside_every_needs_and_holds_the_only_write_scopes` with this one (the tick's full shape is pinned
+by `test_queue_tick_only_sends_a_kick`, which now covers all six gates, and by `_assert_exact_queue_tick` in the
+license contract):
+
+```python
+def test_queue_tick_holds_only_actions_write_checks_nothing_out_and_nothing_waits_on_it():
+    jobs = _jobs()
+    assert jobs[TICK]["permissions"] == {"actions": "write"}
+    assert not any("uses" in step for step in jobs[TICK]["steps"])
+    assert all(TICK not in _needs(job) for job in jobs.values())
+```
+
+In `tldw_Server_API/tests/CI/test_admin_ui_vitest_ratchet_workflow.py` (not in backend-required's contract step, so
+only the whole-directory run in Task 5 would otherwise catch it), replace the docstring and the actor loop of
+`test_manual_dispatch_cannot_publish_the_required_check_name`:
+
+```python
+    """Keep diagnostic manual ratchets from satisfying branch protection: no dispatch, by anyone,
+    publishes the protected name (D2 of the 2026-10-11 merge-queue redesign)."""
+    ...
+    for actor in ("octocat", "github-actions", "github-actions[bot]", "dependabot[bot]", ""):
+        assert published("workflow_dispatch", actor) == "frontend-required-diagnostic"
+    # The events that always published the required name still do, whoever the actor is.
+    for event_name in ("pull_request", "workflow_run"):
+        for actor in ("octocat", "github-actions[bot]"):
+            assert published(event_name, actor) == "frontend-required"
+```
+
+(the `workflow = ...`, `name = ...` and `published` lines between the docstring and the loops stay as they are. Deleted:
+the line asserting that the `github-actions[bot]` dispatch publishes `frontend-required`, and the two old comments
+inside the replaced lines, "A dispatch started by anyone but the queue stays diagnostic. ..." and "The queue's own
+dispatch publishes the required name.", which D2 makes false).
 
 In `test_license_first_workflow_contracts.py`:
 - `ORIGINAL_JOB_NAMES["security-required.yml"]` becomes `("changes", "security-required", "queue-tick", "queue-kick")`.
-- Replace `_assert_exact_queue_tick`'s `if` and job literal with the new tick (the `if` without the
-  `workflow_dispatch` arm; `timeout-minutes: 5`; `permissions: {"actions": "write"}`; the single "Wake the merge queue"
-  step with `KICK_RUN`, copied as a literal string here, not imported).
-- Add `_assert_exact_queue_kick(name, data)`, valid only for `security-required.yml`, pinning the whole `queue-kick`
-  job: its `if` (exactly the four conditions above), `name`, `runs-on`, `timeout-minutes: 10`, the five permissions,
-  the dev checkout with `persist-credentials: false`, and the one `python3 -m Helper_Scripts.ci.merge_queue` step with
-  env `GH_TOKEN`, `MERGE_QUEUE`, `WAIT_RUN: ${{ github.event.inputs.wait_run }}`. Assert no job `needs` it.
+- Replace `_assert_exact_queue_tick` and add `_assert_exact_queue_kick` next to it:
+
+```python
+QUEUE_KICK_RUN = (
+    'gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" '
+    '-f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"'
+)
+
+
+def _assert_exact_queue_tick(name: str, data: dict[str, Any]) -> None:
+    """Pin the whole queue-tick job, so its exemption cannot be widened by editing the job."""
+    gate = QUEUE_TICK_GATES[name]
+    job = dict(data["jobs"]["queue-tick"])
+    assert _normalized(job.pop("if")) == _normalized(
+        f"""
+        always() && !cancelled() &&
+        needs.{gate}.result == 'failure' &&
+        (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        """
+    ), name
+    assert job == {
+        "name": "Merge queue tick",
+        "needs": [gate],
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "permissions": {"actions": "write"},
+        "steps": [
+            {
+                "name": "Wake the merge queue",
+                "env": {
+                    "GH_TOKEN": "${{ github.token }}",
+                    "REPOSITORY": "${{ github.repository }}",
+                    "RUN_ID": "${{ github.run_id }}",
+                },
+                "run": QUEUE_KICK_RUN,
+            },
+        ],
+    }, name
+    # Nothing may wait on it: it can then never delay a required check or turn it red.
+    for other_name, other in data["jobs"].items():
+        assert "queue-tick" not in _needs(other), (name, other_name)
+
+
+def _assert_exact_queue_kick(name: str, data: dict[str, Any]) -> None:
+    """Pin the whole queue-kick job: it exists only in security-required.yml and only runs dev's queue code."""
+    assert name == "security-required.yml", name
+    job = dict(data["jobs"]["queue-kick"])
+    assert _normalized(job.pop("if")) == _normalized(
+        """
+        github.event_name == 'workflow_dispatch' &&
+        github.event.inputs.queue_kick == 'true' &&
+        github.ref == 'refs/heads/dev' &&
+        (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on')
+        """
+    ), name
+    assert job == {
+        "name": "Merge queue kick",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 15,
+        "permissions": {
+            "contents": "write",
+            "pull-requests": "write",
+            "actions": "write",
+            "checks": "read",
+            "statuses": "read",
+        },
+        "steps": [
+            {
+                "name": "Checkout dev",
+                "uses": CHECKOUT_ACTION,
+                "with": {"ref": "dev", "persist-credentials": False},
+            },
+            {
+                "name": "Advance the queue",
+                "env": {
+                    "GH_TOKEN": "${{ github.token }}",
+                    "MERGE_QUEUE": "${{ vars.MERGE_QUEUE }}",
+                    "WAIT_RUN": "${{ github.event.inputs.wait_run }}",
+                },
+                "run": "python3 -m Helper_Scripts.ci.merge_queue",
+            },
+        ],
+    }, name
+    for other_name, other in data["jobs"].items():
+        assert "queue-kick" not in _needs(other), (name, other_name)
+```
 - At both places that special-case `queue-tick` (`test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable`
   and `test_admitted_jobs_have_no_secrets_or_write_scoped_credentials`), add the same branch for
   `job_name == "queue-kick"` calling `_assert_exact_queue_kick`. A `queue-kick` job in any other workflow must fail
   (assert `name == "security-required.yml"` inside the helper).
-- If any contract test pins the `if` of `security-required.yml`'s `changes` or `security-required` job exactly, update
-  that one pin to the prefixed form (Step 3); never widen a rule for any other workflow or job.
+- `test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable` pins the `if` of `security-required.yml`'s
+  `changes` job (through `admission_clause`) and of its `security-required` job (the `LICENSE_RED_GATES` literal)
+  exactly. Insert this immediately before its `assert _normalized(job.get("if")) == _normalized(expected_condition),
+  (name, job_name)` line, and change nothing else in that test:
+
+```python
+                if name == "security-required.yml" and job_name in ("changes", "security-required"):
+                    # A queue kick runs no gate job (spec 4.6 of the 2026-10-11 merge-queue redesign);
+                    # every other event takes the condition unchanged.
+                    expected_condition = expected_condition.replace(
+                        "always() && !cancelled() &&",
+                        "always() && !cancelled() && "
+                        "(github.event.inputs.queue_kick != 'true' || github.ref != 'refs/heads/dev') &&",
+                        1,
+                    )
+```
 - In `test_pr_context_and_base_diff_logic_are_workflow_run_safe`, add the exception
   `if name == "security-required.yml": expected_cancel = "${{ github.event.inputs.queue_kick != 'true' }}"`, with a
   comment: a kick must never cancel a running kick (spec 4.6).
@@ -2247,10 +2684,9 @@ Expected: FAIL (no `queue-kick` job, ticks still run the queue, frontend guard s
         required: false
         type: string
       queue_kick:
-        description: Set only by the merge queue, on dev; runs the queue instead of the gate
+        description: Set to 'true' only by the merge queue, on dev; runs the queue instead of the gate
         required: false
-        type: boolean
-        default: false
+        type: string
       wait_run:
         description: With queue_kick, the id of a run the queue waits for before deciding
         required: false
@@ -2261,9 +2697,11 @@ Its `concurrency.cancel-in-progress` becomes `${{ github.event.inputs.queue_kick
 a comment above: "A queue kick (spec 4.6 of the 2026-10-11 merge-queue redesign) must never cancel a running kick;
 every other run keeps cancel-in-progress."
 
-Prefix both the `changes` job's and the `security-required` job's `if` with
-`!(github.event.inputs.queue_kick == 'true' && github.ref == 'refs/heads/dev') &&` (the rest of each condition
-unchanged, wrapped in parentheses: `!(kick) && (<existing condition>)`).
+In both the `changes` job's and the `security-required` job's `if`, insert
+`(github.event.inputs.queue_kick != 'true' || github.ref != 'refs/heads/dev') &&` right after the leading
+`always() && !cancelled() &&`, leaving the rest of each condition as it is. (Written without a leading `!`, and with the
+status functions still first; review improvement I2.) `queue_kick` is a string input: the dispatch API sends every
+input as a string, and comparing a boolean input to `'true'` is a known trap (`inputs.queue_kick` would be a boolean).
 
 Delete the old `queue-tick` job's comment and job in all six gate workflows and put this in its place (with
 `<gate>` = the workflow's gate job id: `backend-required`, `security-required`, `coverage-required`,
@@ -2314,7 +2752,8 @@ Append to `security-required.yml`, after its `queue-tick`:
       github.ref == 'refs/heads/dev' &&
       (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Same budget as merge-queue.yml's job: a kick may wait 3 minutes for its run, then re-run up to six gates.
+    timeout-minutes: 15
     permissions:
       # write: rebase the front PR's branch, comment and disarm, approve/re-run/cancel/delete runs.
       contents: write
@@ -2351,7 +2790,7 @@ Re-pin `DIRECT_TRIGGER_DIGESTS` with the command in Step 1.
 
 - [ ] **Step 4: Run the workflow tests and actionlint**
 
-Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py tldw_Server_API/tests/CI/test_merge_queue_workflow.py`
+Run: `python -m pytest -q -p no:cacheprovider tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py tldw_Server_API/tests/CI/test_merge_queue_workflow.py tldw_Server_API/tests/CI/test_admin_ui_vitest_ratchet_workflow.py tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py`
 Expected: PASS.
 
 Run actionlint the way `actionlint.yml` does (download it as that workflow does, then
@@ -2359,6 +2798,8 @@ Run actionlint the way `actionlint.yml` does (download it as that workflow does,
 
 Mutation check (then revert): (1) drop `github.ref == 'refs/heads/dev' &&` from the kick job: the kick-`if` test
 FAILS; (2) set security-required's `cancel-in-progress: true`: `test_a_kick_never_cancels_a_running_kick` FAILS;
+(5) drop the kick exclusion from the `changes` job: `test_security_required_kick_skips_every_gate_job_only_on_dev` and
+the contract pin FAIL;
 (3) restore `github.actor != 'github-actions[bot]' &&` in the frontend name: `test_every_dispatch_publishes_the_diagnostic_name`
 FAILS; (4) add `contents: write` to one tick: the tick shape test and `_assert_exact_queue_tick` FAIL.
 
@@ -2371,7 +2812,7 @@ git commit -q -m "ci(merge-queue): queue-tick sends a kick to security-required 
 
 ---
 
-### Task 7: Docs and task record
+### Task 4: Docs and task record
 
 **Files:**
 - Modify: `Docs/Development/CI_REQUIRED_GATES.md` ("Merge Queue" section), `AGENTS.md` and `CLAUDE.md` (the queue
@@ -2401,7 +2842,10 @@ git commit -q -m "ci(merge-queue): queue-tick sends a kick to security-required 
   waits for the failed run to finish and then runs the queue. Nothing wakes it on a timer. If the line looks stuck,
   arming or disarming a PR moves it."
 - "Switching it on" step 3 adds: "one throwaway PR with a deliberately failing gate shows the tick, the kick and the
-  retry."
+  retry, and that the retry's own tick fires when the retry fails too. Check on the first PR that the queue's rebase
+  commits (committed by `github-actions[bot]`) do not make the `dev` ruleset ask for an approving review: its
+  `require_extra_approval_for_unattributed_changes` is on, and GitHub does not say which commits it counts. If they
+  do, switch that option off for `dev`; nothing in the queue can change who commits a rebase."
 
 - [ ] **Step 2: `AGENTS.md` and `CLAUDE.md`**
 
@@ -2438,8 +2882,8 @@ Run `Helper_Scripts/refresh_docs_published.sh` (the onboarding docs gate checks 
 
 ```bash
 # The notes say: the approach; that the action layer is a port of tldw_chatbook scripts/merge_queue.py at 2716b844e1;
-# the nine mutation checks of Task 5 Step 2 and Task 6 Step 4, each with the test that failed; the CI test counts from
-# Task 0 Step 2 and Task 8 Step 1; the files changed.
+# the twelve mutation checks of Task 2 Step 2 and Task 3 Step 4, each with the test that failed; the CI test counts
+# from Task 0 Step 2 and Task 5 Step 1; the review findings fixed (M1-M5, m1-m5, m7, I2, I4, I5); the files changed.
 PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd . task edit TASK-<N> --notes "$NOTES"
 for i in 1 2 3 4 5 6 7 8 9; do PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd . task edit TASK-<N> --check-ac $i; done
 ```
@@ -2455,7 +2899,7 @@ git commit -q -m "docs(ci): merge queue approves held gate runs; ADR-063 amendme
 
 ---
 
-### Task 8: Full verification and the PR
+### Task 5: Full verification and the PR
 
 - [ ] **Step 1: The whole CI test directory and backend-required's contract step**
 
@@ -2494,8 +2938,21 @@ only on the owner's word.
 2. `gh variable set MERGE_QUEUE --body dry` for about a day; compare the logged decisions with what armed PRs do.
 3. One throwaway PR under `on`, the switch set and restored by the same watching command on a deadline. It must show
    the rebase, the license status, six approved gates in the rollup, auto-merge firing, and the four open points of
-   spec section 2. A second throwaway PR with a deliberately failing gate shows the tick, the kick and the retry.
+   spec section 2. Also: the `queue_kick` string input is accepted, the kick's skipped `security-required` check on
+   `dev`'s tip shows on no PR, and the `dev` ruleset does not ask for an approving review on the queue's rebased commits
+   (`require_extra_approval_for_unattributed_changes` is on; if it does ask, switch it off for `dev`). A second
+   throwaway PR with a deliberately failing gate shows the tick, the kick and the retry, and that the retry's own tick
+   fires when the retry fails (`rerun-failed-jobs` must re-run the dependent `queue-tick`).
 4. `on` for all traffic. Rollback at any step: `gh variable set MERGE_QUEUE --body off`.
+
+## Accepted residuals (from the second review, 2026-10-14)
+
+- n2: `_restart_cancelled` and `_retry_gate` re-run first and comment second, as the chatbook queue does. If the comment
+  fails transiently the cap marker is lost and one extra restart or retry is possible; posting the marker first would be
+  worse (a failed re-run would then evict on the next wake). Bounded at one extra run.
+- n3: a cancelled gate run wakes nothing (the tick fires on `failure` only), so a cancellation is acted on at the next
+  queue event. What a gate job reports when it hits its timeout is an open point of the trial; if it is `cancelled`,
+  let the tick also fire on `needs.<gate>.result == 'cancelled'` (its `!cancelled()` already skips superseded runs).
 
 ## Known gap, not in this plan
 
