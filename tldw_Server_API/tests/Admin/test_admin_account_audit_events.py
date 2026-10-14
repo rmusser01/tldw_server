@@ -753,14 +753,16 @@ async def test_emit_admin_account_audit_event_raises_when_required_flush_fails(m
 
 @pytest.mark.asyncio
 async def test_required_admin_audit_is_persisted_before_return(monkeypatch) -> None:
-    flush_calls: list[bool] = []
+    order: list[str] = []
+    logged_events: list[dict] = []
 
     class _AuditService:
-        async def log_event(self, **_kwargs) -> None:
-            return None
+        async def log_event(self, **kwargs) -> None:
+            logged_events.append(kwargs)
+            order.append("log_event")
 
         async def flush(self, *, raise_on_failure: bool) -> None:
-            flush_calls.append(raise_on_failure)
+            order.append(f"flush:{raise_on_failure}")
 
     async def _fake_get_service(_actor_id):
         return _AuditService()
@@ -783,7 +785,16 @@ async def test_required_admin_audit_is_persisted_before_return(monkeypatch) -> N
             action="admin.impersonation.token.create",
             raise_on_failure=True,
         )
-        assert flush_calls == [True]
+        # The event must reach the audit service with the emitted fields and
+        # be persisted (log_event) before the mandatory flush runs.
+        assert order == ["log_event", "flush:True"]
+        assert len(logged_events) == 1
+        event = logged_events[0]
+        assert event["event_type"] == AuditEventType.AUTH_TOKEN_CREATED
+        assert event["resource_id"] == "42"
+        assert event["action"] == "admin.impersonation.token.create"
+        assert event["metadata"]["actor_id"] == 7
+        assert event["metadata"]["target_user_id"] == 42
     finally:
         await finish_after_commit_scope(token, committed=False)
 
