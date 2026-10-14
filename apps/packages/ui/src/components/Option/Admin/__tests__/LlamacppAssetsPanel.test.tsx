@@ -1,13 +1,48 @@
 import React from "react"
-import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { LlamacppAssetsPanel } from "../LlamacppAssetsPanel"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { ASSET_ROW_ESTIMATE, LlamacppAssetsPanel } from "../LlamacppAssetsPanel"
 import type {
   LlamacppAcquisitionJobListResponse,
+  LlamacppAsset,
   LlamacppAssetImportPreviewResponse,
   LlamacppAssetDownloadRequest,
   LlamacppAssetsResponse
 } from "@/types/llamacpp-admin"
+
+/**
+ * jsdom performs no layout, so the virtualizer would always see a 0px-tall
+ * scroll container and render no rows. Report the constrained scroll
+ * container (`h-96` = 384px) with a real height so useVirtualizer computes
+ * genuine windows against the estimate-based measurements.
+ */
+const SCROLL_CONTAINER_HEIGHT = 384
+let originalOffsetHeight: PropertyDescriptor | undefined
+
+beforeAll(() => {
+  originalOffsetHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetHeight"
+  )
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("h-96")
+        ? SCROLL_CONTAINER_HEIGHT
+        : (originalOffsetHeight?.get?.call(this) ?? 0)
+    }
+  })
+})
+
+afterAll(() => {
+  if (originalOffsetHeight) {
+    Object.defineProperty(
+      HTMLElement.prototype,
+      "offsetHeight",
+      originalOffsetHeight
+    )
+  }
+})
 
 const mockAssets: LlamacppAssetsResponse = {
   assets: [
@@ -391,6 +426,91 @@ describe("LlamacppAssetsPanel", () => {
 
     await waitFor(() => {
       expect(onCancelDownload).toHaveBeenCalledWith("42")
+    })
+  })
+
+  it("test_asset_groups_rebuilt_only_on_list_change", async () => {
+    // A dedicated list instance so the spy only observes this render's grouping.
+    const assetList = [...mockAssets.assets]
+    const filterSpy = vi.spyOn(assetList, "filter")
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ ...mockAssets, assets: assetList }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        error={null}
+        onRegisterPath={vi.fn()}
+        onImportFolder={vi.fn()}
+        onReload={vi.fn()}
+      />
+    )
+
+    // Grouping the catalog runs the four kind-filter passes exactly once.
+    expect(filterSpy).toHaveBeenCalledTimes(4)
+    expect(screen.getByText("GGUF models")).toBeTruthy()
+    expect(screen.getByText("mmproj projectors")).toBeTruthy()
+    expect(screen.getByText("Imported folders")).toBeTruthy()
+
+    // A keystroke in an asset input re-renders the panel...
+    const assetInput = screen.getByLabelText("Register local asset path") as HTMLInputElement
+    fireEvent.change(assetInput, { target: { value: "/external/other.gguf" } })
+    await waitFor(() => {
+      expect(assetInput.value).toBe("/external/other.gguf")
+    })
+
+    // ...without rebuilding the groups.
+    expect(filterSpy).toHaveBeenCalledTimes(4)
+
+    filterSpy.mockRestore()
+  })
+
+  it("test_asset_group_renders_windowed_rows", async () => {
+    const ggufAssets: LlamacppAsset[] = Array.from({ length: 500 }, (_, index) => ({
+      ...mockAssets.assets[0]!,
+      asset_id: `gguf:model-${index}`,
+      display_name: `Asset Model ${index}`,
+      path: `/models/model-${index}.gguf`,
+      resolved_path: `/models/model-${index}.gguf`
+    }))
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ assets: ggufAssets, warnings: [], scan_limited: false }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        error={null}
+        onRegisterPath={vi.fn()}
+        onImportFolder={vi.fn()}
+        onReload={vi.fn()}
+      />
+    )
+
+    // The group section virtualizes its own list, not across groups.
+    const group = screen.getByRole("region", { name: "GGUF models" })
+    const list = within(group).getByRole("list", { name: "GGUF models" })
+    const rows = within(list).getAllByRole("listitem")
+
+    expect(rows.length).toBeLessThanOrEqual(30)
+    const mountedIds = rows.map((row) => row.getAttribute("data-asset-id"))
+    expect(mountedIds).toContain("gguf:model-0")
+    expect(mountedIds).not.toContain("gguf:model-100")
+    const scrollContainer = list.parentElement as HTMLElement
+    expect(scrollContainer.className).toContain("overflow-y-auto")
+
+    scrollContainer.scrollTop = 100 * ASSET_ROW_ESTIMATE
+    fireEvent.scroll(scrollContainer)
+
+    expect(await screen.findByText("Asset Model 100")).toBeTruthy()
+    await waitFor(() => {
+      const windowedIds = Array.from(
+        list.querySelectorAll("li[data-asset-id]")
+      ).map((row) => row.getAttribute("data-asset-id"))
+      expect(windowedIds).toContain("gguf:model-100")
+      expect(windowedIds).not.toContain("gguf:model-0")
+      expect(windowedIds.length).toBeLessThanOrEqual(30)
     })
   })
 })

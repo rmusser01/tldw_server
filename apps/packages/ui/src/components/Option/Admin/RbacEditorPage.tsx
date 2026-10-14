@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   Card,
   Table,
@@ -27,6 +28,11 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  adminKeys,
+  useAdminPermissions,
+  useAdminRoles
+} from "@/services/tldw/adminQueries"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 // ── Types ──
@@ -123,6 +129,55 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
     }
   }, [loadMatrix])
 
+  // `permissions` must be derived before the loading early-return below so
+  // filteredPermissions can be memoized without breaking the rules of hooks.
+  const permissions: Permission[] = matrix?.permissions ?? []
+  // Recompute the category filter only when the matrix or the filter changes
+  // (admin perf C-S3 / F16); the grid cells themselves are already O(1).
+  const filteredPermissions = React.useMemo(
+    () =>
+      selectedCategory
+        ? permissions.filter((p) => p.category === selectedCategory)
+        : permissions,
+    [permissions, selectedCategory]
+  )
+
+  // matrix shape: { roles: [{id, name}], permissions: [{id, name, category}], grid: {[permId]: {[roleId]: bool}} }
+  const roles: Array<{ id: number; name: string }> = matrix?.roles ?? []
+  const grid: Record<number, Record<number, boolean>> = matrix?.grid ?? {}
+
+  // Latest-value ref for the per-key "toggling" state: the memoized role
+  // columns below must not rebuild while a checkbox toggle is in flight, but
+  // their render closures still need to read the current disabled state
+  // (admin perf C-S4 / F16 — deps stay [roles, grid, t] without staleness).
+  const togglingRef = useRef<string | null>(null)
+  togglingRef.current = toggling
+
+  // Rebuild the role-column array only when the matrix data or the translator
+  // changes (admin perf C-S4 / F16); re-renders (e.g. category filter or
+  // pagination flips) reuse the memoized array.
+  const roleColumns = React.useMemo(
+    () =>
+      roles.map(role => ({
+        title: role.name,
+        key: `role-${role.id}`,
+        width: 120,
+        align: "center" as const,
+        render: (_: any, record: Permission) => {
+          const val = grid[record.id]?.[role.id] ?? false
+          const key = `${role.id}-${record.id}`
+          return (
+            <Checkbox
+              checked={val}
+              disabled={togglingRef.current === key}
+              onChange={() => handleToggle(role.id, record.id, val)}
+            />
+          )
+        }
+      })),
+    [roles, grid, t]
+  )
+
   if (!matrix) {
     if (matrixError && !loading) {
       return (
@@ -139,15 +194,6 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
     return <Card loading={loading}><div style={{ minHeight: 200 }} /></Card>
   }
 
-  // matrix shape: { roles: [{id, name}], permissions: [{id, name, category}], grid: {[permId]: {[roleId]: bool}} }
-  const roles: Array<{ id: number; name: string }> = matrix.roles ?? []
-  const permissions: Permission[] = matrix.permissions ?? []
-  const grid: Record<number, Record<number, boolean>> = matrix.grid ?? {}
-
-  const filteredPermissions = selectedCategory
-    ? permissions.filter(p => p.category === selectedCategory)
-    : permissions
-
   const columns = [
     {
       title: t("settings:adminRbac.colPermission", "Permission"),
@@ -162,23 +208,7 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
         </span>
       )
     },
-    ...roles.map(role => ({
-      title: role.name,
-      key: `role-${role.id}`,
-      width: 120,
-      align: "center" as const,
-      render: (_: any, record: Permission) => {
-        const val = grid[record.id]?.[role.id] ?? false
-        const key = `${role.id}-${record.id}`
-        return (
-          <Checkbox
-            checked={val}
-            disabled={toggling === key}
-            onChange={() => handleToggle(role.id, record.id, val)}
-          />
-        )
-      }
-    }))
+    ...roleColumns
   ]
 
   return (
@@ -216,7 +246,11 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
           columns={columns}
           rowKey="id"
           loading={loading}
-          pagination={false}
+          // Bound the mounted checkbox grid to one page of permissions
+          // (admin perf C-S4 / F16). The matrix fetch already returns the
+          // complete permissions catalog (the server pages only roles), so
+          // client-side paging covers every permission.
+          pagination={{ pageSize: 50 }}
           scroll={{ x: 260 + roles.length * 120 }}
           size="small"
           locale={{
@@ -234,27 +268,24 @@ const PermissionMatrixTab: React.FC<{ onGuardError: (err: any) => void }> = ({ o
 
 const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
-  const [roles, setRoles] = useState<Role[]>([])
-  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
+  // Roles are shared admin reference data (B-S4/F11): the hook dedupes the
+  // fetch with Server Admin inside the stale window, and mutations below
+  // invalidate the shared key so every consumer refetches.
+  const rolesQuery = useAdminRoles()
+  const roles: Role[] = Array.isArray(rolesQuery.data)
+    ? rolesQuery.data
+    : ((rolesQuery.data as any)?.data ?? [])
+  const loading = rolesQuery.isFetching
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
   const [expandedPerms, setExpandedPerms] = useState<Record<number, any[]>>({})
 
-  const loadRoles = useCallback(async () => {
-    setLoading(true)
-    try {
-      const result = await tldwClient.listAdminRoles()
-      setRoles(Array.isArray(result) ? result : (result as any)?.data ?? [])
-    } catch (err) {
-      onGuardError(err)
-    } finally {
-      setLoading(false)
-    }
-  }, [onGuardError])
-
   useEffect(() => {
-    loadRoles()
-  }, [loadRoles])
+    if (rolesQuery.error) {
+      onGuardError(rolesQuery.error)
+    }
+  }, [rolesQuery.error, onGuardError])
 
   const handleCreate = useCallback(async () => {
     try {
@@ -263,24 +294,24 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
       await tldwClient.createAdminRole(values.name, values.description)
       message.success(t("settings:adminRbac.roleCreated", "Role created"))
       createForm.resetFields()
-      await loadRoles()
+      await queryClient.invalidateQueries({ queryKey: adminKeys.roles })
     } catch (err: any) {
       if (err?.errorFields) return
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleCreateFailed", "Failed to create role")))
     } finally {
       setCreating(false)
     }
-  }, [createForm, loadRoles])
+  }, [createForm, queryClient])
 
   const handleDelete = useCallback(async (roleId: number) => {
     try {
       await tldwClient.deleteAdminRole(roleId)
       message.success(t("settings:adminRbac.roleDeleted", "Role deleted"))
-      await loadRoles()
+      await queryClient.invalidateQueries({ queryKey: adminKeys.roles })
     } catch (err: any) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminRbac.roleDeleteFailed", "Failed to delete role")))
     }
-  }, [loadRoles])
+  }, [queryClient])
 
   const loadRolePerms = useCallback(async (roleId: number) => {
     try {
@@ -333,7 +364,7 @@ const RolesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError
     <Card
       title={t("settings:adminRbac.rolesCardTitle", "Roles")}
       extra={
-        <Button icon={<ReloadOutlined />} onClick={loadRoles} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={() => rolesQuery.refetch()} loading={loading}>
           {t("common:refresh", "Refresh")}
         </Button>
       }
@@ -403,9 +434,6 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
   const [userRoles, setUserRoles] = useState<any[]>([])
   const [rolesLoading, setRolesLoading] = useState(false)
 
-  // All roles for assignment
-  const [allRoles, setAllRoles] = useState<Role[]>([])
-
   // Overrides
   const [overrides, setOverrides] = useState<UserOverride[]>([])
   const [overridesLoading, setOverridesLoading] = useState(false)
@@ -413,9 +441,6 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
   // Effective permissions
   const [effectivePerms, setEffectivePerms] = useState<EffectivePerm[]>([])
   const [effectiveLoading, setEffectiveLoading] = useState(false)
-
-  // All permissions for override modal
-  const [allPermissions, setAllPermissions] = useState<Permission[]>([])
 
   // Modals
   const [addRoleModalOpen, setAddRoleModalOpen] = useState(false)
@@ -471,28 +496,40 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
     }
   }, [onGuardError])
 
-  // Load all roles and permissions once
-  useEffect(() => {
-    const loadMeta = async () => {
-      try {
-        const [rolesResult, permsResult] = await Promise.allSettled([
-          tldwClient.listAdminRoles(),
-          tldwClient.listPermissions()
-        ])
-        if (rolesResult.status === "fulfilled") {
-          const r = rolesResult.value
-          setAllRoles(Array.isArray(r) ? r : (r as any)?.data ?? [])
-        }
-        if (permsResult.status === "fulfilled") {
-          const p = permsResult.value
-          setAllPermissions(Array.isArray(p) ? p : (p as any)?.data ?? [])
-        }
-      } catch {
-        // non-critical
-      }
-    }
-    loadMeta()
-  }, [])
+  // All roles and permissions are shared admin reference data (B-S4/F11):
+  // the hooks reuse whatever Server Admin / the Roles tab already fetched
+  // inside the stale window. Failures stay non-critical here, as before.
+  const rolesQuery = useAdminRoles()
+  const permissionsQuery = useAdminPermissions()
+  // Memoize the normalized arrays so downstream Map/Set memos keep a stable
+  // dependency when react-query serves the cached array instance (the `??`
+  // fallbacks would otherwise mint a fresh empty array every render).
+  const allRoles: Role[] = React.useMemo(
+    () =>
+      Array.isArray(rolesQuery.data)
+        ? rolesQuery.data
+        : ((rolesQuery.data as any)?.data ?? []),
+    [rolesQuery.data]
+  )
+  const allPermissions: Permission[] = React.useMemo(
+    () =>
+      Array.isArray(permissionsQuery.data)
+        ? permissionsQuery.data
+        : ((permissionsQuery.data as any)?.data ?? []),
+    [permissionsQuery.data]
+  )
+  // O(1) keyed lookups for per-row rendering (admin perf C-S3 / F16): the
+  // override table resolves names through the Map instead of scanning the
+  // catalog with `.find` per row, and role options test membership in a Set
+  // instead of `userRoles.some(...)` per option.
+  const permissionById = React.useMemo(
+    () => new Map(allPermissions.map((p) => [p.id, p])),
+    [allPermissions]
+  )
+  const assignedRoleIds = React.useMemo(
+    () => new Set(userRoles.map((ur: any) => ur.id ?? ur.role_id)),
+    [userRoles]
+  )
 
   const handleUserSelect = useCallback((userId: number) => {
     setSelectedUserId(userId)
@@ -588,7 +625,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
       title: t("settings:adminRbac.colPermission", "Permission"),
       key: "permission_name",
       render: (_: any, record: UserOverride) =>
-        record.permission_name ?? allPermissions.find(p => p.id === record.permission_id)?.name ?? `#${record.permission_id}`
+        record.permission_name ?? permissionById.get(record.permission_id)?.name ?? `#${record.permission_id}`
     },
     {
       title: t("settings:adminRbac.colEffect", "Effect"),
@@ -740,7 +777,7 @@ const UserPermissionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ on
           options={allRoles.map(r => ({
             label: r.name,
             value: r.id,
-            disabled: userRoles.some((ur: any) => (ur.id ?? ur.role_id) === r.id)
+            disabled: assignedRoleIds.has(r.id)
           }))}
         />
       </Modal>

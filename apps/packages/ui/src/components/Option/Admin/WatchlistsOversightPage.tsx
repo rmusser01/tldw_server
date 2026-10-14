@@ -20,6 +20,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 
 /**
  * Fleet oversight for watchlists (#2922): a read-only, user-scoped view of
@@ -247,7 +248,7 @@ const WatchlistsOversightPage: React.FC = () => {
       key: "last_scraped_at",
       width: 180,
       render: (value: string | null) =>
-        value ? new Date(value).toLocaleString() : "—"
+        value ? formatAdminDateTime(value) : "—"
     }
   ]
 
@@ -266,7 +267,7 @@ const WatchlistsOversightPage: React.FC = () => {
       key: "published_at",
       width: 180,
       render: (value: string | null) =>
-        value ? new Date(value).toLocaleString() : "—"
+        value ? formatAdminDateTime(value) : "—"
     },
     {
       title: t("settings:adminWatchlistsOversight.colReviewed", "Reviewed"),
@@ -289,7 +290,7 @@ const WatchlistsOversightPage: React.FC = () => {
       key: "started_at",
       width: 180,
       render: (value: string | null) =>
-        value ? new Date(value).toLocaleString() : "—"
+        value ? formatAdminDateTime(value) : "—"
     },
     {
       title: t("settings:adminWatchlistsOversight.colRunStatus", "Status"),

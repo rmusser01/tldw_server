@@ -24,6 +24,7 @@ import {
   type AdminRole,
   type MediaIngestionBudgetDiagnostics
 } from "@/services/tldw/TldwApiClient"
+import { useSystemStats } from "@/services/tldw/adminQueries"
 import { PageShell } from "@/components/Common/PageShell"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 import {
@@ -98,8 +99,14 @@ export const ServerAdminPage: React.FC = () => {
   const message = useAntdMessage()
   const { t } = useTranslation(["option", "settings"])
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
-  const [stats, setStats] = React.useState<any | null>(null)
-  const [loading, setLoading] = React.useState(false)
+  // System statistics are shared admin reference data (B-S4/F11): the query
+  // hook dedupes the fetch with the other admin surfaces inside the stale
+  // window. The stats request keeps its dedicated timeout cap.
+  const systemStatsQuery = useSystemStats({
+    timeoutMs: SYSTEM_STATS_TIMEOUT_MS
+  })
+  const stats = systemStatsQuery.data ?? null
+  const loading = systemStatsQuery.isFetching
   const [error, setError] = React.useState<string | null>(null)
   const [adminGuard, setAdminGuard] = React.useState<"forbidden" | "notFound" | null>(null)
   const [usersData, setUsersData] = React.useState<AdminUserListResponse | null>(null)
@@ -113,6 +120,10 @@ export const ServerAdminPage: React.FC = () => {
   const [mediaBudgetError, setMediaBudgetError] = React.useState<string | null>(null)
   const [mediaBudgetUserId, setMediaBudgetUserId] = React.useState<number | null>(null)
   const [mediaBudgetPolicyId, setMediaBudgetPolicyId] = React.useState("media.default")
+  // Debounce handle for the media-budget diagnostics fetch (B-S5): typing in
+  // the policy input must not fire a network call per keystroke — same shape
+  // as the remote-search debounce in WatchlistsOversightPage.
+  const mediaBudgetTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [userRoleFilter, setUserRoleFilter] = React.useState<string | undefined>(undefined)
   const [userActiveFilter, setUserActiveFilter] = React.useState<string | undefined>(undefined)
   const [usersPage, setUsersPage] = React.useState(1)
@@ -209,32 +220,28 @@ export const ServerAdminPage: React.FC = () => {
     [markAdminGuardFromError]
   )
 
-  const loadSystemStats = React.useCallback(async () => {
-    try {
-      setLoading(true)
-      const data = await tldwClient.getSystemStats({
-        timeoutMs: SYSTEM_STATS_TIMEOUT_MS
-      })
-      setStats(data)
+  // Query errors keep the page's guard + timeout messaging contract: 403/404
+  // map to the admin guard, timeouts get their dedicated retry hint, and the
+  // error clears once a fetch succeeds again.
+  React.useEffect(() => {
+    const err: unknown = systemStatsQuery.error
+    if (!err) {
       setError(null)
-    } catch (e: any) {
-      const baseError = sanitizeAdminErrorMessage(
-        e,
-        "Failed to load system statistics."
-      )
-      setError(
-        isTimeoutLikeError(e)
-          ? (t(
-              "settings:admin.systemStatsTimeout",
-              "System statistics took longer than 10 seconds. Retry to try again."
-            ) as string)
-          : baseError
-      )
-      markAdminGuardFromError(e)
-    } finally {
-      setLoading(false)
+      return
     }
-  }, [markAdminGuardFromError, t])
+    markAdminGuardFromError(err)
+    setError(
+      isTimeoutLikeError(err)
+        ? (t(
+            "settings:admin.systemStatsTimeout",
+            "System statistics took longer than 10 seconds. Retry to try again."
+          ) as string)
+        : sanitizeAdminErrorMessage(
+            err,
+            "Failed to load system statistics."
+          )
+    )
+  }, [systemStatsQuery.error, markAdminGuardFromError, t])
 
   React.useEffect(() => {
     let cancelled = false
@@ -257,12 +264,12 @@ export const ServerAdminPage: React.FC = () => {
   React.useEffect(() => {
     if (initialLoadRef.current) return
     initialLoadRef.current = true
-    void loadSystemStats()
+    // System stats arrive via useSystemStats (mount fetch or shared cache);
+    // the users table and roles stay on their page-local loaders.
     void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
     void loadRoles()
   }, [
     loadRoles,
-    loadSystemStats,
     loadUsers,
     userActiveFilter,
     userRoleFilter,
@@ -270,7 +277,7 @@ export const ServerAdminPage: React.FC = () => {
   ])
 
   const handleRefresh = async () => {
-    await loadSystemStats()
+    await systemStatsQuery.refetch()
     if (mediaBudgetUserId !== null && !adminGuard) {
       void loadMediaBudget(mediaBudgetUserId, mediaBudgetPolicyId)
     }
@@ -282,22 +289,28 @@ export const ServerAdminPage: React.FC = () => {
   const mediaBudgetLimits = mediaBudget?.limits || {}
   const mediaBudgetUsage = mediaBudget?.usage || {}
 
-  React.useEffect(() => {
-    if (mediaBudgetUserId !== null) {
-      return
-    }
-    const firstUser = usersData?.users?.[0]
-    if (firstUser && typeof firstUser.id === "number" && firstUser.id > 0) {
-      setMediaBudgetUserId(firstUser.id)
-    }
-  }, [mediaBudgetUserId, usersData])
-
+  // Diagnostics fetch only after an explicit user selection (B-S5): no
+  // first-user auto-preload on mount. Selection and policy-id changes are
+  // debounced (300ms) so typing never fires a call per keystroke.
   React.useEffect(() => {
     if (adminGuard || mediaBudgetUserId === null) {
       return
     }
-    void loadMediaBudget(mediaBudgetUserId, mediaBudgetPolicyId)
+    if (mediaBudgetTimerRef.current) {
+      clearTimeout(mediaBudgetTimerRef.current)
+    }
+    mediaBudgetTimerRef.current = setTimeout(() => {
+      void loadMediaBudget(mediaBudgetUserId, mediaBudgetPolicyId)
+    }, 300)
   }, [adminGuard, loadMediaBudget, mediaBudgetPolicyId, mediaBudgetUserId])
+
+  React.useEffect(() => {
+    return () => {
+      if (mediaBudgetTimerRef.current) {
+        clearTimeout(mediaBudgetTimerRef.current)
+      }
+    }
+  }, [])
 
   const handleUserTableChange = (pagination: any) => {
     const page = pagination.current || 1
@@ -316,18 +329,24 @@ export const ServerAdminPage: React.FC = () => {
     void loadUsers(1, usersPageSize, role, active)
   }
 
-  const handleToggleUserActive = async (user: AdminUserSummary, nextActive: boolean) => {
-    try {
-      setUpdatingUserId(user.id)
-      await tldwClient.updateAdminUser(user.id, { is_active: nextActive })
-      await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to update user active state", e)
-    } finally {
-      setUpdatingUserId(null)
-    }
-  }
+  // Handlers the memoized table columns close over are stable themselves
+  // (useCallback), so the column arrays survive unrelated state changes
+  // like the reset-password reveal modal (C-S5).
+  const handleToggleUserActive = React.useCallback(
+    async (user: AdminUserSummary, nextActive: boolean) => {
+      try {
+        setUpdatingUserId(user.id)
+        await tldwClient.updateAdminUser(user.id, { is_active: nextActive })
+        await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to update user active state", e)
+      } finally {
+        setUpdatingUserId(null)
+      }
+    },
+    [loadUsers, usersPage, usersPageSize, userRoleFilter, userActiveFilter]
+  )
 
   // The reset endpoint requires the admin to supply the temporary password
   // and an audit reason; generate a strong one and reveal it exactly once so
@@ -341,43 +360,49 @@ export const ServerAdminPage: React.FC = () => {
     return `T!${encoded}`
   }
 
-  const handleResetUserPassword = async (user: AdminUserSummary) => {
-    const temporaryPassword = generateTemporaryPassword()
-    try {
-      setUpdatingUserId(user.id)
-      await tldwClient.resetAdminUserPassword(user.id, {
-        temporary_password: temporaryPassword,
-        reason: "Admin-initiated password reset from Server Admin",
-        force_password_change: true
-      })
-      setResetPasswordResult({
-        username: user.username,
-        temporaryPassword
-      })
-    } catch (e) {
-      message.error(
-        sanitizeAdminErrorMessage(
-          e,
-          t("settings:admin.users.resetPasswordFailed", "Failed to reset the password")
+  const handleResetUserPassword = React.useCallback(
+    async (user: AdminUserSummary) => {
+      const temporaryPassword = generateTemporaryPassword()
+      try {
+        setUpdatingUserId(user.id)
+        await tldwClient.resetAdminUserPassword(user.id, {
+          temporary_password: temporaryPassword,
+          reason: "Admin-initiated password reset from Server Admin",
+          force_password_change: true
+        })
+        setResetPasswordResult({
+          username: user.username,
+          temporaryPassword
+        })
+      } catch (e) {
+        message.error(
+          sanitizeAdminErrorMessage(
+            e,
+            t("settings:admin.users.resetPasswordFailed", "Failed to reset the password")
+          )
         )
-      )
-    } finally {
-      setUpdatingUserId(null)
-    }
-  }
+      } finally {
+        setUpdatingUserId(null)
+      }
+    },
+    [message, t]
+  )
 
-  const handleChangeUserRole = async (user: AdminUserSummary, role: string) => {
-    try {
-      setUpdatingUserId(user.id)
-      await tldwClient.updateAdminUser(user.id, { role })
-      await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to update user role", e)
-    } finally {
-      setUpdatingUserId(null)
-    }
-  }
+  const handleChangeUserRole = React.useCallback(
+    async (user: AdminUserSummary, role: string) => {
+      try {
+        setUpdatingUserId(user.id)
+        await tldwClient.updateAdminUser(user.id, { role })
+        await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to update user role", e)
+      } finally {
+        setUpdatingUserId(null)
+      }
+    },
+    [loadUsers, usersPage, usersPageSize, userRoleFilter, userActiveFilter]
+  )
 
   const handleCreateRole = async () => {
     try {
@@ -398,29 +423,39 @@ export const ServerAdminPage: React.FC = () => {
     }
   }
 
-  const handleDeleteRole = async (roleId: number) => {
-    try {
-      setDeletingRoleId(roleId)
-      await tldwClient.deleteAdminRole(roleId)
-      await loadRoles()
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to delete role", e)
-    } finally {
-      setDeletingRoleId(null)
-    }
-  }
+  const handleDeleteRole = React.useCallback(
+    async (roleId: number) => {
+      try {
+        setDeletingRoleId(roleId)
+        await tldwClient.deleteAdminRole(roleId)
+        await loadRoles()
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to delete role", e)
+      } finally {
+        setDeletingRoleId(null)
+      }
+    },
+    [loadRoles]
+  )
 
-  const userRoleOptions =
-    roles && roles.length > 0
-      ? roles.map((r) => ({ label: r.name, value: r.name }))
-      : [
-          { label: "user", value: "user" },
-          { label: "admin", value: "admin" },
-          { label: "service", value: "service" }
-        ]
+  const userRoleOptions = React.useMemo(
+    () =>
+      roles && roles.length > 0
+        ? roles.map((r) => ({ label: r.name, value: r.name }))
+        : [
+            { label: "user", value: "user" },
+            { label: "admin", value: "admin" },
+            { label: "service", value: "service" }
+          ],
+    [roles]
+  )
 
-  const userColumns = [
+  // Memoized table columns/options: rebuilding these arrays on every page
+  // render re-rendered the (paged) users and roles tables even when nothing
+  // they consume changed (C-S5).
+  const userColumns = React.useMemo(
+    () => [
     {
       title: t("settings:admin.users.username", "Username"),
       dataIndex: "username",
@@ -503,7 +538,91 @@ export const ServerAdminPage: React.FC = () => {
         </Popconfirm>
       )
     }
-  ]
+    ],
+    [
+      t,
+      userRoleOptions,
+      updatingUserId,
+      handleChangeUserRole,
+      handleToggleUserActive,
+      handleResetUserPassword
+    ]
+  )
+
+  const rolesColumns = React.useMemo(
+    () => [
+      {
+        title: t("settings:admin.roles.name", "Name"),
+        dataIndex: "name",
+        key: "name"
+      },
+      {
+        title: t("settings:admin.roles.description", "Description"),
+        dataIndex: "description",
+        key: "description",
+        render: (value: string | null | undefined) =>
+          value || (
+            <Text type="secondary">
+              {t(
+                "settings:admin.roles.noDescription",
+                "No description provided"
+              )}
+            </Text>
+          )
+      },
+      {
+        title: t("settings:admin.roles.system", "System"),
+        dataIndex: "is_system",
+        key: "is_system",
+        render: (value: boolean) =>
+          value ? (
+            <Tag color="blue">
+              {t("settings:admin.roles.systemLabel", "System")}
+            </Tag>
+          ) : (
+            <Tag>
+              {t("settings:admin.roles.customLabel", "Custom")}
+            </Tag>
+          )
+      },
+      {
+        title: t("settings:admin.roles.actions", "Actions"),
+        key: "actions",
+        render: (_: any, record: AdminRole) =>
+          record.is_system ? null : (
+            <Popconfirm
+              title={t(
+                "settings:admin.roles.deleteConfirmTitle",
+                "Delete role?"
+              )}
+              description={t(
+                "settings:admin.roles.deleteConfirmDescription",
+                "This will remove the role from the server. Existing users will lose this role."
+              )}
+              okText={t("common:confirm", "Confirm")}
+              cancelText={t("common:cancel", "Cancel")}
+              onConfirm={() => handleDeleteRole(record.id)}>
+              <Button
+                danger
+                size="small"
+                loading={deletingRoleId === record.id}>
+                {t("common:delete", "Delete")}
+              </Button>
+            </Popconfirm>
+          )
+      }
+    ],
+    [t, handleDeleteRole, deletingRoleId]
+  )
+
+  const mediaBudgetUserOptions = React.useMemo(
+    () =>
+      (usersData?.users || []).map((user) => ({
+        label: `${user.username} (#${user.id})`,
+        value: user.id
+      })),
+    [usersData]
+  )
 
   return (
     <PageShell>
@@ -847,68 +966,7 @@ export const ServerAdminPage: React.FC = () => {
                     loading={rolesLoading}
                     dataSource={roles}
                     pagination={false}
-                    columns={[
-                      {
-                        title: t("settings:admin.roles.name", "Name"),
-                        dataIndex: "name",
-                        key: "name"
-                      },
-                      {
-                        title: t("settings:admin.roles.description", "Description"),
-                        dataIndex: "description",
-                        key: "description",
-                        render: (value: string | null | undefined) =>
-                          value || (
-                            <Text type="secondary">
-                              {t(
-                                "settings:admin.roles.noDescription",
-                                "No description provided"
-                              )}
-                            </Text>
-                          )
-                      },
-                      {
-                        title: t("settings:admin.roles.system", "System"),
-                        dataIndex: "is_system",
-                        key: "is_system",
-                        render: (value: boolean) =>
-                          value ? (
-                            <Tag color="blue">
-                              {t("settings:admin.roles.systemLabel", "System")}
-                            </Tag>
-                          ) : (
-                            <Tag>
-                              {t("settings:admin.roles.customLabel", "Custom")}
-                            </Tag>
-                          )
-                      },
-                      {
-                        title: t("settings:admin.roles.actions", "Actions"),
-                        key: "actions",
-                        render: (_: any, record: AdminRole) =>
-                          record.is_system ? null : (
-                            <Popconfirm
-                              title={t(
-                                "settings:admin.roles.deleteConfirmTitle",
-                                "Delete role?"
-                              )}
-                              description={t(
-                                "settings:admin.roles.deleteConfirmDescription",
-                                "This will remove the role from the server. Existing users will lose this role."
-                              )}
-                              okText={t("common:confirm", "Confirm")}
-                              cancelText={t("common:cancel", "Cancel")}
-                              onConfirm={() => handleDeleteRole(record.id)}>
-                              <Button
-                                danger
-                                size="small"
-                                loading={deletingRoleId === record.id}>
-                                {t("common:delete", "Delete")}
-                              </Button>
-                            </Popconfirm>
-                          )
-                      }
-                    ]}
+                    columns={rolesColumns}
                   />
                   <Form
                     form={roleForm}
@@ -983,10 +1041,7 @@ export const ServerAdminPage: React.FC = () => {
                     value={mediaBudgetUserId ?? undefined}
                     placeholder={t("settings:admin.mediaBudget.user", "User")}
                     onChange={(value) => setMediaBudgetUserId(value)}
-                    options={(usersData?.users || []).map((user) => ({
-                      label: `${user.username} (#${user.id})`,
-                      value: user.id
-                    }))}
+                    options={mediaBudgetUserOptions}
                   />
                   <Input
                     size="small"

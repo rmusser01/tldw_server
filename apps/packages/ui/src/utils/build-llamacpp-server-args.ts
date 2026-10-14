@@ -47,6 +47,24 @@ export interface LlamacppServerArgs {
   [key: string]: any
 }
 
+/** Defaults for the llama.cpp launch form; shared by the admin page and panel. */
+export const DEFAULT_LLAMACPP_SERVER_ARGS_INPUT: LlamacppServerArgsInput = {
+  contextSize: 4096,
+  gpuLayers: 0,
+  cacheType: "f16",
+  splitMode: "layer",
+  rowSplit: false,
+  mlock: false,
+  noMmap: false,
+  noKvOffload: false,
+  streamingLlm: false,
+  cpuMoe: false,
+  mmprojAuto: true,
+  mmprojOffload: true,
+  flashAttn: "auto",
+  customArgs: {}
+}
+
 const SCALAR_NUMBER_PATTERN = /^-?\d+(\.\d+)?$/
 
 const coerceScalarValue = (raw: string): any => {

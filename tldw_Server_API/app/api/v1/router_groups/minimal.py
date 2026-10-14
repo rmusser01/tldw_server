@@ -57,6 +57,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "service_prompts",
     "rpg",
     "admin",
+    "billing",
     "workspace_eligibility",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {

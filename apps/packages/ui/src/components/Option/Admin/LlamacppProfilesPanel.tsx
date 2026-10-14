@@ -153,7 +153,7 @@ const assetOptions = (
   return options
 }
 
-export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
+const LlamacppProfilesPanelImpl: React.FC<LlamacppProfilesPanelProps> = ({
   profiles,
   assets,
   loading = false,
@@ -197,6 +197,18 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
       serverArgsSerializationError: null
     }))
   }
+
+  // Build the asset Select options only when the asset list or the selected
+  // id changes (admin perf C-S3 / F18): every other keystroke in the profile
+  // form re-renders the modal without re-filtering the asset catalog.
+  const ggufOptions = React.useMemo(
+    () => assetOptions(assetList, "gguf", form.modelId),
+    [assetList, form.modelId]
+  )
+  const mmprojOptions = React.useMemo(
+    () => assetOptions(assetList, "mmproj", form.mmprojModelId),
+    [assetList, form.mmprojModelId]
+  )
 
   const buildPayload = () => {
     const name = form.name.trim()
@@ -478,7 +490,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
               aria-label="Profile model"
               value={form.modelId || undefined}
               onChange={(value) => updateForm("modelId", value || "")}
-              options={assetOptions(assetList, "gguf", form.modelId)}
+              options={ggufOptions}
               placeholder="Select a GGUF asset"
               allowClear
               showSearch
@@ -493,7 +505,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
               aria-label="Profile mmproj"
               value={form.mmprojModelId || undefined}
               onChange={(value) => updateForm("mmprojModelId", value || "")}
-              options={assetOptions(assetList, "mmproj", form.mmprojModelId)}
+              options={mmprojOptions}
               placeholder="Optional projector asset"
               allowClear
               showSearch
@@ -556,5 +568,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppProfilesPanel = React.memo(LlamacppProfilesPanelImpl)
 
 export default LlamacppProfilesPanel

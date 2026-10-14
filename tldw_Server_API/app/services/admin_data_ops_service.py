@@ -10,6 +10,8 @@ import io
 import json
 import os
 import re
+import threading
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -60,6 +62,21 @@ class BackupFile:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class _BackupScanRow:
+    """Lightweight scandir result used for sort/paginate before stat detail.
+
+    ``BackupFile`` construction (and its per-file ``stat()`` size lookup) is
+    deferred to the requested page only, so scanning stays cheap.
+    """
+
+    dataset: str
+    user_id: int | None
+    filename: str
+    path: str
+    mtime: float
+
+
 DATASET_DB_RESOLVERS = {
     "media": DatabasePaths.get_media_db_path,
     "chacha": DatabasePaths.get_chacha_db_path,
@@ -70,6 +87,30 @@ DATASET_DB_RESOLVERS = {
 _BACKUP_DATASETS = frozenset([*DATASET_DB_RESOLVERS.keys(), "authnz"])
 _BACKUP_EXTENSIONS = (".db", ".sqlib", ".dump")
 _RETENTION_PREVIEW_SCHEMA_VERSION = "v1"
+
+# TTL cache for backup directory scans: repeated GET /admin/backups calls
+# within this window are served from the cached scan instead of re-walking
+# every dataset directory and user_<id>/ subtree.
+BACKUP_SCAN_CACHE_TTL_SEC = 30.0
+
+# Cache key: (dataset, user_id) exactly as the list endpoint filters them.
+# Value: (monotonic timestamp of the scan, pre-sorted lightweight scan rows).
+# The rows list is immutable-by-convention once published: readers only slice
+# it, never mutate, so no lock is needed while paginating.
+_backup_cache: dict[tuple[str | None, int | None], tuple[float, list[_BackupScanRow]]] = {}
+_backup_cache_lock = threading.Lock()
+
+
+def _reset_backup_cache_for_tests() -> None:
+    """Test-only hook: drop cached backup scans between isolated test envs."""
+    with _backup_cache_lock:
+        _backup_cache.clear()
+
+
+def _invalidate_backup_cache() -> None:
+    """Drop all cached backup scans after any write to the backup tree."""
+    with _backup_cache_lock:
+        _backup_cache.clear()
 
 
 def _backup_base_dir() -> str:
@@ -124,45 +165,54 @@ def _extract_backup_path(message: str) -> str | None:
     return None
 
 
-def _list_backup_files(dataset: str, user_id: int | None) -> list[BackupFile]:
+def _scan_backup_rows(dataset: str, user_id: int | None) -> list[_BackupScanRow]:
     backup_dir = _backup_dir_for_dataset(dataset, user_id)
     if not os.path.isdir(backup_dir):
         return []
-    files = []
+    rows: list[_BackupScanRow] = []
     for entry in os.scandir(backup_dir):
         if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
             continue
         if not entry.name.endswith(_BACKUP_EXTENSIONS):
             continue
-        stat = entry.stat()
-        files.append(
-            BackupFile(
+        rows.append(
+            _BackupScanRow(
                 dataset=dataset,
                 user_id=user_id,
                 filename=entry.name,
                 path=entry.path,
-                size_bytes=int(stat.st_size),
-                created_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                mtime=entry.stat().st_mtime,
             )
         )
-    files.sort(key=lambda item: item.created_at, reverse=True)
-    return files
+    return rows
 
 
-def _list_all_users_backup_files(dataset: str) -> list[BackupFile]:
+def _scan_all_users_backup_rows(dataset: str) -> list[_BackupScanRow]:
     """Every user's backups for a per-user dataset (admin unfiltered view)."""
     base_dir = _backup_base_dir()
     if not os.path.isdir(base_dir):
         return []
-    items: list[BackupFile] = []
+    rows: list[_BackupScanRow] = []
     for entry in os.scandir(base_dir):
         if not entry.is_dir(follow_symlinks=False):
             continue
         match = re.fullmatch(r"user_(\d+)", entry.name)
         if not match:
             continue
-        items.extend(_list_backup_files(dataset, int(match.group(1))))
-    return items
+        rows.extend(_scan_backup_rows(dataset, int(match.group(1))))
+    return rows
+
+
+def _backup_file_from_row(row: _BackupScanRow) -> BackupFile:
+    stat = os.stat(row.path)
+    return BackupFile(
+        dataset=row.dataset,
+        user_id=row.user_id,
+        filename=row.filename,
+        path=row.path,
+        size_bytes=int(stat.st_size),
+        created_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+    )
 
 
 def list_backup_items(
@@ -172,23 +222,42 @@ def list_backup_items(
     limit: int,
     offset: int,
 ) -> tuple[list[BackupFile], int]:
-    datasets = [_validate_backup_dataset(dataset)] if dataset is not None else [*DATASET_DB_RESOLVERS.keys(), "authnz"]
-    items: list[BackupFile] = []
-    for key in datasets:
-        if key == "authnz":
-            items.extend(_list_backup_files(key, None))
-            continue
-        if user_id is not None:
-            items.extend(_list_backup_files(key, user_id))
-            continue
-        # Unfiltered admin view: per-user datasets live under user_<id>/
-        # subdirectories, which the userless scan never visited - so the
-        # most common backups were invisible without a filter (#2921).
-        items.extend(_list_backup_files(key, None))
-        items.extend(_list_all_users_backup_files(key))
-    items.sort(key=lambda item: item.created_at, reverse=True)
-    total = len(items)
-    return items[offset: offset + limit], total
+    validated_dataset = None if dataset is None else _validate_backup_dataset(dataset)
+    safe_user_id = _normalize_user_id(user_id)
+    cache_key = (validated_dataset, safe_user_id)
+
+    now = time.monotonic()
+    with _backup_cache_lock:
+        cached = _backup_cache.get(cache_key)
+    if cached is not None and now - cached[0] < BACKUP_SCAN_CACHE_TTL_SEC:
+        rows = cached[1]
+    else:
+        datasets = [validated_dataset] if validated_dataset is not None else [*DATASET_DB_RESOLVERS.keys(), "authnz"]
+        scanned: list[_BackupScanRow] = []
+        for key in datasets:
+            if key == "authnz":
+                scanned.extend(_scan_backup_rows(key, None))
+                continue
+            if safe_user_id is not None:
+                scanned.extend(_scan_backup_rows(key, safe_user_id))
+                continue
+            # Unfiltered admin view: per-user datasets live under user_<id>/
+            # subdirectories, which the userless scan never visited - so the
+            # most common backups were invisible without a filter (#2921).
+            scanned.extend(_scan_backup_rows(key, None))
+            scanned.extend(_scan_all_users_backup_rows(key))
+        scanned.sort(key=lambda row: row.mtime, reverse=True)
+        # Publish only after sorting: cached rows are shared across threads
+        # and must never be mutated post-publication. A concurrent miss may
+        # scan+store in parallel - last write wins with equally fresh data,
+        # so the duplicate work is benign at this TTL.
+        with _backup_cache_lock:
+            _backup_cache[cache_key] = (time.monotonic(), scanned)
+        rows = scanned
+
+    total = len(rows)
+    page_rows = rows[offset: offset + limit]
+    return [_backup_file_from_row(row) for row in page_rows], total
 
 
 def _resolve_dataset_db_path(dataset: str, user_id: int | None) -> tuple[str, int | None]:
@@ -304,6 +373,10 @@ def create_backup_snapshot(
     if max_backups is not None:
         _prune_backups(backup_dir, max_backups)
 
+    # The backup tree changed (new file, possibly pruned old ones): drop
+    # cached scans so the next list call re-walks the directories.
+    _invalidate_backup_cache()
+
     stat = os.stat(os.path.join(backup_dir, filename))
     return BackupFile(
         dataset=dataset,
@@ -332,11 +405,13 @@ def restore_backup_snapshot(
         result = restore_postgres_backup(backend, backup_path, drop_first=True)
         if result != "ok":
             raise RuntimeError(result)
+        _invalidate_backup_cache()
         return "ok"
 
     result = restore_single_db_backup(db_path, backup_dir, dataset, backup_name)
     if not result.startswith("Database restored"):
         raise RuntimeError(result)
+    _invalidate_backup_cache()
     return result
 
 

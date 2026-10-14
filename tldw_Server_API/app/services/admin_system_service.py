@@ -256,8 +256,8 @@ async def get_system_stats(db) -> SystemStatsResponse:
                         COALESCE(SUM(prompt_tokens), 0) as prompt,
                         COALESCE(SUM(completion_tokens), 0) as completion,
                         COALESCE(SUM(total_tokens), 0) as total
-                    FROM llm_usage_v2
-                    WHERE date(created_at) = CURRENT_DATE
+                    FROM llm_usage_log
+                    WHERE ts >= CURRENT_DATE
                     """
                 )
             else:
@@ -267,8 +267,8 @@ async def get_system_stats(db) -> SystemStatsResponse:
                         COALESCE(SUM(prompt_tokens), 0) as prompt,
                         COALESCE(SUM(completion_tokens), 0) as completion,
                         COALESCE(SUM(total_tokens), 0) as total
-                    FROM llm_usage_v2
-                    WHERE date(created_at) = date('now')
+                    FROM llm_usage_log
+                    WHERE ts >= date('now')
                     """
                 )
                 token_row = await cursor.fetchone()
@@ -280,7 +280,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
                     "total": int(td.get("total") or 0),
                 }
         except Exception as exc:
-            logger.debug(f"Skipping token usage stats in system overview: {exc}")
+            logger.warning(f"Skipping token usage stats in system overview: {exc}")
 
         return SystemStatsResponse(
             users={

@@ -1,7 +1,28 @@
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import ServerAdminPage from "../ServerAdminPage"
+import { createAdminQueryClient } from "../AdminQueryProvider"
+
+/**
+ * Render the page under a fresh admin query client so each test owns its
+ * cache (B-S4): system stats now flow through react-query.
+ */
+const adminQueryClients: QueryClient[] = []
+const renderPage = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
+}
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  adminQueryClients.splice(0).forEach((client) => client.clear())
+})
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -40,6 +61,23 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/components/Common/PageShell", () => ({
   PageShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
 }))
+
+/**
+ * Diagnostics load only after an explicit user selection (B-S5): open the
+ * media-budget user Select and pick the option with the given label.
+ * (antd v6 keeps the mousedown handler on the `.ant-select` root — the old
+ * `.ant-select-selector` inner node no longer exists.)
+ */
+const selectMediaBudgetUser = async (optionLabel: string) => {
+  const mediaBudgetCard = (
+    screen.getByText("Media ingestion budget").closest(".ant-card") as HTMLElement
+  )
+  const userSelect = (
+    within(mediaBudgetCard).getByText("User").closest(".ant-select") as HTMLElement
+  )
+  fireEvent.mouseDown(userSelect)
+  fireEvent.click(await screen.findByText(optionLabel))
+}
 
 describe("ServerAdminPage media budget diagnostics", () => {
   beforeEach(() => {
@@ -110,7 +148,9 @@ describe("ServerAdminPage media budget diagnostics", () => {
   })
 
   it("loads and renders media ingestion budget diagnostics for selected user", async () => {
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
+
+    await selectMediaBudgetUser("admin (#11)")
 
     await waitFor(() => {
       expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledWith({
@@ -128,6 +168,56 @@ describe("ServerAdminPage media budget diagnostics", () => {
     expect(await screen.findByText("~1h 4m")).toBeTruthy()
   })
 
+  it("test_no_diagnostics_preload_on_mount", async () => {
+    renderPage(<ServerAdminPage />)
+
+    // Users (and the rest of the reference data) finish loading; the budget
+    // card must NOT fetch diagnostics until a user is explicitly selected.
+    expect(await screen.findByText("admin@example.com")).toBeTruthy()
+    await waitFor(() => {
+      expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMock.getMediaIngestionBudgetDiagnostics).not.toHaveBeenCalled()
+  })
+
+  it("test_policy_input_debounced", async () => {
+    renderPage(<ServerAdminPage />)
+
+    // Explicit selection settles first (300ms debounce on the fetch effect).
+    await selectMediaBudgetUser("admin (#11)")
+    await waitFor(() => {
+      expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledTimes(1)
+    })
+
+    vi.useFakeTimers()
+    const policyInput = screen.getByPlaceholderText("Policy ID")
+    for (const partial of ["a", "ab", "abc", "abcd"]) {
+      fireEvent.change(policyInput, { target: { value: partial } })
+      act(() => {
+        vi.advanceTimersByTime(299)
+      })
+    }
+
+    // Four keystrokes at 299ms each stay inside the 300ms debounce window:
+    // only the selection fetch has happened so far.
+    expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    // Crossing 300ms fires exactly one fetch for the settled policy value.
+    expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledTimes(2)
+    expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenLastCalledWith({
+      userId: 11,
+      policyId: "abcd"
+    })
+  })
+
   it("formats oversized legacy storage values as bytes", async () => {
     apiMock.getSystemStats.mockResolvedValueOnce({
       users: { total: 1, active: 1, admins: 1, verified: 1, new_last_30d: 0 },
@@ -140,7 +230,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
       sessions: { active: 1, unique_users: 1 }
     })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect((await screen.findAllByText("2 GiB")).length).toBeGreaterThanOrEqual(2)
     expect((await screen.findAllByText("4 GiB")).length).toBeGreaterThanOrEqual(1)
@@ -161,7 +251,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const timeoutMessage = await screen.findByText(
       "System statistics took longer than 10 seconds. Retry to try again."
