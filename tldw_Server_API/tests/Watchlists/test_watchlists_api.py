@@ -1820,3 +1820,39 @@ def test_outputs_generate_audio_trigger_failure_marks_enqueue_failed_metadata(
     assert r.status_code == 200, r.text
     run_payload = r.json()
     assert run_payload.get("stats", {}).get("audio_briefing_task_id") is None
+
+
+def test_output_summaries_return_a_quota_refusal_as_402(client_with_user, monkeypatch):
+    """A refused summary call is not swallowed as a non-critical summarization failure (TASK-13636)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
+
+    c = client_with_user
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    class _RefusingAdapter:
+        def chat(self, request, timeout=None):
+            raise LLMQuotaExceededError(
+                category="llm_tokens_month", current=12, limit=10, message="over", retry_after=60
+            )
+
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _p: _RefusingAdapter()))
+
+    r = c.post(
+        "/api/v1/watchlists/sources",
+        json={"name": "Quota Feed", "url": "https://example.com/quota.xml", "source_type": "rss", "tags": ["quota"]},
+    )
+    assert r.status_code == 200, r.text
+    r = c.post("/api/v1/watchlists/jobs", json={"name": "Quota Digest", "scope": {"tags": ["quota"]}})
+    assert r.status_code == 200, r.text
+    r = c.post(f"/api/v1/watchlists/jobs/{r.json()['id']}/run")
+    assert r.status_code == 200, r.text
+
+    r = c.post(
+        "/api/v1/watchlists/outputs",
+        json={"run_id": r.json()["id"], "summarize": True, "llm_provider": "openai", "llm_model": "test-model"},
+    )
+    assert r.status_code == 402, r.text
+    assert r.json()["detail"]["error"] == "limit_exceeded"
