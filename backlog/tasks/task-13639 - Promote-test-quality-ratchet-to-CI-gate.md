@@ -23,14 +23,15 @@ Executed 2026-10-14 (commit bd7448d6fb on codex/credit-batch4-uat-hardening). Ba
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Ratchet is a required CI gate: wrapper test (tests/CI/test_test_quality_ratchet.py) in backend-required.yml enforces --enforce against the regenerated baseline (743->1107 offenses, matching live scan totals exactly). Three exemplar fixes strengthen assertions against real production contracts (admin audit fields+ordering per admin_audit_service.py:89-105; DSR split preserves all 4 case behaviors; notification payload forwarding per monitoring.py:568-583). Red/green independently re-verified by review (baseline tamper -> exit 1 naming offense). Review: Approved, minors only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
