@@ -174,10 +174,10 @@ cross-module table.
 
 | Path | Why |
 |---|---|
-| `Docs/Development/Used_Prompts/Codeslop-Vibecheck-SKILL.md` (repo root) | **The rubric you apply.** Its three axes, per-axis flag / do-not-flag lists, severity guide, and "Common Mistakes" section. Follow it, with the two overrides in section 3. |
+| `Docs/Development/Used_Prompts/Codeslop-Vibecheck-SKILL.md` | **The rubric you apply.** Its three axes, per-axis flag / do-not-flag lists, severity guide, and "Common Mistakes" section. Follow it, with the two overrides in section 3. |
 | `Docs/superpowers/reviews/rag/README.md` | The review rules and stage-file format you must reproduce. |
 | `Docs/superpowers/reviews/rag/` + `db-management/` | Already-complete reviews. Extend, do not redo. |
-| `audits/2026-07-04-test-suite-audit-round2.md` | The finding-ID and severity-ranking style to match. |
+| `Docs/Audit/2026-07-04-test-suite-audit-round2.md` | The finding-ID and severity-ranking style to match. |
 | `Docs/Architecture.md` | Layering ground truth. Quoted in section 9. |
 | `Docs/ADR/` (31 ADRs) | Binding decisions. **A finding that contradicts an ADR is invalid** — check before asserting. |
 | `Docs/Conventions/README_TEMPLATE.md` | Module README convention; 90 of 100 `app/core/*/` dirs comply. |
@@ -594,7 +594,7 @@ usually inflates its own numbers; do not let it.
 ### 12. Ranking and output contract
 
 **Ranking:** severity × blast-radius × effort, using the numeric-weight-plus-High/Medium
-vocabulary from `audits/2026-07-04-test-suite-audit-round2.md` — a priority table of
+vocabulary from `Docs/Audit/2026-07-04-test-suite-audit-round2.md` — a priority table of
 `| ID | finding | weight | class |` rows, sorted by weight descending. Blast radius is
 site count × churn of the files involved. Effort is gated by test coverage: a consolidation
 across well-covered sites is cheaper than one across thin coverage, so **state the coverage**.

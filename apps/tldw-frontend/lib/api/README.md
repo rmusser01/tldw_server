@@ -2,7 +2,7 @@
 
 This directory links the frontend to the backend's OpenAPI contract so a
 backend model change can't silently drift from the frontend's view of the API
-(the RF1 / #2590 defect class from `audits/2026-07-04-test-suite-audit-round2.md`).
+(the RF1 / #2590 defect class from `Docs/Audit/2026-07-04-test-suite-audit-round2.md`).
 
 ## Files
 

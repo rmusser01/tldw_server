@@ -3,7 +3,7 @@
 
 The frontend hand-writes ``page.route()`` mocks and API clients with no link to
 the backend contract, so a Pydantic model change can silently break the wired
-system while both suites stay green (audits/2026-07-04-test-suite-audit-round2.md
+system while both suites stay green (Docs/Audit/2026-07-04-test-suite-audit-round2.md
 RF1, the #2590 class). This script is the backend half of the drift gate:
 
 * ``--out openapi.json``  — write the full canonical schema (feeds
