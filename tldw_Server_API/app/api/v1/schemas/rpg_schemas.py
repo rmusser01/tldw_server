@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 
 class RPGCampaignCreateRequest(BaseModel):
@@ -234,3 +234,149 @@ class RPGProposalRejectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     review_notes: str | None = Field(default=None, max_length=2000)
+
+
+class RPGCampaignUpdateRequest(BaseModel):
+    """Request body for PATCH /rpg/campaigns/{campaign_id}."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    status: Literal["active", "archived"] | None = None
+    expected_version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _require_mutable_field(self) -> "RPGCampaignUpdateRequest":
+        if self.title is None and self.description is None and self.status is None:
+            raise ValueError("no_mutable_fields")
+        return self
+
+
+class RPGSessionUpdateRequest(BaseModel):
+    """Request body for PATCH /rpg/sessions/{session_id}."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["active", "archived"] | None = None
+    expected_version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _require_mutable_field(self) -> "RPGSessionUpdateRequest":
+        if self.title is None and self.status is None:
+            raise ValueError("no_mutable_fields")
+        return self
+
+
+class RPGAuthoritySettingsReplaceRequest(BaseModel):
+    """Request body for PUT /rpg/sessions/{session_id}/authority-settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    import_auto_commit: bool
+    mcp_auto_commit: bool
+    model_auto_commit: bool
+    model_auto_commit_event_types: list[Annotated[str, Field(min_length=1, max_length=120)]]
+    expected_version: int = Field(ge=1)
+
+
+class RPGCampaignListItem(RPGCampaignResponse):
+    """Campaign row as returned in list endpoints."""
+
+    created_at: datetime
+    updated_at: datetime
+
+
+class RPGCampaignDetail(RPGCampaignListItem):
+    """Campaign row as returned by the single-campaign read endpoint."""
+
+    session_count: int
+
+
+class RPGSessionListItem(RPGSessionResponse):
+    """Session row as returned in list endpoints."""
+
+    pending_proposal_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class RPGSessionDetail(RPGSessionListItem):
+    """Session row as returned by the single-session read endpoint."""
+
+    authority_settings: dict[str, Any]
+    linked_chat_id: int | None
+
+
+class RPGCampaignListResponse(BaseModel):
+    """Response body for campaign list endpoints."""
+
+    items: list[RPGCampaignListItem]
+    total_count: int
+    limit: int
+    offset: int
+
+
+class RPGSessionListResponse(BaseModel):
+    """Response body for session list endpoints."""
+
+    items: list[RPGSessionListItem]
+    total_count: int
+    limit: int
+    offset: int
+
+
+class RPGEventResponse(BaseModel):
+    """Serialized RPG session event, mirroring RPGSessionEvent."""
+
+    id: int
+    session_id: int
+    sequence_number: int
+    event_type: str
+    event_payload: dict[str, Any]
+    source_type: str
+    source_actor_id: str | None
+    source_label: str | None
+    operation_id: int | None
+    event_schema_version: str
+    adapter_key: str
+    adapter_version: str
+    proposal_id: int | None
+    created_at: datetime
+
+
+class RPGEventsListResponse(BaseModel):
+    """Response body for session event listing."""
+
+    items: list[RPGEventResponse]
+    next_after_sequence: int
+    limit: int
+
+
+class RPGProposalListResponse(BaseModel):
+    """Response body for session proposal listing."""
+
+    items: list[dict[str, Any]]
+    total_count: int
+    limit: int
+    offset: int
+
+
+class RPGSnapshotResponse(BaseModel):
+    """Response body for reading a session snapshot."""
+
+    snapshot_version: int
+    last_event_sequence: int
+    snapshot: dict[str, Any]
+    diagnostics: dict[str, Any]
+
+
+class RPGSnapshotRebuildResponse(BaseModel):
+    """Response body for rebuilding a session snapshot."""
+
+    snapshot_version: int
+    last_event_sequence: int
+    event_count: int
+    replayed: bool
+    diagnostics: dict[str, Any]
