@@ -26,6 +26,7 @@ type ButtonProps = {
   className?: string
   type?: ButtonHtmlType | ButtonVariant
   htmlType?: ButtonHtmlType
+  "aria-describedby"?: string
   ariaLabel?: string
   title?: string
   "data-testid"?: string
@@ -80,6 +81,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       type,
       htmlType,
       ariaLabel,
+      "aria-describedby": ariaDescribedBy,
       title,
       "data-testid": dataTestId
     },
@@ -116,6 +118,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         onClick={onClick}
         onKeyDown={onKeyDown}
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         aria-busy={loading}
         title={title ?? ariaLabel}
         data-testid={dataTestId}>

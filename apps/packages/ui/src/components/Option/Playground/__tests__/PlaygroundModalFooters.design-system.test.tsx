@@ -253,6 +253,9 @@ vi.mock("lucide-react", () => ({
   WandSparkles: () => <span data-testid="wand-icon" />
 }))
 
+// Footer geometry/actions declare a legacy view; protected choices have dedicated real-context controls.
+vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => null }))
+
 vi.mock("@/utils/provider-registry", () => ({
   getProviderDisplayName: (provider: string) => provider
 }))

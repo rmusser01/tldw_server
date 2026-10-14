@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  historySelection: null as Record<string, unknown> | null,
   realSelection: false,
   ownerReady: null as Promise<void> | null,
   ownerFailed: false,
@@ -114,6 +115,11 @@ vi.mock("@/store/option", () => ({
       selector(state.option),
     { getState: () => state.option }
   )
+}))
+
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext: () => mocks.historySelection
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
@@ -396,6 +402,7 @@ describe("AssistantSelect behavior", () => {
     localStorage.clear()
     vi.clearAllMocks()
     mocks.realSelection = false
+    mocks.historySelection = null
     mocks.assistantMeta = { isLoading: false, assistantKey: "alice", isCurrent: () => true, setRenderValue: vi.fn() }
     mocks.ownerReady = null
     mocks.ownerFailed = false
@@ -435,6 +442,140 @@ describe("AssistantSelect behavior", () => {
       avatar_url: "https://example.com/alpha-full.png",
       system_prompt: "Character full prompt"
     })
+  })
+
+  it("disables compact tracked persona launch with guidance while keeping tracked character selection", async () => {
+    mocks.historySelection = { getCurrent: () => ({ owner: null }) }
+    const onTrackedSelection = vi.fn().mockResolvedValue(true)
+    const user = userEvent.setup()
+    render(<CharacterControlsSheet onTrackedSelection={onTrackedSelection} />)
+    const persona = screen.getByRole("button", { name: "Start tracked persona chat" })
+    expect(persona).toBeDisabled()
+    expect(persona).toHaveAccessibleDescription(/tracked persona chat.*unavailable.*overlay/i)
+    await user.click(persona)
+    expect(screen.queryByTestId("tracked-assistant-picker")).toBeNull()
+    expect(onTrackedSelection).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Start tracked character chat" }))
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    await waitFor(() => expect(onTrackedSelection).toHaveBeenCalledWith(expect.objectContaining({ kind: "character" }), expect.any(Function)))
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it.each(["character", "persona"])("does not offer the ordinary-chat overlay action for a tracked %s conversation", async kind => {
+    mocks.historySelection = { getCurrent: () => ({ owner: { kind: "native" } }) }
+    Object.assign(state.option, { serverChatAssistantKind: kind, serverChatAssistantId: "persona-1",
+      serverChatCharacterId: kind === "character" ? "char-1" : null })
+    const user = userEvent.setup()
+    renderAssistantSelect()
+    await user.click(screen.getByTestId("character-select"))
+    await user.click(screen.getByRole("tab", { name: "Personas" }))
+    expect(await screen.findByRole("button", { name: "Guide Persona" })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Use a persona prompt overlay" })).toBeNull()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it("offers an explicit public persona overlay choice without silently adopting tracked identity", async () => {
+    mocks.historySelection = { getCurrent: () => ({ owner: null }) }
+    const user = userEvent.setup()
+    renderAssistantSelect()
+    await user.click(screen.getByTestId("character-select"))
+    await user.click(screen.getByRole("tab", { name: "Personas" }))
+    const choice = await screen.findByRole("button", { name: "Guide Persona" })
+    expect(choice).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Use a persona prompt overlay" }))
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(choice).toBeEnabled()
+    await user.click(choice)
+    await waitFor(() => expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "persona", id: "persona-1", metadata: expect.objectContaining({ selectionMode: "overlay" })
+    })))
+    expect(mocks.updateSettings).toHaveBeenCalledWith({ assistantOverlay: expect.objectContaining({ kind: "persona", id: "persona-1" }) })
+  })
+
+  it.each(["idle", "local", "native"])("explains unavailable tracked persona in protected %s history without writes", async source => {
+    mocks.historySelection = { getCurrent: () => ({ owner: source === "idle" ? null : { kind: source } }) }
+    if (source === "idle") Object.assign(state.option, { historyId: null, serverChatId: null })
+    if (source === "local") Object.assign(state.option, { historyId: "local-history", serverChatId: null })
+    const onTrackedSelection = vi.fn()
+    const user = userEvent.setup()
+    renderAssistantSelect({ initialTab: "persona", onTrackedSelection })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    const choice = await screen.findByRole("button", { name: "Guide Persona" })
+    expect(choice).toBeDisabled()
+    expect(choice).toHaveAccessibleDescription(/tracked persona chat.*unavailable.*overlay/i)
+    await user.click(choice)
+    expect(onTrackedSelection).not.toHaveBeenCalled()
+    expect(mocks.getPersonaProfile).not.toHaveBeenCalled()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(state.option.setHistoryId).not.toHaveBeenCalled()
+    expect(state.option.setServerChatId).not.toHaveBeenCalled()
+  })
+
+  it.each(["event", "preference"])("retires a held tracked character when an overlay intent opens the same protected picker by %s", async boundary => {
+    mocks.historySelection = { getCurrent: () => ({ owner: null }) }
+    let release!: (accepted: boolean) => void
+    const pending = new Promise<boolean>(resolve => { release = resolve })
+    let isCurrent!: () => boolean
+    const tracked = vi.fn((_selection, guard: () => boolean) => { isCurrent = guard; return pending })
+    const complete = vi.fn()
+    const user = userEvent.setup()
+    const view = renderAssistantSelect({ onTrackedSelection: tracked, onSelectionComplete: complete })
+    try {
+      await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+      await user.click(await screen.findByRole("button", { name: "Alpha" }))
+      expect(isCurrent()).toBe(true)
+      if (boundary === "event") act(() => window.dispatchEvent(new CustomEvent("tldw:open-assistant-select", {
+        detail: { tab: "persona", applyAs: "overlay" }
+      })))
+      else view.rerenderAssistantSelect({ initialTab: "persona", selectionModePreference: "overlay", onTrackedSelection: tracked, onSelectionComplete: complete })
+      expect(isCurrent()).toBe(false)
+      await act(async () => { release(true); await pending })
+      expect(complete).not.toHaveBeenCalled()
+      const persona = await screen.findByRole("button", { name: "Guide Persona" })
+      expect(persona).toBeEnabled()
+      expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+      expect(mocks.updateSettings).not.toHaveBeenCalled()
+      await user.click(persona)
+      await waitFor(() => expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "persona", metadata: expect.objectContaining({ selectionMode: "overlay" })
+      })))
+      expect(tracked).toHaveBeenCalledOnce()
+      expect(state.option.setServerChatId).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => { release(true); await pending })
+      view.unmount()
+    }
+  })
+
+  it("blocks protected persona staging and updates overlay intent while the same picker is open", async () => {
+    mocks.historySelection = { getCurrent: () => ({ owner: null }) }
+    const stage = vi.fn()
+    const user = userEvent.setup()
+    renderAssistantSelect({ initialTab: "persona", selection: null, onSelectionChange: stage })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    const choice = await screen.findByRole("button", { name: "Guide Persona" })
+    expect(choice).toBeDisabled()
+    await user.click(choice)
+    expect(stage).not.toHaveBeenCalled()
+    const requestMode = (applyAs: "tracked" | "overlay") => act(() => {
+      window.dispatchEvent(new CustomEvent("tldw:open-assistant-select", { detail: { tab: "persona", applyAs } }))
+    })
+    requestMode("overlay")
+    await waitFor(() => expect(choice).toBeEnabled())
+    requestMode("tracked")
+    await waitFor(() => expect(choice).toBeDisabled())
+    requestMode("overlay")
+    await waitFor(() => expect(choice).toBeEnabled())
+    await user.click(choice)
+    await waitFor(() => expect(stage).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "persona", metadata: expect.objectContaining({ selectionMode: "overlay" })
+    })))
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(state.option.setServerChatId).not.toHaveBeenCalled()
   })
 
   it("waits for verified ownership before accepting a picker choice or replacing Chat", async () => {

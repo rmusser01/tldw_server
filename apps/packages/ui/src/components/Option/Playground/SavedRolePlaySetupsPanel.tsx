@@ -1,5 +1,7 @@
 import React from "react"
 import { Button, Input } from "antd"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 
 import {
   describeRolePlaySetupPreview,
@@ -32,6 +34,10 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
   onDeleteSetup,
   t
 }) => {
+  const historySelection = useHistorySelectionContext()
+  const personaGuidanceId = React.useId()
+  const personaSetupUnavailable = (setup: StartupTemplateBundle) =>
+    isProtectedTrackedPersonaUnavailable(Boolean(historySelection), setup.rolePlay?.identity?.kind, null)
   const rolePlaySetups = React.useMemo(
     () => setups.filter((setup) => isRolePlayRelevantBundle(setup)),
     [setups]
@@ -109,6 +115,11 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
         </Button>
       </div>
 
+      {rolePlaySetups.some(personaSetupUnavailable) && (
+        <p id={personaGuidanceId} role="status" className="text-sm text-text-muted">
+          {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+        </p>
+      )}
       {rolePlaySetups.length === 0 ? (
         <p className="text-xs text-text-muted">
           {t(
@@ -165,12 +176,14 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                     <Button
                       size="small"
                       type="primary"
+                      disabled={personaSetupUnavailable(setup)}
+                      aria-describedby={personaSetupUnavailable(setup) ? personaGuidanceId : undefined}
                       aria-label={t(
                         "playground:composer.applyRolePlaySetup",
                         "Apply {{name}}",
                         { name: setup.name }
                       )}
-                      onClick={() => void onApplySetup(setup)}>
+                      onClick={() => { if (!personaSetupUnavailable(setup)) void onApplySetup(setup) }}>
                       {t("common:apply", "Apply")}
                     </Button>
                     <Button

@@ -9,7 +9,8 @@ import {
   useServerChatHistory
 } from "@/hooks/useServerChatHistory"
 import { useStoreMessageOption } from "@/store/option"
-import type { AssistantSelection } from "@/types/assistant-selection"
+import { isProtectedTrackedPersonaUnavailable, type AssistantSelection } from "@/types/assistant-selection"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { openCharactersWorkspace } from "@/utils/characters-route"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -40,7 +41,10 @@ export const CharacterControlsSheet = ({
   onTrackedSelection,
   onRequestClose
 }: CharacterControlsSheetProps) => {
-  const { t } = useTranslation(["playground", "common"])
+  const { t } = useTranslation(["playground", "common", "option"])
+  const historySelection = useHistorySelectionContext()
+  const personaGuidanceId = React.useId()
+  const trackedPersonaUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), "persona", "tracked")
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const serverChatAssistantKind = useStoreMessageOption(
@@ -159,6 +163,7 @@ export const CharacterControlsSheet = ({
   }, [retireTrackedPicker, setSelectedAssistant, updateSettings])
 
   const handleStartTracked = (tab: "character" | "persona") => {
+    if (isProtectedTrackedPersonaUnavailable(Boolean(historySelection), tab, "tracked")) return
     trackedPickerIntentRef.current++
     setTrackedPicker({ tab, intent: trackedPickerIntentRef.current })
   }
@@ -274,6 +279,8 @@ export const CharacterControlsSheet = ({
           </Button>
           <Button
             variant="outline"
+            disabled={trackedPersonaUnavailable}
+            aria-describedby={trackedPersonaUnavailable ? personaGuidanceId : undefined}
             onClick={() => void handleStartTracked("persona")}>
             {t(
               "playground:characterRail.startTrackedPersona",
@@ -281,6 +288,11 @@ export const CharacterControlsSheet = ({
             )}
           </Button>
         </div>
+        {trackedPersonaUnavailable && (
+          <p id={personaGuidanceId} className="text-sm text-text-muted">
+            {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+          </p>
+        )}
         {trackedPickerTab ? (
           <div data-testid="tracked-assistant-picker" className="pt-2">
             <AssistantSelect

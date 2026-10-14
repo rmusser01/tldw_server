@@ -4,7 +4,7 @@ import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/h
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
-import type { AssistantSelection } from "@/types/assistant-selection"
+import { isProtectedTrackedPersonaUnavailable, type AssistantSelection } from "@/types/assistant-selection"
 import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
 import { createDefaultActorSettings } from "@/types/actor"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
@@ -785,6 +785,7 @@ export const SidepanelForm = ({
   const placeholderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const {
     onSubmit: submitMessageAction,
+    effectiveAssistantState: messageAssistantState,
     setSelectedAssistant,
     selectedModel,
     setSelectedModel,
@@ -827,9 +828,13 @@ export const SidepanelForm = ({
     captureStopGuard
   )
   const greetingSubmitGateRef = React.useRef<() => boolean>(() => false)
-  const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) =>
-    greetingSubmitGateRef.current() ? Promise.resolve({ status: "skipped" as const,
-      reason: t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") }) : submitMessageAction(input), [submitMessageAction, t])
+  const personaSubmitDisabledReasonRef = React.useRef<string | null>(null)
+  const getSubmitDisabledReason = React.useCallback(() => personaSubmitDisabledReasonRef.current ??
+    (greetingSubmitGateRef.current() ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : null), [t])
+  const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) => {
+    const reason = getSubmitDisabledReason()
+    return reason ? Promise.resolve({ status: "skipped" as const, reason }) : submitMessageAction(input)
+  }, [getSubmitDisabledReason, submitMessageAction])
   const { captureQueuedDispatchGuard } = conversationMetadata
   const currentChatApiProvider = useStoreChatModelSettings(
     (state) => state.apiProvider
@@ -849,7 +854,7 @@ export const SidepanelForm = ({
       serverChatId
     })
   const effectiveAssistantState = React.useMemo(
-    () =>
+    () => messageAssistantState ??
       resolveEffectiveAssistantState({
         tracked: {
           assistantKind: serverChatAssistantKind,
@@ -859,6 +864,7 @@ export const SidepanelForm = ({
         settings: conversationContextSettings ?? null
       }),
     [
+      messageAssistantState,
       conversationContextSettings,
       serverChatAssistantId,
       serverChatAssistantKind,
@@ -908,6 +914,11 @@ export const SidepanelForm = ({
   const pageContextActive = chatMode === "rag" && chatWithWebsiteEmbedding
 
   const greetingHistorySelection = useHistorySelectionContext()
+  const personaHistoryUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(greetingHistorySelection),
+    effectiveAssistantState.mode === "tracked_persona" ? "persona" : null, "tracked")
+  const personaSubmitDisabledReason = personaHistoryUnavailable
+    ? t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
+  personaSubmitDisabledReasonRef.current = personaSubmitDisabledReason
   const getHandoffInputRevision = form.getRevision
   const handoffInputRevision = getHandoffInputRevision()
   const handoffSourceKey = JSON.stringify([draftOwnerKey, historyId, serverChatId, draftAddress, sourceDraftRevision, handoffInputRevision])
@@ -2932,6 +2943,8 @@ export const SidepanelForm = ({
 
   const validateQueuedRequest = React.useCallback(
     (item: QueuedRequest) => {
+      const reason = getSubmitDisabledReason()
+      if (reason) return reason
       if (isQueuedDispatchBlockedByComposerState) {
         return t(
           "playground:composer.queue.currentDraftAttachmentConflict",
@@ -2974,7 +2987,7 @@ export const SidepanelForm = ({
 
       return null
     },
-    [availableChatModelIds, greetingHistorySelection, isQueuedDispatchBlockedByComposerState, t]
+    [availableChatModelIds, getSubmitDisabledReason, greetingHistorySelection, isQueuedDispatchBlockedByComposerState, t]
   )
 
   const sendQueuedRequest = React.useCallback(
@@ -3210,11 +3223,11 @@ export const SidepanelForm = ({
   const cancelCurrentAndRunDisabledReason =
     queue.cancelCurrentAndRunDisabledReason
   const handleRunQueuedRequest = (...args: Parameters<typeof queue.handleRunQueuedRequest>) => {
-    if (greetingSubmitGateRef.current()) return
+    if (getSubmitDisabledReason()) return
     return queue.handleRunQueuedRequest(...args)
   }
   const handleRunNextQueuedRequest = () => {
-    if (greetingSubmitGateRef.current()) return
+    if (getSubmitDisabledReason()) return
     return queue.handleRunNextQueuedRequest()
   }
   const queueMetadataStatus = conversationMetadata.isReady
@@ -3263,7 +3276,7 @@ export const SidepanelForm = ({
       image: string,
       options?: { ignorePinnedResults?: boolean }
     ) => {
-      if (greetingStarting) return
+      if (getSubmitDisabledReason()) return
       if (!connectionReadyRef.current) {
         notification.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
         return
@@ -3375,7 +3388,7 @@ export const SidepanelForm = ({
       availableChatModelIds,
       contextFiles.length,
       draftReady,
-      greetingStarting,
+      getSubmitDisabledReason,
       greetingHistorySelection,
       form,
       isSending,
@@ -3403,11 +3416,11 @@ export const SidepanelForm = ({
   const primaryActionLabel = shouldQueuePrimaryAction
     ? t("common:queue", "Queue")
     : t("common:send", "Send")
-  const primaryActionTitle = !isConnectionReady
+  const primaryActionTitle = personaSubmitDisabledReason ?? (!isConnectionReady
     ? t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string
     : shouldQueuePrimaryAction
       ? t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string
-      : sendButtonTitle
+      : sendButtonTitle)
   const primaryActionAriaLabel = shouldQueuePrimaryAction
     ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
     : (t("playground:composer.submitAria", "Send message") as string)
@@ -3698,7 +3711,7 @@ export const SidepanelForm = ({
                         onClearAll={queuedRequestActions.clear}
                         onOpenDiagnostics={openDiagnostics}
                         forceRunDisabledReason={cancelCurrentAndRunDisabledReason}
-                        dispatchDisabledReason={greetingStarting ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : queueMetadataStatus}
+                        dispatchDisabledReason={getSubmitDisabledReason() ?? queueMetadataStatus}
                       />
                     )}
                     {contextChips.length > 0 && (
@@ -3813,6 +3826,7 @@ export const SidepanelForm = ({
 
                       const composerInlineMessagesNode = (
                         <>
+                          {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
                           {isConnectionReady && !isProMode && <ModelSelect
                             iconClassName="size-4"
                             showSelectedName
@@ -4149,7 +4163,7 @@ export const SidepanelForm = ({
                                   <Space.Compact>
                                   <button
                                     aria-label={primaryActionAriaLabel}
-                                    disabled={!isConnectionReady}
+                                    disabled={!isConnectionReady || Boolean(personaSubmitDisabledReason)}
                                     data-testid="chat-send"
                                     title={primaryActionTitle}
                                     type={shouldQueuePrimaryAction ? "button" : "submit"}
@@ -4515,7 +4529,7 @@ export const SidepanelForm = ({
                               variant="primary"
                               size="sm"
                               ariaLabel={primaryActionAriaLabel}
-                              disabled={!isConnectionReady}
+                              disabled={!isConnectionReady || Boolean(personaSubmitDisabledReason)}
                               title={primaryActionTitle}
                               className="min-h-[44px] rounded-full px-4 text-[11px] font-semibold uppercase tracking-[0.12em]"
                             >
@@ -4833,7 +4847,7 @@ export const SidepanelForm = ({
                             size="sm"
                             shape="pill"
                             ariaLabel={primaryActionAriaLabel}
-                            disabled={!isConnectionReady}
+                            disabled={!isConnectionReady || Boolean(personaSubmitDisabledReason)}
                             title={primaryActionTitle}
                             data-testid="chat-send"
                             className="min-h-10 whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-[0.08em]"

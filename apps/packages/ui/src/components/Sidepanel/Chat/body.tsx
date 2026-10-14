@@ -2,6 +2,7 @@ import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
 import { useMessage } from "~/hooks/useMessage"
 import { EmptySidePanel } from "../Chat/empty"
@@ -14,7 +15,7 @@ import { generateID } from "@/db/dexie/helpers"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useStoreMessageOption } from "@/store/option"
 import type { Character } from "@/types/character"
-import { characterToAssistantSelection, getAssistantSelectionMode } from "@/types/assistant-selection"
+import { characterToAssistantSelection, getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 import {
   EDIT_MESSAGE_EVENT,
   type TimelineActionDetail
@@ -44,6 +45,7 @@ export const SidePanelBody = ({
     streaming,
     isProcessing,
     regenerateLastMessage,
+    effectiveAssistantState,
     editMessage,
     deleteMessage,
     isSearchingInternet,
@@ -54,6 +56,11 @@ export const SidePanelBody = ({
     serverChatId,
     isEmbedding
   } = useMessage()
+  const { t } = useTranslation(["option"])
+  const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
+    Boolean(historySelection), effectiveAssistantState?.kind,
+    effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
+  ) ? t("assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
   const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const { ttsEnabled } = useWebUI()
   const [openReasoning] = useStorage("openReasoning", false)
@@ -292,6 +299,7 @@ export const SidePanelBody = ({
                   currentMessageIndex={index}
                   totalMessages={messages.length}
                   onRegenerate={regenerateLastMessage}
+                  regenerateDisabledReason={regenerateDisabledReason}
                   message_type={resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled))}
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}

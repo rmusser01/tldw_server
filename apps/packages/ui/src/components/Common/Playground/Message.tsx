@@ -136,14 +136,17 @@ const savedPartialStatusCopy = {
   ]
 } as const
 
+type ResponseRecoveryAction = {
+  id: string
+  label: string
+  onClick: () => void
+  disabledReason?: string | null
+}
+
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload
   toggleLabels: { show: string; hide: string }
-  recoveryActions?: Array<{
-    id: string
-    label: string
-    onClick: () => void
-  }>
+  recoveryActions?: ResponseRecoveryAction[]
 }> = ({ payload, toggleLabels, recoveryActions = [] }) => {
   const [showDetails, setShowDetails] = React.useState(false)
 
@@ -179,6 +182,8 @@ const ErrorBubble: React.FC<{
               key={action.id}
               type="button"
               onClick={action.onClick}
+              disabled={Boolean(action.disabledReason)}
+              title={action.disabledReason || undefined}
               className="rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
             >
               {action.label}
@@ -193,11 +198,7 @@ const ErrorBubble: React.FC<{
 const EmptyAssistantResponseNotice: React.FC<{
   summary: string
   detail: string
-  recoveryActions: Array<{
-    id: string
-    label: string
-    onClick: () => void
-  }>
+  recoveryActions: ResponseRecoveryAction[]
 }> = ({ summary, detail, recoveryActions }) => (
   <div
     role="status"
@@ -213,6 +214,8 @@ const EmptyAssistantResponseNotice: React.FC<{
             key={action.id}
             type="button"
             onClick={action.onClick}
+            disabled={Boolean(action.disabledReason)}
+            title={action.disabledReason || undefined}
             className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
           >
             {action.label}
@@ -236,6 +239,7 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
+  regenerateDisabledReason?: string | null
   onEditFormSubmit: (
     value: string,
     isSend: boolean,
@@ -514,6 +518,8 @@ const PlaygroundMessageImpl = (props: Props) => {
   const responseRecoveryBusy = props.isStreaming || props.isProcessing
   const recoveryBusyRef = useRef(responseRecoveryBusy)
   recoveryBusyRef.current = responseRecoveryBusy
+  const generationUnavailableRef = useRef(Boolean(props.regenerateDisabledReason))
+  generationUnavailableRef.current = Boolean(props.regenerateDisabledReason)
   const detachedReplyRef = useRef<{ id?: string; message: string } | null>(null)
   const detachedReplyId = props.messageId ?? props.serverMessageId
   const originalReply = detachedResponse?.originalReply
@@ -969,7 +975,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         return
       }
       if (action === "regenerate") {
-        if (!props.isBot || !props.onRegenerate) return
+        if (!props.isBot || !props.onRegenerate || props.regenerateDisabledReason) return
         event.preventDefault()
         props.onRegenerate()
         articleRef.current?.focus()
@@ -981,6 +987,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.isBot,
       props.onNewBranch,
       props.onRegenerate,
+      props.regenerateDisabledReason,
       props.onSwipeNext,
       props.onSwipePrev
     ]
@@ -1692,9 +1699,9 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.sources
     ]
   )
-  const runResponseRecovery = React.useCallback((action: () => void) => {
+  const runResponseRecovery = React.useCallback((action: () => void, generates = false) => {
     const current = useStoreMessageOption.getState()
-    if (recoveryBusyRef.current || current.streaming || current.isProcessing) return
+    if ((generates && generationUnavailableRef.current) || recoveryBusyRef.current || current.streaming || current.isProcessing) return
     action()
   }, [])
   const handleEnableProviderFallback = React.useCallback(() => {
@@ -1712,18 +1719,19 @@ const PlaygroundMessageImpl = (props: Props) => {
             )
       )
       props.onRegenerate()
-    })
+    }, true)
   }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting, runResponseRecovery])
   const errorRecoveryActions = React.useMemo(() => {
     if (!errorPayload || responseRecoveryBusy) return []
-    const actions: Array<{ id: string; label: string; onClick: () => void }> = [
+    const actions: ResponseRecoveryAction[] = [
       {
         id: "retry",
         label: t(
           "playground:errorRecovery.retrySameModel",
           "Retry same model"
         ),
-        onClick: () => runResponseRecovery(props.onRegenerate)
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(props.onRegenerate, true)
       },
       {
         id: "switch",
@@ -1739,6 +1747,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
+        disabledReason: props.regenerateDisabledReason,
         onClick: handleEnableProviderFallback
       }
     ]
@@ -1749,7 +1758,8 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        onClick: () => runResponseRecovery(() => props.onContinue?.())
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
       })
     }
     if (errorPayload.upgradeUrl) {
@@ -1788,15 +1798,17 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
+    props.regenerateDisabledReason,
     t
   ])
   const interruptionRecoveryActions = React.useMemo(() => {
     if (!interruptedGeneration || errorPayload || responseRecoveryBusy) return []
-    const actions: Array<{ id: string; label: string; onClick: () => void }> = [
+    const actions: ResponseRecoveryAction[] = [
       {
         id: "retry",
         label: t("playground:errorRecovery.retrySameModel", "Retry same model"),
-        onClick: () => runResponseRecovery(props.onRegenerate)
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(props.onRegenerate, true)
       },
       {
         id: "switch",
@@ -1811,6 +1823,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
+        disabledReason: props.regenerateDisabledReason,
         onClick: handleEnableProviderFallback
       })
     }
@@ -1821,7 +1834,8 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        onClick: () => runResponseRecovery(() => props.onContinue?.())
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
       })
     }
     return actions
@@ -1836,6 +1850,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
+    props.regenerateDisabledReason,
     t
   ])
 
@@ -1847,7 +1862,8 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.retrySameModel",
           "Retry same model"
         ),
-        onClick: () => runResponseRecovery(props.onRegenerate)
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(props.onRegenerate, true)
       },
       {
         id: "switch",
@@ -1863,6 +1879,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
+        disabledReason: props.regenerateDisabledReason,
         onClick: handleEnableProviderFallback
       }
     ],
@@ -1872,6 +1889,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       handleEnableProviderFallback,
       handleOpenModelSettings,
       props.onRegenerate,
+      props.regenerateDisabledReason,
       t
     ]
   )
@@ -3013,6 +3031,8 @@ const PlaygroundMessageImpl = (props: Props) => {
                       key={action.id}
                       type="button"
                       onClick={action.onClick}
+                      disabled={Boolean(action.disabledReason)}
+                      title={action.disabledReason || undefined}
                       className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10">
                       {action.label}
                     </button>
@@ -3094,6 +3114,7 @@ const PlaygroundMessageImpl = (props: Props) => {
               isLastMessage={isLastMessage}
               hideEditAndRegenerate={props.hideEditAndRegenerate}
               onRegenerate={props.onRegenerate}
+              regenerateDisabledReason={props.regenerateDisabledReason}
               onNewBranch={props.onNewBranch}
               temporaryChat={props.temporaryChat}
               hideContinue={props.hideContinue}

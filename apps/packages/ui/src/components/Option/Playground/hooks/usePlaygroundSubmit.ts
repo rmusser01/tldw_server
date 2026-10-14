@@ -93,6 +93,7 @@ export type UsePlaygroundSubmitDeps = {
   estimateTokensForText: (text: string) => number
   resolveSubmissionIntent: (message: string) => any
   queueSubmission: (args: PlaygroundQueueSubmissionArgs) => unknown
+  getSubmitDisabledReason?: () => string | null
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
   compareModelsSupportCapability: (models: string[], cap: string) => boolean
   notificationApi: any
@@ -185,6 +186,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     estimateTokensForText,
     resolveSubmissionIntent,
     queueSubmission,
+    getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,
     compareModelsSupportCapability,
     notificationApi,
@@ -248,6 +250,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   )
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
+    if (getSubmitDisabledReason?.()) return
     form.onSubmit(async (value: any) => {
       if (!connectionReadyRef.current) {
         notificationApi.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })

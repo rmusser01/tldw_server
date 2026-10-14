@@ -4156,6 +4156,57 @@ it.each(["write", "refresh", "final-read"])(
 )
 
 
+it("compact captured persona regeneration refuses before preparation and preserves the original pair and owner", async () => {
+  h1.persona = true
+  mocks.storeState.messages = [
+    { id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+    { id: "a1", name: "Persona", isBot: true, message: "same answer", sources: [] }
+  ]
+  const originalMessages = structuredClone(mocks.storeState.messages)
+  const originalHistory = structuredClone(mocks.chatBaseState.history)
+  const originalSelection = h1.controller.getCurrent()
+  const originalCapture = originalSelection.capture
+  const originalAddress = mocks.storeState.chatDraftAddress
+  h1.read.mockResolvedValue({ id: "u-old", conversation_id: nativeChatId, sender: "user", parent_message_id: null,
+    content: "old question", has_image: false, version: 1 })
+  h1.wire.mockImplementation(async function* () {
+    yield { tldw_history_admission_v1: { version: 1, owner_key: originalSelection.view.owner_key,
+      conversation_id: nativeChatId, input_message_id: "u-old", input_message_revision: "1",
+      selection_digest: "ORIGINAL INPUT ADMISSION", originating_selection_revision: 0, messages: [] } }
+    yield { choices: [{ delta: { content: "Unsupported persona reply" } }] }
+    yield { tldw_message_id: "unsupported-persona-alternative", tldw_conversation_id: nativeChatId }
+  })
+  const hook = renderHook(() => useMessage())
+  mocks.setMessages.mockClear()
+  mocks.setHistory.mockClear()
+  mocks.getActorScene.mockClear()
+  mocks.loadServicePromptSnapshot.mockClear()
+  let outcome: unknown
+  await act(async () => { outcome = await hook.result.current.regenerateLastMessage() })
+  expect(outcome).toEqual({ status: "skipped", reason: "native_history_persona_unsupported" })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.read).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.create).not.toHaveBeenCalled()
+  expect(h1.recover).not.toHaveBeenCalled()
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(mocks.finalModel.stream).not.toHaveBeenCalled()
+  expect(mocks.getActorScene).not.toHaveBeenCalled()
+  expect(mocks.loadServicePromptSnapshot).not.toHaveBeenCalled()
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(mocks.setHistory).not.toHaveBeenCalled()
+  expect(mocks.storeState.messages).toEqual(originalMessages)
+  expect(mocks.chatBaseState.history).toEqual(originalHistory)
+  expect(h1.controller.getCurrent()).toBe(originalSelection)
+  expect(h1.controller.getCurrent().capture).toBe(originalCapture)
+  expect(mocks.storeState.chatDraftAddress).toBe(originalAddress)
+  expect(mocks.storeState.detachedHistoryResponse).toBeNull()
+  expect(mocks.notification.error).toHaveBeenCalledWith(expect.objectContaining({
+    description: expect.stringContaining("Persona conversations are not supported")
+  }))
+  hook.unmount()
+})
+
 it.each(["normal", "character"].flatMap(mode => ["current", "interrupted", "old result", "wrong admission"].map(boundary => ({ mode, boundary }))))(
   "compact native owned regeneration through $mode / $boundary keeps the canonical input and original reply",
   async ({ mode, boundary }) => {

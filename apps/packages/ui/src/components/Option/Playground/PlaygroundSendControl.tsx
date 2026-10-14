@@ -194,6 +194,7 @@ export interface PlaygroundSendControlProps {
   onStopStreaming: () => void
   onStopListening: () => void
   onSubmitForm: () => void
+  submitDisabledReason?: string | null
   characterChatSendBlocker?: PlaygroundSendBlocker | null
 
   // Send menu
@@ -224,6 +225,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onStopListening,
       onSubmitForm,
       characterChatSendBlocker,
+      submitDisabledReason,
       sendMenuOpen,
       onSendMenuChange,
       t
@@ -328,13 +330,13 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
+            disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"
                 : undefined
             }
-            title={primaryActionTitle}
+            title={submitDisabledReason ?? primaryActionTitle}
             aria-label={primaryActionAriaLabel}
           >
             <div

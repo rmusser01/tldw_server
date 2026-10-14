@@ -419,6 +419,27 @@ describe("rendered research actions after a parent or policy change", () => {
     ).messages
   })
 
+  it("unavailable regeneration blocks the visible action and keyboard shortcut while preserving Copy", () => {
+    const onRegenerate = vi.fn()
+    const props: React.ComponentProps<typeof PlaygroundMessage> = {
+      isBot: true, name: "Persona", message: ANSWER, isProcessing: false, isStreaming: false,
+      onEditFormSubmit: vi.fn(), onRegenerate, currentMessageIndex: 1, totalMessages: 2,
+      conversationInstanceId: SERVER_CHAT_ID,
+      regenerateDisabledReason: "Use a persona prompt overlay or choose a character for tracked chat."
+    }
+    const view = render(<PlaygroundMessage {...props} />)
+    const button = screen.getByRole("button", { name: "regenerate" })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute("title", props.regenerateDisabledReason)
+    fireEvent.click(button)
+    fireEvent.keyDown(button.closest("article")!, { key: "r", altKey: true, shiftKey: true })
+    expect(onRegenerate).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "copyToClipboard" })).toBeEnabled()
+    view.rerender(<PlaygroundMessage {...props} regenerateDisabledReason={undefined} />)
+    fireEvent.keyDown(screen.getByRole("button", { name: "regenerate" }).closest("article")!, { key: "r", altKey: true, shiftKey: true })
+    expect(onRegenerate).toHaveBeenCalledOnce()
+  })
+
   it.each([
     ["Follow up", "onFollowUp"],
     ["Use in Chat", "onUseInChat"]

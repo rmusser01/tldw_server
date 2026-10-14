@@ -1,7 +1,7 @@
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
-import { getAssistantSelectionMode } from "@/types/assistant-selection"
+import { getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { VirtualChatTimeline, type ChatTimelineNavigation } from "./VirtualChatTimeline"
@@ -222,6 +222,10 @@ export const PlaygroundChat = ({
     visualIdentityManualExpressionOverride: visualManualExpressionKey,
     setVisualIdentityManualExpressionOverride: setVisualManualExpressionKey
   })
+  const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
+    Boolean(historySelection), effectiveAssistantState?.kind,
+    effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
+  ) ? t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
   const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const confirmSensitiveValues = React.useCallback(async () => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") {
@@ -1405,6 +1409,7 @@ export const PlaygroundChat = ({
                 currentMessageIndex={block.index}
                 totalMessages={messages.length}
                 onRegenerate={regenerateLastMessage}
+                regenerateDisabledReason={regenerateDisabledReason}
                 onRegenerateImage={(payload) => {
                   void handleRegenerateGeneratedImage(payload)
                 }}

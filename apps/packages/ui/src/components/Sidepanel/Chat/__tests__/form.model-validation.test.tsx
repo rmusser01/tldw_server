@@ -1,3 +1,5 @@
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -71,6 +73,10 @@ const initializer = (name: string) => {
     throw new Error(`Missing sidebar declaration: ${name}`)
   return declaration.initializer.getText(ast)
 }
+const optionalInitializer = (name: string, fallback: string) => {
+  const node = nodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node) && node.name.getText(ast) === name)
+  return node?.initializer?.getText(ast) ?? fallback
+}
 const effects = nodes
   .filter(
     (node) =>
@@ -100,8 +106,14 @@ if (!catalogDataName) throw new Error("Missing sidebar model catalog data")
 const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
-    const { form, selectedModel, isSending, isConnectionReady, isProMode, draftReady } = scope;
-    const audioHealthEnabled = false, greetingHistorySelection = null;
+    const { form, selectedModel, isSending, isConnectionReady, isProMode, draftReady, protectedHistory = false, personaMode = "none" } = scope;
+    const audioHealthEnabled = false, greetingHistorySelection = protectedHistory ? { getCurrent: () => ({ status: "ready", owner: null, view: null }) } : null;
+    const effectiveAssistantState = resolveEffectiveAssistantState({ tracked: personaMode === "tracked" ? { assistantKind: "persona", assistantId: "loaded-persona" } : null,
+      settings: personaMode === "overlay" ? { assistantOverlay: { kind: "persona", id: "loaded-persona", name: "Persona overlay", system_prompt: "Fixture overlay" } } : null });
+    const personaHistoryUnavailable = ${optionalInitializer("personaHistoryUnavailable", "false")};
+    const personaSubmitDisabledReason = ${optionalInitializer("personaSubmitDisabledReason", "null")};
+    const personaSubmitDisabledReasonRef = { current: personaSubmitDisabledReason }, greetingSubmitGateRef = { current: () => false };
+    const getSubmitDisabledReason = ${optionalInitializer("getSubmitDisabledReason", "() => null")};
     const fetchChatModels = mocks.fetchChatModels;
     const ${catalogQuery.getText(ast)};
     const availableChatModelIds = ${initializer("availableChatModelIds")};
@@ -134,6 +146,8 @@ const useSidebarValidation = new Function(
   "findUnavailableChatModel",
   "normalizeChatModelId",
   "isSavedRoleplayConversation",
+  "resolveEffectiveAssistantState",
+  "isProtectedTrackedPersonaUnavailable",
   compiled
 )(
   React,
@@ -146,7 +160,9 @@ const useSidebarValidation = new Function(
   buildAvailableChatModelIds,
   findUnavailableChatModel,
   normalizeChatModelId,
-  isSavedRoleplayConversation
+  isSavedRoleplayConversation,
+  resolveEffectiveAssistantState,
+  isProtectedTrackedPersonaUnavailable
 ) as (scope: {
   form: ReturnType<typeof useSimpleForm<{ message: string; image: string }>>
   selectedModel: string
@@ -154,6 +170,8 @@ const useSidebarValidation = new Function(
   isConnectionReady: boolean
   isProMode: boolean
   draftReady: boolean
+  protectedHistory?: boolean
+  personaMode?: "none" | "tracked" | "overlay"
 }) => {
   submit: (message: string, image: string) => Promise<void>
   inline: React.ReactNode
@@ -167,7 +185,9 @@ function Harness({
   pro = false,
   draftReady = true,
   text = "keep my draft",
-  image = ""
+  image = "",
+  protectedHistory = false,
+  personaMode = "none" as "none" | "tracked" | "overlay"
 }) {
   const form = useSimpleForm({ initialValues: { message: text, image } })
   const [selectedModel, setSelectedModel] = React.useState(model)
@@ -178,7 +198,9 @@ function Harness({
     isSending: busy,
     isConnectionReady: connected,
     isProMode: pro,
-    draftReady
+    draftReady,
+    protectedHistory,
+    personaMode
   })
   return (
     <>
@@ -209,6 +231,25 @@ const waitForCatalog = () =>
   )
 
 describe("sidebar model validation", () => {
+  it.each([false, true])("refuses loaded protected persona before direct or queued preparation (busy=%s)", async busy => {
+    renderHarness(<Harness model="ready-model" busy={busy} protectedHistory personaMode="tracked" />)
+    await waitForCatalog()
+    fireEvent.click(screen.getByText("Send"))
+    await waitFor(() => expect(screen.getByText(/Tracked persona chat is unavailable here/)).toBeVisible())
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.queue).not.toHaveBeenCalled()
+    expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+  })
+
+  it.each([{ protectedHistory: false, personaMode: "tracked" as const }, { protectedHistory: true, personaMode: "overlay" as const }])(
+    "keeps supported persona lane available ($protectedHistory/$personaMode)", async props => {
+      renderHarness(<Harness model="ready-model" {...props} />)
+      await waitForCatalog()
+      fireEvent.click(screen.getByText("Send"))
+      await waitFor(() => expect(mocks.send).toHaveBeenCalledOnce())
+    }
+  )
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.fetchChatModels.mockResolvedValue(models)
@@ -382,7 +423,7 @@ describe("sidebar model validation", () => {
   })
 })
 
-it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and Run next entry points on %s", async surface => {
+it.each(["compact", "full"].flatMap(surface => ["greeting", "persona"].map(reason => ({ surface, reason }))))("$reason readiness gates ordinary, Run now, and Run next entry points on $surface", async ({ surface, reason }) => {
   const formSource = surface === "compact" ? source : readFileSync(path.resolve(__dirname, "../../../Option/Playground/PlaygroundForm.tsx"), "utf8")
   const tree = ts.createSourceFile("form.tsx", formSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const initializers = new Map<string, string>()
@@ -392,22 +433,24 @@ it.each(["compact", "full"])("greeting preparation gates ordinary, Run now, and 
   }
   walk(tree)
   const dispatchNames = ["onSubmit", "handleRunQueuedRequest", "handleRunNextQueuedRequest"]
-  if (surface === "full") dispatchNames.unshift("getSubmitDisabledReason")
+  dispatchNames.unshift("getSubmitDisabledReason")
   const code = dispatchNames.map(name => {
     const value = initializers.get(name)
     if (!value) throw new Error(`Missing actual dispatch entry: ${name}`)
     return `const ${name} = ${value};`
   }).join("\n") + "\nreturn { onSubmit, handleRunQueuedRequest, handleRunNextQueuedRequest };"
   const transpiled = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  let preparing = true
+  let preparing = reason === "greeting"
+  const personaSubmitDisabledReasonRef = { current: reason === "persona" ? "Tracked persona chat is unavailable here" : null }
   const submitMessageAction = vi.fn(async () => ({ status: "submitted" })), run = vi.fn(), next = vi.fn()
-  const actions = new Function("React", "greetingSubmitGateRef", "characterSubmitBlockerRef", "submitMessageAction", "runQueuedRequest", "runNextQueuedRequest", "queue", "t", transpiled)(
-    { useCallback: (callback: unknown) => callback }, { current: () => preparing }, { current: null }, submitMessageAction, run, next,
+  const actions = new Function("React", "greetingSubmitGateRef", "characterSubmitBlockerRef", "personaSubmitDisabledReasonRef", "submitMessageAction", "runQueuedRequest", "runNextQueuedRequest", "queue", "t", transpiled)(
+    { useCallback: (callback: unknown) => callback }, { current: () => preparing }, { current: null }, personaSubmitDisabledReasonRef, submitMessageAction, run, next,
     { handleRunQueuedRequest: run, handleRunNextQueuedRequest: next }, t)
   expect(await actions.onSubmit({ message: "UNSENT", image: "" })).toMatchObject({ status: "skipped" })
   actions.handleRunQueuedRequest("queued"); actions.handleRunNextQueuedRequest()
   expect(submitMessageAction).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled(); expect(next).not.toHaveBeenCalled()
   preparing = false
+  personaSubmitDisabledReasonRef.current = null
   await actions.onSubmit({ message: "UNSENT", image: "" }); actions.handleRunQueuedRequest("queued"); actions.handleRunNextQueuedRequest()
   expect(submitMessageAction).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledWith("queued"); expect(next).toHaveBeenCalledOnce()
 

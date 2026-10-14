@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next"
 import type { PersonaInfo } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { useStoreMessageOption } from "@/store/option"
@@ -18,6 +19,7 @@ import {
   type AssistantSelectTab
 } from "@/utils/assistant-select-events"
 import {
+  isProtectedTrackedPersonaUnavailable,
   characterToAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection
@@ -132,6 +134,8 @@ export const AssistantSelect: React.FC<Props> = ({
   onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common", "playground"])
+  const historySelection = useHistorySelectionContext()
+  const personaGuidanceId = React.useId()
   const [storedAssistant, setSelectedAssistant, assistantMeta] =
     useSelectedAssistant(null)
   const selectedAssistant =
@@ -191,11 +195,17 @@ export const AssistantSelect: React.FC<Props> = ({
   React.useLayoutEffect(() => {
     invalidateSelectionLifetime()
     return invalidateSelectionLifetime
-  }, [open, invalidateSelectionLifetime])
+  }, [open, selectionModePreference, invalidateSelectionLifetime])
   const [searchText, setSearchText] = React.useState("")
   const selectionModeIntentRef = React.useRef<"tracked" | "overlay">(
     selectionModePreference
   )
+  const [requestedSelectionMode, setRequestedSelectionMode] = React.useState(selectionModePreference)
+  const publishSelectionModeIntent = React.useCallback((mode: "tracked" | "overlay") => {
+    selectionModeIntentRef.current = mode
+    setRequestedSelectionMode(mode)
+  }, [])
+  const trackedPersonaUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), "persona", requestedSelectionMode)
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
     initialTab ?? selectedAssistant?.kind ?? "character"
   )
@@ -322,13 +332,14 @@ export const AssistantSelect: React.FC<Props> = ({
   }, [selectedAssistant?.kind])
 
   React.useEffect(() => {
-    selectionModeIntentRef.current = selectionModePreference
-  }, [selectionModePreference])
+    publishSelectionModeIntent(selectionModePreference)
+  }, [publishSelectionModeIntent, selectionModePreference])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
 
     const handleOpen = (event: Event) => {
+      invalidateSelectionLifetime()
       const detail = (event as CustomEvent<AssistantSelectOpenDetail>).detail
       const requestedTab = detail?.tab
       if (requestedTab === "character" || requestedTab === "persona") {
@@ -340,7 +351,7 @@ export const AssistantSelect: React.FC<Props> = ({
           ? detail.returnFocusSelector.trim()
           : null
       const requestedMode = detail?.applyAs ?? selectionModePreference
-      selectionModeIntentRef.current = requestedMode
+      publishSelectionModeIntent(requestedMode)
       pendingSelectionModeIntentRef.current = detail?.applyAs ?? null
       eventOpenIntentRef.current = true
       setSearchText("")
@@ -351,7 +362,7 @@ export const AssistantSelect: React.FC<Props> = ({
     return () => {
       window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
     }
-  }, [selectionModePreference])
+  }, [invalidateSelectionLifetime, publishSelectionModeIntent, selectionModePreference])
 
   React.useEffect(() => {
     if (!open || typeof window === "undefined") return
@@ -590,13 +601,14 @@ export const AssistantSelect: React.FC<Props> = ({
       if (selectionPending || trackedSelectionPendingRef.current) return
       const nextMode =
         pendingSelectionModeIntentRef.current ?? selectionModeIntentRef.current
+      if (isProtectedTrackedPersonaUnavailable(Boolean(historySelection), entry.kind, nextMode)) return
       const isTrackedMode =
         effectiveAssistantState.mode === "tracked_character" ||
         effectiveAssistantState.mode === "tracked_persona"
       if (nextMode === "overlay" && isTrackedMode) {
         setOpen(false)
         setSearchText("")
-        selectionModeIntentRef.current = selectionModePreference
+        publishSelectionModeIntent(selectionModePreference)
         pendingSelectionModeIntentRef.current = null
         restoreReturnFocus()
         return
@@ -633,14 +645,14 @@ export const AssistantSelect: React.FC<Props> = ({
         }
         setOpen(false)
         setSearchText("")
-        selectionModeIntentRef.current = selectionModePreference
+        publishSelectionModeIntent(selectionModePreference)
         pendingSelectionModeIntentRef.current = null
         restoreReturnFocus()
         return
       }
       setOpen(false)
       setSearchText("")
-      selectionModeIntentRef.current = selectionModePreference
+      publishSelectionModeIntent(selectionModePreference)
       pendingSelectionModeIntentRef.current = null
       restoreReturnFocus()
       if (onSelectionChange) {
@@ -687,6 +699,8 @@ export const AssistantSelect: React.FC<Props> = ({
       await onSelectionComplete?.(nextEntry)
     },
     [
+      historySelection,
+      publishSelectionModeIntent,
       selectionPending,
       effectiveAssistantState.mode,
       clearActiveServerChat,
@@ -709,9 +723,9 @@ export const AssistantSelect: React.FC<Props> = ({
         if (eventOpenIntentRef.current) {
           eventOpenIntentRef.current = false
         } else if (pendingSelectionModeIntentRef.current) {
-          selectionModeIntentRef.current = pendingSelectionModeIntentRef.current
+          publishSelectionModeIntent(pendingSelectionModeIntentRef.current)
         } else {
-          selectionModeIntentRef.current = selectionModePreference
+          publishSelectionModeIntent(selectionModePreference)
         }
       }
       if (!nextOpen) {
@@ -720,13 +734,13 @@ export const AssistantSelect: React.FC<Props> = ({
         restoreReturnFocus()
       }
     },
-    [restoreReturnFocus, selectionModePreference]
+    [publishSelectionModeIntent, restoreReturnFocus, selectionModePreference]
   )
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
     setSearchText("")
-    selectionModeIntentRef.current = selectionModePreference
+    publishSelectionModeIntent(selectionModePreference)
     restoreReturnFocus()
     try {
       if (typeof window !== "undefined") {
@@ -735,7 +749,7 @@ export const AssistantSelect: React.FC<Props> = ({
     } catch {
       // no-op
     }
-  }, [restoreReturnFocus, selectionModePreference])
+  }, [publishSelectionModeIntent, restoreReturnFocus, selectionModePreference])
 
   const buttonLabel =
     labelOverride ||
@@ -855,6 +869,23 @@ export const AssistantSelect: React.FC<Props> = ({
       data-testid="assistant-select-menu"
       aria-busy={selectionPending}
       className="max-h-80 overflow-y-auto px-2 py-2">
+      {activeTab === "persona" && trackedPersonaUnavailable && (
+        <div className="px-2 pb-2 text-sm text-text-muted">
+          <p id={personaGuidanceId} role="status">
+            {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+          </p>
+          {!onSelectionChange && effectiveAssistantState.mode !== "tracked_character" && effectiveAssistantState.mode !== "tracked_persona" && (
+            <button type="button" disabled={selectionPending} className="mt-2 min-h-[44px] rounded-md border border-border px-3 text-text hover:bg-surface2"
+              onClick={() => {
+                invalidateSelectionLifetime()
+                pendingSelectionModeIntentRef.current = "overlay"
+                publishSelectionModeIntent("overlay")
+              }}>
+              {t("option:assistant.usePersonaOverlay", "Use a persona prompt overlay")}
+            </button>
+          )}
+        </div>
+      )}
       {trackedSelectionPending && (
         <p role="status" className="px-2 pb-2 text-sm text-text-subtle">
           {t("option:assistant.checkingSetup", "Checking setup…")}
@@ -884,7 +915,8 @@ export const AssistantSelect: React.FC<Props> = ({
               <button
                 type="button"
                 aria-label={entry.name}
-                disabled={selectionPending}
+                disabled={selectionPending || (entry.kind === "persona" && trackedPersonaUnavailable)}
+                aria-describedby={entry.kind === "persona" && trackedPersonaUnavailable ? personaGuidanceId : undefined}
                 className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
                   isActive
                     ? "border-primary bg-primary/10 text-text"
@@ -1051,7 +1083,7 @@ export const AssistantSelect: React.FC<Props> = ({
           aria-expanded={open}
           onClick={() => {
             pendingSelectionModeIntentRef.current = null
-            selectionModeIntentRef.current = selectionModePreference
+            publishSelectionModeIntent(selectionModePreference)
           }}>
           <UserCircle2 className={iconClassName} />
           {showLabel ? (

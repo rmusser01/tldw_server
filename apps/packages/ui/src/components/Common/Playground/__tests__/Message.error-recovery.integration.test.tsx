@@ -1660,6 +1660,30 @@ it("Delete failure uses recovery copy and never announces success", async () => 
 
 
 describe("preserved reply before recovery", () => {
+  it.each(["interrupted", "empty", "provider error"] as const)("unsupported persona disables %s generation recovery before provider settings writes", state => {
+    if (state === "provider error") decodeChatErrorPayloadMock.mockReturnValue({ summary: "Provider failed" })
+    const onRegenerate = vi.fn(), onContinue = vi.fn()
+    const reason = "Use a persona prompt overlay or choose a character for tracked chat."
+    const props = { ...baseProps, onRegenerate, onContinue,
+      message: state === "empty" ? "" : baseProps.message,
+      generationInfo: state === "interrupted" ? { interrupted: true } : undefined }
+    const view = render(<PlaygroundMessage {...props} regenerateDisabledReason={reason} />)
+    for (const label of ["Retry same model", "Try provider fallback", ...(state !== "empty" ? ["Continue from partial"] : [])]) {
+      const action = screen.getByRole("button", { name: label })
+      expect(action).toBeDisabled()
+      expect(action).toHaveAttribute("title", reason)
+      fireEvent.click(action)
+    }
+    expect(screen.getByRole("button", { name: "Switch model" })).toBeEnabled()
+    expect(updateChatModelSettingMock).not.toHaveBeenCalled()
+    expect(onRegenerate).not.toHaveBeenCalled()
+    expect(onContinue).not.toHaveBeenCalled()
+    view.rerender(<PlaygroundMessage {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Try provider fallback" }))
+    expect(updateChatModelSettingMock).toHaveBeenCalledWith("apiProvider", undefined)
+    expect(onRegenerate).toHaveBeenCalledOnce()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     decodeChatErrorPayloadMock.mockReturnValue(null)

@@ -2752,6 +2752,23 @@ export const useMessage = () => {
     historyRegenerate?: NativeHistoryRegenerate;
     assertCurrent?: () => void;
   }, beginResponse: () => boolean) => {
+    if (historySelection && resolveUseMessageSendMode({
+      effectiveMode: effectiveAssistantState.mode,
+      hasEffectiveAssistant: Boolean(effectiveSelectedAssistant),
+      draftAssistantKind: selectedAssistant?.kind ?? null,
+      draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
+    }) === "tracked_persona") {
+      assertQueuedDispatchCurrent?.();
+      assertCurrent?.();
+      if (historyRegenerate?.isOriginCurrent() === false ||
+          requestedActorSceneSend?.isCurrent() === false || !settingsDraftIsCurrent())
+        return chatSubmitSkipped("stale_selection");
+      notification.error({
+        message: t("error"),
+        description: nativeCharacterPreflightMessage(new Error("native_history_persona_unsupported"), t)
+      });
+      return chatSubmitSkipped("native_history_persona_unsupported");
+    }
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
     const historyOriginIsCurrent = historySelection?.fence();
     const commandSession = usePlaygroundSessionStore.getState();
@@ -3401,21 +3418,6 @@ export const useMessage = () => {
             draftAssistantKind: selectedAssistant?.kind ?? null,
             draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
           });
-          if (
-            historySelection &&
-            sendMode === "tracked_persona"
-          ) {
-            notification.error({
-              message: t("error"),
-              description: nativeCharacterPreflightMessage(new Error("native_history_persona_unsupported"), t)
-            });
-            if (releaseNormalControllerIfOwned()) {
-              setAbortController(null);
-              setIsProcessing(false);
-              setStreaming(false);
-            }
-            return chatSubmitSkipped("native_history_persona_unsupported");
-          }
           const trackedCharacterForSend =
             sendMode === "tracked_character"
               ? (() => {
@@ -4073,6 +4075,7 @@ export const useMessage = () => {
 
   return {
     conversationMetadata,
+    effectiveAssistantState,
     setSelectedAssistant,
     messages,
     setMessages,

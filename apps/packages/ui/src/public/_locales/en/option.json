@@ -6421,5 +6421,11 @@
   },
   "header_pageNavigator": {
     "message": "Pages"
+  },
+  "assistant_trackedPersonaUnavailable": {
+    "message": "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat."
+  },
+  "assistant_usePersonaOverlay": {
+    "message": "Use a persona prompt overlay"
   }
 }

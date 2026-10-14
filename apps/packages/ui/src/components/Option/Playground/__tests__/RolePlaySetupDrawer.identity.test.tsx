@@ -40,10 +40,16 @@ const mocks = vi.hoisted(() => ({
       typeof import("@/hooks/chat/actor-scene-source").captureCurrentActorSceneTarget
     >(),
   setHistoryId: vi.fn<(id: string | null) => void>(),
+  historySelection: null as Record<string, unknown> | null,
   accountRevision: 0
 }))
 // Picker catalog/account/native-view acceptance are declared unit boundaries.
 // The actual option store publishes typed addresses; source/session checks remain.
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext: () => mocks.historySelection
+}))
+
 vi.mock("@/hooks/chat/actor-scene-source", () => ({
   captureCurrentActorSceneTarget: mocks.captureCurrentActorSceneTarget
 }))
@@ -255,8 +261,8 @@ const renderDrawer = (
       </>
     );
   };
-  render(<Harness />);
-  return { onApply, onClose };
+  const view = render(<Harness />);
+  return { onApply, onClose, rerender: () => view.rerender(<Harness />) };
 };
 
 const choosePersona = async () => {
@@ -278,6 +284,7 @@ describe("conversation setup identity", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.accountRevision = 0
+    mocks.historySelection = null
     useStoreMessageOption.setState({
       historyId: "history-1",
       serverChatId: "server-1",
@@ -306,6 +313,21 @@ describe("conversation setup identity", () => {
       .mockImplementation(async ({ target }) => sceneRead(target))
     mocks.saveScene.mockReset().mockResolvedValue(true)
     useActorStore.getState().reset()
+  })
+
+  it("keeps an already staged persona when protected history appears and explains unavailable Apply", async () => {
+    const { onApply, rerender } = renderDrawer()
+    const user = await choosePersona()
+    mocks.historySelection = { getSignal: () => undefined }
+    rerender()
+    const apply = screen.getByRole("button", { name: "Apply", exact: true })
+    expect(apply).toBeDisabled()
+    expect(apply).toHaveAccessibleDescription(/tracked persona.*unavailable.*overlay/i)
+    expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona")
+    await user.click(apply)
+    expect(onApply).not.toHaveBeenCalled()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.saveScene).not.toHaveBeenCalled()
   })
 
   it("captures the notified destination after deferred preparation before saving scene", async () => {

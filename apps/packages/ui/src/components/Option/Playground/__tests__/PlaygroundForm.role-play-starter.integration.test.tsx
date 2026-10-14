@@ -1372,6 +1372,20 @@ vi.mock("../RolePlaySetupDrawer", async (original) => {
           }>
           Apply Persona setup
         </button>
+        <button
+          onClick={() =>
+            apply({
+              identitySelection: {
+                kind: "persona",
+                id: "persona-guide",
+                name: "Guide",
+                metadata: { selectionMode: "overlay" }
+              },
+              generationPresetKey: "precise"
+            })
+          }>
+          Apply Persona overlay setup
+        </button>
         <button onClick={() => apply({ clearIdentity: true })}>
           Apply clear identity
         </button>
@@ -1438,6 +1452,26 @@ vi.mock("../RolePlaySetupDrawer", async (original) => {
             })
           }>
           Apply behavior and generation setup
+        </button>
+        <button
+          onClick={() =>
+            apply({
+              identitySelection: {
+                kind: "persona",
+                id: "persona-guide",
+                name: "Guide",
+                metadata: { selectionMode: "overlay" }
+              },
+              behaviorTemplate: {
+                id: "guarded-behavior",
+                title: "Guarded behavior",
+                content: "Original behavior proposal",
+                category: "roleplay"
+              },
+              generationPresetKey: "precise"
+            })
+          }>
+          Apply overlay behavior and generation setup
         </button>
         <button onClick={applySaved}>Apply owned model saved setup</button>
         <button
@@ -3404,8 +3438,8 @@ describe("PlaygroundForm role-play starter", () => {
     "Form role-play continuation fences behavior and generation after %s",
     async (boundary) => {
       const f = prepareQualifiedSceneSource("fresh")
-      f.source.serverChatAssistantKind = "persona"
-      f.source.serverChatAssistantId = "persona-guide"
+      f.source.serverChatAssistantKind = null
+      f.source.serverChatAssistantId = null
       f.source.serverChatCharacterId = null
       nativeSetupFixture.realRolePlayPresets = true
       const settings = nativeSetupFixture.settings!
@@ -3469,7 +3503,7 @@ describe("PlaygroundForm role-play starter", () => {
         )
         await user.click(
           await screen.findByRole("button", {
-            name: "Apply behavior and generation setup"
+            name: "Apply overlay behavior and generation setup"
           })
         )
         let accepted: boolean | void
@@ -3664,8 +3698,8 @@ describe("PlaygroundForm role-play starter", () => {
     async (retirement) => {
       const f = prepareQualifiedSceneSource("fresh")
       Object.assign(f.source, {
-        serverChatAssistantKind: "persona",
-        serverChatAssistantId: "persona-guide",
+        serverChatAssistantKind: null,
+        serverChatAssistantId: null,
         serverChatCharacterId: null
       })
       nativeSetupFixture.realSettings = true
@@ -3692,11 +3726,7 @@ describe("PlaygroundForm role-play starter", () => {
       }
       const key = `actorSettings:owned:${f.target.key}`
       sceneBucket.records.set(key, original)
-      const bundle = ownedStartupBundle(proposal, {
-        kind: "persona",
-        id: "persona-guide",
-        name: "Guide"
-      })
+      const bundle = ownedStartupBundle(proposal, null)
       bundle.selectedModel = f.source.selectedModel
       if (!bundle.rolePlay)
         throw new Error("fixture requires the frozen role-play proposal")
@@ -4023,8 +4053,8 @@ describe("PlaygroundForm role-play starter", () => {
     async (retirement) => {
       const f = prepareQualifiedSceneSource("fresh")
       Object.assign(f.source, {
-        serverChatAssistantKind: "persona",
-        serverChatAssistantId: "persona-guide",
+        serverChatAssistantKind: null,
+        serverChatAssistantId: null,
         serverChatCharacterId: null
       })
       nativeSetupFixture.realSettings = true
@@ -4056,7 +4086,7 @@ describe("PlaygroundForm role-play starter", () => {
           screen.getByRole("button", { name: "Open role-play setup" })
         )
         await user.click(
-          await screen.findByRole("button", { name: "Apply Persona setup" })
+          await screen.findByRole("button", { name: "Apply Persona overlay setup" })
         )
         await waitFor(() =>
           expect(
@@ -4268,8 +4298,8 @@ describe("PlaygroundForm role-play starter", () => {
     "Form settings continuation preserves immutable response settings during held identity (%s)",
     async (retirement) => {
       const f = prepareQualifiedSceneSource("fresh")
-      f.source.serverChatAssistantKind = "persona"
-      f.source.serverChatAssistantId = "persona-guide"
+      f.source.serverChatAssistantKind = null
+      f.source.serverChatAssistantId = null
       f.source.serverChatCharacterId = null
       nativeSetupFixture.realSettings = true
       nativeSetupFixture.realRolePlayPresets = true
@@ -4299,7 +4329,7 @@ describe("PlaygroundForm role-play starter", () => {
         )
         await user.click(
           await screen.findByRole("button", {
-            name: "Apply behavior and generation setup"
+            name: "Apply overlay behavior and generation setup"
           })
         )
         await waitFor(() =>
@@ -4371,8 +4401,8 @@ describe("PlaygroundForm role-play starter", () => {
         expect(f.source.chatDraftRevision).toBe(f.revision)
         expect(f.source.history).toBe(originalHistory)
         expect(f.source.messages).toBe(originalMessages)
-        expect(f.source.serverChatAssistantKind).toBe("persona")
-        expect(f.source.serverChatAssistantId).toBe("persona-guide")
+        expect(f.source.serverChatAssistantKind).toBeNull()
+        expect(f.source.serverChatAssistantId).toBeNull()
         expect(f.reset).not.toHaveBeenCalled()
         expect(nativeSetupFixture.actor).not.toHaveBeenCalled()
         expect(nativeSetupFixture.scene).not.toHaveBeenCalled()
@@ -4392,8 +4422,8 @@ describe("PlaygroundForm role-play starter", () => {
     "Form settings continuation preserves immutable startup settings during held model persistence (%s)",
     async (retirement) => {
       const f = prepareQualifiedSceneSource("fresh")
-      f.source.serverChatAssistantKind = "persona"
-      f.source.serverChatAssistantId = "persona-guide"
+      f.source.serverChatAssistantKind = null
+      f.source.serverChatAssistantId = null
       f.source.serverChatCharacterId = null
       nativeSetupFixture.realSettings = true
       const modelStore = nativeSetupFixture.actualSettingsStore!
@@ -4423,11 +4453,7 @@ describe("PlaygroundForm role-play starter", () => {
       }
       const key = `actorSettings:owned:${f.target.key}`
       sceneBucket.records.set(key, original)
-      const bundle = ownedStartupBundle(proposal, {
-        kind: "persona",
-        id: "persona-guide",
-        name: "Guide"
-      })
+      const bundle = ownedStartupBundle(proposal, null)
       if (!bundle.rolePlay)
         throw new Error("fixture requires the original role-play proposal")
       bundle.selectedModel = originalModel
@@ -4979,6 +5005,81 @@ describe("PlaygroundForm role-play starter", () => {
     }
   )
 
+  it("keeps a loaded protected persona readable with unavailable Send, exact draft and owner", async () => {
+    const f = prepareQualifiedSceneSource("native", "loaded-persona", "loaded-persona-mirror")
+    Object.assign(f.source, { serverChatAssistantKind: "persona", serverChatAssistantId: "persona-guide", serverChatCharacterId: null,
+      messages: [{ id: "persona-row", name: "Guide", message: "Saved persona response", isBot: true }],
+      history: [{ role: "assistant", content: "Saved persona response" }] })
+    selectedAssistantMock.initialSelection = null
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      const input = screen.getByTestId("composer-textarea")
+      await user.type(input, "Keep this exact persona draft  ")
+      const before = { chatDraftAddress: f.source.chatDraftAddress, chatDraftRevision: f.source.chatDraftRevision,
+        historyId: f.source.historyId, serverChatId: f.source.serverChatId, history: f.source.history, messages: f.source.messages }
+      expect(screen.getByText(/Tracked persona chat is unavailable here/)).toBeVisible()
+      const sends = screen.getAllByRole("button", { name: /send message/i })
+      sends.forEach(send => expect(send).toBeDisabled())
+      await user.click(sends[0])
+      await user.keyboard("{Enter}")
+      expect(onSubmitMock).not.toHaveBeenCalled()
+      expect(createChatCompletionMock).not.toHaveBeenCalled()
+      expect(input).toHaveValue("Keep this exact persona draft  ")
+      expect(f.source).toMatchObject(before)
+      expect(f.reset).not.toHaveBeenCalled()
+      expect(nativeSetupFixture.retain).not.toHaveBeenCalled()
+    } finally { view.unmount() }
+  })
+
+  it.each(["drawer", "startup"])("refuses protected persona through the retained %s application before identity, model, prompt, RAG or destination writes", async entry => {
+    const persona = { kind: "persona" as const, id: "persona-guide", name: "Guide Persona" }
+    let view: ReturnType<typeof render>
+    let apply: () => Promise<unknown>
+    if (entry === "drawer") {
+      const fixture = await openActualSceneDrawer("neutral fresh")
+      view = fixture.view
+      const callback = nativeSetupFixture.drawerProps?.onApply
+      if (!callback) throw new Error("expected actual parent Apply callback")
+      apply = async () => callback({ identitySelection: { ...persona, metadata: { selectionMode: "tracked" } } })
+    } else {
+      prepareQualifiedSceneSource("fresh")
+      savedSetupFixture.raw = JSON.stringify([ownedStartupBundle(createDefaultActorSettings(), persona)])
+      const fixture = await openOwnedStartupPreview()
+      view = fixture.view
+      apply = fixture.apply
+    }
+    const source = playgroundFormMessageOptionState.value
+    const snapshot = () => structuredClone({ historyId: source.historyId, serverChatId: source.serverChatId,
+      chatDraftAddress: source.chatDraftAddress, chatDraftRevision: source.chatDraftRevision, selectedModel: source.selectedModel,
+      selectedSystemPrompt: source.selectedSystemPrompt, history: source.history, messages: source.messages,
+      ragPinnedResults: source.ragPinnedResults, toolChoice: source.toolChoice })
+    const before = snapshot()
+    const modelBefore = nativeSetupFixture.actualSettingsStore!.getState()
+    const recordsBefore = structuredClone(Array.from(sceneBucket.records.entries()))
+    const route = vi.fn()
+    window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, route)
+    try {
+      await act(async () => {
+        if (entry === "drawer") await expect(apply()).rejects.toThrow("native_history_persona_unsupported")
+        else {
+          expect(await apply()).toBe(false)
+          expect(nativeSetupFixture.error).toHaveBeenCalledWith(expect.objectContaining({
+            description: expect.stringMatching(/persona.*not supported.*overlay/i)
+          }))
+        }
+      })
+      expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+      expect(nativeSetupFixture.actualSettingsStore!.getState()).toBe(modelBefore)
+      expect(snapshot()).toEqual(before)
+      expect(Array.from(sceneBucket.records.entries())).toEqual(recordsBefore)
+      expect(sceneBucket.set).not.toHaveBeenCalled()
+      expect(saveActorSettingsMock).not.toHaveBeenCalled()
+      expect(nativeSetupFixture.retain).not.toHaveBeenCalled()
+      expect(route).not.toHaveBeenCalled()
+    } finally { window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, route); view.unmount() }
+  })
+
   it("clears an explicit scope when the default composer opener reopens during close", async () => {
     prepareNativeSource()
     modelSettingsBoundary.enabled = true
@@ -5189,7 +5290,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,
@@ -5251,7 +5352,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,
@@ -5338,7 +5439,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,
@@ -5383,7 +5484,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,
@@ -5432,7 +5533,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,
@@ -5490,7 +5591,7 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "",
           rolePlay: {
             source: "role-play-setup",
-            identity: { kind: "persona", id: "guide", name: "Guide" },
+            identity: null,
             behavior: null,
             scene: null,
             generation: null,
@@ -5563,7 +5664,7 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "Proposed behavior",
           rolePlay: {
             source: "role-play-setup",
-            identity: { kind: "persona", id: "guide", name: "Guide" },
+            identity: null,
             behavior: {
               source: "template",
               templateId: "proposal",
@@ -5630,7 +5731,7 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "",
           rolePlay: {
             source: "role-play-setup",
-            identity: { kind: "persona", id: "guide", name: "Guide" },
+            identity: null,
             behavior: null,
             scene: null,
             generation: null,
@@ -5692,7 +5793,7 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "",
           rolePlay: {
             source: "role-play-setup",
-            identity: { kind: "persona", id: "guide", name: "Guide" },
+            identity: null,
             behavior: null,
             scene: null,
             generation: null,
@@ -5756,7 +5857,7 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "",
           rolePlay: {
             source: "role-play-setup",
-            identity: { kind: "persona", id: "guide", name: "Guide" },
+            identity: null,
             behavior: null,
             scene: null,
             generation: null,
@@ -5805,7 +5906,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,
@@ -5858,7 +5959,7 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "",
           rolePlay: {
             source: "role-play-setup",
-            identity: { kind: "persona", id: "guide", name: "Guide" },
+            identity: null,
             behavior: null,
             scene: null,
             generation: null,
@@ -6863,13 +6964,13 @@ describe("PlaygroundForm role-play starter", () => {
 
   it.each([
     "legacy character startup",
-    "owned persona role-play startup"
+    "owned clear-identity role-play startup"
   ] as const)(
     "detaches through the real Form before one selection write for %s",
     async (path) => {
-      const kind = path === "legacy character startup" ? "character" : "persona"
-      const identity = { kind, id: "new-identity", name: "New identity" }
-      if (kind === "persona")
+      const kind = path === "legacy character startup" ? "character" : null
+      const identity = kind ? { kind, id: "new-identity", name: "New identity" } : null
+      if (kind === null)
         prepareQualifiedSceneSource("native", "chat-original")
       else playgroundFormMessageOptionState.value.serverChatId = "chat-original"
       savedSetupFixture.raw = JSON.stringify([
@@ -6879,13 +6980,13 @@ describe("PlaygroundForm role-play starter", () => {
           systemPrompt: "New behavior",
           character:
             kind === "character"
-              ? { id: identity.id, name: identity.name }
+              ? { id: identity!.id, name: identity!.name }
               : null,
           // This ordinary SDK startup has no Scene proposal. Its character identity
           // still uses the nonnative writer; role-play character ordering is tested
           // separately with original qualified native ownership.
           rolePlay:
-            kind === "persona"
+            kind === null
               ? {
                   source: "role-play-setup",
                   identity,
@@ -6915,7 +7016,7 @@ describe("PlaygroundForm role-play starter", () => {
         ).toHaveBeenCalledWith(null)
         expect(
           selectedAssistantMock.setSelectedAssistant
-        ).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(identity))
+        ).toHaveBeenCalledExactlyOnceWith(identity ? expect.objectContaining(identity) : null)
         if (kind === "character") {
           expect(nativeSetupFixture.scene).not.toHaveBeenCalled()
           expect(saveActorSettingsMock).not.toHaveBeenCalled()
@@ -6991,7 +7092,40 @@ describe("PlaygroundForm role-play starter", () => {
     expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledTimes(ready ? 0 : 1)
   })
 
-  it("detaches an owned persona startup before Scene persistence and suppresses its late presentation", async () => {
+  it.each(["identity", "scene"])("refuses owned tracked-persona %s startup before detachment or any writer", async proposal => {
+    const f = prepareQualifiedSceneSource("native", "original-persona-refusal", "original-persona-history")
+    const setup = ownedStartupBundle({ ...createDefaultActorSettings(), notes: "Unsupported persona Scene proposal" }, {
+      kind: "persona", id: "guide", name: "Guide"
+    })
+    if (!setup.rolePlay) throw new Error("expected role-play proposal")
+    if (proposal === "identity") setup.rolePlay.scene = null
+    savedSetupFixture.raw = JSON.stringify([setup])
+    const record = { value: createDefaultActorSettings(), updatedAt: 1730000000000 }
+    sceneBucket.records.set(`actorSettings:owned:${f.target.key}`, record)
+    const before = { chatDraftAddress: f.source.chatDraftAddress, chatDraftRevision: f.source.chatDraftRevision, historyId: f.source.historyId,
+      serverChatId: f.source.serverChatId, history: f.source.history, messages: f.source.messages, selectedModel: f.source.selectedModel,
+      selectedSystemPrompt: f.source.selectedSystemPrompt, ragPinnedResults: f.source.ragPinnedResults }
+    const { view, apply } = await openOwnedStartupPreview()
+    const modelBefore = nativeSetupFixture.actualSettingsStore!.getState()
+    try {
+      await act(async () => { expect(await apply()).toBe(false) })
+      expect(nativeSetupFixture.error).toHaveBeenCalledWith(expect.objectContaining({ description: expect.stringMatching(/persona.*not supported.*overlay/i) }))
+      expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+      expect(f.source.setChatDraftAddress).not.toHaveBeenCalled()
+      expect(f.source.setHistoryId).not.toHaveBeenCalled()
+      expect(f.source.setServerChatId).not.toHaveBeenCalled()
+      expect(f.reset).not.toHaveBeenCalled()
+      expect(saveActorSettingsMock).not.toHaveBeenCalled()
+      expect(sceneBucket.set).not.toHaveBeenCalled()
+      expect(sceneBucket.records.get(`actorSettings:owned:${f.target.key}`)).toBe(record)
+      expect(nativeSetupFixture.actualSettingsStore!.getState()).toBe(modelBefore)
+      expect(f.source).toMatchObject(before)
+      expect(useActorStore.getState().applied).toBeNull()
+      expect(screen.getByRole("button", { name: "Apply saved template" })).toBeInTheDocument()
+    } finally { view.unmount() }
+  })
+
+  it("detaches an owned clear-identity startup before Scene persistence and suppresses its late presentation", async () => {
     const f = prepareQualifiedSceneSource("native", "old-chat", "old-history")
     savedSetupFixture.raw = JSON.stringify([
       createStartupTemplateBundle({
@@ -7000,7 +7134,7 @@ describe("PlaygroundForm role-play starter", () => {
         systemPrompt: "",
         rolePlay: {
           source: "role-play-setup",
-          identity: { kind: "persona", id: "guide", name: "Guide" },
+          identity: null,
           behavior: null,
           scene: null,
           generation: null,

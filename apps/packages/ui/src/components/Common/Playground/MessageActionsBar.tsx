@@ -109,6 +109,7 @@ type MessageActionsBarProps = {
   isLastMessage: boolean
   hideEditAndRegenerate?: boolean
   onRegenerate: () => void
+  regenerateDisabledReason?: string | null
   onNewBranch?: () => void
   temporaryChat?: boolean
   hideContinue?: boolean
@@ -173,6 +174,7 @@ export function MessageActionsBar({
   isLastMessage,
   hideEditAndRegenerate,
   onRegenerate,
+  regenerateDisabledReason,
   onNewBranch,
   temporaryChat,
   hideContinue,
@@ -565,9 +567,11 @@ export function MessageActionsBar({
               </Tooltip>
             )}
             {isBot && !hideEditAndRegenerate && isLastMessage && (
-              <Tooltip title={t("regenerate")}>
+              <Tooltip title={regenerateDisabledReason || t("regenerate")}>
                 <IconButton
                   ariaLabel={t("regenerate") as string}
+                  disabled={Boolean(regenerateDisabledReason)}
+                  title={regenerateDisabledReason || undefined}
                   onClick={onRegenerate}
                   className={actionButtonClass}
                 >

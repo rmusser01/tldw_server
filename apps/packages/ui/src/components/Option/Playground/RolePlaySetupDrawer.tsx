@@ -8,7 +8,7 @@ import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useActorStore } from "@/store/actor"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
-import type { AssistantSelection } from "@/types/assistant-selection"
+import { getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable, type AssistantSelection } from "@/types/assistant-selection"
 import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import type { ModelSettingsOperation } from "@/hooks/chat/model-settings-operation"
@@ -149,7 +149,8 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   onDeleteSavedSetup,
   returnFocusRef
 }) => {
-  const { t } = useTranslation(["playground", "common"])
+  const { t } = useTranslation(["playground", "common", "option"])
+  const personaGuidanceId = React.useId()
   const applyScene = useActorStore(state => state.applyScene)
   const [modal, modalContextHolder] = Modal.useModal()
   const editRevisionRef = React.useRef(0)
@@ -217,6 +218,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     (state) => state.sourceSelectionRevision
   )
   const historySelection = useHistorySelectionContext()
+  const personaIdentityUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), stagedIdentity?.kind, getAssistantSelectionMode(stagedIdentity))
   const historySelectionRef = React.useRef(historySelection)
   historySelectionRef.current = historySelection
   const selectionSignal = historySelection?.getSignal()
@@ -875,6 +877,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   )
 
   const handleApply = React.useCallback(async () => {
+    if (personaIdentityUnavailable) return
     const payload: RolePlaySetupApplyPayload = {}
     if (clearIdentity) payload.clearIdentity = true
     else if (stagedIdentity) payload.identitySelection = stagedIdentity
@@ -899,6 +902,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     clearBehavior,
     clearIdentity,
     onApply,
+    personaIdentityUnavailable,
     resetGenerationStyle,
     sceneDraft,
     stagedBehaviorTemplate,
@@ -1153,6 +1157,11 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       }}
       footer={
         <div className="space-y-2">
+          {personaIdentityUnavailable && (
+            <p id={personaGuidanceId} role="status" className="text-sm text-text-muted">
+              {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+            </p>
+          )}
           {applyError ? (
             <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-text">
               {applyError}
@@ -1190,7 +1199,8 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               type="primary"
               aria-label={t("common:apply", "Apply")}
               loading={saving}
-              disabled={loading || reviewingScene || Boolean(sceneLoadError) || !loadedSceneRef.current?.()}
+              disabled={personaIdentityUnavailable || loading || reviewingScene || Boolean(sceneLoadError) || !loadedSceneRef.current?.()}
+              aria-describedby={personaIdentityUnavailable ? personaGuidanceId : undefined}
               onClick={handleApply}>
               {t("common:apply", "Apply")}
             </Button>

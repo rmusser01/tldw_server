@@ -1376,6 +1376,7 @@ const selectAssistantFromRuntimeRail = async (
   options: {
     tab: 'Characters' | 'Personas';
     assistantName: string;
+    applyAsOverlay?: boolean;
   }
 ) => {
   const runtimeInspector = getDesktopRuntimeInspector(page);
@@ -1404,6 +1405,11 @@ const selectAssistantFromRuntimeRail = async (
     await page.waitForTimeout(1_500);
   }
   await expect(assistantButton).toBeVisible({ timeout: 30_000 });
+  if (options.applyAsOverlay) {
+    await expect(assistantButton).toBeDisabled();
+    await panel.getByRole('button', { name: 'Use a persona prompt overlay' }).click();
+    await expect(assistantButton).toBeEnabled();
+  }
   await assistantButton.click();
   await expect(panel).toBeHidden({ timeout: 10_000 });
 };
@@ -2776,6 +2782,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await selectAssistantFromRuntimeRail(page, {
         tab: 'Personas',
         assistantName: String(selectedPersona.name),
+        applyAsOverlay: true,
       });
 
       const assistantTrigger = runtimeInspector.locator('[data-cockpit-assistant-select-trigger]');
@@ -2900,81 +2907,65 @@ test.describe('/chat cockpit real-server parity', () => {
     }
   });
 
-  test('starts a tracked persona chat from the runtime rail and restores tracked mode after reload', async ({
-    page,
-    request,
-  }) => {
+  test('explains unavailable tracked persona chat without writes and offers an explicit ordinary-chat overlay', async ({ page, request }) => {
     test.setTimeout(150_000);
-
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
     const chatModelSelection = await getDeterministicChatReadiness(request);
-    expect(chatModelSelection).toMatchObject({
-      providerId: 'custom-openai-api',
-      modelId: expect.any(String),
-    });
-
+    expect(chatModelSelection).toMatchObject({ providerId: 'custom-openai-api', modelId: expect.any(String) });
     const timestamp = Date.now();
     let persona: DisposablePersona | null = null;
-
     try {
-      persona = await createDisposablePersona(
-        request,
-        `tracked_persona_${timestamp}`,
-        `Tracked Persona ${timestamp}`
-      );
-
+      persona = await createDisposablePersona(request, `tracked_persona_${timestamp}`, `Tracked Persona ${timestamp}`);
       await openDesktopChatCockpit(page, chatModelSelection);
-
-      await selectAssistantFromRuntimeRail(page, {
-        tab: 'Personas',
-        assistantName: persona.name,
-      });
-
-      const prompt = `Tracked persona proof ${timestamp}`;
+      const prompt = `Preserved persona draft ${timestamp}`;
+      const input = page.getByTestId('chat-input');
+      await input.fill(prompt);
+      const originalSession = await readPlaygroundSessionSnapshot(page);
+      const originalMessages = await page.getByRole('log', { name: /chat messages/i }).textContent();
+      const writes: string[] = [];
+      const recordWrite = (hit: Request) => {
+        if (hit.url().includes('/api/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(hit.method()))
+          writes.push(`${hit.method()} ${new URL(hit.url()).pathname}`);
+      };
+      page.on('request', recordWrite);
+      try {
+        const runtime = getDesktopRuntimeInspector(page);
+        await runtime.getByRole('button', { name: 'Select character or persona' }).click();
+        const panel = page.getByTestId('assistant-select-panel');
+        await panel.getByRole('tab', { name: 'Personas' }).click();
+        const choice = panel.getByRole('button', { name: persona.name, exact: true });
+        await expect(choice).toBeVisible({ timeout: 30_000 });
+        await expect(choice).toBeDisabled();
+        await expect(choice).toHaveAccessibleDescription(/tracked persona chat.*unavailable.*overlay/i);
+        await expect(panel.getByRole('status')).toContainText('choose a character for tracked chat');
+        await choice.evaluate((element: HTMLButtonElement) => element.click());
+        await expect(choice).toBeDisabled();
+        await expect(panel).toBeVisible();
+        await expect(input).toHaveValue(prompt);
+        expect(await readPlaygroundSessionSnapshot(page)).toEqual(originalSession);
+        expect(await page.getByRole('log', { name: /chat messages/i }).textContent()).toBe(originalMessages);
+        await assertRuntimeAssistantCleared(runtime);
+        expect(writes).toEqual([]);
+        await panel.getByRole('button', { name: 'Use a persona prompt overlay' }).click();
+        await expect(choice).toBeEnabled();
+        await choice.click();
+        await expect(panel).toBeHidden();
+      } finally {
+        page.removeListener('request', recordWrite);
+      }
+      await expect(input).toHaveValue(prompt);
       const turn = await sendChatTurnAndCapture(page, prompt);
-      const createCall = findChatCreateCall(turn.calls);
-
-      expect(createCall).toBeDefined();
-      expect(createCall?.requestBody).toMatchObject({
-        assistant_kind: 'persona',
-        assistant_id: persona.id,
-      });
-
-      const chatId =
-        extractCreatedChatIdFromCreateCall(createCall) ??
-        extractConversationChatIdFromResponse(turn.response) ??
-        extractConversationChatIdFromCall(findConversationTurnCall(turn.calls)) ??
-        (await waitForPersistedServerChatId(page));
-
-      const chatDetails = await getChatDetails(request, chatId);
-      expect(chatDetails.status).toBe(200);
-      expect(chatDetails.body).toMatchObject({
-        id: chatId,
-        assistant_kind: 'persona',
-        assistant_id: persona.id,
-      });
+      expect(turn.response?.status()).toBe(200);
+      const ordinaryCompletion = turn.calls.find(call => call.method === 'POST' && /\/chat\/completions$/.test(new URL(call.url).pathname));
+      expect(ordinaryCompletion).toBeDefined();
+      expect(JSON.stringify(ordinaryCompletion?.requestBody)).toContain(`You are ${persona.name}, a concise overlay test persona.`);
+      await expect(getDesktopRuntimeInspector(page)).toContainText(persona.name);
+      for (const call of turn.calls.filter(call => call.method === 'POST')) {
+        expect(call.requestBody).not.toMatchObject({ assistant_kind: 'persona' });
+        expect(new URL(call.url).pathname).not.toMatch(/\/complete-v2$/);
+      }
       await expectDeterministicMockReply(page);
-
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
-        timeout: 60_000,
-      });
-      await assertNoBlockingServerDialog(page);
-      await expect(page.getByTestId('character-chat-readiness-panel')).toBeHidden({
-        timeout: 60_000,
-      });
-      await assertCoreComposerControls(page);
-      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
-      await expectDeterministicMockReply(page);
-
-      const runtimeInspector = getDesktopRuntimeInspector(page);
-      await expect(runtimeInspector).toContainText('Persona selected', {
-        timeout: 60_000,
-      });
-      await expect(runtimeInspector).toContainText(persona.name);
-      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
-      await expect(page.getByTestId('character-control-rail')).toHaveCount(0);
     } finally {
       await cleanupDisposablePersona(request, persona);
     }

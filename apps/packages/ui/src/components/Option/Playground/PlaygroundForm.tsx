@@ -158,6 +158,7 @@ import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
+  isProtectedTrackedPersonaUnavailable,
   getAssistantSelectionMode,
   type AssistantSelection,
 } from "@/types/assistant-selection";
@@ -667,6 +668,7 @@ export const PlaygroundForm = ({
     },
   } = useMessageOption();
   const greetingSubmitGateRef = React.useRef<() => boolean>(() => false);
+  const personaSubmitDisabledReasonRef = React.useRef<string | null>(null);
   const characterSubmitBlockerRef = React.useRef(characterChatSendBlocker);
   characterSubmitBlockerRef.current = characterChatSendBlocker;
   React.useLayoutEffect(() => {
@@ -674,9 +676,9 @@ export const PlaygroundForm = ({
     setQueuedMessages(previous => previous.map(item => item.status === "queued"
       ? blockQueuedRequest(item, "chat_setup_changed") : item));
   }, [characterChatSendBlocker?.active, queuedMessages, setQueuedMessages]);
-  const getSubmitDisabledReason = React.useCallback(() => characterSubmitBlockerRef.current?.active
+  const getSubmitDisabledReason = React.useCallback(() => personaSubmitDisabledReasonRef.current ?? (characterSubmitBlockerRef.current?.active
     ? characterSubmitBlockerRef.current.title
-    : greetingSubmitGateRef.current() ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : null, [t]);
+    : greetingSubmitGateRef.current() ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : null), [t]);
   const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) => {
     const reason = getSubmitDisabledReason();
     return reason ? Promise.resolve({ status: "skipped" as const, reason }) : submitMessageAction(input);
@@ -1708,6 +1710,11 @@ export const PlaygroundForm = ({
     assistantPreparationViewRef.current = { researchContext, openUIRequestMode, appendFormattingGuidePrompt, isConnectionReady, composerModels, composerModelsLoading };
   }, [researchContext, openUIRequestMode, appendFormattingGuidePrompt, isConnectionReady, composerModels, composerModelsLoading]);
   const historySelection = useHistorySelectionContext();
+  const personaHistoryUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection),
+    effectiveAssistantState?.mode === "tracked_persona" ? "persona" : null, "tracked");
+  const personaSubmitDisabledReason = personaHistoryUnavailable
+    ? t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null;
+  personaSubmitDisabledReasonRef.current = personaSubmitDisabledReason;
   const captureSelectionFence = historySelection?.fence;
   const resetSelectedHistory = historySelection?.reset;
   const assistantOwnerIsCurrent = assistantMeta?.isCurrent;
@@ -1793,6 +1800,9 @@ export const PlaygroundForm = ({
         options.settingsOperation ?? captureModelSettingsOperation()
       if (options.isCurrent?.() === false || !settingsOperation.isCurrent())
         return false
+      if (options.applyIdentity !== false && isProtectedTrackedPersonaUnavailable(
+        Boolean(historySelection), selection?.kind, getAssistantSelectionMode(selection)
+      )) throw new Error("native_history_persona_unsupported")
       const activeChat = useStoreMessageOption.getState()
       let modelIsCurrent = captureSelectedModelGuard()
       const toolsState = useMcpToolsStore.getState()
@@ -4366,6 +4376,7 @@ export const PlaygroundForm = ({
     estimateTokensForText: estimateTokensForText as any,
     resolveSubmissionIntent,
     queueSubmission,
+    getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,
     compareModelsSupportCapability,
     notificationApi,
@@ -4410,13 +4421,13 @@ export const PlaygroundForm = ({
   });
   greetingSubmitGateRef.current = isGreetingPreparing;
   const handleComposerSend = React.useCallback(() => {
-    if (greetingStarting || historySelectionPending) return;
+    if (greetingStarting || historySelectionPending || personaSubmitDisabledReason) return;
     if (characterChatSendBlocker?.active) {
       runCharacterChatSendBlocker();
       return;
     }
     submitForm();
-  }, [greetingStarting, historySelectionPending, characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
+  }, [personaSubmitDisabledReason, greetingStarting, historySelectionPending, characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
   React.useEffect(() => {
     voiceChatSubmitFormRef.current = () => {
       handleComposerSend();
@@ -6026,6 +6037,7 @@ export const PlaygroundForm = ({
       onStopListening={stopListening}
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
+      submitDisabledReason={personaSubmitDisabledReason}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}
@@ -7103,6 +7115,7 @@ export const PlaygroundForm = ({
 
                         const composerInlineMessagesNode = (
                           <>
+                            {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
                             {form.errors.message && (
                               <div
                                 role="alert"
