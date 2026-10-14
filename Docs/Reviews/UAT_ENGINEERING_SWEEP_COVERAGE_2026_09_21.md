@@ -144,16 +144,18 @@ All rows below are **unverified for the future integrated sweep candidate**. Ref
 | C-10 | Model/runtime administration to real inference | [tier-4-admin](../../apps/tldw-frontend/e2e/workflows/tier-4-admin), [llamacpp-runtime-admin.spec.ts](../../apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts) |
 | C-11 | MCP discovery and scoped tool execution | [mcp-hub.spec.ts](../../apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts), [workflow-editor.spec.ts](../../apps/tldw-frontend/e2e/workflows/tier-3-automation/workflow-editor.spec.ts), [chat-workflows.spec.ts](../../apps/tldw-frontend/e2e/workflows/tier-3-automation/chat-workflows.spec.ts) |
 | C-12 | Workflow/scheduled task to monitored result | [mcp-hub.spec.ts](../../apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts), [workflow-editor.spec.ts](../../apps/tldw-frontend/e2e/workflows/tier-3-automation/workflow-editor.spec.ts), [chat-workflows.spec.ts](../../apps/tldw-frontend/e2e/workflows/tier-3-automation/chat-workflows.spec.ts) |
-| X-01 | Upgrade an existing installation without losing work | No direct automation mapping established |
-| X-02 | Reciprocal user, organization and browser-state isolation | No direct automation mapping established |
+| X-01 | Upgrade an existing installation without losing work | Partial backend: ChaChaNotes schema-migration ladder (`tldw_Server_API/tests/DB_Management/test_chacha_migration_v*.py`) and Media DB bootstrap tests cover schema upgrade in place. Install-level upgrade (config/env/browser-state preservation across versions) remains `manual:<no install-level automation exists>` |
+| X-02 | Reciprocal user, organization and browser-state isolation | Backend: RLS coverage + route-auth + scope-predicate ratchets (`tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py`, `tests/lint/test_route_auth_ratchet.py`, `tests/lint/test_scope_predicate_ratchet.py`), AuthNZ isolated_test_environment suites, Sharing endpoints (`tests/Sharing/`). Browser-state isolation across profiles: `manual:<no cross-profile browser automation>` |
 | X-03 | Usability, accessibility and responsive review | [stage4-axe-high-risk-routes.spec.ts](../../apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.spec.ts), [playwright.config.ts](../../apps/tldw-frontend/playwright.config.ts) |
 | X-04 | Extension capture, sidepanel and cross-surface continuity | [stage4-axe-high-risk-routes.spec.ts](../../apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.spec.ts), [playwright.config.ts](../../apps/tldw-frontend/playwright.config.ts) |
-| S-01 | Quiz and study assistance | No direct automation mapping established |
-| S-02 | Chatbooks and portable backups | No direct automation mapping established |
-| S-03 | Artifact editors | No direct automation mapping established |
-| S-04 | Research and source workspaces | No direct automation mapping established |
-| S-05 | Moderation and claims review | No direct automation mapping established |
-| S-06 | Specialized tools and discovery | No direct automation mapping established |
+| S-01 | Quiz and study assistance | Backend API/service: `tldw_Server_API/tests/Quizzes/` (incl. `test_osce_endpoints.py`, generation fixtures), `tests/Flashcards/` (service prompts, adapter contracts, study assistant) |
+| S-02 | Chatbooks and portable backups | Backend: `tldw_Server_API/tests/Chatbooks/`, `tests/integration/test_chatbook_integration.py`, quota interplay `tests/Usage/test_quota_evals_chatbooks.py`. Admin backup/restore surface: `manual:<no dedicated admin-backup suite found in tests/ inventory>` |
+| S-03 | Artifact editors | Backend: `tldw_Server_API/tests/FileArtifacts/` (artifact storage endpoints) + Storage suite (`tests/Storage/`); UI editor surfaces: `manual:<UI-level editor flows lack browser automation>` |
+| S-04 | Research and source workspaces | Backend: `tldw_Server_API/tests/Research/`, `tests/ResearchWorkspace/`, `tests/PrototypeWorkspaces/` |
+| S-05 | Moderation and claims review | Backend: `tldw_Server_API/tests/Claims/`, `tests/Claims_Extraction/`; moderation review UI: `manual:<moderation UI flows lack browser automation>` |
+| S-06 | Specialized tools and discovery | Partial: Prompt Studio CLI/unit suites and discovery-adjacent endpoint tests; consolidated tool-discovery flow: `manual:<no single end-to-end discovery automation>` |
+
+Mapping basis (2026-10-14, TASK-13640): test-directory inventory of `tldw_Server_API/tests/`; rows name the nearest owning backend suites and explicitly mark the residual manual surface instead of claiming full coverage.
 
 ### Static workflow-source inventory
 
