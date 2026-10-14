@@ -4,6 +4,7 @@ import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import { isExplicitRequestCancellation } from '@/services/request-events';
+import { deriveRequestTimeout, parseRetryAfter } from '@/services/tldw/request-core';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
 import { asVNGenerationRejectionCode, VN_GENERATION_REJECTION_MESSAGES, type VNGenerationRejectionCode } from '@web/lib/api/vnGenerationErrors';
 
@@ -335,7 +336,14 @@ function createAbortSignal(config: ApiRequestConfig): {
   cleanup: () => void;
   didTimeout: () => boolean;
 } {
-  const timeout = config.timeout ?? api.defaults.timeout;
+  // Shared timeout policy (TASK-13526 transport Stage A): per-path floors
+  // and overrides match the extension; the web 30s default seeds
+  // requestTimeoutMs so generic paths keep today's behavior.
+  const timeout = deriveRequestTimeout(
+    { requestTimeoutMs: api.defaults.timeout },
+    (config.url ?? '') as Parameters<typeof deriveRequestTimeout>[1],
+    config.timeout
+  );
   const callerSignal = config.signal;
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -442,8 +450,9 @@ async function parseErrorBody(response: Response): Promise<ApiErrorResponse> {
 }
 
 function retryAfterFromHeaders(headers: Headers): number | undefined {
-  const retryAfterHeader = headers.get('retry-after');
-  return retryAfterHeader ? parseInt(retryAfterHeader, 10) || undefined : undefined;
+  // Shared parser (TASK-13526 transport Stage A): handles both delta-seconds
+  // and HTTP-date forms, returning milliseconds.
+  return parseRetryAfter(headers.get('retry-after')) ?? undefined;
 }
 
 function buildRequestHistoryConfig(
