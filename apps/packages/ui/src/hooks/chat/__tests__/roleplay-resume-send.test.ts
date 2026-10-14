@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { waitFor } from "@testing-library/react"
 import type { TFunction } from "i18next"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { HistoryBookmark } from "@/db/dexie/types"
@@ -939,4 +940,61 @@ describe("saved Roleplay Retry input receipt boundary", () => {
       expect(acknowledgeInput).not.toHaveBeenCalled()
     }
   )
+})
+
+describe("bound native roleplay feedback ownership", () => {
+  const providerError = () => Object.assign(new Error("HTTP 401"), { status: 401,
+    details: { detail: { error: { code: "provider_authentication_failed", type: "provider_authentication_failed" } } } })
+  it("wraps current bound provider failure for settings recovery and retains one original accepted input", async () => {
+    const mounted = await prepare()
+    const failure = providerError()
+    io.complete.mockRejectedValueOnce(failure)
+    const error = await sendNativeHistoryCharacter(mounted.params).catch(cause => cause)
+    const { NativeHistoryRoleplaySendError } = await import("../native-character-preflight")
+    const { classifyCharacterChatFailureRecovery } = await import("../useCharacterChatMode")
+    expect(error).toBeInstanceOf(NativeHistoryRoleplaySendError)
+    expect(error.cause).toBe(failure)
+    expect(error.isCurrent()).toBe(true)
+    expect(classifyCharacterChatFailureRecovery(error)).toMatchObject({ kind: "provider_unconfigured", action: "open-model-settings" })
+    const [entry] = await loadHistoryTurnRecoveries({ profile_id: "profile", client_session_id: "reopen" }, mounted.view)
+    expect(entry.turn).toMatchObject({ input_text: mounted.params.message, state: "accepted_unsent", roleplay_resume: { append: { conversation_id: metadata.id } } })
+    expect(io.append).toHaveBeenCalledOnce()
+    expect(io.complete).toHaveBeenCalledOnce()
+    expect(io.legacy).not.toHaveBeenCalled()
+    expect(mounted.follow).not.toHaveBeenCalled()
+    expect(mounted.params.releaseActivity).toHaveBeenCalledOnce()
+  })
+  it.each(["view", "source", "account", "draft", "Stop"] as const)("keeps a held bound provider failure retired after %s changes", async boundary => {
+    const mounted = await prepare()
+    let reject!: (error: Error) => void
+    io.complete.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+    const pending = sendNativeHistoryCharacter(mounted.params).catch(cause => cause)
+    await waitFor(() => expect(io.complete).toHaveBeenCalledOnce())
+    if (boundary === "view") mounted.earlier()
+    if (boundary === "source") mounted.retire()
+    if (boundary === "account") mounted.auth.abort()
+    if (boundary === "draft") useStoreMessageOption.getState().startNewChatDraft()
+    if (boundary === "Stop") mounted.stop.abort()
+    reject(providerError())
+    const error = await pending
+    const { NativeHistoryRoleplaySendError } = await import("../native-character-preflight")
+    expect(error).toBeInstanceOf(NativeHistoryRoleplaySendError)
+    expect(error.isCurrent()).toBe(false)
+    if (boundary === "Stop") expect(mounted.controller.refreshRecovery).toHaveBeenCalledOnce()
+    else expect(mounted.controller.refreshRecovery).not.toHaveBeenCalled()
+    expect(mounted.follow).not.toHaveBeenCalled()
+    expect(io.append).toHaveBeenCalledOnce()
+    expect(io.complete).toHaveBeenCalledOnce()
+    expect(mounted.params.releaseActivity).toHaveBeenCalledOnce()
+  })
+  it("preserves the bound typed settings/context refusal before any transport", async () => {
+    const mounted = await prepare()
+    const { NativeHistorySettingsReadError } = await import("../native-character-preflight")
+    const error = await sendNativeHistoryCharacter({ ...mounted.params, image: "synthetic-image" }).catch(cause => cause)
+    expect(error).toBeInstanceOf(NativeHistorySettingsReadError)
+    expect(error.cause).toMatchObject({ message: "roleplay_resume_explicit_context_unsupported" })
+    expect(io.append).not.toHaveBeenCalled()
+    expect(io.complete).not.toHaveBeenCalled()
+    expect(mounted.params.releaseActivity).toHaveBeenCalledOnce()
+  })
 })

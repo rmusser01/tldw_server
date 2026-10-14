@@ -195,6 +195,9 @@ export const sendNativeHistoryCharacter = async (
         image: params.image,
         unsupportedContext: params.unsupportedContext,
         setMessages: params.setMessages
+      }).catch(error => {
+        if (error instanceof NativeHistoryBranchRefusal || error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError) throw error
+        throw new NativeHistoryRoleplaySendError(error, () => !signal.aborted && originalPreparationIsCurrent() && draftIsCurrent())
       })
       if (saved && privateHandle && attempt?.state === "bound" &&
           attempt.chatId === owner.conversation_id && attempt.inputText === params.message)

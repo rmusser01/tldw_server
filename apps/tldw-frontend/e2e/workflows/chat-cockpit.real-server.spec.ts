@@ -1,3 +1,5 @@
+import { readStore } from "../../../extension/tests/e2e/utils/history-selection";
+import type { HistoryBookmark } from "../../../packages/ui/src/db/dexie/types";
 /**
  * /chat cockpit real-server parity checks.
  *
@@ -17,6 +19,7 @@ import {
 } from '@playwright/test';
 import { captureAllApiCalls, type CapturedApiCall } from '../utils/api-assertions';
 import { waitForStreamComplete } from '../utils/journey-helpers';
+import { parseRoleplayResumeAppendRequest, parseRoleplayResumeAppendReceipt, parseRoleplayResumeCompletionRequest, parseRoleplayResumeCompletionReceipt } from '../../../packages/ui/src/services/tldw/roleplay-resume';
 
 const serverUrl = (
   process.env.TLDW_E2E_SERVER_URL ||
@@ -416,7 +419,7 @@ const extractConfiguredProviders = (payload: any): any[] => {
 
 const normalizeCockpitProviderKey = (provider: string): string => {
   const normalized = provider.trim().toLowerCase();
-  if (normalized === 'llama.cpp') return 'llamacpp';
+  if (normalized === 'llama.cpp' || normalized === 'llama') return 'llamacpp';
   if (normalized === 'local-llm') return 'local';
   if (normalized === 'custom_openai_api') return 'custom-openai-api';
   return normalized;
@@ -438,7 +441,7 @@ const normalizeConfiguredChatModelId = (providerName: string, value: unknown): s
   return model;
 };
 
-const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection => {
+const buildConfiguredChatModelSelection = (payload: any, metadata: unknown): RealChatModelSelection => {
   const configuredProviders = extractConfiguredProviders(payload).filter(
     (provider: any) => Array.isArray(provider?.models) && provider.models.length > 0
   );
@@ -465,20 +468,42 @@ const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection
     throw new Error(`Configured provider ${provider.name || '<unknown>'} has no usable model`);
   }
 
+  const configuredProvider = normalizeCockpitProviderKey(providerName);
+  const rows = Array.isArray(metadata) ? metadata : Array.isArray((metadata as any)?.models) ? (metadata as any).models : [];
+  // Match normalizeTldwModels ID precedence; Playwright cannot import the UI's ESM package in this CJS fixture.
+  const catalog = rows.map((entry: any) => {
+    const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+    const rawModel = text(entry?.model) || text(entry?.model_id);
+    const rawName = text(entry?.name), rawId = text(entry?.id);
+    const id = rawModel || (rawName && !/\s/.test(rawName) && /[/:._-]/.test(rawName) ? rawName : '') || rawId || rawName;
+    return { id, provider: text(entry?.provider), type: entry?.type };
+  });
+  const matches = catalog.filter(entry =>
+    normalizeCockpitProviderKey(entry.provider) === configuredProvider &&
+    normalizeConfiguredChatModelId(providerName, entry.id) === model &&
+    (!entry.type || entry.type === 'chat')
+  );
+  if (matches.length !== 1) {
+    throw new Error(`Configured chat model ${providerName}/${model} needs one unique model catalog entry`);
+  }
   return {
     provider: providerName,
     model,
-    key: `tldw:${model}`,
+    key: `${configuredProvider}:${matches[0].id}`,
   };
 };
 
 const getConfiguredChatModelSelection = async (
   request: APIRequestContext
 ): Promise<RealChatModelSelection> => {
-  const providers = await apiGet<unknown>(request, '/api/v1/llm/providers');
+  const [providers, metadata] = await Promise.all([
+    apiGet<unknown>(request, '/api/v1/llm/providers'),
+    apiGet<unknown>(request, '/api/v1/llm/models/metadata'),
+  ]);
   expect(providers.status).toBe(200);
+  expect(metadata.status).toBe(200);
   expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
-  return buildConfiguredChatModelSelection(providers.body);
+  return buildConfiguredChatModelSelection(providers.body, metadata.body);
 };
 
 const getDeterministicChatReadiness = async (
@@ -1379,16 +1404,18 @@ const selectAssistantFromRuntimeRail = async (
     applyAsOverlay?: boolean;
   }
 ) => {
+  await expect(page.getByRole('button', { name: /send message/i })).toBeEnabled();
   const runtimeInspector = getDesktopRuntimeInspector(page);
   await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
   const panel = page.getByTestId('assistant-select-panel');
   await expect(panel).toBeVisible();
-  await page.getByRole('tab', { name: options.tab }).click();
+  await expect(panel.getByRole('textbox', { name: 'Search characters and personas', exact: true })).toBeFocused();
+  await panel.getByRole('tab', { name: options.tab }).click();
   await expect(page.getByRole('tab', { name: options.tab })).toHaveAttribute(
     'aria-selected',
     'true'
   );
-  const assistantButton = page.getByRole('button', {
+  const assistantButton = panel.getByRole('button', {
     name: options.assistantName,
     exact: true,
   });
@@ -1684,11 +1711,11 @@ test.describe('/chat cockpit real-server parity', () => {
             models: ['openai:gpt-4.1-mini'],
           },
         ],
-      })
+      }, { models: [{ name: 'gpt-4.1-mini', provider: 'openai', type: 'chat' }] })
     ).toEqual({
       provider: 'openai',
       model: 'gpt-4.1-mini',
-      key: 'tldw:gpt-4.1-mini',
+      key: 'openai:gpt-4.1-mini',
     });
 
     expect(
@@ -1700,8 +1727,23 @@ test.describe('/chat cockpit real-server parity', () => {
             models: ['llama3:latest'],
           },
         ],
-      }).model
-    ).toBe('llama3:latest');
+      }, { models: [{ model: 'llama3:latest', provider: 'llama.cpp', type: 'chat' }] })
+    ).toEqual({ provider: 'llama.cpp', model: 'llama3:latest', key: 'llamacpp:llama3:latest' });
+  });
+
+  test('qualifies deployed name-only metadata with its explicit provider', () => {
+    expect(buildConfiguredChatModelSelection({ providers: [{ name: 'openai', is_configured: true,
+      default_model: 'gpt-4.1-mini', models: ['gpt-4.1-mini'] }] },
+      { models: [{ name: 'gpt-4.1-mini', provider: 'openai' }] })).toEqual({
+      provider: 'openai', model: 'gpt-4.1-mini', key: 'openai:gpt-4.1-mini'
+    });
+  });
+
+  test('rejects missing or ambiguous configured model catalog entries', () => {
+    const providers = { providers: [{ name: 'openai', is_configured: true, models: ['gpt-4.1-mini'] }] };
+    expect(() => buildConfiguredChatModelSelection(providers, { models: [] })).toThrow(/unique.*catalog/i);
+    const entry = { id: 'openai:gpt-4.1-mini', provider: 'openai', type: 'chat' };
+    expect(() => buildConfiguredChatModelSelection(providers, { models: [entry, entry] })).toThrow(/unique.*catalog/i);
   });
 
   test('does not intercept backend routes in this real-server spec', async ({
@@ -1807,11 +1849,10 @@ test.describe('/chat cockpit real-server parity', () => {
     const providers = await apiGet<any>(request, '/api/v1/llm/providers');
     expect(providers.status).toBe(200);
     expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
-    const chatModelSelection = buildConfiguredChatModelSelection(providers.body);
-
     const models = await apiGet<any>(request, '/api/v1/llm/models/metadata');
     expect(models.status).toBe(200);
     expect(extractModels(models.body).length).toBeGreaterThan(0);
+    const chatModelSelection = buildConfiguredChatModelSelection(providers.body, models.body);
 
     const apiTracker = trackRealApiHits(page);
     await seedRealServerConfig(page, {
@@ -1924,7 +1965,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(sourceInventory).toBeVisible();
     await expect(
       sourceInventory.getByRole('listitem').filter({ hasText: 'Web search' })
-    ).toContainText('Active');
+    ).toContainText('Selected for the next message.');
 
     await closeSearchContextIfOpen(page);
     await contextRail.getByRole('button', { name: 'Open Search & Context' }).click();
@@ -1954,18 +1995,42 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByRole('textbox', { name: 'Search models' })).toBeVisible();
     await expect(page.getByRole('menu').first()).toBeVisible();
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('textbox', { name: 'Search models' })).toBeHidden();
+    await expect(modelSelector).toBeFocused();
 
-    await contextRail.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
-    await expect(page.getByText(/Prompt|Search/i).first()).toBeVisible();
+    const promptTrigger = contextRail.getByRole('button', { name: /Select prompt|Select a prompt/i });
+    await promptTrigger.click();
+    const promptSearch = page.getByPlaceholder('Search prompts...', { exact: true });
+    await expect(promptSearch).toBeFocused();
     await page.keyboard.press('Escape');
+    await expect(promptSearch).toBeHidden();
+    await expect(promptTrigger).toBeFocused();
 
-    await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
-    await expect(page.getByText(/Character|No character/i).first()).toBeVisible();
+    const assistantTrigger = runtimeInspector.getByRole('button', { name: 'Select character or persona' });
+    await assistantTrigger.click();
+    const assistantSearch = page.getByRole('textbox', { name: 'Search characters and personas', exact: true });
+    await expect(assistantSearch).toBeFocused();
     await page.keyboard.press('Escape');
+    await expect(page.getByTestId('assistant-select-panel')).toBeHidden();
+    await expect(assistantTrigger).toBeFocused();
 
-    await page.getByTestId('tools-button').click();
-    await expect(page.getByText(/Clear conversation|More tools/i).first()).toBeVisible();
+    const toolsTrigger = page.getByTestId('tools-button');
+    const toolsBeforePointerFocus = await toolsTrigger.boundingBox();
+    expect(toolsBeforePointerFocus).not.toBeNull();
+    await toolsTrigger.click();
+    const toolsPopup = page.locator('.playground-more-tools:visible');
+    await expect(toolsPopup.getByRole('button', { name: 'Clear conversation', exact: true })).toBeVisible();
+    const toolsAfterPointerFocus = await toolsTrigger.boundingBox();
+    expect(toolsAfterPointerFocus).not.toBeNull();
+    expect(Math.abs(toolsAfterPointerFocus!.y - toolsBeforePointerFocus!.y)).toBeLessThanOrEqual(1);
     await page.keyboard.press('Escape');
+    await expect(toolsPopup).toBeHidden();
+    await expect(toolsTrigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(toolsPopup.getByRole('button', { name: 'Clear conversation', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(toolsPopup).toBeHidden();
+    await expect(toolsTrigger).toBeFocused();
 
     await runtimeInspector.getByRole('button', { name: 'Open model settings' }).click();
     const modelSettingsDialog = page.getByRole('dialog', {
@@ -2518,6 +2583,8 @@ test.describe('/chat cockpit real-server parity', () => {
       cockpitLayout: mobileFocusOnlyLayoutSeed,
     });
     await page.setViewportSize({ width: 390, height: 844 });
+    const catalogResponse = page.waitForResponse(response => response.request().method() === 'GET' &&
+      new URL(response.url()).pathname === '/api/v1/llm/models/metadata' && response.status() === 200);
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -2545,6 +2612,10 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(mobileWebSearchControl).toHaveAttribute('aria-pressed', 'false');
     }
 
+    const browserCatalog = extractModels(await (await catalogResponse).json());
+    expect(browserCatalog.some(entry => normalizeCockpitProviderKey(String(entry.provider)) === normalizeCockpitProviderKey(chatModelSelection.provider) &&
+      normalizeConfiguredChatModelId(chatModelSelection.provider, entry.model || entry.model_id || entry.id || entry.name) === chatModelSelection.model)).toBe(true);
+    await expect(page.getByTestId('model-selector-option')).toHaveCount(0);
     const mobileSmokePrompt = 'mobile cockpit smoke deterministic prompt';
     await page.getByTestId('chat-input').fill(mobileSmokePrompt);
     await page.getByRole('button', { name: /send message/i }).click();
@@ -2858,13 +2929,12 @@ test.describe('/chat cockpit real-server parity', () => {
         tab: 'Characters',
         assistantName: character.name,
       });
-      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
-        character.firstMessage
-      );
-
-      const prompt = `Tracked character proof ${timestamp}`;
-      const turn = await sendChatTurnAndCapture(page, prompt);
-      const createCall = findChatCreateCall(turn.calls);
+      const openingCapture = captureAllApiCalls(page);
+      await page.getByRole('button', { name: 'Start with this greeting', exact: true }).click();
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(character.firstMessage);
+      const openingCalls = await openingCapture.stop();
+      expect(openingCalls.filter(call => call.method === 'POST' && /\/(?:chat\/completions|complete-v2|completions)$/.test(new URL(call.url).pathname))).toEqual([]);
+      const createCall = findChatCreateCall(openingCalls);
       expect(createCall).toBeDefined();
       const trackedCharacterId = (createCall?.requestBody as Record<string, unknown> | null)
         ?.character_id;
@@ -2874,13 +2944,44 @@ test.describe('/chat cockpit real-server parity', () => {
         extractCreatedChatIdFromCreateCall(createCall) ??
         (await waitForPersistedServerChatId(page));
 
+      expect(createCall?.status).toBe(201);
+      expect(new URL(createCall!.url).searchParams.get('seed_first_message')).toBe('true');
+      expect(new URL(createCall!.url).searchParams.get('greeting_strategy')).toBe('default');
+      const opening = await apiGet<any>(request, `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(opening.status).toBe(200);
+      expect(opening.body.messages).toHaveLength(1);
+      const greeting = opening.body.messages[0];
+      expect(greeting).toMatchObject({ conversation_id: chatId, sender: 'assistant', content: character.firstMessage, parent_message_id: null, version: 1 });
+      const captured = openingCalls.filter(call => call.method === 'POST' && call.status === 200 && new URL(call.url).pathname === `/api/v1/chat/conversations/${chatId}/history/selection`).at(-1)?.responseBody as any;
+      expect(captured.view).toMatchObject({ owner_key: expect.stringMatching(/^native-history-v1:sha256:/), conversation_id: chatId, cursor: { kind: 'after_message', message_id: greeting.id } });
+      expect(captured.snapshot).toMatchObject({ owner_key: captured.view.owner_key, conversation_id: chatId, source_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) });
+      expect(captured.rows).toHaveLength(1);
+      expect(captured.rows[0]).toMatchObject({ id: greeting.id, role: 'assistant', settled: true, parent_id: null });
+
+      const prompt = `Tracked character proof ${timestamp}`;
+      const turn = await sendChatTurnAndCapture(page, prompt);
+      const appendCall = turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === `/api/v1/chats/${chatId}/roleplay/messages`);
+      const completionCall = turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === `/api/v1/chats/${chatId}/complete-v2`);
+      expect(appendCall?.status).toBe(201);
+      expect(completionCall?.status).toBe(200);
+      const input = parseRoleplayResumeAppendRequest(appendCall?.requestBody);
+      expect(input.content).toBe(prompt);
+      expect(input.expected.tail).toEqual({ message_id: greeting.id, message_version: greeting.version });
+      const admission = parseRoleplayResumeAppendReceipt(chatId, input, appendCall?.responseBody);
+      const sent = parseRoleplayResumeCompletionRequest(completionCall?.requestBody);
+      expect(sent).toMatchObject({ stream: false, save_to_db: true, include_character_context: true, append_user_message: false,
+        tldw_roleplay_resume_v1: { input_message_id: admission.message_id, input_message_version: admission.message_version, expected: admission.fence } });
+      const settlement = parseRoleplayResumeCompletionReceipt(chatId, sent, completionCall?.responseBody);
+      expect(settlement).toMatchObject({ character_id: Number(character.id), saved: true });
+      const canonical = await apiGet<any>(request, `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(canonical.status).toBe(200);
+      expect(canonical.body.messages).toHaveLength(3);
+      expect(canonical.body.messages[0]).toEqual(greeting);
+      expect(canonical.body.messages[1]).toMatchObject({ id: admission.message_id, content: prompt, sender: 'user', parent_message_id: greeting.id });
+      expect(canonical.body.messages[2]).toMatchObject({ id: settlement.assistant_message_id, content: settlement.assistant_content, sender: 'assistant', parent_message_id: admission.message_id });
       const chatDetails = await getChatDetails(request, chatId);
       expect(chatDetails.status).toBe(200);
-      expect(chatDetails.body).toMatchObject({
-        id: chatId,
-        character_id: Number(character.id),
-        assistant_kind: 'character',
-      });
+      expect(chatDetails.body).toMatchObject({ id: chatId, character_id: Number(character.id), assistant_kind: 'character' });
       await expectDeterministicMockReply(page);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2894,6 +2995,9 @@ test.describe('/chat cockpit real-server parity', () => {
       await assertCoreComposerControls(page);
       await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
       await expectDeterministicMockReply(page);
+      const reopened = await apiGet<any>(request, `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(reopened.status).toBe(200);
+      expect(reopened.body.messages).toEqual(canonical.body.messages);
 
       const runtimeInspector = getDesktopRuntimeInspector(page);
       await expect(runtimeInspector).toContainText('Character selected', {
@@ -2996,7 +3100,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const compositionPreview = getDesktopCompositionPreview(page);
 
     await expect(compositionPreview).toContainText(`Scope: ${modelKey}`);
-    await expect(compositionPreview).not.toContainText(`Scope: ${chatModelSelection.key}`);
+    expect(modelKey).toBe(chatModelSelection.key);
     await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
     await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();
 
@@ -3035,7 +3139,13 @@ test.describe('/chat cockpit real-server parity', () => {
     assertHealthResponse(health);
     const chatModelSelection = await getConfiguredChatModelSelection(request);
 
+    const catalogResponse = page.waitForResponse(response => response.request().method() === 'GET' &&
+      new URL(response.url()).pathname === '/api/v1/llm/models/metadata' && response.status() === 200);
     await openDesktopChatCockpit(page, chatModelSelection);
+    const browserCatalog = extractModels(await (await catalogResponse).json());
+    expect(browserCatalog.some(entry => normalizeCockpitProviderKey(String(entry.provider)) === normalizeCockpitProviderKey(chatModelSelection.provider) &&
+      normalizeConfiguredChatModelId(chatModelSelection.provider, entry.model || entry.model_id || entry.id || entry.name) === chatModelSelection.model)).toBe(true);
+    await expect(page.getByTestId('model-selector-option')).toHaveCount(0);
 
     const contextRail = getDesktopContextRail(page);
     const webSearchControl = contextRail.getByRole('button', {
@@ -3110,6 +3220,43 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(
         runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
       ).toBeVisible();
+      // Stop may precede the server settlement receipt; reload the saved history before a new turn.
+      const originalChatId = completionRequest.postDataJSON().conversation_id ?? completionRequest.postDataJSON().tldw_history_selection_v1?.conversation_id;
+      expect(typeof originalChatId).toBe('string');
+      const originalRecoveries = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
+        .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
+      const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
+      expect(stoppedInput).toBeDefined();
+      await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      const automaticTurnAttempts: string[] = [];
+      const observeAutomaticTurn = (hit: Request) => {
+        if (hit.method() !== 'POST') return;
+        const path = new URL(hit.url()).pathname;
+        if (path.endsWith('/completions') || path.endsWith('/complete-v2') ||
+          path.endsWith('/complete') || path.endsWith('/messages')) automaticTurnAttempts.push(path);
+      };
+      page.on('request', observeAutomaticTurn);
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await assertNoBlockingServerDialog(page);
+        const coldRecovery = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
+          .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}))
+          .find(turn => turn.operation_id === stoppedInput!.operation_id);
+        expect(coldRecovery).toEqual(stoppedInput);
+        await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
+        const savedSource = page.getByRole('list', { name: 'Complete source messages', exact: true });
+        await expect(savedSource).toBeVisible();
+        const continueAfterSaved = savedSource.locator('[data-history-message-id]').last()
+          .getByRole('button', { name: 'Continue after this message', exact: true });
+        await expect(continueAfterSaved).toBeEnabled();
+        await continueAfterSaved.click();
+        await page.getByRole('button', { name: 'Cancel review', exact: true }).click();
+        await expect(page.locator("article[data-role='user']").filter({ hasText: prompt })).toHaveCount(1);
+        await expect(page.getByRole('button', { name: /send message/i })).toBeEnabled();
+        expect(automaticTurnAttempts).toEqual([]);
+      } finally {
+        page.removeListener('request', observeAutomaticTurn);
+      }
       const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
       await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
       await page.getByRole('button', { name: /send message/i }).click();

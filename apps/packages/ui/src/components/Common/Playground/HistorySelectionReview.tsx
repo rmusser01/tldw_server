@@ -660,7 +660,7 @@ export function HistorySelectionReview({
             {text(
               entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
               entry.turn.persistence === 'server'
-                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat before trying again; recovery will not send it again automatically.'
+                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.'
                 : 'The original send outcome is retained separately from history. It will not be sent again automatically.'
             )}
           </p>

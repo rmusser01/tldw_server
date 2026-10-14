@@ -1774,3 +1774,14 @@ describe("saved Roleplay Retry original composer acknowledgement", () => {
     ]).toEqual([literal, literal])
   })
 })
+
+it("explains explicit saved-history review before continuing an uncertain native turn without replay", () => {
+  const selection = recoveryController("server", "accepted_unsent")
+  const originalView = selection.view
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  expect(screen.getByText("The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.")).toBeVisible()
+  expect(screen.getByRole("button", { name: "Review conversation history", exact: true })).toBeVisible()
+  expect(selection.view).toBe(originalView)
+  expect(selection.choose).not.toHaveBeenCalled()
+})

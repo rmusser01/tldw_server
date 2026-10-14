@@ -1343,6 +1343,7 @@
     "branchPending": "Your next message will branch from this point. The existing conversation is kept.",
     "recoveryTitle": "Turn needs review",
     "recoveryMessage": "The original send outcome is retained separately from history. It will not be sent again automatically.",
+    "nativeRecoveryMessage": "The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.",
     "inspectRecovery": "Inspect original input and result",
     "copyRecovery": "Copy recovered text",
     "dismissRecovery": "Dismiss recovery",

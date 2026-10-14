@@ -1,7 +1,7 @@
 ---
 id: TASK-13668
 title: Load required model catalog before first composer dispatch
-status: In Progress
+status: Done
 labels:
 - chat
 - ux
@@ -18,7 +18,7 @@ A cold full composer with a restored model gates its own admission catalog obser
 <!-- AC:BEGIN -->
 - [x] #1 Connected full composer fetches its required model catalog with picker closed and never engaged; disconnected composer does not fetch
 - [x] #2 Ordinary submission and queued validation distinguish active catalog loading from an unavailable model without dispatch or source writes; supported ready and frozen roleplay paths remain available
-- [ ] #3 Native/WebUI regressions, source checks and actual cold mobile/streaming cockpit workflows qualify the root fix with canonical conversation preservation
+- [x] #3 Native/WebUI regressions, source checks and actual cold mobile/streaming cockpit workflows qualify the root fix with canonical conversation preservation
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,19 +34,22 @@ Final bounded independent source review: no actionable correctness finding; both
 V2 actual browser remains 4 passed/3 failed (Tools, mobile premature Send, stream premature Send); no native first-send closure. Reassessed after repeated failures: filtered real QueryClient diagnostic showed pending/fetching then success/idle with70 models and no activation hold; clean installed AntD Tools opens. Root UI problem: ordinary Send appeared enabled while catalog admission still correctly rejected loading. Added actual Form red/green tests for disabled loading and ready settlement, with positive image-command and saved-native-character exceptions; seven connected suites now314 tests passed each native/WebUI, zero skipped, both three-root types0 and lint0new. Existing disabled-reason and loading-label UI reused; no timers or weakening of admission. Exact prior Tools picker sequence is investigated separately.
 Final combined pointer/catalog verification:14 suites405 each native/WebUI,4root types both0, lint13TS0new, six actual browser cases pass including unopened mobile firstSend and strict greeting/reply/cold reopen. Model admission and pointer roots are verified; AC3/full streaming workflow remains open under13656 after stop-before-admission and cold-empty-reopen evidence. Preserve source guards and do not assume optimistic input acceptance. Bounded review Docs/Reviews/CHAT_COMPOSER_REQUIRED_CATALOG_POINTER_13668_13669_2026_10_14.md; original9/28+4rowfixture unchanged; no fullPR approval.
 Normal22-file hooks passed. Source-only bounded commit planned with TASK13669 and all connected callers;13656 cockpit E2E file/task remain separate while early-stop workflow assertion is unresolved. AC3 intentionally open. BanditN/A TS/Markdown-only; wholePR backend validation remains required.
+Full17 cockpit allpass39.2s,0skips/retries/flakes on source-matchedgMU build, including unopened-picker coldmobileSend and actual streamingStop/reload/explicitH1boundary/nextSend withoriginaljournal deepEqual and raw0automaticcompletion/admissionattempts. This completes AC3 boundedcatalogqualification. Required model observer/loading/activation controls remain14suites405each nativeWebUI/source4roots/types/lint qualified in6aa69d48ee. Normal final hooks/taskclosure follow. Newlyfound bound-private live-global readiness is separate; no wholePR/merge claim.
+Normal15-file finalhooks passed; own completed required-catalog plan retired. All3AC/6DOD complete. Distinct bound-popup liveglobal readiness is new task; completed catalog unit not reopened.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Required connected composer catalog and explicit verification/loading control complete. Warm verified mounts avoid extra IO; earlyempty/priorinflight/account retirements covered. Both runtime14suites405 pass, source types/lint and currentnative mobile/streaming/full17cockpit qualify. Original9/28+4fixture preserved. Source implementation6aa69d48ee; final taskclosure accompanies qualifiedcockpit recovery. BanditN/A TS/Markdown scope; wholePR gates remain separate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
