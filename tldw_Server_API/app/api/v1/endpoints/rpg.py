@@ -23,11 +23,13 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user, get_media_db_path_for_rag
 from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
+    RPGAuthoritySettingsReplaceRequest,
     RPGCampaignCreateRequest,
     RPGCampaignDetail,
     RPGCampaignListItem,
     RPGCampaignListResponse,
     RPGCampaignResponse,
+    RPGCampaignUpdateRequest,
     RPGContextBuildRequest,
     RPGContextResponse,
     RPGEventResponse,
@@ -46,6 +48,8 @@ from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGSessionListItem,
     RPGSessionListResponse,
     RPGSessionResponse,
+    RPGSessionUpdateRequest,
+    RPGSnapshotRebuildResponse,
     RPGSnapshotResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -730,6 +734,121 @@ def list_session_proposals(
             total_count=total,
             limit=limit,
             offset=offset,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.patch(
+    "/campaigns/{campaign_id}",
+    response_model=RPGCampaignDetail,
+    dependencies=_write_dependencies(RPG_CAMPAIGNS_MANAGE),
+)
+def update_campaign(
+    campaign_id: int,
+    request: RPGCampaignUpdateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGCampaignDetail:
+    """Update campaign metadata or archive status."""
+
+    try:
+        service.update_campaign(
+            campaign_id,
+            title=request.title,
+            description=request.description,
+            status=request.status,
+            expected_version=request.expected_version,
+            idempotency_key=idempotency_key,
+        )
+        detail, session_count = service.get_campaign_detail(campaign_id)
+        return RPGCampaignDetail.model_validate({**asdict(detail), "session_count": session_count})
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=RPGSessionDetail,
+    dependencies=_write_dependencies(RPG_SESSIONS_MANAGE),
+)
+def update_session(
+    session_id: int,
+    request: RPGSessionUpdateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGSessionDetail:
+    """Update session metadata or archive status."""
+
+    try:
+        service.update_session(
+            session_id,
+            title=request.title,
+            status=request.status,
+            expected_version=request.expected_version,
+            idempotency_key=idempotency_key,
+        )
+        session, pending_proposal_count = service.get_session_detail(session_id)
+        return RPGSessionDetail.model_validate(
+            {**asdict(session), "pending_proposal_count": pending_proposal_count}
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.put(
+    "/sessions/{session_id}/authority-settings",
+    response_model=RPGSessionDetail,
+    dependencies=_write_dependencies(RPG_SESSIONS_MANAGE),
+)
+def replace_authority_settings(
+    session_id: int,
+    request: RPGAuthoritySettingsReplaceRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGSessionDetail:
+    """Replace a session's authority settings wholesale."""
+
+    try:
+        service.replace_authority_settings(
+            session_id,
+            authority_settings={
+                "import_auto_commit": request.import_auto_commit,
+                "mcp_auto_commit": request.mcp_auto_commit,
+                "model_auto_commit": request.model_auto_commit,
+                "model_auto_commit_event_types": request.model_auto_commit_event_types,
+            },
+            expected_version=request.expected_version,
+            idempotency_key=idempotency_key,
+        )
+        session, pending_proposal_count = service.get_session_detail(session_id)
+        return RPGSessionDetail.model_validate(
+            {**asdict(session), "pending_proposal_count": pending_proposal_count}
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/snapshot/rebuild",
+    response_model=RPGSnapshotRebuildResponse,
+    dependencies=_write_dependencies(RPG_SESSIONS_MANAGE),
+)
+def rebuild_snapshot(
+    session_id: int,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGSnapshotRebuildResponse:
+    """Rebuild a session's snapshot by replaying its event log."""
+
+    try:
+        result = service.rebuild_snapshot(session_id, idempotency_key=idempotency_key)
+        return RPGSnapshotRebuildResponse(
+            snapshot_version=result.snapshot.snapshot_version,
+            last_event_sequence=result.snapshot.last_event_sequence,
+            event_count=result.event_count,
+            replayed=result.replayed,
+            diagnostics=result.snapshot.diagnostics_json,
         )
     except Exception as exc:
         raise _map_error(exc) from exc

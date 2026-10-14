@@ -823,3 +823,100 @@ def test_session_snapshot_events_and_foreign_404():
 
     assert events.status_code == 200 and events.json()["items"] == []  # nosec B101
     assert client.get("/api/v1/rpg/campaigns/999999", headers=_headers()).status_code == 404  # nosec B101
+
+
+def test_patch_campaign_archive_and_conflict():
+    client = TestClient(app)
+    campaign_id, _session_id = _create_campaign_and_session(client, "route-patch")
+    patched = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-1"}),
+        json={"status": "archived", "expected_version": 1},
+    )
+    assert patched.status_code == 200 and patched.json()["status"] == "archived"  # nosec B101
+    assert patched.json()["version"] == 2  # nosec B101
+    replay = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-1"}),
+        json={"status": "archived", "expected_version": 1},
+    )
+    assert replay.status_code == 200 and replay.json()["version"] == 2  # nosec B101  (replay)
+    conflict = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-2"}),
+        json={"title": "Stale", "expected_version": 1},
+    )
+    assert conflict.status_code == 409  # nosec B101
+    bad_status = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-3"}),
+        json={"status": "deleted", "expected_version": 2},
+    )
+    # The Task 5 schema rejects unknown statuses at the Pydantic Literal layer,
+    # so FastAPI answers with its standard request-validation code (422), not 400.
+    assert bad_status.status_code == 422  # nosec B101
+
+
+def test_patch_session_title_and_conflict():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-patch-s")
+
+    patched = client.patch(
+        f"/api/v1/rpg/sessions/{session_id}",
+        headers=_headers(**{"Idempotency-Key": "route-ps-1"}),
+        json={"title": "Renamed Opening", "expected_version": 1},
+    )
+    assert patched.status_code == 200  # nosec B101
+    assert patched.json()["title"] == "Renamed Opening"  # nosec B101
+    assert patched.json()["version"] == 2  # nosec B101
+
+    conflict = client.patch(
+        f"/api/v1/rpg/sessions/{session_id}",
+        headers=_headers(**{"Idempotency-Key": "route-ps-2"}),
+        json={"status": "archived", "expected_version": 1},
+    )
+    assert conflict.status_code == 409  # nosec B101
+
+
+def test_authority_settings_put_roundtrip():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-auth")
+    payload = {
+        "import_auto_commit": False, "mcp_auto_commit": True,
+        "model_auto_commit": False, "model_auto_commit_event_types": [],
+        "expected_version": 1,
+    }
+    updated = client.put(
+        f"/api/v1/rpg/sessions/{session_id}/authority-settings",
+        headers=_headers(**{"Idempotency-Key": "route-au-1"}), json=payload,
+    )
+    assert updated.status_code == 200  # nosec B101
+    assert updated.json()["authority_settings"]["mcp_auto_commit"] is True  # nosec B101
+    detail = client.get(f"/api/v1/rpg/sessions/{session_id}", headers=_headers())
+    assert detail.json()["authority_settings"]["mcp_auto_commit"] is True  # nosec B101
+    bad = dict(payload, model_auto_commit_event_types=["nope.nope"], expected_version=2)
+    assert client.put(
+        f"/api/v1/rpg/sessions/{session_id}/authority-settings",
+        headers=_headers(**{"Idempotency-Key": "route-au-2"}), json=bad,
+    ).status_code == 400  # nosec B101
+
+
+def test_snapshot_rebuild_route():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-rb")
+    rebuilt = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/snapshot/rebuild", headers=_headers(**{"Idempotency-Key": "route-rb-1"}),
+    )
+    assert rebuilt.status_code == 200  # nosec B101
+    assert rebuilt.json()["event_count"] == 0 and rebuilt.json()["replayed"] is False  # nosec B101
+    replay = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/snapshot/rebuild", headers=_headers(**{"Idempotency-Key": "route-rb-1"}),
+    )
+    assert replay.status_code == 200 and replay.json()["replayed"] is True  # nosec B101
+
+
+def test_mutation_routes_scope_matrix():
+    expected = {
+        ("PATCH", "/api/v1/rpg/campaigns/{campaign_id}"): {rpg_endpoint.RPG_CAMPAIGNS_MANAGE},
+        ("PATCH", "/api/v1/rpg/sessions/{session_id}"): {rpg_endpoint.RPG_SESSIONS_MANAGE},
+        ("PUT", "/api/v1/rpg/sessions/{session_id}/authority-settings"): {rpg_endpoint.RPG_SESSIONS_MANAGE},
+        ("POST", "/api/v1/rpg/sessions/{session_id}/snapshot/rebuild"): {rpg_endpoint.RPG_SESSIONS_MANAGE},
+    }
+    for (method, path), scopes in expected.items():
+        assert scopes <= _route_permissions(method, path), f"{method} {path} missing {scopes - _route_permissions(method, path)}"  # nosec B101
