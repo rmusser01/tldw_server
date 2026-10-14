@@ -18,37 +18,33 @@ def _limiter(tmp_path) -> UserRateLimiter:
 async def test_daily_evaluation_cap_is_atomic_with_the_reservation(tmp_path) -> None:
     """The Nth+1 evaluation of the day is refused inside the same transaction that counts it."""
     limiter = _limiter(tmp_path)
-    config = await limiter._get_user_config("7")
     for _ in range(2):
-        ok, _meta = await limiter._reserve_request_usage("7", "/e", 0, 0.0, config, max_evaluations_per_day=2)
+        ok, _meta = await limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=2)
         assert ok is True
-    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, 0.0, config, max_evaluations_per_day=2)
+    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=2)
     assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 2
 
 
 async def test_daily_evaluation_cap_of_zero_refuses_the_first_evaluation(tmp_path) -> None:
     """max_evaluations_per_day == 0 must block, not mean unlimited (spec 2 review B2)."""
     limiter = _limiter(tmp_path)
-    config = await limiter._get_user_config("7")
-    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, 0.0, config, max_evaluations_per_day=0)
+    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=0)
     assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 0
 
 
 async def test_daily_evaluation_token_cap(tmp_path) -> None:
     """A request whose tokens would pass the daily token cap is refused."""
     limiter = _limiter(tmp_path)
-    config = await limiter._get_user_config("7")
-    assert (await limiter._reserve_request_usage("7", "/e", 900, 0.0, config, max_tokens_per_day=1000))[0] is True
-    ok, meta = await limiter._reserve_request_usage("7", "/e", 101, 0.0, config, max_tokens_per_day=1000)
+    assert (await limiter._reserve_request_usage("7", "/e", 900, max_tokens_per_day=1000))[0] is True
+    ok, meta = await limiter._reserve_request_usage("7", "/e", 101, max_tokens_per_day=1000)
     assert ok is False and meta["error"] == "Daily evaluation token limit exceeded"
 
 
 async def test_batch_of_four_is_refused_against_a_cap_of_three(tmp_path) -> None:
     """A batch reserving 4 evaluations against a cap of 3 is refused (Qodo Q1)."""
     limiter = _limiter(tmp_path)
-    config = await limiter._get_user_config("7")
     ok, meta = await limiter._reserve_request_usage(
-        "7", "/e", 0, 0.0, config, max_evaluations_per_day=3, evaluations_requested=4
+        "7", "/e", 0, max_evaluations_per_day=3, evaluations_requested=4
     )
     assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 3
 
@@ -56,9 +52,8 @@ async def test_batch_of_four_is_refused_against_a_cap_of_three(tmp_path) -> None
 async def test_batch_of_three_is_admitted_and_records_three(tmp_path) -> None:
     """A batch reserving 3 evaluations against a cap of 3 is admitted and counts as 3 (Qodo Q1)."""
     limiter = _limiter(tmp_path)
-    config = await limiter._get_user_config("7")
     ok, _meta = await limiter._reserve_request_usage(
-        "7", "/e", 0, 0.0, config, max_evaluations_per_day=3, evaluations_requested=3
+        "7", "/e", 0, max_evaluations_per_day=3, evaluations_requested=3
     )
     assert ok is True
     summary = await limiter.get_usage_summary("7")

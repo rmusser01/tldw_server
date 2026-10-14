@@ -2080,6 +2080,10 @@ class LLMQuotaExceededError(HTTPException):
     through unchanged.
     """
 
+    # Job workers read these: a quota window does not reset in seconds, so a refused job is not retried.
+    retryable = False
+    failure_code = "llm_quota_exceeded"
+
     def __init__(self, *, category: str, current: float, limit: int | float, message: str, retry_after: int) -> None:
         super().__init__(
             status_code=402,

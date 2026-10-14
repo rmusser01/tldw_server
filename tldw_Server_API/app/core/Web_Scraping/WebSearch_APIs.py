@@ -715,11 +715,13 @@ async def analyze_and_aggregate(web_search_results_dict: dict, sub_query_dict: d
         relevant_results = review_and_select_results(relevant_results)
 
     # 6. Summarize/aggregate final answer
-    final_answer = aggregate_results(
+    # Off the event loop: the summaries and the final report are sync LLM calls (LLM usage accounting spec §4b).
+    final_answer = await asyncio.to_thread(
+        aggregate_results,
         relevant_results,
         sub_query_dict["main_goal"],
         sub_questions,
-        search_params.get('final_answer_llm')
+        search_params.get('final_answer_llm'),
     )
 
     # 7. Return the final data

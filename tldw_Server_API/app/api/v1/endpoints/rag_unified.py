@@ -931,6 +931,8 @@ async def rag_ablate(
         return {"summary": out, "runs": runs}
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as exc:  # noqa: BLE001 - convert unexpected endpoint failures
         logger.error("RAG ablation failed")
         raise HTTPException(
@@ -1929,6 +1931,8 @@ async def simple_search_endpoint(
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error("Simple search failed")
         raise HTTPException(
@@ -2425,6 +2429,8 @@ async def advanced_search_endpoint(
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error("Advanced search failed")
         raise HTTPException(

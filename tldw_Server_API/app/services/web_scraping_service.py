@@ -348,7 +348,8 @@ async def ingest_web_content_orchestrate(
                 _ANALYSIS_PROVIDER_REQUIRED_MESSAGE,
             )
 
-        analysis_results = analyze(
+        analysis_results = await asyncio.to_thread(
+            analyze,
             input_data=content,
             custom_prompt_arg=(summary_prompt_overrides or {}).get(
                 "user", getattr(request, "custom_prompt", None) or "Summarize this article."

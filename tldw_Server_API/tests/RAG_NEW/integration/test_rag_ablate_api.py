@@ -315,3 +315,31 @@ def test_rag_ablate_capabilities_smoke(auth_headers):
         agentic = data.get("features", {}).get("agentic_chunking", {})
         params = set(agentic.get("parameters", []))
         assert {"agentic_adaptive_budgets", "agentic_coverage_target", "agentic_min_corroborating_docs"}.issubset(params)
+
+
+@pytest.mark.asyncio
+async def test_ablate_passes_an_llm_quota_refusal_through(monkeypatch):
+    """A refusal raised inside an ablation run keeps its 402; it is not turned into a 500 (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    runtime = _CountingRuntime()
+    _install_direct_ablate_fakes(monkeypatch, runtime)
+
+    async def refused(**_kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", refused)
+    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", refused)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await rag_endpoint.rag_ablate(
+            request_raw=_request(),
+            request=rag_endpoint.AblationRequest(query="ablate", with_answer=False),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+            media_db=None,
+            chacha_db=None,
+        )
+
+    assert runtime.close_calls == 1  # nosec B101

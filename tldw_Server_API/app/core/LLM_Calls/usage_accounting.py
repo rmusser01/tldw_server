@@ -1,7 +1,8 @@
-"""Record usage for every chat provider call made for a known user (LLM usage accounting spec §2, §3).
+"""Check and record every chat provider call made for a known user (LLM usage accounting spec §2, §3, §4b).
 
 ``instrument_provider_class`` wraps a provider class's own ``chat``, ``achat``,
-``stream`` and ``astream``. Nothing here may raise into the provider call.
+``stream`` and ``astream``. The quota check runs before the provider method and
+may raise ``LLMQuotaExceededError``; nothing else here may raise into the call.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
     current_llm_user_id,
     in_accounted_call,
 )
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -259,6 +261,48 @@ def _accounted_sync_stream(provider: Any, plan: _CallPlan, request: Any, inner: 
         _record_stream(provider, plan, request, seen, started)
 
 
+def _close_quietly(*streams: Any) -> None:
+    """Close sync iterators, ignoring their errors."""
+    for stream in streams:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            with suppress(Exception):
+                close()
+
+
+async def _aclose_quietly(*streams: Any) -> None:
+    """Close async iterators, ignoring their errors."""
+    for stream in streams:
+        aclose = getattr(stream, "aclose", None)
+        if callable(aclose):
+            with suppress(Exception):
+                await aclose()
+
+
+def _checked_at_first_item(user_id: int, outer: Iterator[Any], inner: Any) -> Iterator[Any]:
+    """Check on the thread that reads the first item, for a stream started where it could not be checked (§4b)."""
+    try:
+        check_user_sync(user_id)
+    except BaseException:
+        _close_quietly(outer, inner)
+        raise
+    yield from outer
+
+
+async def _async_checked_at_first_item(user_id: int, outer: Any, inner: Any) -> AsyncIterator[Any]:
+    """Check before the first item, which is before an async generator's provider code runs (§4b)."""
+    try:
+        await check_user_async(user_id)
+    except BaseException:
+        await _aclose_quietly(outer, inner)
+        raise
+    try:
+        async for item in outer:
+            yield item
+    finally:
+        await _aclose_quietly(outer)
+
+
 async def _accounted_async_stream(
     provider: Any, plan: _CallPlan, request: Any, inner: Any, started: float
 ) -> AsyncIterator[Any]:
@@ -287,9 +331,15 @@ def _wrap_chat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def chat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        user_id = user_to_check()
+        if user_id is not None:
+            check_user_sync(user_id)
         plan = _plan_call()
         if plan is None:
-            return fn(self, request, *args, **kwargs)
+            if user_id is None:
+                return fn(self, request, *args, **kwargs)
+            with accounted_call():  # checked here, so a nested provider method is not checked again
+                return fn(self, request, *args, **kwargs)
         started = time.monotonic()
         with accounted_call():
             response = fn(self, request, *args, **kwargs)
@@ -304,9 +354,15 @@ def _wrap_achat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     async def achat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        user_id = user_to_check()
+        if user_id is not None:
+            await check_user_async(user_id)
         plan = _plan_call()
         if plan is None:
-            return await fn(self, request, *args, **kwargs)
+            if user_id is None:
+                return await fn(self, request, *args, **kwargs)
+            with accounted_call():  # checked here, so a nested provider method is not checked again
+                return await fn(self, request, *args, **kwargs)
         started = time.monotonic()
         with accounted_call():
             response = await fn(self, request, *args, **kwargs)
@@ -317,30 +373,41 @@ def _wrap_achat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Return a generator that records when the stream ends. The plan is fixed when stream() is called."""
+    """Check before the provider method, then return a generator that records when the stream ends.
+
+    The check, and the plan, are fixed when stream() is called. Where the check
+    cannot run then (on the event loop's thread), it runs at the first item.
+    """
 
     @functools.wraps(fn)
     def stream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        user_id = user_to_check()
+        unchecked = user_id is not None and not check_user_sync(user_id)
         plan = _plan_call()
-        if plan is None:
+        if plan is None and not unchecked:
             return fn(self, request, *args, **kwargs)
         started = time.monotonic()
         with accounted_call():
             inner = fn(self, request, *args, **kwargs)
         if not hasattr(inner, "__iter__"):
             return inner  # a broken provider's result reaches the caller's own check unchanged
-        return _accounted_sync_stream(self, plan, request, inner, started)
+        outer = inner if plan is None else _accounted_sync_stream(self, plan, request, inner, started)
+        return _checked_at_first_item(user_id, outer, inner) if unchecked else outer
 
     return stream
 
 
 def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Return an async generator that records when the stream ends; an awaitable result stays awaitable."""
+    """Check before the provider code runs, and return an async generator that records when the stream ends.
+
+    An awaitable result stays awaitable, and is checked before it is awaited.
+    """
 
     @functools.wraps(fn)
     def astream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        user_id = user_to_check()
         plan = _plan_call()
-        if plan is None:
+        if plan is None and user_id is None:
             return fn(self, request, *args, **kwargs)
         started = time.monotonic()
         with accounted_call():
@@ -348,17 +415,24 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
         if inspect.isawaitable(inner):
 
             async def _resolve() -> Any:
-                """Await the provider's result, then wrap the iterator it resolves to."""
+                """Check, await the provider's result, then wrap the iterator it resolves to."""
+                if user_id is not None:
+                    try:
+                        await check_user_async(user_id)
+                    except BaseException:
+                        _close_quietly(inner)
+                        raise
                 with accounted_call():
                     resolved = await inner
-                if not hasattr(resolved, "__aiter__"):
+                if plan is None or not hasattr(resolved, "__aiter__"):
                     return resolved
                 return _accounted_async_stream(self, plan, request, resolved, started)
 
             return _resolve()
         if not hasattr(inner, "__aiter__"):
             return inner  # a broken provider's result reaches the caller's own check unchanged
-        return _accounted_async_stream(self, plan, request, inner, started)
+        outer = inner if plan is None else _accounted_async_stream(self, plan, request, inner, started)
+        return outer if user_id is None else _async_checked_at_first_item(user_id, outer, inner)
 
     if inspect.iscoroutinefunction(fn):
         inspect.markcoroutinefunction(astream)

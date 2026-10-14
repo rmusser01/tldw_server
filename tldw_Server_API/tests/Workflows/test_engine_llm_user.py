@@ -136,3 +136,46 @@ async def test_a_resumed_run_sees_the_run_owner(tmp_path, monkeypatch) -> None:
         await engine_mod.WorkflowEngine(db).continue_run(run_id, after_step_id="s1", last_outputs={})
         assert current_llm_user_id() == 3
     assert seen == [(7, "workflow")]
+
+
+async def test_a_refused_llm_call_fails_the_step_and_the_run_records_it(tmp_path, monkeypatch) -> None:
+    """A run on its own thread and loop is checked at the call (spec §4b): no provider call, a failed run."""
+    from types import SimpleNamespace
+    from typing import Any
+
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    refuse_llm_calls(monkeypatch)
+    provider_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        chat_service,
+        "_get_llm_registry",
+        lambda: SimpleNamespace(get_adapter=lambda _name: SimpleNamespace(chat=provider_calls.append)),
+    )
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = _create_run(db, "7")
+    done = threading.Event()
+
+    async def _adapter(_config, _context):
+        """Make an LLM call through the shared call layer, as the workflow llm step does."""
+        try:
+            return await chat_service.perform_chat_api_call_async(
+                api_provider="openai", messages=[{"role": "user", "content": "hi"}], model="gpt-4o-mini",
+                api_key="test-key", app_config={},
+            )
+        finally:
+            done.set()
+
+    monkeypatch.setattr(engine_mod, "get_adapter", lambda _step_type: _adapter)
+    engine = engine_mod.WorkflowEngine(db)
+    engine_mod.WorkflowScheduler._spawn(engine.start_run(run_id))  # noqa: SLF001 - the thread hand-off under test
+    assert await asyncio.to_thread(done.wait, 10)
+    for _ in range(100):
+        run = db.get_run(run_id)
+        if run is not None and run.status == "failed":
+            break
+        await asyncio.sleep(0.05)
+    assert run is not None and run.status == "failed"
+    assert (run.error or "").startswith("402") and "limit_exceeded" in run.error
+    assert provider_calls == []
