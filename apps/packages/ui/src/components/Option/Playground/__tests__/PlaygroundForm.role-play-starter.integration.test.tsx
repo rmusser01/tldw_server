@@ -515,10 +515,14 @@ vi.mock("@/hooks/useChatDraftOwner", () => {
   return { useChatDraftOwner: () => owner }
 })
 
+const modelCatalogQueryOptions = vi.hoisted(() => ({ enabled: [] as boolean[], loading: false, imageCommand: false }))
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: { queryKey: string[] }) => ({ data: queryKey[0] === "playground:chatModels" && nativeSetupFixture.settings
-    ? nativeSetupFixture.models : [], isSuccess: true, isFetching: false, isError: false, refetch: vi.fn() }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQuery: ({ queryKey, enabled }: { queryKey: string[]; enabled?: boolean }) => {
+    if (queryKey[0] === "playground:chatModels") modelCatalogQueryOptions.enabled.push(Boolean(enabled))
+    return { data: queryKey[0] === "playground:chatModels" && nativeSetupFixture.settings
+      ? nativeSetupFixture.models : [], isSuccess: !modelCatalogQueryOptions.loading, isFetching: queryKey[0] === "playground:chatModels" && modelCatalogQueryOptions.loading, isError: false, refetch: vi.fn() }
+  },
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryState: vi.fn(() => undefined) }),
   useMutation: ({
     mutationFn,
     onSuccess,
@@ -1783,6 +1787,7 @@ vi.mock("@/hooks/playground", () => ({
     imageBackendBadgeLabel: "Mock Backend"
   }),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     actionBarVisible: true,
     actionBarVisibilityClass: "",
     handlers: {
@@ -1810,7 +1815,7 @@ vi.mock("@/hooks/playground", () => ({
       isImageCommand: false,
       imageBackendOverride: undefined
     }),
-    activeImageCommand: null,
+    activeImageCommand: modelCatalogQueryOptions.imageCommand,
     handleSlashCommandSelect: vi.fn()
   }),
   useMessageCollapse: () => ({
@@ -1855,6 +1860,8 @@ vi.mock("@/hooks/playground", () => ({
 }))
 
 beforeEach(async () => {
+  modelCatalogQueryOptions.loading = false
+  modelCatalogQueryOptions.imageCommand = false
   modelSettingsBoundary.enabled = false
   modelSettingsBoundary.afterClose = null
   await seedLocalFork(false)
@@ -2297,6 +2304,51 @@ const installRouteReceiptListener = (externalRestore: boolean) => {
 }
 
 describe("PlaygroundForm role-play starter", () => {
+  it("disables ordinary Send while the required catalog is loading and enables it after settlement", async () => {
+    prepareNativeSource()
+    modelCatalogQueryOptions.loading = true
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+    const sends = within(view.container).getAllByRole("button", { name: "Send message", exact: true })
+    for (const send of sends) {
+      expect(send).toBeDisabled()
+      expect(send).toHaveAttribute("title", "Loading models…")
+    }
+    modelCatalogQueryOptions.loading = false
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    for (const send of sends) expect(send).toBeEnabled()
+    } finally { view.unmount() }
+  })
+  it.each(["image", "saved character"] as const)("keeps %s Send independent of the ordinary catalog load", kind => {
+    if (kind === "saved character") {
+      const { source } = prepareQualifiedSceneSource("native", "saved-source")
+      source.serverChatAssistantKind = "character"
+      source.serverChatCharacterId = "saved-character"
+    } else {
+      prepareNativeSource()
+      modelCatalogQueryOptions.imageCommand = true
+    }
+    modelCatalogQueryOptions.loading = true
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      for (const send of within(view.container).getAllByRole("button", { name: "Send message", exact: true })) expect(send).toBeEnabled()
+    } finally { view.unmount() }
+  })
+
+  it.each([true, false])("requires the model catalog independently of an unopened picker while connected=%s", async connected => {
+    const { useChatSurfaceCoordinatorStore } = await import("@/store/chat-surface-coordinator")
+    useChatSurfaceCoordinatorStore.setState({ visiblePanels: { "model-catalog": false }, engagedPanels: { "model-catalog": false } })
+    playgroundFormConnectionState.isConnected = connected
+    playgroundFormConnectionState.phase = connected ? "connected" : "disconnected"
+    modelCatalogQueryOptions.enabled = []
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    expect(modelCatalogQueryOptions.enabled.length).toBeGreaterThan(0)
+    expect(modelCatalogQueryOptions.enabled.every(enabled => enabled === connected)).toBe(true)
+    expect(useChatSurfaceCoordinatorStore.getState().visiblePanels["model-catalog"]).toBe(false)
+    expect(useChatSurfaceCoordinatorStore.getState().engagedPanels["model-catalog"]).toBe(false)
+    view.unmount()
+  })
+
   it.each(["enabled", "unavailable"] as const)(
     "Scene selection isolates a full replacement from %s legacy scratch and the departing owned Scene",
     async (legacy) => {

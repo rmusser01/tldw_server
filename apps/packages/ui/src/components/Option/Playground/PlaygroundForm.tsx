@@ -4,6 +4,7 @@ import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSave
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition";
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker";
 import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart";
 import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery";
@@ -893,9 +894,6 @@ export const PlaygroundForm = ({
   const audioHealthEnabled = useChatSurfaceCoordinatorStore((state) =>
     shouldEnableOptionalResource(state, "audio-health"),
   );
-  const modelCatalogEnabled = useChatSurfaceCoordinatorStore((state) =>
-    shouldEnableOptionalResource(state, "model-catalog"),
-  );
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
   const { capabilities, loading: capsLoading } = useServerCapabilities();
   const {
@@ -1436,11 +1434,11 @@ export const PlaygroundForm = ({
     handleMentionsOpen,
   } = useTabMentions(textareaRef);
 
-  const { data: composerModels, isFetching: composerModelsFetching, isError: composerModelsFailed, refetch: retryComposerModels } = useChatModelCatalog(modelCatalogEnabled);
+  const { data: composerModels, isFetching: composerModelsFetching, isError: composerModelsFailed, refetch: retryComposerModels } = useChatModelCatalog(isConnectionReady);
   // True while the catalog is actively being fetched and none have arrived yet.
   // Used to show a loading affordance instead of a "connect your server" error.
   const composerModelsLoading =
-    modelCatalogEnabled &&
+    isConnectionReady &&
     composerModelsFetching &&
     ((composerModels as any[] | undefined)?.length ?? 0) === 0;
   const { data: imageModels = [] } = useQuery({
@@ -4180,6 +4178,7 @@ export const PlaygroundForm = ({
     getDispatchDisabledReason: getSubmitDisabledReason,
     captureDispatchFence: captureAssistantActionGuard,
     composerModels,
+    composerModelsLoading,
     isConnectionReady,
     isSending,
     selectedModel,
@@ -5616,7 +5615,7 @@ export const PlaygroundForm = ({
 
   const {
     actionBarVisible,
-    composerFocusWithin,
+    composerTextareaExpanded,
     actionBarVisibilityClass,
     handlers: actionBarHandlers,
   } = useActionBarVisibility({ externalPinSources });
@@ -5626,7 +5625,7 @@ export const PlaygroundForm = ({
     true,
   );
   const shouldCompactComposerTextarea =
-    !composerFocusWithin &&
+    !composerTextareaExpanded &&
     !contextToolsOpen &&
     !showSlashMenu &&
     !showMentions &&
@@ -6021,6 +6020,9 @@ export const PlaygroundForm = ({
       t={t}
     />
   );
+  const modelCatalogSubmitDisabledReason = composerModelsLoading && !activeImageCommand &&
+    !isSavedRoleplayConversation(historySelection)
+    ? toText(t("playground:composer.modelsLoading", "Loading models…")) : null;
   const sendControl = (
     <PlaygroundSendControl
       isProMode={isProMode}
@@ -6031,13 +6033,13 @@ export const PlaygroundForm = ({
       isConnectionReady={isConnectionReady}
       sendWhenEnter={sendWhenEnter}
       onSendWhenEnterChange={setSendWhenEnter}
-      sendLabel={sendLabel}
+      sendLabel={modelCatalogSubmitDisabledReason ?? sendLabel}
       compareNeedsMoreModels={compareNeedsMoreModels}
       onStopStreaming={stopStreamingFromUi}
       onStopListening={stopListening}
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
-      submitDisabledReason={personaSubmitDisabledReason}
+      submitDisabledReason={personaSubmitDisabledReason ?? modelCatalogSubmitDisabledReason}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}

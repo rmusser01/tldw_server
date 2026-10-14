@@ -2,6 +2,8 @@ import React from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ComposerTextarea } from "../ComposerTextarea"
+import userEvent from "@testing-library/user-event"
+import { useActionBarVisibility } from "@/hooks/playground/useActionBarVisibility"
 import useDynamicTextareaSize from "@/hooks/useDynamicTextareaSize"
 
 vi.mock("react-i18next", () => ({
@@ -120,4 +122,35 @@ it("forwards the sizing callback to the native textarea and retains the focus ob
   expect(objectRef.current).toBeNull()
   frame.mockRestore()
   cancel.mockRestore()
+})
+
+function FocusGeometryComposer() {
+  const visibility = useActionBarVisibility({ externalPinSources: false })
+  return <><div onFocusCapture={visibility.handlers.onFocusCapture} onBlurCapture={visibility.handlers.onBlurCapture}>
+    <ComposerTextarea {...createProps({ compactWhenInactive: !visibility.composerTextareaExpanded })} />
+    <button type="button">Tools geometry control</button>
+  </div><button type="button">Outside composer</button></>
+}
+
+describe("composer action focus preserves input geometry", () => {
+  it("keeps an idle input compact when a toolbar action takes focus", async () => {
+    const user = userEvent.setup()
+    const view = render(<FocusGeometryComposer />)
+    try {
+      await user.click(screen.getByRole("button", { name: "Tools geometry control" }))
+      expect(screen.getByTestId("chat-input")).toHaveStyle({ minHeight: "44px" })
+    } finally { view.unmount() }
+  })
+  it("expands on input entry and keeps that height through internal action focus", async () => {
+    const user = userEvent.setup()
+    const view = render(<FocusGeometryComposer />)
+    try {
+      await user.click(screen.getByTestId("chat-input"))
+      expect(screen.getByTestId("chat-input")).toHaveStyle({ minHeight: "60px" })
+      await user.click(screen.getByRole("button", { name: "Tools geometry control" }))
+      expect(screen.getByTestId("chat-input")).toHaveStyle({ minHeight: "60px" })
+      await user.click(screen.getByRole("button", { name: "Outside composer" }))
+      expect(screen.getByTestId("chat-input")).toHaveStyle({ minHeight: "44px" })
+    } finally { view.unmount() }
+  })
 })

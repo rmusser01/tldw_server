@@ -246,7 +246,7 @@ vi.mock("@tanstack/react-query", () => ({
     isFetching: false,
     isError: false
   }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryState: vi.fn(() => undefined) }),
   useMutation: ({
     mutationFn,
     onMutate,
@@ -1007,6 +1007,7 @@ vi.mock("@/hooks/playground", () => ({
     imageBackendBadgeLabel: "Mock Backend"
   }),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     actionBarVisible: true,
     actionBarVisibilityClass: "",
     handlers: {

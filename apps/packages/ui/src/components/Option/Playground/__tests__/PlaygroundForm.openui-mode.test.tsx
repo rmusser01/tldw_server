@@ -1073,6 +1073,7 @@ vi.mock("@/hooks/playground", () => ({
     imageBackendBadgeLabel: "Mock Backend"
   }),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     actionBarVisible: true,
     actionBarVisibilityClass: "",
     handlers: {

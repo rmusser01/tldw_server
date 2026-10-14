@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useEffect, useState, useSyncExternalStore } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { fetchChatModels } from "@/services/tldw-server"
 import {
   getChatModelsCacheGeneration,
@@ -15,16 +15,43 @@ export const useChatModelCatalog = (enabled = true) => {
     getChatModelsCacheGeneration,
     getChatModelsCacheGeneration
   )
+  const client = useQueryClient()
+  const queryKey = ["playground:chatModels", generation]
+  const previous = client.getQueryState(queryKey)
+  const previousPending = previous?.fetchStatus === "fetching"
+  const previousEmpty = previous?.status === "success" && Array.isArray(previous.data) && previous.data.length === 0
   const query = useQuery({
-    queryKey: ["playground:chatModels", generation],
+    queryKey,
     queryFn: () => fetchChatModels({ requireFresh: true }),
     enabled,
     retry: false,
     staleTime: 30_000
   })
-  const verified = query.isSuccess && !query.isFetching
+  const [activation, setActivation] = useState({ enabled, generation,
+    needsVerification: enabled && (previousPending || previousEmpty), waitForPrevious: previousPending })
+  if (activation.generation !== generation) {
+    setActivation({ enabled, generation, needsVerification: false, waitForPrevious: false })
+  } else if (activation.enabled !== enabled) {
+    setActivation({ enabled, generation, needsVerification: enabled, waitForPrevious: previousPending })
+  }
+  const { refetch } = query
+  useEffect(() => {
+    if (!activation.needsVerification) return
+    let current = true
+    void (async () => {
+      if (activation.waitForPrevious) {
+        await refetch({ cancelRefetch: false, throwOnError: false })
+        if (!current) return
+      }
+      await refetch({ cancelRefetch: false, throwOnError: false })
+      if (current) setActivation(value => value === activation ? { ...value, needsVerification: false } : value)
+    })()
+    return () => { current = false }
+  }, [activation, generation, refetch])
+  const verified = query.isSuccess && !query.isFetching && !activation.needsVerification
   return {
     ...query,
+    isFetching: query.isFetching || activation.needsVerification,
     data: verified ? query.data : undefined,
     isSuccess: verified,
     catalogGeneration: generation

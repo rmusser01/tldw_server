@@ -163,7 +163,7 @@ vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryState: vi.fn(() => undefined) }),
   useMutation: ({
     mutationFn,
     onSuccess,
@@ -774,6 +774,7 @@ vi.mock("@/hooks/playground", () => ({
     imageBackendBadgeLabel: "Mock Backend"
   }),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     actionBarVisible: true,
     actionBarVisibilityClass: "",
     handlers: {

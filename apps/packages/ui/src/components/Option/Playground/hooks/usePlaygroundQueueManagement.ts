@@ -55,6 +55,7 @@ type SubmissionIntent = {
 
 export interface UsePlaygroundQueueManagementDeps {
   composerModels: unknown[] | undefined
+  composerModelsLoading?: boolean
   isConnectionReady: boolean
   isSending: boolean
   getDispatchDisabledReason?: () => string | null
@@ -166,6 +167,7 @@ export function usePlaygroundQueueManagement(
 ) {
   const {
     composerModels,
+    composerModelsLoading = false,
     isConnectionReady,
     isSending,
     getDispatchDisabledReason,
@@ -288,6 +290,7 @@ export function usePlaygroundQueueManagement(
         null) as PlaygroundQueuedSourceContext | null
 
       if (!sourceContext?.isImageCommand && !isSavedRoleplayConversation(historySelection)) {
+        if (composerModelsLoading) return t("playground:composer.modelsLoading", "Loading models…")
         if (!item.snapshot.compareMode) {
           const normalizedSelectedModel = normalizeChatModelId(
             item.snapshot.selectedModel
@@ -347,6 +350,7 @@ export function usePlaygroundQueueManagement(
     },
     [
       availableChatModelIds,
+      composerModelsLoading,
       compareModelsSupportCapability,
       historySelection,
       isQueuedDispatchBlockedByComposerState,
@@ -702,6 +706,10 @@ export function usePlaygroundQueueManagement(
 
   const validateSelectedChatModelsAvailability = React.useCallback(
     (modelsToCheck: string[]) => {
+      if (composerModelsLoading) {
+        form.setFieldError("message", t("playground:composer.modelsLoading", "Loading models…"))
+        return false
+      }
       const unavailableModel = findUnavailableChatModel(
         modelsToCheck,
         availableChatModelIds,
@@ -717,7 +725,7 @@ export function usePlaygroundQueueManagement(
       )
       return false
     },
-    [availableChatModelIds, form, t]
+    [availableChatModelIds, composerModelsLoading, form, t]
   )
 
   return {

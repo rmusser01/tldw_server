@@ -165,6 +165,27 @@ const baseDeps = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe("usePlaygroundQueueManagement document processing", () => {
+  it("keeps ordinary and queued admission pending while the required catalog loads, then accepts ready models", async () => {
+    const deps = baseDeps({ uploadedFiles: [] })
+    const original = useStoreMessageOption.getState()
+    const item = buildQueuedRequest({ promptText: "Keep the pending model draft", snapshot: { selectedModel: "openai:gpt-4o-mini" } })
+    const hook = renderHook(({ loading }) => usePlaygroundQueueManagement({ ...deps, composerModelsLoading: loading }), { initialProps: { loading: true } })
+    expect(hook.result.current.validateSelectedChatModelsAvailability(["openai:gpt-4o-mini"])).toBe(false)
+    expect(deps.form.setFieldError).toHaveBeenCalledWith("message", "Loading models…")
+    expect(hook.result.current.validateQueuedRequest(item)).toBe("Loading models…")
+    await expect(queueMock.args.sendQueuedRequest(item, () => {})).rejects.toThrow("Loading models…")
+    expect(deps.sendMessage).not.toHaveBeenCalled()
+    expect(getActorSceneForChat).not.toHaveBeenCalled()
+    expect(prepareChatDocumentAttachmentsForSend).not.toHaveBeenCalled()
+    expect(queueMock.enqueue).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(original.chatDraftAddress)
+    expect(useStoreMessageOption.getState().queuedMessages).toBe(original.queuedMessages)
+    hook.rerender({ loading: false })
+    expect(hook.result.current.validateSelectedChatModelsAvailability(["openai:gpt-4o-mini"])).toBe(true)
+    expect(hook.result.current.validateQueuedRequest(item)).toBeNull()
+    hook.unmount()
+  })
+
   beforeEach(() => {
     useStoreMessageOption.getState().startNewChatDraft()
     expect(captureChatDraftLoad("switch")(acceptedLocal)).toBe(true)
@@ -549,7 +570,7 @@ it("an image queue without an optional caller fence cannot send after synchronou
 })
 
 
-it("Full saved Roleplay queue uses saved setup with no current model or Scene read and no settings publication", async () => {
+it.each([false, true])("Full saved Roleplay queue uses saved setup with no current model or Scene read and no settings publication while catalog loading=%s", async composerModelsLoading => {
   useStoreMessageOption.getState().startNewChatDraft()
   const conversation_id = "saved-roleplay-queue"
   const owner = {
@@ -574,6 +595,7 @@ it("Full saved Roleplay queue uses saved setup with no current model or Scene re
     .mockRejectedValue(new Error("live Scene forbidden"))
   const deps = baseDeps({
     historySelection: selected,
+    composerModelsLoading,
     historyId: null,
     serverChatId: conversation_id,
     selectedModel: "",
