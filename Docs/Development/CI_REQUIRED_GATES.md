@@ -244,7 +244,8 @@ Three traps worth stating outright:
 ## Merge Queue
 
 Tracked as TASK-13462, decided in [ADR-063](../ADR/063-in-repo-merge-queue.md), designed in
-`Docs/superpowers/specs/2026-10-04-merge-queue-design.md`.
+`Docs/superpowers/specs/2026-10-04-merge-queue-design.md` and amended by
+`Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md` (TASK-13639).
 
 Strict enforcement means one merge puts every other ready PR behind, and without a queue each of them rebases and
 re-runs the required gates to race for the next merge. The queue makes that serial: only the armed PR at the front of
@@ -269,24 +270,28 @@ gh variable get MERGE_QUEUE
 2. Do not rebase or update an armed PR, and do not merge it by hand. The queue rebases it when it reaches the front.
 3. To push more work, disarm first (`gh pr merge <n> --disable-auto`), push, then arm again. Re-arming puts the PR at
    the back of the line.
-4. Never click "Approve and run" on a queue-rebased PR. The empty approval-pending runs are expected; approving them
-   starts duplicates.
-5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, `dev` changed workflow files, auto-merge
-   did not fire). Fix the cause and arm again.
+4. The queue approves a rebased PR's six required gate runs itself; approving one by hand is harmless. Never dispatch
+   a required gate by hand to unblock a PR: a dispatched run's check does not count toward the PR's required statuses,
+   so the PR stays blocked.
+5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, a gate run GitHub would not re-run or
+   approve, a gate kept being cancelled, `dev` changed workflow files, auto-merge did not fire). Fix the cause and arm
+   again.
 
 Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 
 ### What the queue does to the front PR
 
-- **Behind `dev`:** rebases it with a pinned head, then starts all seven required statuses on the new head and cancels
-  the old head's runs. A `GITHUB_TOKEN` rebase starts no workflow runs, so the queue dispatches them:
-  `backend-required`, `security-required`, `coverage-required`, `frontend-required` and `e2e-required` on the PR branch
-  with `base_sha` set to `dev`'s tip, `container-build-check` on the PR branch, and `frontend-license-gate.yml` on `dev`
-  with the PR number.
-- **A status failed:** starts that status again once, and evicts the PR if it fails a second time on the same head.
-- **All seven green:** waits for auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
+- **Behind `dev`:** rebases it with a pinned head. GitHub then holds the new head's `pull_request` runs for approval.
+  The queue dispatches `frontend-license-gate.yml` on `dev` with the PR number, approves the held runs of the six
+  required gates, deletes the other held runs, cancels the old head's runs and comments once. A dispatched gate would
+  not count, so the queue never dispatches one.
+- **A status failed:** re-runs that gate's failed jobs once (the license gate is dispatched on `dev` again), and evicts
+  the PR if it fails a second time on the same head. A gate run that finished without reporting its check counts as a
+  failure; a cancelled gate run is restarted once per head.
+- **All seven green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
+  auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
 
-Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head.
+Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head: their held runs are deleted.
 
 ### Three details that surprise people
 
@@ -295,17 +300,23 @@ Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased hea
   removes the PR from the line with the steps to take: `git fetch origin dev && git rebase origin/dev`, force-push with
   lease, arm again. After that the queue can rebase it itself until the next workflow change lands.
 
-- `frontend-required.yml` publishes `frontend-required-diagnostic`, not the protected name, when a person dispatches
-  it. Only a dispatch made by `github-actions[bot]`, which is how the queue starts it, publishes `frontend-required`.
-- The queue wakes on arm, disarm, close, pushes to `dev`, and a failed required gate (the `queue-tick` job). Nothing
-  wakes it on a timer. If the line looks stuck, any of those events moves it; arming or disarming a PR is enough.
+- `frontend-required.yml` publishes `frontend-required-diagnostic`, never the protected name, on any dispatch.
+- The queue wakes on arm, disarm, close, pushes to `dev`, and a failed required gate: that run's `queue-tick` job
+  dispatches `security-required.yml` on `dev` with `queue_kick=true`, whose `queue-kick` job waits for the failed run to
+  finish and then runs the queue. Nothing wakes it on a timer. If the line looks stuck, arming or disarming a PR moves
+  it.
 
 ### Switching it on (owner)
 
 1. Enable **Allow auto-merge** in repository settings.
 2. `gh variable set MERGE_QUEUE --body dry` for about a day; compare the job summaries with what armed PRs do.
 3. `gh variable set MERGE_QUEUE --body on` with one low-risk PR first. That run answers the questions listed in the
-   spec's rollout section, which cannot be checked without a real queue run.
+   spec's rollout section, which cannot be checked without a real queue run. One throwaway PR with a deliberately
+   failing gate shows the tick, the kick and the retry, and that the retry's own tick fires when the retry fails too.
+   Check on the first PR that the queue's rebase commits (committed by `github-actions[bot]`) do not make the `dev`
+   ruleset ask for an approving review: its `require_extra_approval_for_unattributed_changes` is on, and GitHub does not
+   say which commits it counts. If they do, switch that option off for `dev`; nothing in the queue can change who
+   commits a rebase.
 4. Roll back at any time with `gh variable set MERGE_QUEUE --body off`.
 
 ## Security Threshold Policy

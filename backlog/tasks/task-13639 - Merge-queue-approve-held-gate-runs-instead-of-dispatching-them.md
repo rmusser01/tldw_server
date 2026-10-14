@@ -15,21 +15,31 @@ The queue as merged in #3188 cannot land a PR: it starts the six gates with work
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 After a rebase the queue dispatches the license gate on dev, approves exactly the six held gate runs, deletes the other held runs and cancels the old head's live runs
-- [ ] #2 A missing gate is started by approving its held run or restarting its cancelled run (once per head), never by a dispatch; with neither, a no-run strike evicts after 10 minutes
-- [ ] #3 A gate that failed once is re-run in place (failed jobs) and its held re-run approved; a second failure evicts; a run that never reported its check counts as a failure
-- [ ] #4 No code path dispatches a check context; a guard test fails if one does
-- [ ] #5 A failed gate's queue-tick only dispatches security-required.yml on dev with queue_kick=true and its run id; the kick waits for that run, then runs the queue, and never cancels another kick
-- [ ] #6 frontend-required.yml publishes frontend-required-diagnostic on every dispatch
-- [ ] #7 Transient GitHub errors fail the queue run and disarm nobody; other refusals strike before evicting
-- [ ] #8 A green front PR is rebased, not waited on or evicted as stuck, when dev has commits its head lacks
-- [ ] #9 Workflow contract tests, CI_REQUIRED_GATES.md, AGENTS.md, CLAUDE.md and ADR-063 match the new behaviour
+- [x] #1 After a rebase the queue dispatches the license gate on dev, approves exactly the six held gate runs, deletes the other held runs and cancels the old head's live runs
+- [x] #2 A missing gate is started by approving its held run or restarting its cancelled run (once per head), never by a dispatch; with neither, a no-run strike evicts after 10 minutes
+- [x] #3 A gate that failed once is re-run in place (failed jobs) and its held re-run approved; a second failure evicts; a run that never reported its check counts as a failure
+- [x] #4 No code path dispatches a check context; a guard test fails if one does
+- [x] #5 A failed gate's queue-tick only dispatches security-required.yml on dev with queue_kick=true and its run id; the kick waits for that run, then runs the queue, and never cancels another kick
+- [x] #6 frontend-required.yml publishes frontend-required-diagnostic on every dispatch
+- [x] #7 Transient GitHub errors fail the queue run and disarm nobody; other refusals strike before evicting
+- [x] #8 A green front PR is rebased, not waited on or evicted as stuck, when dev has commits its head lacks
+- [x] #9 Workflow contract tests, CI_REQUIRED_GATES.md, AGENTS.md, CLAUDE.md and ADR-063 match the new behaviour
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-10-14-merge-queue-approve-held-runs.md.
+
+Approach: the action layer is a port of tldw_chatbook scripts/merge_queue.py at 2716b844e1 (approve held runs, strikes, comment de-dup, transient classification, kick with wait_run, young-head wait, run budget), adapted from one required check to six gate contexts plus the license status. decide_front stays pure; _decide approves held gate runs before reading, then checks a green head against dev (compare) before waiting on it or evicting it as stuck. Caps so nothing is re-run on every wake: a completed gate run that reported no check counts as one failure (retried once, then evicted); a cancelled run, or one whose gate job was cancelled, is restarted once per gate per head (restart-<context> marker). The license goes first on start and retry. A failure after a rebase took effect wakes a kick. Workflows: each queue-tick only dispatches security-required.yml on dev with queue_kick=true (string input) and its run id; security-required.yml's queue-kick job (timeout 15) waits for that run, then runs the queue from dev; its gate jobs skip on a kick on refs/heads/dev; cancel-in-progress is false for kicks. frontend-required publishes the diagnostic name on every dispatch (D2).
+
+Reviews: two independent reviews of the plan (the second applied it literally to a copy of the repo: 390 passed); a final whole-branch review of the code. Findings fixed before code was written: M1-M5, m1-m5, m7, n1, n4, I2, I4, I5 (see the plan's Review Focus and Accepted residuals).
+
+Verification on the branch: queue and workflow CI tests 391 passed, 1 skipped (baseline on dev 336 passed, 1 skipped). Mutation checks, each failing its named test: a dispatch added to _start; the gate filter dropped from _queue_held; cleanup deleting gate runs; the compare guard removed; the restart cap removed; no-check runs not counted as failures; kick cancel-in-progress true; the frontend bot exemption restored. actionlint 1.7.12 clean. ruff: no new findings beyond import-order warnings already on dev.
+
+Not verified (needs the owner's one-PR trial, spec section 7): the string queue_kick input accepted live; rerun-failed-jobs re-running the dependent queue-tick; what a timed-out gate reports; whether the dev ruleset's require_extra_approval_for_unattributed_changes asks for an approval on the queue's github-actions[bot]-committed rebase; job permissions inside approved runs.
+
+Files: Helper_Scripts/ci/merge_queue.py; .github/workflows/{security,backend,coverage,e2e,frontend}-required.yml, container-build-check.yml; tldw_Server_API/tests/CI/test_merge_queue_{rules,actions,gate_workflows,frontend_required}.py, test_license_first_workflow_contracts.py, test_admin_ui_vitest_ratchet_workflow.py; Docs/Development/CI_REQUIRED_GATES.md, AGENTS.md, CLAUDE.md, Docs/ADR/063-in-repo-merge-queue.md (+ Docs/Published copy), both specs, the plan.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
