@@ -111,6 +111,9 @@ DISPATCH_ERRORS = {
 }
 
 
+QUEUE_AUTHOR = {"login": "github-actions", "__typename": "Bot"}
+
+
 class FakeGh:
     """Records every mutating call; serves scripted reads.
 
@@ -176,6 +179,9 @@ class FakeGh:
         self.calls.append(call)
         self.events.append(call)
 
+    def _run_by_id(self, rid):
+        return next((r for runs in self.runs.values() for r in runs if r.get("id") == rid), None)
+
     def _set_run(self, rid, **fields):
         for runs in self.runs.values():
             for run in runs:
@@ -199,10 +205,17 @@ class FakeGh:
             return {"data": {}}
         self.reads += 1
         if "comments(last" in query:
+            # An entry is a body, (body, createdAt), or a dict of node fields; a comment is the
+            # queue's own (GraphQL author `github-actions`, a Bot) unless the dict names another author.
             nodes = []
             for index, entry in enumerate(self.comments.get(v["number"], []), start=1):
-                body, created = entry if isinstance(entry, tuple) else (entry, None)
-                nodes.append({"databaseId": index, "body": body, "createdAt": created})
+                if isinstance(entry, dict):
+                    node = {"databaseId": index, "createdAt": None, **entry}
+                else:
+                    body, created = entry if isinstance(entry, tuple) else (entry, None)
+                    node = {"databaseId": index, "body": body, "createdAt": created}
+                node.setdefault("author", QUEUE_AUTHOR)
+                nodes.append(node)
             return {"data": {"repository": {"pullRequest": {"comments": {"nodes": nodes}}}}}
         if "pullRequest(number" in query:
             node = self.reread.get(v["number"], self.nodes[v["number"]])
@@ -295,7 +308,8 @@ class FakeGh:
             self._record(("rerun", rid, "failed" if path.endswith("-failed-jobs") else "all"))
             if self.rerun_error:
                 raise mq.GhError(self.rerun_error)
-            self._set_run(int(rid), status="queued", conclusion=None)
+            listed = self._run_by_id(int(rid)) or {}
+            self._set_run(int(rid), status="queued", conclusion=None, run_attempt=int(listed.get("run_attempt") or 1) + 1)
             return None
         if method == "GET" and re.search(r"/actions/runs/\d+$", path):
             rid = int(path.rsplit("/", 1)[1])
@@ -946,9 +960,9 @@ def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
             }[query]
         elif args[2] == "GET" and f"head_sha={NEW}&status=action_required" in args[3]:
             out = {"total_count": len(held), "workflow_runs": list(held)}
-        elif args[2] == "POST" and args[3].endswith("/approve"):
-            rid = int(args[3].split("/runs/")[1].split("/")[0])
-            held[:] = [r for r in held if r["id"] != rid]  # GitHub starts it; it is no longer held
+        elif args[2] in ("POST", "DELETE") and (args[3].endswith("/approve") or args[2] == "DELETE"):
+            rid = int(args[3].removesuffix("/approve").split("/runs/")[1].split("/")[0])
+            held[:] = [r for r in held if r["id"] != rid]  # approved (GitHub starts it) or deleted: no longer held
             out = None
         elif args[2] == "GET":
             out = [] if "/statuses" in args[3] else {"total_count": 0, "check_runs": [], "workflow_runs": []}
@@ -1117,7 +1131,7 @@ def test_wait_for_run_returns_once_the_run_completes_and_gives_up_after_the_boun
 @pytest.mark.parametrize(("error", "outcome"), [
     ("gh: The workflow run cannot be rerun (HTTP 422)", "refused"),
     ("gh: Conflict (HTTP 409)", "refused"),
-    ("gh: Unable to re-run this workflow run because it was created over a month ago (HTTP 403)", "refused"),
+    ("gh: Unable to re-run this workflow run because it was created over a month ago (HTTP 403)", "final"),
 ])
 def test_rerun_refusals(error, outcome):
     run = _run_of("e2e-required.yml", 70, "completed", "failure")
@@ -1155,8 +1169,8 @@ def test_comment_once_removes_its_own_copy_when_a_racing_run_posted_first():
 
         def graphql(self, query, **v):
             if "comments(last" in query and posted:  # the second read sees the racer's copy, id 7
-                nodes = [{"databaseId": 7, "body": posted[0], "createdAt": None},
-                         {"databaseId": 50, "body": posted[0], "createdAt": None}]
+                nodes = [{"databaseId": 7, "body": posted[0], "createdAt": None, "author": QUEUE_AUTHOR},
+                         {"databaseId": 50, "body": posted[0], "createdAt": None, "author": QUEUE_AUTHOR}]
                 return {"data": {"repository": {"pullRequest": {"comments": {"nodes": nodes}}}}}
             return super().graphql(query, **v)
 
@@ -1397,14 +1411,163 @@ def test_a_failed_gate_whose_run_is_still_live_is_left_for_its_kick():
     assert gh.calls == []
 
 
-def test_a_refused_rerun_evicts():
+def _failed_e2e(**fake):
     failed = _run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)
-    checks = _checks({E2E: None}) + [_check(E2E, "failure", suite=700)]
-    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [failed]}, checks={OLD: checks},
-                statuses={OLD: [_status()]}, rerun_error="gh: The workflow run cannot be rerun (HTTP 422)")
+    checks = _checks({E2E: None}) + [_check(E2E, "failure", completed="2026-10-04T11:00:00Z", suite=700)]
+    return FakeGh([_node(1, state="BLOCKED")], runs={OLD: [failed]}, checks={OLD: checks},
+                  statuses={OLD: [_status()]}, **fake)
+
+
+def test_a_refused_rerun_strikes_then_evicts_after_the_gap():
+    """Spec section 7: a refusal GitHub gave is a strike, since a racing re-run not visible yet can
+    cause a 409; only a refusal for good (a 403 for a run over a month old) evicts at once."""
+    refused = "gh: The workflow run cannot be rerun (HTTP 422)"
+    first = _failed_e2e(rerun_error=refused)
+    _run(first)
+    assert not any(c[0] == "disarm" for c in first.calls)
+    assert f"merge-queue:rerun-refused-{E2E}:{OLD}" in first.calls[-1][2]
+    warned = (f"<!-- merge-queue:rerun-refused-{E2E}:{OLD} -->\nx", "2026-10-04T11:45:00Z")
+    later = _failed_e2e(rerun_error=refused, comments={1: [warned]})
+    _run(later)
+    assert [c[0] for c in later.calls][-2:] == ["comment", "disarm"]
+    assert f"merge-queue:evict-rerun:{OLD}" in later.calls[-2][2]
+    final = _failed_e2e(rerun_error="gh: Unable to re-run this workflow run because it was created over a month ago (HTTP 403)")
+    _run(final)
+    assert [c[0] for c in final.calls][-2:] == ["comment", "disarm"]
+
+
+def test_a_retry_decided_on_a_stale_snapshot_never_evicts_a_gate_that_has_since_passed():
+    """A racing queue run re-ran the gate and it passed; this run's decision still says "failed once".
+    The retry marker alone must not read as "failed again"."""
+    run = _run_of("e2e-required.yml", 70, "completed", "success", check_suite_id=700, run_attempt=2)
+    checks = _checks({E2E: None}) + [_check(E2E, "failure", completed="2026-10-04T11:00:00Z", suite=700),
+                                     _check(E2E, "success", completed="2026-10-04T11:30:00Z", suite=700)]
+    marker = f"<!-- merge-queue:retry-{E2E}:{OLD} -->\nx\n<!-- merge-queue-attempt:1 -->"
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, checks={OLD: checks}, statuses={OLD: [_status()]},
+                comments={1: [marker]})
+    stale = _pr_state(checks=(mq.CheckRun(E2E, "completed", "failure", NOW, "https://check/e2e", 700),))
+    assert mq._retry_gate(gh, stale, mq.BY_NAME[E2E], (), lambda m: None, lambda s: None, lambda: NOW) is False
+    assert gh.calls == []
+
+
+def test_a_retried_gate_whose_run_is_live_again_is_left_alone_without_a_warning():
+    """The run is going again (still on the recorded attempt, e.g. its first attempt not yet over on
+    a stale snapshot): stand down, neither evict nor strike."""
+    run = _run_of("e2e-required.yml", 70, "in_progress", None, check_suite_id=700, run_attempt=1)
+    marker = f"<!-- merge-queue:retry-{E2E}:{OLD} -->\nx\n<!-- merge-queue-attempt:1 -->"
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, comments={1: [marker]})
+    stale = _pr_state(checks=(mq.CheckRun(E2E, "completed", "failure", NOW, "https://check/e2e", 700),))
+    listed = dict(run, status="completed", conclusion="failure")  # how the stale listing saw it
+    assert mq._after_rerun(gh, stale, mq.BY_NAME[E2E], listed, 1, lambda fresh, state: True,
+                           mq.Action("evict", "x", slug="failed-twice"), lambda m: None, lambda: NOW) is False
+    assert gh.calls == []
+
+
+def test_a_start_decided_on_a_stale_snapshot_never_evicts_a_gate_whose_restart_has_since_passed():
+    run = _run_of("e2e-required.yml", 70, "completed", "success", check_suite_id=700, run_attempt=2)
+    checks = _checks({E2E: None}) + [_check(E2E, "cancelled", completed="2026-10-04T11:00:00Z", suite=700),
+                                     _check(E2E, "success", completed="2026-10-04T11:30:00Z", suite=700)]
+    marker = f"<!-- merge-queue:restart-{E2E}:{OLD} -->\nx\n<!-- merge-queue-attempt:1 -->"
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, checks={OLD: checks}, statuses={OLD: [_status()]},
+                comments={1: [marker]})
+    stale = _pr_state(checks=(mq.CheckRun(E2E, "completed", "cancelled", NOW, "https://check/e2e", 700),))
+    assert mq._start(gh, stale, (E2E,), lambda m: None, lambda s: None, lambda: NOW) is False
+    assert gh.calls == []
+
+
+def test_a_pending_rerun_wakes_a_kick_and_the_kick_does_not_evict_while_github_still_shows_the_old_attempt():
+    old_attempt = {"status": "completed", "conclusion": "failure", "run_attempt": 1}
+    first = _failed_e2e(run_status={70: [old_attempt]})
+    _run(first)
+    assert ("rerun", "70", "failed") in first.calls
+    assert ("dispatch", "security-required.yml", {"ref": "dev", "inputs[queue_kick]": "true"}) in first.calls
+    retry_comment = next(c[2] for c in first.calls if c[0] == "comment")
+    assert "<!-- merge-queue-attempt:1 -->" in retry_comment
+    kick = _failed_e2e(run_status={70: [old_attempt]}, comments={1: [retry_comment]})
+    _run(kick)
+    assert not any(c[0] == "disarm" for c in kick.calls)
+    assert any(c[0] == "comment" and f"merge-queue:rerun-unseen-{E2E}:{OLD}" in c[2] for c in kick.calls)
+
+
+def test_a_pending_restart_wakes_a_kick():
+    cancelled = _run_of("e2e-required.yml", 70, "completed", "cancelled")
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [cancelled]},
+                run_status={70: [{"status": "completed", "conclusion": "cancelled", "run_attempt": 1}]},
+                **_green({E2E: None}))
     _run(gh)
-    assert [c[0] for c in gh.calls][-2:] == ["comment", "disarm"]
-    assert f"merge-queue:evict-rerun:{OLD}" in gh.calls[-2][2]
+    assert ("rerun", "70", "all") in gh.calls
+    assert ("dispatch", "security-required.yml", {"ref": "dev", "inputs[queue_kick]": "true"}) in gh.calls
+
+
+def test_a_gate_run_held_for_someone_else_is_never_re_run_or_approved():
+    held = dict(_held(70, "e2e-required.yml", actor="some-agent[bot]"), check_suite_id=700)
+    checks = _checks({E2E: None}) + [_check(E2E, "failure", suite=700)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [held]}, checks={OLD: checks}, statuses={OLD: [_status()]})
+    _run(gh)
+    assert not any(c[0] in ("rerun", "approve", "disarm") for c in gh.calls)
+    assert f"merge-queue:held-{E2E}:{OLD}" in gh.calls[-1][2]
+
+
+def test_start_never_restarts_a_run_held_for_someone_else():
+    held = _held(70, "e2e-required.yml", actor="some-agent[bot]")
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [held]}, **_green({E2E: None}))
+    _run(gh)
+    assert not any(c[0] in ("rerun", "approve") for c in gh.calls)
+
+
+def test_a_behind_front_gets_no_approvals_on_its_old_head():
+    gh = FakeGh([_node(1)], runs={OLD: [_held(90, "e2e-required.yml")], NEW: _six_held()})
+    _run(gh)
+    assert ("approve", "90") not in gh.calls
+
+
+def test_a_pr_disarmed_since_the_line_was_read_gets_no_approvals():
+    disarmed = _node(1, state="BLOCKED", armed=None)
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [_held(35, "e2e-required.yml")]},
+                reread={1: disarmed}, late_nodes=[disarmed], **_green({E2E: None}))
+    _run(gh)
+    assert ("approve", "35") not in gh.calls
+
+
+def test_a_missing_license_is_dispatched_while_the_gates_run():
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [_run_of("e2e-required.yml", 70)]},
+                **_green({E2E: None}, statuses=[]))
+    assert _run(gh)[0][1].contexts == (LICENSE,)
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+
+
+def test_a_non_gate_held_run_listed_after_the_first_cleanup_is_deleted_too():
+    class LateHeld(FakeGh):
+        added = False
+
+        def rest(self, method, path, fields=None):
+            out = super().rest(method, path, fields)
+            if (method == "GET" and f"head_sha={NEW}" in path and "status=action_required" in path and not self.added
+                    and sum(c[0] == "approve" for c in self.calls) == 6):
+                self.added = True
+                self.runs[NEW].append(_held(40, "ci.yml"))
+            return out
+
+    gh = LateHeld([_node(1)], runs={NEW: _six_held()})
+    _run(gh)
+    assert ("delete", "40") in gh.calls
+
+
+def test_a_marker_in_someone_elses_comment_is_ignored():
+    forged = {"body": f"LGTM <!-- merge-queue:retry-{E2E}:{OLD} -->", "author": {"login": "someone", "__typename": "User"}}
+    gh = _failed_e2e(comments={1: [forged]}, run_status={70: ["in_progress"]})
+    _run(gh)
+    assert ("rerun", "70", "failed") in gh.calls
+    assert not any(c[0] == "disarm" for c in gh.calls)
+
+
+def test_an_unknown_rerun_error_is_warned_about_per_gate():
+    old_warning = (f"<!-- merge-queue:rerun-error-{BACKEND}:{OLD} -->\nx", "2026-10-04T11:40:00Z")
+    gh = _failed_e2e(rerun_error="gh: Something odd (HTTP 400)", comments={1: [old_warning]})
+    with pytest.raises(mq.GhError):
+        _run(gh)
+    assert not any(c[0] == "disarm" for c in gh.calls)
+    assert any(c[0] == "comment" and f"merge-queue:rerun-error-{E2E}:{OLD}" in c[2] for c in gh.calls)
 
 
 def test_a_transient_rerun_error_fails_the_run_and_disarms_nobody():
@@ -1478,7 +1641,7 @@ def test_main_passes_only_a_numeric_wait_run(monkeypatch):
 
     monkeypatch.setattr(mq, "run", fake_run)
     monkeypatch.setenv("MERGE_QUEUE", "on")
-    for value, expected in (("123", 123), ("", None), ("12; rm -rf /", None)):
+    for value, expected in (("123", 123), ("", None), ("12; rm -rf /", None), ("\u00b2", None)):
         seen.clear()
         monkeypatch.setenv("WAIT_RUN", value)
         mq.main()

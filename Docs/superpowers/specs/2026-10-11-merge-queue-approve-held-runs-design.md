@@ -50,6 +50,8 @@ Not yet verified here; the one-PR trial (section 7) answers them:
   `github-actions[bot]`, and no such commit has merged here before. If it asks, the owner switches the option off for
   `dev`; the queue cannot change who commits a rebase.
 - That the kick's skipped `security-required` check on `dev`'s tip shows on no PR, including a `dev` -> `main` release.
+- That `actions: write` alone lets a tick dispatch the kick; that GitHub lists a rebased head's held runs together; what
+  a 409 on a re-run means; and the GraphQL author login of the queue's comments on this repository.
 
 ## 3. The change in one paragraph
 
@@ -110,7 +112,7 @@ yet. The kick is therefore hosted by `security-required.yml`, which does: a disp
 `queue_kick=true` skips every gate job and runs only a `queue-kick` job with the queue's permissions. On any other ref,
 or without the flag, the workflow behaves as today. `queue_kick` is a string input (`'true'`), compared through
 `github.event.inputs`. The kick job's timeout is 15 minutes, as `merge-queue.yml`'s: it may wait 3 minutes for its run
-and then re-run up to six gates. Every gate workflow's concurrency group is pinned with
+and then re-run up to six gates. Every PR shows one more skipped row, `Merge queue kick`. Every gate workflow's concurrency group is pinned with
 `cancel-in-progress: true`, which would let a second kick cancel a running one. For a kick it is false instead
 (`cancel-in-progress: ${{ github.event.inputs.queue_kick != 'true' }}`), so one kick never cancels another mid-run;
 GitHub keeps one running and one pending. A hand dispatch of `security-required.yml` on `dev` without the flag still
@@ -156,7 +158,18 @@ check" read as "each of the six gate contexts". The ones that matter most:
 - **Errors.** A transient error (5xx, 429, rate limit, network, GraphQL "Something went wrong") fails the queue run and
   never disarms a PR. A refusal GitHub actually gave is re-read first: a run that is live or held again was handled by a
   racing queue run, so this one stands down. Otherwise it is a strike: one warning comment, and an eviction only once
-  that comment is 10 minutes old.
+  that comment is 10 minutes old. The one refusal that evicts at once is a re-run of a run over a month old, which
+  GitHub will never accept. A run held for someone else's approval is never approved or re-run: it is a strike too.
+- **Second failures are read fresh** (final code review, 2026-10-14). A retry or restart comment records the run attempt
+  the queue re-ran. With that comment present, the PR is evicted only when a fresh read shows the queue's re-run has run
+  (a higher attempt) and the gate still failed (or, for a restart, was cancelled again). A run that is live, held or
+  passed since the decision stands down; a re-run not visible yet is a strike. A decision taken on a snapshot older than
+  a racing run's successful re-run can therefore never evict.
+- **Markers are the queue's own.** Retry, restart and strike markers count only in comments the queue posted (GraphQL
+  author `github-actions`, a Bot). A marker hidden in anyone else's comment is ignored, so no commenter can turn a first
+  failure into an eviction.
+- **The license is never left behind running gates.** It has no queue-tick, so a license status missing while the gates
+  run (a dispatch lost around a rebase) is dispatched again once the head is older than 3 minutes.
 - **Evictions** name their cause (`evict-no-run`, `evict-rerun`, `evict-approve` join the existing kinds), post the
   comment first and disarm second.
 

@@ -4,7 +4,8 @@ name: Merge Queue
 # Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
 #
 # Wakes when a PR into dev is armed for auto-merge, disarmed or closed, and on every push to
-# dev. The queue-tick job of each required workflow runs the same script after a failed gate.
+# dev. After a failed gate, that gate's queue-tick dispatches security-required.yml on dev with
+# queue_kick=true, and its queue-kick job runs the same script.
 # Nothing here is triggered from the default branch: the triggers that read main's copy of a
 # workflow are deliberately absent, because nothing in the queue may depend on main.
 #
@@ -37,7 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
+      # write: rebase the front PR's branch, comment and disarm, approve/re-run/cancel/delete runs,
+      # dispatch the license gate and the queue kick.
       contents: write
       pull-requests: write
       actions: write

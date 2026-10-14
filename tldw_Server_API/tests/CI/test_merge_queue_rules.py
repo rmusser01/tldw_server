@@ -205,3 +205,13 @@ def test_a_run_of_an_unknown_context_is_ignored() -> None:
 def test_a_young_head_wait_is_marked_young() -> None:
     pr = _pr(merge_state="BLOCKED", checks=_green(without=(E2E,)), head_committed_at=NOW - timedelta(minutes=1))
     assert mq.decide_front(pr, NOW).slug == "young"
+
+
+def test_a_missing_license_is_started_while_gates_run_unless_the_head_is_young() -> None:
+    """The license gate runs on dev and has no queue-tick: left waiting behind running gates, nothing
+    would start it once they finish."""
+    running = _green(without=(E2E, LICENSE)) + (_run(E2E, status="in_progress"),)
+    old = mq.decide_front(_pr(merge_state="BLOCKED", checks=running), NOW)
+    assert (old.kind, old.contexts) == ("start", (LICENSE,))
+    young = mq.decide_front(_pr(merge_state="BLOCKED", checks=running, head_committed_at=NOW - timedelta(minutes=1)), NOW)
+    assert (young.kind, young.slug, young.contexts) == ("wait", "young", (E2E, LICENSE))

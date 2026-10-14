@@ -190,10 +190,11 @@ jobs:
         if: needs.changes.outputs.security_relevant_changed != 'true'
         run: echo "No security-relevant paths changed; bandit scan skipped by policy."
 
-      # The last arm is the merge queue's dispatch: without it a dispatched run
-      # skipped this step and the gate passed without a dependency review. A
-      # dispatch has no pull_request payload, so the action is given both refs:
-      # inputs.base_sha (dev's tip) and github.sha (the dispatched branch's head).
+      # The last arm is a manual diagnostic dispatch with base_sha (the merge
+      # queue no longer dispatches gates; a dispatched check would not count):
+      # without it a dispatched run skipped this step and passed without a
+      # dependency review. A dispatch has no pull_request payload, so the action
+      # is given both refs: inputs.base_sha and github.sha (the branch's head).
       - name: Dependency review (high/critical)
         if: >-
           github.event_name == 'pull_request' ||
