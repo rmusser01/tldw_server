@@ -450,9 +450,11 @@ async function parseErrorBody(response: Response): Promise<ApiErrorResponse> {
 }
 
 function retryAfterFromHeaders(headers: Headers): number | undefined {
-  // Shared parser (TASK-13526 transport Stage A): handles both delta-seconds
-  // and HTTP-date forms, returning milliseconds.
-  return parseRetryAfter(headers.get('retry-after')) ?? undefined;
+  // Shared parser (TASK-13526 transport Stage A) handles both delta-seconds
+  // and HTTP-date forms and returns MILLISECONDS; the web ApiError.retryAfter
+  // field keeps its axios-convention SECONDS semantics, so convert here.
+  const ms = parseRetryAfter(headers.get('retry-after'));
+  return ms == null ? undefined : Math.ceil(ms / 1000);
 }
 
 function buildRequestHistoryConfig(

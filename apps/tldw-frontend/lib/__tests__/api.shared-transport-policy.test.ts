@@ -26,8 +26,9 @@ describe("web api client shared transport policy (source contract)", () => {
     )
   })
 
-  it("parses Retry-After with the shared parser", () => {
+  it("parses Retry-After with the shared parser and converts ms back to the web's seconds semantics", () => {
     expect(source).toContain("parseRetryAfter(headers.get('retry-after'))")
+    expect(source).toContain("Math.ceil(ms / 1000)")
     expect(source).not.toContain("parseInt(retryAfterHeader, 10)")
   })
 })
