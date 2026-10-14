@@ -1,8 +1,10 @@
+from dataclasses import asdict
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
-from tldw_Server_API.app.core.RPG.errors import RPGNotFoundError, RPGValidationError
+from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGNotFoundError, RPGValidationError
 from tldw_Server_API.app.core.RPG.rules.refs import RulesPackSourceValidation
 from tldw_Server_API.app.core.RPG.service import RPGService
 
@@ -591,3 +593,95 @@ def test_service_lists_events_and_proposals_and_snapshot_versions():
     assert historical.snapshot_version == 0  # nosec B101
     with pytest.raises(RPGNotFoundError):
         service.get_snapshot(session.id, snapshot_version=99)
+
+
+def test_service_updates_campaign_and_session():
+    service = _service()
+    campaign = service.create_campaign("Title", None, "fate", idempotency_key="svc-u-1")
+    result = service.update_campaign(
+        campaign.id,
+        title="Act II",
+        status="archived",
+        expected_version=campaign.version,
+        idempotency_key="svc-pu-1",
+    )
+    assert result.campaign.status == "archived"  # nosec B101
+    replay = service.update_campaign(
+        campaign.id,
+        title="Act II",
+        status="archived",
+        expected_version=campaign.version,
+        idempotency_key="svc-pu-1",
+    )
+    assert replay.replayed is True  # nosec B101
+    with pytest.raises(RPGConflictError):
+        service.update_campaign(
+            campaign.id,
+            title="X",
+            expected_version=999,
+            idempotency_key="svc-pu-2",
+        )
+
+
+def test_service_validates_authority_settings():
+    service = _service()
+    campaign = service.create_campaign("Title", None, "fate", idempotency_key="svc-a-1")
+    session = service.create_session(
+        campaign_id=campaign.id,
+        title="S",
+        adapter_key="fate",
+        idempotency_key="svc-as-1",
+    )
+    good = {
+        "import_auto_commit": False,
+        "mcp_auto_commit": True,
+        "model_auto_commit": False,
+        "model_auto_commit_event_types": [],
+    }
+    result = service.replace_authority_settings(
+        session.id,
+        authority_settings=good,
+        expected_version=session.version,
+        idempotency_key="svc-au-1",
+    )
+    assert result.session.authority_settings["mcp_auto_commit"] is True  # nosec B101
+    bad_type = {**good, "model_auto_commit_event_types": ["note.added", "not.an.event"]}
+    with pytest.raises(RPGValidationError):
+        service.replace_authority_settings(
+            session.id,
+            authority_settings=bad_type,
+            expected_version=result.session.version,
+            idempotency_key="svc-au-2",
+        )
+    with pytest.raises(RPGValidationError):
+        service.replace_authority_settings(
+            session.id,
+            authority_settings={"mcp_auto_commit": True},
+            expected_version=result.session.version,
+            idempotency_key="svc-au-3",
+        )
+
+
+def test_service_rebuild_matches_incremental_snapshot():
+    service = _service()
+    campaign = service.create_campaign("Title", None, "fate", idempotency_key="svc-r-1")
+    session = service.create_session(
+        campaign_id=campaign.id,
+        title="S",
+        adapter_key="fate",
+        idempotency_key="svc-rs-1",
+    )
+    service.record_events(
+        session.id,
+        [{"event_type": "note.added", "event_payload": {"note_id": "n1"}}],
+        "user",
+        0,
+        "svc-re-1",
+    )
+    incremental = service.get_snapshot(session.id)
+    rebuilt = service.rebuild_snapshot(session.id, idempotency_key="svc-rb-1")
+    # get_snapshot returns RPGSnapshotState; stored snapshot_json is asdict(state)
+    # on both the incremental commit and rebuild paths.
+    assert rebuilt.snapshot.snapshot_json == asdict(incremental.snapshot)  # nosec B101
+    assert rebuilt.snapshot.snapshot_version == incremental.snapshot_version + 1  # nosec B101
+    assert rebuilt.replayed is False  # nosec B101
