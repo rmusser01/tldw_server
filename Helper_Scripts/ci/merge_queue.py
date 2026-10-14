@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """One-at-a-time merge queue for `dev`.
 
-Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
+Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md, amended by
+Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md
 
-Runs inside GitHub Actions with the built-in GITHUB_TOKEN (merge-queue.yml and the queue-tick
-jobs of the required workflows). Each run reads the line of armed PRs, decides one action for
+Runs inside GitHub Actions with the built-in GITHUB_TOKEN (merge-queue.yml, and the
+queue-kick job of security-required.yml that a failed gate's queue-tick dispatches). Each run reads the line of armed PRs, decides one action for
 the PR at the front and, in `on` mode, performs it. PRs behind the front are never touched.
 
 Never enables auto-merge, never merges, never pushes: a merge made with GITHUB_TOKEN pushes
@@ -51,16 +52,37 @@ PER_PAGE = 100
 MAX_PAGES = 10
 PASSING = frozenset({"success", "neutral", "skipped"})
 LIVE_RUN_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
-BROKEN_RUN_CONCLUSIONS = frozenset({"failure", "startup_failure", "timed_out"})
-# Who a run started with GITHUB_TOKEN belongs to: the queue's own dispatches and rebases.
+# A queue rebase (GITHUB_TOKEN) makes GitHub create the PR's pull_request runs held for approval
+# (spec S2). Approving a gate's held run is what makes its check count (S4); a dispatched run's
+# check never reaches the PR's rollup (S5). So the queue approves and never dispatches a gate.
 QUEUE_ACTOR = "github-actions[bot]"
-# gh reports API errors as `gh: <message> (HTTP NNN)`. These two mean the PR's branch itself
-# refuses the dispatch; every other error is GitHub's and fails the run so the next event retries.
-BRANCH_REFUSALS = ("(HTTP 422)", "(HTTP 404)")
+HELD_RUN_POLLS = 10
+HELD_RUN_POLL_S = 3
+# The workflow the queue dispatches to wake itself (spec 4.6, D3): GitHub starts a dispatch only
+# for a workflow file that exists on main, and merge-queue.yml does not yet.
+KICK_WORKFLOW = "security-required.yml"
+# How a re-run GitHub answered with an error is read (`_rerun_error`): refused for good (409/422,
+# or a 403 saying the run is over a month old), transient (`_transient`, re-raised so the next
+# event retries; never disarms), or unknown (re-raised with a `rerun-error` warning, and counted
+# as refused once that warning is STRIKE_GAP old).
+RERUN_REFUSALS = ("HTTP 409", "HTTP 422")
+RERUN_REFUSAL_403_TEXT = "month ago"
+# How long a kick waits for the run that sent it to complete before deciding. The kick's job
+# timeout is 15 minutes (as merge-queue.yml's); the wait plus one front's worst case (an UNKNOWN
+# settle, a rebase's polls, re-runs of up to six gates) must fit.
+# ponytail: a run still live after this is a GitHub fault; the kick decides anyway and the next event recovers.
+WAIT_RUN_TRIES = 30
+WAIT_RUN_DELAY_S = 6.0
+# A queue run takes on no further front, and starts no young-head wait that would end, past this;
+# it wakes a fresh run instead.
+RUN_BUDGET = timedelta(minutes=4)
+# A lasting failure to get a head going (a rebase that did not take effect, no run to start, an
+# unclassified re-run error, a refused approval) is warned about once per head and evicts only
+# once the warning is at least this old (spec section 7, errors).
+STRIKE_GAP = timedelta(minutes=10)
 # GitHub refuses to let an Actions token create or update a file under .github/workflows
 # ("refusing to allow a GitHub App to create or update workflow ... without `workflows`
-# permission"), and GITHUB_TOKEN can never hold that permission. A rebase that would bring
-# dev's workflow changes into the PR branch therefore fails every time it is tried.
+# permission"), and GITHUB_TOKEN can never hold that permission.
 WORKFLOW_REFUSAL = ("workflow", "permission")
 
 MISSING, RUNNING, PASSED, FAILED, FAILED_TWICE = "missing", "running", "passed", "failed", "failed twice"
@@ -68,38 +90,34 @@ MISSING, RUNNING, PASSED, FAILED, FAILED_TWICE = "missing", "running", "passed",
 
 @dataclass(frozen=True)
 class Context:
-    """One required status on `dev` and how the queue starts it (spec 4.1).
+    """One required status on `dev` and the workflow that reports it (spec 4.1).
 
     Attributes:
         name: The context, as branch protection names it.
         workflow: The workflow file that reports it.
-        kind: `check` for a check run on the PR head, produced by the workflow dispatched on
-            the PR's branch; `status` for a commit status on the PR head, produced by the
-            workflow dispatched on `dev` with the `pr` input.
-        base_sha: Whether a `check` dispatch takes dev's tip as its `base_sha` input.
-        queue_only_dispatch: Whether a dispatch of the workflow reports this context only when
-            the queue made it. `frontend-required.yml` names its gate
-            `frontend-required-diagnostic` on a dispatch by anyone else (spec 4.8), so such a
-            run is not a run of this context at all.
+        kind: `check` for a gate's check run, which counts only from a `pull_request` run on the
+            PR head; `status` for the license commit status, posted by the license gate the
+            queue dispatches on `dev`.
     """
 
     name: str
     workflow: str
     kind: str = "check"
-    base_sha: bool = True
-    queue_only_dispatch: bool = False
 
 
 CONTEXTS = (
     Context("backend-required", "backend-required.yml"),
     Context("security-required", "security-required.yml"),
     Context("coverage-required", "coverage-required.yml"),
-    Context("frontend-required", "frontend-required.yml", queue_only_dispatch=True),
+    Context("frontend-required", "frontend-required.yml"),
     Context("e2e-required", "e2e-required.yml"),
-    Context("container-build-check", "container-build-check.yml", base_sha=False),
+    Context("container-build-check", "container-build-check.yml"),
     Context("frontend-license-policy/trusted/dev", "frontend-license-gate.yml", kind="status"),
 )
 ALL_CONTEXTS = tuple(c.name for c in CONTEXTS)
+BY_NAME = {c.name: c for c in CONTEXTS}
+GATE_WORKFLOWS = frozenset(c.workflow for c in CONTEXTS if c.kind == "check")
+LICENSE = next(c for c in CONTEXTS if c.kind == "status")
 
 
 @dataclass(frozen=True)
@@ -133,13 +151,12 @@ class PrState:
         number: The PR number.
         node_id: The PR's GraphQL node id, used by mutations.
         head_sha: The current head commit.
-        head_ref: The head branch name, the ref the check workflows are dispatched on.
+        head_ref: The head branch name.
         same_repo: Whether the head branch lives in this repository (not a fork).
         armed_at: When auto-merge was enabled, or None if it is not armed.
         is_draft: Whether the PR is a draft.
         merge_state: GitHub's `mergeStateStatus` (`BEHIND`, `CLEAN`, `DIRTY`, ...).
         head_committed_at: The head commit's date.
-        base_sha: dev's tip, read together with the PR; sent as the `base_sha` dispatch input.
         checks: The required contexts' runs on the head, stand-ins included.
         human_author: Whether a user, not a bot or app, opened the PR.
     """
@@ -153,23 +170,22 @@ class PrState:
     is_draft: bool
     merge_state: str
     head_committed_at: datetime
-    base_sha: str = ""
     checks: tuple[CheckRun, ...] = ()
     human_author: bool = True
 
 
 @dataclass(frozen=True)
 class Action:
-    """The single decision for the front PR: wait, rebase, dispatch, retry or evict.
+    """The single decision for the front PR: wait, rebase, start, retry or evict.
 
     `slug` names an eviction's cause in its comment marker (`evict-<slug>`), so a re-armed PR
     evicted again on the same head for a different reason is still told why.
 
     Attributes:
-        kind: `wait`, `rebase`, `dispatch`, `retry` or `evict`.
+        kind: `wait`, `rebase`, `start`, `retry` or `evict`.
         reason: A human-readable cause, logged and quoted in comments.
         links: Run URLs quoted in the comment (the failed runs).
-        slug: An eviction's cause, used in its comment marker.
+        slug: An eviction's cause, used in its comment marker; `young` on the young-head wait.
         contexts: The required contexts the action targets: the ones a rebase, dispatch or
             retry starts, and the ones a wait or eviction is about.
     """
@@ -269,9 +285,12 @@ def decide_front(pr: PrState, now: datetime) -> Action:
     if running:
         return Action("wait", f"running: {', '.join(running)}", contexts=running)
     if missing:
-        if now - pr.head_committed_at <= YOUNG_HEAD:
-            return Action("wait", "head is under 3 minutes old; its own runs may not be visible yet", contexts=missing)
-        return Action("dispatch", f"no run on the up-to-date head: {', '.join(missing)}", contexts=missing)
+        # The commit date comes from the author's clock: one a little ahead counts as young too, one
+        # further ahead does not, or the line would wait for that clock.
+        if abs(now - pr.head_committed_at) <= YOUNG_HEAD:
+            return Action("wait", "head is under 3 minutes old; its own runs may not be visible yet",
+                          slug="young", contexts=missing)
+        return Action("start", f"no counted run on the up-to-date head: {', '.join(missing)}", contexts=missing)
     # BLOCKED with everything green is mergeStateStatus lagging the checks. Review threads are
     # not consulted: dev's rules do not require conversations to be resolved, so an unresolved
     # thread never blocks the merge and must never evict a green PR.
@@ -281,12 +300,16 @@ def decide_front(pr: PrState, now: datetime) -> Action:
             return Action(
                 "evict", "green for over 15 minutes but auto-merge did not fire; re-arm to retry", slug="stuck",
             )
-        return Action("wait", "green; auto-merge should fire")
+        return Action("wait", "green; auto-merge should fire", slug="green")
     return Action("wait", f"merge state {state}")
 
 
 class GhError(RuntimeError):
     """A gh CLI call failed, or a list read was longer than the queue will page through."""
+
+
+class CommentRefused(GhError):
+    """GitHub will never take the queue's comment on this PR (its conversation is locked)."""
 
 
 class GhApi(Protocol):
@@ -365,12 +388,10 @@ class Gh:
         return json.loads(out) if out.strip() else None
 
 
-# baseRef is the live branch, so its target is dev's tip at the moment the PR state was read.
 PR_FIELDS = """
   number id isDraft headRefOid headRefName mergeStateStatus
   author { __typename }
   headRepository { nameWithOwner }
-  baseRef { target { oid } }
   autoMergeRequest { enabledAt }
   commits(last: 1) { nodes { commit { committedDate } } }
 """
@@ -385,7 +406,7 @@ PR_QUERY = (
 )
 COMMENTS_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { comments(last: 100) { nodes { body } } } } }"
+    " pullRequest(number: $number) { comments(last: 100) { nodes { databaseId body createdAt } } } } }"
 )
 REBASE_MUTATION = (
     "mutation($id: ID!, $oid: GitObjectID!) { updatePullRequestBranch(input: "
@@ -422,7 +443,6 @@ def _parse_pr(node: dict) -> PrState:
         is_draft=node["isDraft"],
         merge_state=node["mergeStateStatus"],
         head_committed_at=_ts(commits[0]["commit"]["committedDate"]) if commits else datetime.now(timezone.utc),
-        base_sha=((node.get("baseRef") or {}).get("target") or {}).get("oid") or "",
         human_author=(node.get("author") or {}).get("__typename") == "User",
     )
 
@@ -455,7 +475,7 @@ def read_prs(gh: GhApi) -> list[PrState]:
 
 
 def read_pr(gh: GhApi, number: int) -> PrState:
-    """Read one PR's current state, and dev's tip with it.
+    """Read one PR's current state.
 
     Args:
         gh: The GitHub client.
@@ -583,67 +603,67 @@ def _own_run_id() -> int:
     return int(os.environ.get("GITHUB_RUN_ID", "0") or 0)
 
 
-def _host_workflow() -> str:
-    """The workflow file whose run is executing this script, or "" outside Actions.
+def counted(checks: tuple[CheckRun, ...], runs: list[dict]) -> tuple[CheckRun, ...]:
+    """Drop gate check runs that came from a run other than `pull_request` (a `workflow_dispatch`).
 
-    `GITHUB_WORKFLOW_REF` is `owner/repo/.github/workflows/<file>@<ref>`.
+    Such a check is attached to the head commit but absent from the PR's status rollup, so it
+    never satisfies the context (spec S5). A check whose run is not listed is kept.
+
+    Args:
+        checks: The gate contexts' check runs on the head, from `read_checks`.
+        runs: Every workflow run on the head, from `runs_on`.
+
+    Returns:
+        The checks that count.
     """
-    ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
-    return ref.split("@", 1)[0].rsplit("/", 1)[-1]
+    not_counted = {r.get("check_suite_id") for r in runs
+                   if _workflow_name(r) in GATE_WORKFLOWS and r.get("event") != "pull_request"}
+    return tuple(c for c in checks if c.suite_id is None or c.suite_id not in not_counted)
+
+
+# A completed run with one of these conclusions is no result: a cancelled run is restarted, a
+# held one approved. Any other completed run that reported no check is a failure of its gate.
+NO_RESULT_CONCLUSIONS = frozenset({"cancelled", "action_required"})
 
 
 def required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tuple[CheckRun, ...]:
-    """Required-workflow runs on a head that have not reported their check, as stand-ins.
+    """Gate `pull_request` runs on a head that have not reported their check, as stand-ins.
 
-    - A LIVE run stands in as an in-flight check: each required check is a needs-gated job with
-      no check run until the jobs before it finish, so an in-flight front PR would otherwise
-      look like it has no run and be dispatched again on every wake.
+    - A LIVE run stands in as an in-flight check: each gate is a needs-gated job with no check run
+      until the jobs before it finish, so an in-flight front PR would otherwise look like it has
+      no run.
     - A COMPLETED run with no check run for its context in its check suite stands in as one
-      failure when it failed (`BROKEN_RUN_CONCLUSIONS`: a startup failure, e.g. a broken
-      workflow file on the branch), or when the queue itself dispatched it and it finished
-      green without ever reporting the context (the branch's copy names its gate job
-      differently). Either would otherwise read as "no run" and be dispatched forever. A failed
-      run whose suite DID report the check is not a gate failure (its queue-tick may have
-      failed); that check run already speaks for it.
+      failure, whatever it concluded, unless it was cancelled or is held (`NO_RESULT_CONCLUSIONS`):
+      a startup failure, a timeout before the gate job, or a gate job the branch renamed or removed
+      would otherwise read as "no run" and be started again on every wake. As a failure it is
+      retried once and then evicted. A run whose suite DID report the check is judged by that check
+      (a failed run whose queue-tick failed is not a gate failure).
 
-    A hand-started `frontend-required.yml` dispatch is skipped: it publishes a diagnostic name,
-    never the required one (spec 4.8).
-
-    A workflow-run conclusion is only ever read as a failure here, never as a merge signal.
-    The queue's own run (GITHUB_RUN_ID) is never counted: a queue-tick runs inside the required
-    workflow run it reports on. The license gate runs on `dev`, not on this head, so it has no
-    stand-in; its commit status is all the queue sees of it.
+    Only `pull_request` runs stand in: a dispatched gate run can never satisfy a context (spec
+    S5), whoever started it, so waiting on one would only stall the line. A workflow-run
+    conclusion is only ever read as a failure here, never as a merge signal. The license gate runs
+    on `dev`, not on this head, so it has no stand-in.
 
     Args:
         runs: The workflow runs on the head, from `runs_on`.
-        checks: The check-run contexts' runs on that head, from `read_checks`.
+        checks: The gate contexts' counted check runs on that head.
 
     Returns:
-        One stand-in per live run and per completed run that counts as a failure.
+        One stand-in per live run and per completed run that reported no check.
     """
     by_workflow = {c.workflow: c for c in CONTEXTS if c.kind == "check"}
     reported = {(c.context, c.suite_id) for c in checks if c.suite_id is not None}
     stand_ins = []
     for run in runs:
         ctx = by_workflow.get(_workflow_name(run))
-        if ctx is None or run.get("id") == _own_run_id():
+        if ctx is None or run.get("event") != "pull_request":
             continue
-        # A diagnostic dispatch can never report the required name, so neither its being live
-        # nor its failing says anything about the context. `actor` is who started the run and,
-        # unlike `triggering_actor`, does not change when someone re-runs it.
-        if (ctx.queue_only_dispatch and run.get("event") == "workflow_dispatch"
-                and (run.get("actor") or {}).get("login") != QUEUE_ACTOR):
-            continue
-        context = ctx.name
-        url, conclusion = run.get("html_url", ""), run.get("conclusion")
+        url = run.get("html_url", "")
         if run.get("status") in LIVE_RUN_STATUSES:
-            stand_ins.append(CheckRun(context, run["status"], None, None, url))
-            continue
-        silent_green = (conclusion == "success" and run.get("event") == "workflow_dispatch"
-                        and (run.get("triggering_actor") or {}).get("login") == QUEUE_ACTOR)
-        if (run.get("status") == "completed" and (conclusion in BROKEN_RUN_CONCLUSIONS or silent_green)
-                and (context, run.get("check_suite_id")) not in reported):
-            stand_ins.append(CheckRun(context, "completed", "failure", _ts(run.get("updated_at")), url))
+            stand_ins.append(CheckRun(ctx.name, run["status"], None, None, url))
+        elif (run.get("status") == "completed" and run.get("conclusion") not in NO_RESULT_CONCLUSIONS
+              and (ctx.name, run.get("check_suite_id")) not in reported):
+            stand_ins.append(CheckRun(ctx.name, "completed", "failure", _ts(run.get("updated_at")), url))
     return tuple(stand_ins)
 
 
@@ -658,13 +678,13 @@ def read_contexts(gh: GhApi, sha: str) -> tuple[CheckRun, ...]:
         sha: The head commit.
 
     Returns:
-        Check runs, workflow-run stand-ins and commit statuses, each tagged with its context.
+        Counted check runs, workflow-run stand-ins and commit statuses, each tagged with its context.
 
     Raises:
         GhError: A call failed.
     """
     runs = runs_on(gh, sha)
-    checks = read_checks(gh, sha)
+    checks = counted(read_checks(gh, sha), runs)
     return checks + required_run_stand_ins(runs, checks) + read_statuses(gh, sha)
 
 
@@ -676,20 +696,67 @@ def _best_effort(log: Callable[[str], None], what: str, fn: Callable[[], object]
         log(f"  best-effort {what} failed: {exc}")
 
 
-def comment_once(gh: GhApi, number: int, kind: str, sha: str, body: str) -> bool:
-    """Post a comment unless one of this kind already exists for this head.
+def _transient(exc: GhError) -> bool:
+    """Whether an error is GitHub's or the network's, saying nothing about the PR.
+
+    Matches what gh prints: a REST error `gh: <message> (HTTP 502)`, a non-JSON one `gh: HTTP 502`,
+    a GraphQL timeout `gh: Something went wrong while executing your query...`, rate limits and
+    abuse detection, and a network failure, where gh prints no `gh: ` server message at all
+    (e.g. `Post "https://api.github.com/graphql": EOF`).
 
     Args:
-        gh: The GitHub client.
-        number: The PR number.
-        kind: The comment's kind, part of its hidden marker.
-        sha: The head the comment is about, part of its hidden marker.
-        body: The visible text.
+        exc: The error a call raised.
 
     Returns:
-        True if it posted, False if the marker was already there.
+        True for an outage or throttling error; False for GitHub's answer about this PR.
+    """
+    message = str(exc).split(" failed: ", 1)[-1]
+    lowered = message.lower()
+    # ponytail: "no `gh: ` line" = network. Should gh ever drop that prefix, every error reads as
+    # transient: queue runs fail visibly and nothing is disarmed; match the new shape then.
+    server_answered = any(line.startswith("gh: ") for line in message.splitlines())
+    return ("HTTP 5" in message or "HTTP 429" in message or "rate limit" in lowered or "abuse detection" in lowered
+            or "something went wrong while executing your query" in lowered or not server_answered)
+
+
+def has_comment(gh: GhApi, number: int, kind: str, sha: str) -> bool:
+    """Whether the queue already posted a comment of this kind for this head.
 
     Raises:
+        GhError: The read failed.
+    """
+    return marker_age(gh, number, kind, sha, datetime.now(timezone.utc)) is not None
+
+
+def marker_age(gh: GhApi, number: int, kind: str, sha: str, now: datetime) -> timedelta | None:
+    """How long ago the queue posted a comment of this kind for this head.
+
+    Returns:
+        Its age, `timedelta.max` if it has no timestamp, or None if there is no such comment.
+
+    Raises:
+        GhError: The read failed.
+    """
+    marker = f"<!-- merge-queue:{kind}:{sha} -->"
+    owner, name = _owner_name()
+    data = gh.graphql(COMMENTS_QUERY, owner=owner, name=name, number=number)
+    for node in data["data"]["repository"]["pullRequest"]["comments"]["nodes"]:
+        if marker in (node.get("body") or ""):
+            posted = _ts(node.get("createdAt"))
+            return timedelta.max if posted is None else now - posted
+    return None
+
+
+def comment_once(gh: GhApi, number: int, kind: str, sha: str, body: str,
+                 log: Callable[[str], None] = print) -> bool:
+    """Post a comment unless one of this kind already exists for this head.
+
+    Returns:
+        True if it posted, False if the marker was already there (or a racing queue run posted
+        the same comment first, in which case this run's copy is removed).
+
+    Raises:
+        CommentRefused: The PR's conversation is locked.
         GhError: A call failed.
     """
     marker = f"<!-- merge-queue:{kind}:{sha} -->"
@@ -698,21 +765,103 @@ def comment_once(gh: GhApi, number: int, kind: str, sha: str, body: str) -> bool
     bodies = [n.get("body") or "" for n in data["data"]["repository"]["pullRequest"]["comments"]["nodes"]]
     if any(marker in b for b in bodies):
         return False
-    gh.rest("POST", f"repos/{REPO}/issues/{number}/comments", {"body": f"{marker}\n{body}"})
+    try:
+        posted = gh.rest("POST", f"repos/{REPO}/issues/{number}/comments", {"body": f"{marker}\n{body}"})
+    except GhError as exc:
+        if "is locked" in str(exc).lower() and not _transient(exc):
+            raise CommentRefused(str(exc)) from exc
+        raise
+    # Two racing queue runs can both pass the check above and both post. Each then looks again and
+    # the later one removes its own copy, so one comment remains.
+    own_id = posted.get("id") if isinstance(posted, dict) else None
+    if own_id is None:
+        return True
+    try:
+        again = gh.graphql(COMMENTS_QUERY, owner=owner, name=name, number=number)
+        ids = [n["databaseId"] for n in again["data"]["repository"]["pullRequest"]["comments"]["nodes"]
+               if marker in (n.get("body") or "") and n.get("databaseId") is not None]
+        if ids and min(ids) < own_id:
+            gh.rest("DELETE", f"repos/{REPO}/issues/comments/{own_id}")
+            return False
+    except GhError as exc:
+        # The comment is posted; tidying up must never stop what the caller does next. At worst two copies stay.
+        log(f"  best-effort comment de-duplication on #{number} failed: {exc}")
     return True
 
 
-def dispatch(gh: GhApi, workflow: str, ref: str, inputs: dict[str, str] | None = None) -> None:
-    """Start a workflow_dispatch run.
+def _comment_if_allowed(gh: GhApi, number: int, kind: str, sha: str, log: Callable[[str], None], body: str) -> None:
+    try:
+        comment_once(gh, number, kind, sha, body, log)
+    except CommentRefused as exc:
+        log(f"  cannot comment on #{number} ({exc}); skipped")
+
+
+def _disarm(gh: GhApi, pr: PrState, log: Callable[[str], None]) -> None:
+    try:
+        gh.graphql(DISARM_MUTATION, id=pr.node_id)
+    except GhError as exc:
+        # Two racing runs can evict the same PR (a merge fires both push:dev and
+        # pull_request:closed), and the second disarm hits an already-disarmed PR. Any other
+        # failure must not leave the PR armed under a "removed" comment: fail the run, and the
+        # next one evicts it again.
+        if read_pr(gh, pr.number).armed_at is not None:
+            raise
+        log(f"  #{pr.number} was already disarmed ({exc})")
+
+
+def _evict(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None]) -> bool:
+    """Tell the PR why, then disarm it; always returns True (it left the line)."""
+    # Comment first: if the job dies between the two calls the PR stays armed and the next run
+    # evicts it again (the comment is deduplicated), instead of being disarmed with no reason given.
+    links = "".join(f"\n- {u}" for u in action.links)
+    comment_once(
+        gh, pr.number, f"evict-{action.slug}", pr.head_sha,
+        f"Merge queue: removed from the line ({action.reason}). Auto-merge is now off. Fix the cause, then "
+        f"re-arm with `gh pr merge {pr.number} --auto --merge` to rejoin at the back.{links}",
+        log,
+    )
+    _disarm(gh, pr, log)
+    log(f"  evicted #{pr.number}: {action.reason}")
+    return True
+
+
+def _strike(gh: GhApi, pr: PrState, kind: str, warning: str, eviction: Action, wake_first: bool,
+            log: Callable[[str], None], now: Callable[[], datetime]) -> bool:
+    """Count one failure to get this head going (see STRIKE_GAP).
 
     Args:
         gh: The GitHub client.
-        workflow: The workflow file's basename.
-        ref: The branch to run it on (its copy of the workflow is the one that runs).
-        inputs: The dispatch inputs, if any.
+        pr: The front PR.
+        kind: The warning comment's kind (`rebase-failed`, `rebase-unmoved`, `no-run`, `approve-error`).
+        warning: The warning's text.
+        eviction: The eviction for a strike at least STRIKE_GAP after the warning.
+        wake_first: Wake a queue kick after the warning, to look again soon.
+        log: Receives one line per notable step.
+        now: The clock.
+
+    Returns:
+        True if the PR was evicted.
 
     Raises:
-        GhError: GitHub refused the dispatch (e.g. HTTP 422, no workflow_dispatch trigger).
+        GhError: A call failed.
+    """
+    age = marker_age(gh, pr.number, kind, pr.head_sha, now())
+    if age is None:
+        comment_once(gh, pr.number, kind, pr.head_sha, warning, log)
+        if wake_first:
+            _wake_best_effort(gh, log)
+        return False
+    if age < STRIKE_GAP:
+        log(f"  #{pr.number}: {kind} again within {STRIKE_GAP}; a later event decides")
+        return False
+    return _evict(gh, pr, eviction, log)
+
+
+def dispatch(gh: GhApi, workflow: str, ref: str, inputs: dict[str, str] | None = None) -> None:
+    """Start a workflow_dispatch run. Only `dispatch_license` and `wake` call this (guard-tested).
+
+    Raises:
+        GhError: GitHub refused the dispatch.
     """
     fields = {"ref": ref}
     for key, value in (inputs or {}).items():
@@ -720,118 +869,251 @@ def dispatch(gh: GhApi, workflow: str, ref: str, inputs: dict[str, str] | None =
     gh.rest("POST", f"repos/{REPO}/actions/workflows/{workflow}/dispatches", fields)
 
 
-def dispatch_request(ctx: Context, pr: PrState) -> tuple[str, str, dict[str, str]]:
-    """Say how one required context is started for a PR's head (spec 4.1 table).
+def dispatch_license(gh: GhApi, pr: PrState, log: Callable[[str], None]) -> None:
+    """Start dev's copy of the license gate for the PR (spec 4.4): the one context the queue dispatches.
 
-    A check context runs the PR branch's copy of its workflow, with dev's tip as `base_sha`
-    where the workflow takes one. The license status runs dev's copy of the license gate with
-    the PR number, so the policy code is always dev's.
+    Any error re-raises: the dispatch runs on dev, so a refusal is never the PR's fault.
+    """
+    dispatch(gh, LICENSE.workflow, BASE, {"pr": str(pr.number)})
+    log(f"  dispatched {LICENSE.workflow} on {BASE} for #{pr.number}")
 
-    Args:
-        ctx: The context to start.
-        pr: The PR; `head_ref`, `base_sha` and `number` are used.
 
-    Returns:
-        The workflow file, the ref to dispatch it on, and its inputs.
+def wake(gh: GhApi, wait_run: int | None = None) -> None:
+    """Start a queue kick: `security-required.yml` on dev with `queue_kick=true` (spec 4.6, D3).
+
+    Its gate jobs skip and only its `queue-kick` job runs, which waits for `wait_run` (if given)
+    and then runs the queue. GitHub keeps one kick running and one pending; a newer pending kick
+    replaces an older pending one, which is enough because every kick decides from fresh state.
 
     Raises:
-        GhError: dev's tip is unknown. Without `base_sha` a gate would compare against `HEAD^`
-            and could pass with nothing tested (spec 4.3).
+        GhError: The dispatch failed.
     """
-    if ctx.kind == "status":
-        return ctx.workflow, BASE, {"pr": str(pr.number)}
-    if not ctx.base_sha:
-        return ctx.workflow, pr.head_ref, {}
-    if not pr.base_sha:
-        raise GhError(f"{BASE}'s tip is unknown for #{pr.number}; refusing to dispatch {ctx.workflow} without base_sha")
-    return ctx.workflow, pr.head_ref, {"base_sha": pr.base_sha}
+    inputs = {"queue_kick": "true"}
+    if wait_run is not None:
+        inputs["wait_run"] = str(wait_run)
+    dispatch(gh, KICK_WORKFLOW, BASE, inputs)
 
 
-def _evict(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None]) -> bool:
-    """Disarm the PR and tell it why, once per cause and head; always returns True (it left the line)."""
-    # Best-effort: a merge fires both push:dev and pull_request:closed, so two racing runs can
-    # evict the same PR and the second disarm hits an already-disarmed PR.
-    _best_effort(log, f"disarm #{pr.number}", lambda: gh.graphql(DISARM_MUTATION, id=pr.node_id))
-    links = "".join(f"\n- {u}" for u in action.links)
-    comment_once(
-        gh, pr.number, f"evict-{action.slug}", pr.head_sha,
-        f"Merge queue: removed from the line ({action.reason}). Auto-merge is now off. Fix the cause, then "
-        f"re-arm with `gh pr merge {pr.number} --auto --merge` to rejoin at the back.{links}",
-    )
-    log(f"  evicted #{pr.number}: {action.reason}")
-    return True
+def _wake_best_effort(gh: GhApi, log: Callable[[str], None]) -> None:
+    _best_effort(log, "wake a queue kick", lambda: wake(gh))
 
 
-def _dispatch_contexts(
-    gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], None],
-    finish: Callable[[], None] = lambda: None,
-) -> bool:
-    """Dispatch the named contexts on the PR's head; a refusal by the PR's branch evicts the PR.
+def wait_for_run(gh: GhApi, run_id: int, sleep: Callable[[float], None], log: Callable[[str], None]) -> None:
+    """Wait, bounded, for a workflow run to complete; a run still live after the bound is left."""
+    error: GhError | None = None
+    for _ in range(WAIT_RUN_TRIES):
+        try:
+            if gh.rest("GET", f"repos/{REPO}/actions/runs/{run_id}").get("status") not in LIVE_RUN_STATUSES:
+                return
+            error = None
+        except GhError as exc:  # a failed read is retried within the bound, never fatal
+            error = exc
+        sleep(WAIT_RUN_DELAY_S)
+    seen = f"last read failed: {error}" if error else "still live"
+    log(f"run {run_id} not seen complete after {WAIT_RUN_TRIES * WAIT_RUN_DELAY_S:.0f}s ({seen}); deciding anyway")
 
-    Only HTTP 422 (the branch's workflow is broken, lacks the trigger or rejects the input) and
-    HTTP 404 (the ref is gone) on a dispatch to the PR's OWN branch are the PR's fault. Anything
-    else re-raises, so the run fails and the next event retries: a 5xx, rate limit, network
-    error or 403, and any error at all from the license gate, which is dispatched on `dev`.
-    Evicting on those would disarm every front that an outage, or a broken `dev`, touches.
 
-    The license gate goes first: it is the one dispatch the PR cannot be blamed for, so if it
-    fails the run stops before any runner is spent on the six gates.
+def _is_held(run: dict) -> bool:
+    """Whether GitHub holds this run for approval (it lists as completed, `action_required`)."""
+    return "action_required" in (run.get("status"), run.get("conclusion"))
 
-    The workflow this script is running in goes last. A queue-tick runs inside a required
-    workflow's own run, and dispatching that same workflow on the same branch cancels the run
-    executing this script (one concurrency group per workflow, event and ref, with
-    cancel-in-progress). Everything the caller still has to do once the runs are started is
-    passed as `finish`: it runs after the last dispatch, or just before the host workflow's
-    dispatch when there is one, so a cancelled tick loses nothing.
 
-    Args:
-        gh: The GitHub client.
-        pr: The PR whose head the contexts are started on.
-        names: The contexts to start.
-        log: Receives one line per dispatch.
-        finish: The caller's remaining work (cancel superseded runs, comment). Not run if the
-            PR is evicted before the point where it would run.
+def _queue_held(run: dict) -> bool:
+    """Whether this is a held run the queue may approve (spec section 7, "What may be approved").
+
+    A gate workflow's pull_request run that the queue's own token caused, on this repository's
+    branch. Never a non-gate workflow (D1: `ci.yml` alone is 200+ jobs), never a run from another
+    repository (GitHub's approval gate for outside contributors), never one another actor caused,
+    such as an agent's push waiting for a person.
+    """
+    return (_is_held(run) and run.get("event") == "pull_request"
+            and _workflow_name(run) in GATE_WORKFLOWS
+            and (run.get("triggering_actor") or {}).get("login") == QUEUE_ACTOR
+            and (run.get("head_repository") or {}).get("full_name") == REPO)
+
+
+def approve_held_runs(gh: GhApi, sha: str, log: Callable[[str], None]) -> set[str]:
+    """Approve the gate runs GitHub holds on this head because the queue's token caused them.
+
+    Best-effort per run: one refused approval must not stop the others.
 
     Returns:
-        True if the PR was evicted (the line moves on), False if the runs were started.
+        The workflow names whose held runs were approved.
     """
-    host = _host_workflow()
-    ordered = sorted(
-        (c for c in CONTEXTS if c.name in names), key=lambda c: (c.workflow == host, c.kind != "status"),
-    )
-    requests = [(ctx, dispatch_request(ctx, pr)) for ctx in ordered]  # all resolved before any is sent
-    finished = False
-    for ctx, (workflow, ref, inputs) in requests:
-        if workflow == host and not finished:
-            finish()
-            finished = True
+    try:
+        held = runs_on(gh, sha, status="action_required")
+    except GhError as exc:
+        log(f"  best-effort list held runs failed: {exc}")
+        return set()
+    approved: set[str] = set()
+    for run in held:
+        if not _queue_held(run):
+            continue
         try:
-            dispatch(gh, workflow, ref, inputs)
+            gh.rest("POST", f"repos/{REPO}/actions/runs/{run['id']}/approve")
         except GhError as exc:
-            if ctx.kind == "status" or not any(code in str(exc) for code in BRANCH_REFUSALS):
-                raise
-            reason = f"CI dispatch of {workflow} failed: {str(exc)[:200]}"
-            return _evict(gh, pr, Action("evict", reason, slug="dispatch"), log)
-        log(f"  dispatched {workflow} on {ref} for #{pr.number}")
-    if not finished:
-        finish()
+            log(f"  best-effort approve run {run['id']} failed: {exc}")
+            continue
+        approved.add(_workflow_name(run))
+        log(f"  approved held run {run['id']} ({_workflow_name(run)})")
+    return approved
+
+
+def _approve_strictly(gh: GhApi, pr: PrState, run: dict, log: Callable[[str], None],
+                      now: Callable[[], datetime]) -> bool:
+    """Approve one held gate run a start or retry depends on.
+
+    Not best-effort: a transient error re-raises (the run fails; nobody is disarmed). Any other
+    refusal is re-read first: a run no longer held was approved by a racing queue run. One still
+    held is an `approve-error` strike.
+
+    Returns:
+        True if the PR was evicted.
+
+    Raises:
+        GhError: A transient error, or a failed re-read.
+    """
+    try:
+        gh.rest("POST", f"repos/{REPO}/actions/runs/{run['id']}/approve")
+    except GhError as exc:
+        if _transient(exc):
+            raise
+        if not _is_held(gh.rest("GET", f"repos/{REPO}/actions/runs/{run['id']}")):
+            log(f"  run {run['id']} is no longer held; a racing queue run approved it")
+            return False
+        error = str(exc)[:200]
+        return _strike(
+            gh, pr, "approve-error",
+            f"Merge queue: GitHub refused to approve one of this PR's gate runs ({error}). It will try again, and "
+            "remove it from the line if GitHub still refuses 10 minutes from now.",
+            Action("evict", f"GitHub keeps refusing to approve its gate run: {error}", slug="approve"), False, log, now,
+        )
+    log(f"  approved held run {run['id']} ({_workflow_name(run)})")
     return False
 
 
-def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[[float], None]) -> bool:
-    """Rebase the front PR onto dev with its head pinned, then start the seven contexts (spec section 7).
+def _going_again(gh: GhApi, run_id: int) -> bool:
+    """Whether a run is live or held again, i.e. a racing queue run has re-run it since we looked."""
+    fresh = gh.rest("GET", f"repos/{REPO}/actions/runs/{run_id}")
+    return fresh.get("status") in LIVE_RUN_STATUSES or _is_held(fresh)
+
+
+def _rerun_error(exc: GhError) -> str:
+    """Classify a re-run error as `refused`, `transient` or `unknown` (see RERUN_REFUSALS)."""
+    text = str(exc)
+    if any(code in text for code in RERUN_REFUSALS) or ("HTTP 403" in text and RERUN_REFUSAL_403_TEXT in text.lower()):
+        return "refused"
+    if _transient(exc):
+        return "transient"
+    return "unknown"
+
+
+def _rerun(gh: GhApi, pr: PrState, run: dict, failed_only: bool, log: Callable[[str], None],
+           sleep: Callable[[float], None], now: Callable[[], datetime]) -> str:
+    """Re-run a gate run in place, then approve the re-run if GitHub holds it.
+
+    A re-run adds an attempt to the same check suite, so it replaces the old result for branch
+    protection while `read_checks` (filter=all) still lists the old one.
 
     Returns:
-        True if the PR was evicted (conflicts, a rebase the token may not do, a second failed
-        rebase, or a refused dispatch), False otherwise.
+        `started` (by this run, or by a racing queue run), `pending` (re-run, not live after the
+        approval polls: the caller wakes a kick once it has recorded the attempt), or `refused`.
+
+    Raises:
+        GhError: A transient error, or an unknown one before its warning is STRIKE_GAP old.
+    """
+    path = f"repos/{REPO}/actions/runs/{run['id']}/{'rerun-failed-jobs' if failed_only else 'rerun'}"
+    try:
+        gh.rest("POST", path)
+    except GhError as exc:
+        kind = _rerun_error(exc)
+        if kind == "transient":
+            raise
+        # Whatever code GitHub refused with, a racing queue run may have re-run it first.
+        if _going_again(gh, run["id"]):
+            log(f"  #{pr.number}: run {run['id']} was re-run by a racing queue run; standing down")
+            return "started"
+        if kind == "unknown":
+            age = marker_age(gh, pr.number, "rerun-error", pr.head_sha, now())
+            if age is None:
+                comment_once(
+                    gh, pr.number, "rerun-error", pr.head_sha,
+                    f"Merge queue: re-running a required gate failed ({str(exc)[:200]}); will try again, and "
+                    "remove it from the line if it still fails 10 minutes from now.",
+                    log,
+                )
+                raise
+            if age < STRIKE_GAP:
+                raise
+        log(f"  #{pr.number}: re-run of run {run['id']} refused: {exc}")
+        return "refused"
+    # The re-run's actor is the queue's token, so GitHub may hold it for approval again.
+    for _ in range(HELD_RUN_POLLS):
+        sleep(HELD_RUN_POLL_S)
+        approve_held_runs(gh, pr.head_sha, log)
+        if gh.rest("GET", f"repos/{REPO}/actions/runs/{run['id']}").get("status") in LIVE_RUN_STATUSES:
+            log(f"  #{pr.number}: re-ran run {run['id']}")
+            return "started"
+    log(f"  #{pr.number}: re-ran run {run['id']}; not live yet")
+    return "pending"
+
+
+def _wake_if_moved(gh: GhApi, pr: PrState, sleep: Callable[[float], None]) -> bool:
+    """Wake a kick if the PR's head moved; return whether it did.
+
+    Raises:
+        GhError: The re-read or the wake failed. The caller then treats the head as unmoved, so a
+            wake that never went out is not mistaken for a stand-down.
+    """
+    sleep(REBASE_POLL_S)  # an accepted rebase moves the branch about 1 s after the mutation returns
+    if read_pr(gh, pr.number).head_sha == pr.head_sha:
+        return False
+    wake(gh)
+    return True
+
+
+def _approve_gates(gh: GhApi, sha: str, log: Callable[[str], None], sleep: Callable[[float], None]) -> set[str]:
+    """Approve the six held gate runs on a fresh head, waiting (bounded) for them to appear."""
+    approved: set[str] = set()
+    for attempt in range(HELD_RUN_POLLS):
+        if attempt:
+            sleep(HELD_RUN_POLL_S)
+        approved |= approve_held_runs(gh, sha, log)
+        if approved >= GATE_WORKFLOWS:
+            break
+    return approved
+
+
+def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[[float], None],
+            now: Callable[[], datetime]) -> bool:
+    """Rebase the front PR onto dev with its head pinned, then get its seven contexts going (spec section 6).
+
+    Returns:
+        True if the PR was evicted, False otherwise.
+
+    Raises:
+        GhError: A transient error with the head unmoved, or the license dispatch failed.
     """
     try:
         gh.graphql(REBASE_MUTATION, id=pr.node_id, oid=pr.head_sha)
     except GhError as exc:
+        if _transient(exc):
+            # Each merge wakes two queue runs, and the one that loses the rebase race is answered
+            # with a generic error; a lost response looks the same. With the head moved, nothing
+            # failed: stand down. With it unmoved it is GitHub's error: fail the run so the next
+            # event retries; it never counts toward an eviction.
+            try:
+                moved = _wake_if_moved(gh, pr, sleep)
+            except GhError as read_exc:
+                log(f"  re-read or wake after a failed rebase failed: {read_exc}")
+                moved = False
+            if moved:
+                log(f"  rebase of #{pr.number} was answered with an error, but its head moved; standing down")
+                return False
+            raise
         fresh = read_pr(gh, pr.number)
         if fresh.head_sha == pr.head_sha and fresh.merge_state != "DIRTY":
-            # A racing run's rebase may have been accepted with its ref update still landing
-            # (about 1 s): look once more before counting this as our own failure.
+            # A racing run's rebase may have been accepted with its ref update still landing.
             sleep(REBASE_POLL_S)
             fresh = read_pr(gh, pr.number)
         if fresh.head_sha != pr.head_sha:
@@ -840,7 +1122,6 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
         if fresh.merge_state == "DIRTY":
             return _evict(gh, fresh, Action("evict", "conflicts with dev (rebase refused)", slug="conflict"), log)
         if all(word in str(exc).lower() for word in WORKFLOW_REFUSAL):
-            # Retrying cannot help, and waiting would hold up everyone behind this PR.
             reason = (
                 "dev changed workflow files since this branch was cut, and the queue's token is not allowed to "
                 "rebase across them; rebase onto dev by hand (`git fetch origin dev && git rebase origin/dev`, "
@@ -848,16 +1129,14 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
             )
             return _evict(gh, fresh, Action("evict", reason, slug="workflows"), log)
         error = str(exc)[:200]
-        posted = comment_once(
-            gh, pr.number, "rebase-failed", pr.head_sha,
-            f"Merge queue: rebasing onto dev failed ({error}); will retry once, then remove from the line.",
+        log(f"  rebase failed: {exc}")
+        return _strike(
+            gh, fresh, "rebase-failed",
+            f"Merge queue: rebasing onto dev failed ({error}); will retry, and remove it from the line if "
+            "rebasing still fails 10 minutes from now.",
+            Action("evict", f"rebase onto dev keeps failing: {error}", slug="rebase"), False, log, now,
         )
-        if posted:
-            log(f"  rebase failed, will retry once: {exc}")
-            return False
-        return _evict(gh, fresh, Action("evict", f"rebase onto dev keeps failing: {error}", slug="rebase"), log)
-    # The mutation returns the PRE-rebase headRefOid and the branch moves about 1 s later, so
-    # wait for the new head to appear before dispatching CI on it.
+    # The mutation returns the PRE-rebase headRefOid and the branch moves about 1 s later.
     rebased = None
     for _ in range(REBASE_POLLS):
         sleep(REBASE_POLL_S)
@@ -866,35 +1145,244 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
             rebased = fresh
             break
     if rebased is None:
-        log(f"  rebase of #{pr.number} accepted but the head never moved; a later wake recovers it")
-        return False
-    old_runs = runs_on(gh, pr.head_sha)
-
-    def finish() -> None:
-        """Cancel the old head's runs, drop empty approval runs and announce the rebase."""
-        # The run executing this script is never cancelled: a queue-tick runs inside a required
-        # workflow's run on the old head, and an auto_merge_enabled-triggered merge-queue.yml
-        # run shares that head too.
-        for run in old_runs:
-            if run.get("status") not in LIVE_RUN_STATUSES:
-                continue
-            if run.get("id") == _own_run_id() or _workflow_name(run) == QUEUE_WORKFLOW:
-                continue
-            _best_effort(log, f"cancel run {run['id']}",
-                         lambda rid=run["id"]: gh.rest("POST", f"repos/{REPO}/actions/runs/{rid}/cancel"))
-        cleanup_approval_runs(gh, rebased, log)
-        comment_once(
-            gh, pr.number, "rebased", rebased.head_sha,
-            f"Merge queue: this PR is next. Rebased onto `{BASE}` (head `{rebased.head_sha[:10]}`) and started "
-            f"the {len(CONTEXTS)} required checks.",
+        log(f"  rebase of #{pr.number} accepted but the head never moved")
+        # If the branch moves later its held runs need a queue run to approve them: the warning
+        # wakes a kick. A later unmoved rebase evicts, or every event would rebase again.
+        return _strike(
+            gh, pr, "rebase-unmoved",
+            "Merge queue: the rebase onto dev was accepted, but the branch has not moved yet; a queue run will "
+            "look again shortly, and remove it from the line if the branch still does not move 10 minutes from now.",
+            Action("evict", "rebase onto dev was accepted but the branch never moved, twice at least 10 minutes apart",
+                   slug="rebase-unmoved"), True, log, now,
         )
-
-    # A rebase made with GITHUB_TOKEN starts no pull_request run, so the queue starts all seven
-    # contexts itself (spec 4.2), and nothing else (spec 4.5). The old head's runs are cancelled
-    # only once the new ones are started (see _dispatch_contexts for the one exception).
-    if _dispatch_contexts(gh, rebased, ALL_CONTEXTS, log, finish):
-        return True
+    try:
+        old_runs = runs_on(gh, pr.head_sha)
+        # Spec 4.4: the license status first, so each gate's await_license finds it (when
+        # LICENSE_FIRST_CI_ENABLED is true). Then the gates: approving their held runs is what makes
+        # their checks count (S4). Then the other held runs go (D1), then the old head's live runs.
+        dispatch_license(gh, rebased, log)
+        approved = _approve_gates(gh, rebased.head_sha, log, sleep)
+    except GhError:
+        # The branch has moved and its gate runs are held: nothing else would wake the queue to
+        # approve them. The kick finds an up-to-date head and approves, so this cannot chain.
+        _wake_best_effort(gh, log)
+        raise
+    cleanup_approval_runs(gh, rebased, log)
+    for run in old_runs:
+        if run.get("status") not in LIVE_RUN_STATUSES:
+            continue
+        if run.get("id") == _own_run_id() or _workflow_name(run) == QUEUE_WORKFLOW:
+            continue
+        _best_effort(log, f"cancel run {run['id']}",
+                     lambda rid=run["id"]: gh.rest("POST", f"repos/{REPO}/actions/runs/{rid}/cancel"))
+    total = len(GATE_WORKFLOWS)
+    if len(approved) < total:
+        # The rest are still held, and a held run never runs its own queue-tick: wake a kick.
+        _wake_best_effort(gh, log)
+        started = f"approved {len(approved)} of its {total} required gates; a woken queue run approves the rest"
+    else:
+        started = f"approved its {total} required gates"
+    _comment_if_allowed(
+        gh, pr.number, "rebased", rebased.head_sha, log,
+        f"Merge queue: this PR is next. Rebased onto `{BASE}` (head `{rebased.head_sha[:10]}`); dispatched the "
+        f"license gate and {started}.",
+    )
     log(f"  rebased #{pr.number} {pr.head_sha[:10]} -> {rebased.head_sha[:10]}")
+    return False
+
+
+def cleanup_approval_runs(gh: GhApi, pr: PrState, log: Callable[[str], None]) -> None:
+    """Delete the non-gate runs GitHub holds on the front head because the queue's token caused them (D1).
+
+    A queue rebase makes GitHub hold a run for every pull_request workflow; only the six gates are
+    approved. Deleting the others removes the "Approve and run" button that would start `ci.yml`'s
+    200+ jobs on a click. A gate's held run is never deleted here. Best-effort end to end.
+    """
+    try:
+        runs = runs_on(gh, pr.head_sha, status="action_required")
+    except GhError as exc:
+        log(f"  best-effort list approval-pending runs failed: {exc}")
+        return
+    for run in runs:
+        if (run.get("triggering_actor") or {}).get("login") != QUEUE_ACTOR or _workflow_name(run) in GATE_WORKFLOWS:
+            continue
+        _best_effort(log, f"delete approval-pending run {run['id']}",
+                     lambda rid=run["id"]: gh.rest("DELETE", f"repos/{REPO}/actions/runs/{rid}"))
+
+
+def _gate_runs(gh: GhApi, sha: str) -> list[dict]:
+    """The gate workflows' pull_request runs on this head, newest first."""
+    runs = [r for r in runs_on(gh, sha) if _workflow_name(r) in GATE_WORKFLOWS and r.get("event") == "pull_request"]
+    return sorted(runs, key=lambda r: r.get("created_at") or "", reverse=True)
+
+
+def _restart_cancelled(gh: GhApi, pr: PrState, ctx: Context, run: dict, links: tuple[str, ...],
+                       log: Callable[[str], None], sleep: Callable[[float], None], now: Callable[[], datetime]) -> bool:
+    """Re-run a cancelled gate run in full, once per gate per head (the `restart-<context>` marker).
+
+    A cancelled run says nothing about the PR (a timeout, a person, a superseded run), so it is
+    restarted rather than counted as a failure. A second cancellation on the same head evicts:
+    a gate that keeps being cancelled, such as one that hits its job timeout, would otherwise be
+    restarted on every wake and hold the line forever.
+
+    Returns:
+        True if the PR was evicted.
+    """
+    kind = f"restart-{ctx.name}"
+    if has_comment(gh, pr.number, kind, pr.head_sha):
+        if _going_again(gh, run["id"]):
+            log(f"  #{pr.number}: run {run['id']} was restarted by a racing queue run; standing down")
+            return False
+        return _evict(gh, pr, Action("evict", f"{ctx.name} was cancelled again after the queue restarted it",
+                                     links, "rerun"), log)
+    outcome = _rerun(gh, pr, run, False, log, sleep, now)
+    if outcome == "refused":
+        return _evict(gh, pr, Action("evict", f"GitHub refused to restart the cancelled {ctx.name} run; push a "
+                                     "commit, or close and reopen the PR", links, "no-run"), log)
+    comment_once(gh, pr.number, kind, pr.head_sha,
+                 f"Merge queue: {ctx.name}'s run on `{pr.head_sha[:10]}` was cancelled; restarting it once.", log)
+    if outcome == "pending":
+        _wake_best_effort(gh, log)
+    return False
+
+
+def _start(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], None],
+           sleep: Callable[[float], None], now: Callable[[], datetime]) -> bool:
+    """Get the named missing contexts going on an up-to-date head (spec 4.1, start).
+
+    The license is dispatched on dev. A gate's held run is approved; with none, its newest completed
+    pull_request run (cancelled, or whose gate job was cancelled) is restarted once
+    (`_restart_cancelled`). A run that finished without reporting its check is a failure stand-in,
+    so its context is failed, not missing, and goes through `_retry_gate`. A dispatch would not
+    count (S5), so a gate with no run at all gets a `no-run` strike. It looks again for up to
+    HELD_RUN_POLLS x HELD_RUN_POLL_S first: a head's age is its commit date, not its push, so its
+    runs may not be listed yet.
+
+    Returns:
+        True if the PR was evicted.
+
+    Raises:
+        GhError: A call failed for a reason other than a refusal.
+    """
+    if any(BY_NAME[n].kind == "status" for n in names):
+        dispatch_license(gh, pr, log)
+    pending = {BY_NAME[n].workflow: n for n in names if BY_NAME[n].kind == "check"}
+    for attempt in range(HELD_RUN_POLLS):
+        if not pending:
+            return False
+        if attempt:
+            sleep(HELD_RUN_POLL_S)
+        for run in runs_on(gh, pr.head_sha, status="action_required"):
+            if _workflow_name(run) in pending and _queue_held(run):
+                if _approve_strictly(gh, pr, run, log, now):
+                    return True
+                pending.pop(_workflow_name(run), None)
+        runs = _gate_runs(gh, pr.head_sha)
+        for workflow, name in list(pending.items()):
+            mine = [r for r in runs if _workflow_name(r) == workflow]
+            if any(r.get("status") in LIVE_RUN_STATUSES for r in mine):
+                log(f"  #{pr.number}: a {name} run appeared on {pr.head_sha[:10]}; standing down for it")
+                del pending[workflow]
+                continue
+            # A missing context's completed runs ended with no counted result for it: the run, or its
+            # gate job, was cancelled (any other completed run without the check is a failure
+            # stand-in). A run held for someone else is theirs, never ours to touch.
+            redo = next((r for r in mine if r.get("status") == "completed" and not _is_held(r)), None)
+            if redo is None:
+                continue
+            if _restart_cancelled(gh, pr, BY_NAME[name], redo, (), log, sleep, now):
+                return True
+            del pending[workflow]
+    if not pending:
+        return False
+    which = ", ".join(sorted(pending.values()))
+    return _strike(
+        gh, pr, "no-run",
+        f"Merge queue: found no run of {which} on this head that the queue can start. It will look again, and "
+        "remove it from the line if there is still none 10 minutes from now. A push, or closing and reopening the "
+        "PR, starts its CI.",
+        Action("evict", f"no run of {which} on this head that the queue can start; push a commit, or close and "
+               "reopen the PR", slug="no-run"), False, log, now,
+    )
+
+
+def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], log: Callable[[str], None],
+                sleep: Callable[[float], None], now: Callable[[], datetime]) -> bool:
+    """Re-run the run whose gate failed once, in its own check suite.
+
+    The failed run's own queue-tick sends a kick that waits for the run to complete, because
+    GitHub only re-runs a completed run; a run still live is left for that kick. A run held again
+    (its re-run's approval failed) is approved. One retry per gate per head: a run that failed
+    without reporting its check keeps its run id when re-run, so its failures never add up to two;
+    the `retry-<context>` marker caps it instead. A retry attempt that ended cancelled is restarted
+    once (`_restart_cancelled`), not counted.
+
+    Returns:
+        True if the PR was evicted.
+    """
+    failed = sorted((c for c in pr.checks if c.context == ctx.name and c.status == "completed"
+                     and c.conclusion not in PASSING and c.conclusion != "cancelled"),
+                    key=lambda c: c.completed_at or datetime.min.replace(tzinfo=timezone.utc))
+    suite = failed[-1].suite_id if failed else None
+    runs = [r for r in _gate_runs(gh, pr.head_sha) if _workflow_name(r) == ctx.workflow]
+    run = next((r for r in runs if suite is not None and r.get("check_suite_id") == suite), None)
+    if run is None:  # a stand-in failure: a completed run that reported no check
+        reported = {c.suite_id for c in pr.checks if c.context == ctx.name and c.suite_id is not None}
+        run = next((r for r in runs if r.get("status") == "completed"
+                    and r.get("conclusion") not in NO_RESULT_CONCLUSIONS
+                    and r.get("check_suite_id") not in reported), None)
+    if run is None:
+        return _evict(gh, pr, Action("evict", f"{ctx.name} failed and its run cannot be found to re-run",
+                                     links, "rerun"), log)
+    if run.get("status") in LIVE_RUN_STATUSES:
+        log(f"  #{pr.number}: {ctx.name} run {run['id']} is still live; its kick re-runs it")
+        return False
+    if _queue_held(run):
+        return _approve_strictly(gh, pr, run, log, now)
+    if run.get("conclusion") == "cancelled":
+        return _restart_cancelled(gh, pr, ctx, run, links, log, sleep, now)
+    kind = f"retry-{ctx.name}"
+    if has_comment(gh, pr.number, kind, pr.head_sha):
+        if _going_again(gh, run["id"]):
+            log(f"  #{pr.number}: run {run['id']} was re-run by a racing queue run; standing down")
+            return False
+        why = f"{ctx.name} failed again after its retry"
+        if suite is None:  # the run reported no check at all
+            why += " (its run ended without reporting the check; was the gate job renamed or removed?)"
+        return _evict(gh, pr, Action("evict", why, links, "failed-twice"), log)
+    outcome = _rerun(gh, pr, run, suite is not None, log, sleep, now)
+    if outcome == "refused":
+        return _evict(gh, pr, Action("evict", f"{ctx.name} failed once and GitHub refused to re-run it",
+                                     links, "rerun"), log)
+    listed = "".join(f"\n- {u}" for u in links)
+    comment_once(gh, pr.number, kind, pr.head_sha,
+                 f"Merge queue: {ctx.name} failed once on `{pr.head_sha[:10]}`; re-running it.{listed}", log)
+    if outcome == "pending":
+        _wake_best_effort(gh, log)
+    return False
+
+
+def _retry(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None], sleep: Callable[[float], None],
+           now: Callable[[], datetime]) -> bool:
+    """Retry each context that failed once: the license by a new dispatch on dev, a gate by a re-run.
+
+    Returns:
+        True if the PR was evicted.
+    """
+    listed = "".join(f"\n- {u}" for u in action.links)
+    # The license first, as on a start (spec 4.4): with LICENSE_FIRST_CI_ENABLED a gate's
+    # await_license waits for it. (Re-enabling license-first also needs a gate the license refused
+    # to be re-run in full: a failed-jobs re-run keeps the old await_license verdict.)
+    for name in sorted(action.contexts, key=lambda n: BY_NAME[n].kind != "status"):
+        ctx = BY_NAME[name]
+        if ctx.kind == "status":
+            dispatch_license(gh, pr, log)
+            comment_once(gh, pr.number, f"retry-{name}", pr.head_sha,
+                         f"Merge queue: {name} failed once on `{pr.head_sha[:10]}`; dispatched the license gate "
+                         f"on `{BASE}` again.{listed}", log)
+            continue
+        if _retry_gate(gh, pr, ctx, action.links, log, sleep, now):
+            return True
     return False
 
 
@@ -911,83 +1399,47 @@ def _appeared(gh: GhApi, pr: PrState, names: tuple[str, ...], now: datetime) -> 
 
 def apply(
     gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None], sleep: Callable[[float], None],
-    now: datetime,
+    now: Callable[[], datetime],
 ) -> bool:
     """Perform one decided action (spec section 7).
 
-    Args:
-        gh: The GitHub client.
-        pr: The front PR, as decided on.
-        action: The decided action.
-        log: Receives one line per notable step.
-        sleep: Waits between rereads (injected by tests).
-        now: The current time (UTC).
-
     Returns:
-        True if the PR left the line (evicted, by decision or because an action failed), so
-        the caller moves on to the next front; False otherwise.
+        True if the PR left the line (evicted), so the caller moves on to the next front.
 
     Raises:
         GhError: A read or a non-best-effort call failed.
     """
-    if action.kind == "rebase":
-        return _rebase(gh, pr, log, sleep)
-    if action.kind in ("dispatch", "retry"):
-        # Two queue runs (merge-queue.yml and a queue-tick) can decide the same dispatch for the
-        # same head. Once the first one's run is listed, the other sees it here and stands down
-        # for that context. This narrows the race but cannot close it: the window left is the
-        # time between this read and the POST, plus GitHub's delay between a dispatch returning
-        # and its run showing up (for the license gate: until its run posts `pending`), which
-        # no read can see. A duplicate is one extra run.
-        appeared = _appeared(gh, pr, action.contexts, now)
-        if appeared:
-            log(f"  #{pr.number}: a run appeared since the decision for {', '.join(appeared)}; not dispatching those")
-        targets = tuple(n for n in action.contexts if n not in appeared)
-        if not targets:
-            return False
-
-        def finish() -> None:
-            """Announce a retry; a plain dispatch says nothing."""
-            if action.kind == "retry":
-                links = "".join(f"\n- {u}" for u in action.links)
-                comment_once(
-                    gh, pr.number, "retry", pr.head_sha,
-                    f"Merge queue: {', '.join(targets)} failed once on `{pr.head_sha[:10]}`; retrying with a "
-                    f"fresh run.{links}",
-                )
-
-        return _dispatch_contexts(gh, pr, targets, log, finish)
-    if action.kind == "evict":
-        return _evict(gh, pr, action, log)
-    return False
-
-
-def cleanup_approval_runs(gh: GhApi, pr: PrState, log: Callable[[str], None]) -> None:
-    """Delete the empty approval-pending runs the queue's own token rebase created.
-
-    Best-effort end to end: a failed listing must not abort the pass.
-
-    Args:
-        gh: The GitHub client.
-        pr: The front PR; runs on its head are cleaned.
-        log: Receives a line per failed best-effort call.
-    """
     try:
-        runs = runs_on(gh, pr.head_sha, status="action_required")
-    except GhError as exc:
-        log(f"  best-effort list approval-pending runs failed: {exc}")
-        return
-    for run in runs:
-        if (run.get("triggering_actor") or {}).get("login") != QUEUE_ACTOR:
-            continue
-        _best_effort(log, f"delete approval-pending run {run['id']}",
-                     lambda rid=run["id"]: gh.rest("DELETE", f"repos/{REPO}/actions/runs/{rid}"))
+        if action.kind == "rebase":
+            return _rebase(gh, pr, log, sleep, now)
+        if action.kind in ("start", "retry"):
+            # Two queue runs can decide the same action for the same head. Once the first one's run
+            # is live (or the license status pending), the other sees it here and stands down for
+            # that context.
+            appeared = _appeared(gh, pr, action.contexts, now())
+            if appeared:
+                log(f"  #{pr.number}: a run appeared since the decision for {', '.join(appeared)}; leaving those")
+            targets = tuple(n for n in action.contexts if n not in appeared)
+            if not targets:
+                return False
+            if action.kind == "start":
+                return _start(gh, pr, targets, log, sleep, now)
+            return _retry(gh, pr, replace(action, contexts=targets), log, sleep, now)
+        if action.kind == "evict":
+            return _evict(gh, pr, action, log)
+        return False
+    except CommentRefused as exc:
+        # The queue keeps its retry and strike counts in comments; on a locked PR it can neither
+        # count nor explain, so it takes the PR out of the line rather than stall the line on it.
+        log(f"  cannot comment on #{pr.number} ({exc}); removing it from the line without a comment")
+        _disarm(gh, pr, log)
+        return True
 
 
 UNQUEUED_NOTES = {
-    "fork": "Merge queue: fork PRs are not queued, because GitHub cannot dispatch workflows on a fork's branch. "
-            "A maintainer merges this one by hand.",
-    "bot": "Merge queue: PRs opened by a bot or app are not queued, because a queue dispatch would run this "
+    "fork": "Merge queue: fork PRs are not queued, because approving a fork's held runs would bypass GitHub's "
+            "approval gate for outside contributors' workflows. A maintainer merges this one by hand.",
+    "bot": "Merge queue: PRs opened by a bot or app are not queued, because a queue-approved run would run this "
            "branch's workflows without the token limits and approval gates GitHub applies to bot-authored "
            "runs. A maintainer merges this one by hand.",
 }
@@ -1058,12 +1510,37 @@ def _still_front(gh: GhApi, pr: PrState, left: set[int]) -> bool:
     return bool(line) and line[0].number == pr.number and line[0].head_sha == pr.head_sha
 
 
+def _decide(gh: GhApi, pr: PrState, mode: str, now: Callable[[], datetime],
+            log: Callable[[str], None]) -> tuple[PrState, Action]:
+    """Read the front PR's contexts and decide (spec section 6).
+
+    Raises:
+        GhError: A read failed.
+    """
+    if mode == "on" and pr.merge_state not in ("BEHIND", "DIRTY"):
+        # Held gate runs left by an earlier rebase or re-run: approving them first lets the
+        # decision below see them as the live runs they become. A BEHIND front is about to be
+        # rebased and a DIRTY one evicted.
+        approve_held_runs(gh, pr.head_sha, log)
+    pr = replace(pr, checks=read_contexts(gh, pr.head_sha))
+    action = decide_front(pr, now())
+    if action.slug in ("stuck", "green"):
+        # Right after a merge the next PR's merge state can still read up to date (tldw_chatbook
+        # #3070, TASK-34948). Auto-merge cannot fire on a head that is behind, so a green head is
+        # checked against dev before the queue waits on it or evicts it as stuck. One GET.
+        compare = gh.rest("GET", f"repos/{REPO}/compare/{BASE}...{pr.head_sha}?per_page=1") or {}
+        if compare.get("behind_by", 0) > 0:
+            action = Action("rebase", "behind dev (its merge state had not caught up yet)", contexts=ALL_CONTEXTS)
+    return pr, action
+
+
 def run(
     gh: GhApi,
     mode: str | None,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     sleep: Callable[[float], None] = time.sleep,
     log: Callable[[str], None] = print,
+    wait_run: int | None = None,
 ) -> list[tuple[int, Action]]:
     """One queue pass: decide for the front PR and, in `on` mode, act; repeat after evictions.
 
@@ -1073,6 +1550,8 @@ def run(
         now: The clock (injected by tests).
         sleep: Waits between rereads (injected by tests).
         log: Receives the run's log lines.
+        wait_run: A run to wait for (bounded) before deciding: set by a kick that a failed gate's
+            queue-tick sent, so the failed run has completed and can be re-run.
 
     Returns:
         The (PR number, action) decisions taken or, in dry mode, proposed.
@@ -1084,16 +1563,42 @@ def run(
     if mode not in ("dry", "on"):
         log("merge queue is off (MERGE_QUEUE is not 'dry' or 'on')")
         return []
+    started = now()
+    if wait_run:
+        wait_for_run(gh, wait_run, sleep, log)
     prs = read_prs(gh)
     comment_unqueued(gh, prs, mode, log)
     decisions: list[tuple[int, Action]] = []
     left: set[int] = set()
-    for pr in line_of(prs)[:MAX_FRONTS_PER_RUN]:
+    for index, pr in enumerate(line_of(prs)[:MAX_FRONTS_PER_RUN]):
+        if index and now() - started > RUN_BUDGET:
+            log(f"run budget spent before #{pr.number}; a fresh queue run continues")
+            if mode == "on":
+                _wake_best_effort(gh, log)
+            break
         pr = settle_unknown(gh, pr, sleep)
         if pr.armed_at is None:
             continue
-        pr = replace(pr, checks=read_contexts(gh, pr.head_sha))
-        action = decide_front(pr, now())
+        pr, action = _decide(gh, pr, mode, now, log)
+        if mode == "on" and action.slug == "young":
+            # A kick woken right after a rebase whose held runs had not appeared can land before
+            # GitHub lists the head's runs, and nothing may wake the queue again for this head.
+            # Wait out the window once and decide again (capped at one window).
+            remaining = (pr.head_committed_at + YOUNG_HEAD - now()).total_seconds()
+            pause = min(max(0.0, remaining), YOUNG_HEAD.total_seconds()) + 1
+            if now() - started + timedelta(seconds=pause) > RUN_BUDGET:
+                log(f"#{pr.number}: no budget left to wait out its young head; a fresh queue run will")
+                _wake_best_effort(gh, log)
+            else:
+                sleep(pause)
+                fresh = settle_unknown(gh, read_pr(gh, pr.number), sleep)
+                if fresh.armed_at != pr.armed_at:
+                    break  # disarmed or re-armed meanwhile; that event wakes a fresh run
+                same_head = fresh.head_sha == pr.head_sha
+                pr, action = _decide(gh, fresh, mode, now, log)
+                if action.slug == "young" and same_head:
+                    # Waited a full window and it still looks young: its commit clock runs ahead.
+                    action = Action("start", "no run after waiting out the young-head window", contexts=action.contexts)
         decisions.append((pr.number, action))
         log(f"#{pr.number}: {action.kind} - {action.reason}")
         left_line = action.kind == "evict"
@@ -1102,7 +1607,7 @@ def run(
                 log(f"#{pr.number}: no longer the armed front PR on this head; nothing done, the next wake decides")
                 break
             cleanup_approval_runs(gh, pr, log)
-            left_line = apply(gh, pr, action, log, sleep, now())
+            left_line = apply(gh, pr, action, log, sleep, now)
         if not left_line:
             break
         left.add(pr.number)
@@ -1112,10 +1617,13 @@ def run(
 def main() -> int:
     """Run one queue pass with the real gh CLI and append the decisions to the job summary.
 
+    `WAIT_RUN` (a kick's `wait_run` input) is used only when it is all digits.
+
     Returns:
         The process exit code (0; a failed call raises instead).
     """
-    decisions = run(Gh(), os.environ.get("MERGE_QUEUE"))
+    wait = os.environ.get("WAIT_RUN", "").strip()
+    decisions = run(Gh(), os.environ.get("MERGE_QUEUE"), wait_run=int(wait) if wait.isdigit() else None)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:

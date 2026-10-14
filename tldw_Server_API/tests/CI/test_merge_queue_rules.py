@@ -37,23 +37,26 @@ def _pr(**kw: object) -> mq.PrState:
     base = {
         "number": 1, "node_id": "PR_1", "head_sha": "a" * 40, "head_ref": "feat/x", "same_repo": True,
         "armed_at": NOW - timedelta(hours=1), "is_draft": False, "merge_state": "CLEAN",
-        "head_committed_at": NOW - timedelta(hours=2), "base_sha": "d" * 40, "checks": (),
+        "head_committed_at": NOW - timedelta(hours=2), "checks": (),
     }
     base.update(kw)
     return mq.PrState(**base)
 
 
-def test_the_seven_required_contexts_and_how_each_is_started() -> None:
-    """Spec 4.1 table: six check runs dispatched on the PR branch, one status dispatched on dev."""
-    assert [(c.name, c.workflow, c.kind, c.base_sha) for c in mq.CONTEXTS] == [
-        ("backend-required", "backend-required.yml", "check", True),
-        ("security-required", "security-required.yml", "check", True),
-        ("coverage-required", "coverage-required.yml", "check", True),
-        ("frontend-required", "frontend-required.yml", "check", True),
-        ("e2e-required", "e2e-required.yml", "check", True),
-        ("container-build-check", "container-build-check.yml", "check", False),
-        ("frontend-license-policy/trusted/dev", "frontend-license-gate.yml", "status", True),
+def test_the_seven_required_contexts() -> None:
+    """Six gate check runs started by approving their held pull_request runs; one license status
+    dispatched on dev (spec 4.1)."""
+    assert [(c.name, c.workflow, c.kind) for c in mq.CONTEXTS] == [
+        ("backend-required", "backend-required.yml", "check"),
+        ("security-required", "security-required.yml", "check"),
+        ("coverage-required", "coverage-required.yml", "check"),
+        ("frontend-required", "frontend-required.yml", "check"),
+        ("e2e-required", "e2e-required.yml", "check"),
+        ("container-build-check", "container-build-check.yml", "check"),
+        ("frontend-license-policy/trusted/dev", "frontend-license-gate.yml", "status"),
     ]
+    assert {c.workflow for c in mq.CONTEXTS[:6]} == mq.GATE_WORKFLOWS
+    assert mq.LICENSE.name == "frontend-license-policy/trusted/dev"
     assert mq.REPO.count("/") == 1 and mq.BASE == "dev"
 
 
@@ -115,11 +118,15 @@ def test_context_state_table(runs: list[mq.CheckRun], state: str) -> None:
         (_pr(merge_state="BLOCKED", checks=_green(without=(E2E,)) + (
             _run(E2E, "failure", 30), _run(E2E, "failure", 2))), "evict", (E2E,)),
         (_pr(merge_state="BLOCKED", checks=_green(without=(E2E,)) + (_run(E2E, "failure"),)), "retry", (E2E,)),
-        (_pr(merge_state="BLOCKED", checks=_green(without=(E2E, LICENSE))), "dispatch", (E2E, LICENSE)),
-        (_pr(merge_state="BLOCKED", checks=()), "dispatch", mq.ALL_CONTEXTS),
+        (_pr(merge_state="BLOCKED", checks=_green(without=(E2E, LICENSE))), "start", (E2E, LICENSE)),
+        (_pr(merge_state="BLOCKED", checks=()), "start", mq.ALL_CONTEXTS),
         (_pr(merge_state="BLOCKED", checks=tuple(_run(n, "cancelled") for n in mq.ALL_CONTEXTS)),
-         "dispatch", mq.ALL_CONTEXTS),
+         "start", mq.ALL_CONTEXTS),
         (_pr(merge_state="BLOCKED", checks=_green(without=(E2E,)), head_committed_at=NOW - timedelta(minutes=2)),
+         "wait", (E2E,)),
+        (_pr(merge_state="BLOCKED", checks=_green(without=(E2E,)), head_committed_at=NOW + timedelta(minutes=5)),
+         "start", (E2E,)),
+        (_pr(merge_state="BLOCKED", checks=_green(without=(E2E,)), head_committed_at=NOW + timedelta(seconds=30)),
          "wait", (E2E,)),
         # Section 6, the green rows.
         (_pr(merge_state="CLEAN", checks=_green(5)), "wait", ()),
@@ -143,7 +150,7 @@ def test_context_state_table(runs: list[mq.CheckRun], state: str) -> None:
         "unknown-waits", "behind-rebases-and-starts-all-seven", "dirty-evicts",
         "running-waits", "failed-twice-evicts", "failed-once-retries-only-that-context",
         "missing-dispatches-only-those-contexts", "no-run-at-all-dispatches-all-seven",
-        "only-cancelled-dispatches", "missing-on-a-young-head-waits",
+        "only-cancelled-dispatches", "missing-on-a-young-head-waits", "future-dated-head-starts", "slightly-ahead-head-waits",
         "green-clean-waits", "green-unstable-waits", "stuck-green-evicts",
         "green-is-timed-from-the-last-context-to-finish",
         "green-blocked-waits-for-auto-merge", "retry-that-passed-waits", "green-other-merge-state-waits",
@@ -193,3 +200,8 @@ def test_retry_links_the_failed_run_of_each_failed_context() -> None:
 def test_a_run_of_an_unknown_context_is_ignored() -> None:
     checks = _green() + (mq.CheckRun("ci / lint", "completed", "failure", NOW, "x"),)
     assert mq.decide_front(_pr(merge_state="CLEAN", checks=checks), NOW).kind == "wait"
+
+
+def test_a_young_head_wait_is_marked_young() -> None:
+    pr = _pr(merge_state="BLOCKED", checks=_green(without=(E2E,)), head_committed_at=NOW - timedelta(minutes=1))
+    assert mq.decide_front(pr, NOW).slug == "young"
