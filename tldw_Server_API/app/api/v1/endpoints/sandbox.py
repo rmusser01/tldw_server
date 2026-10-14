@@ -2311,8 +2311,6 @@ def _ws_shutdown_deadline_s() -> float:
     return 0.5 if is_truthy(os.getenv("TEST_MODE")) else 5.0
 
 
-
-
 # -----------------------
 # Admin API (list/details)
 # -----------------------

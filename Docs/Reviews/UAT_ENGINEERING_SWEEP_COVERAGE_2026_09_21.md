@@ -153,7 +153,7 @@ All rows below are **unverified for the future integrated sweep candidate**. Ref
 | S-03 | Artifact editors | Backend: `tldw_Server_API/tests/FileArtifacts/` (artifact storage endpoints) + Storage suite (`tests/Storage/`); UI editor surfaces: `manual:<UI-level editor flows lack browser automation>` |
 | S-04 | Research and source workspaces | Backend: `tldw_Server_API/tests/Research/`, `tests/ResearchWorkspace/`, `tests/PrototypeWorkspaces/` |
 | S-05 | Moderation and claims review | Backend: `tldw_Server_API/tests/Claims/`, `tests/Claims_Extraction/`; moderation review UI: `manual:<moderation UI flows lack browser automation>` |
-| S-06 | Specialized tools and discovery | Partial: Prompt Studio CLI/unit suites and discovery-adjacent endpoint tests; consolidated tool-discovery flow: `manual:<no single end-to-end discovery automation>` |
+| S-06 | Specialized tools and discovery | Partial: Prompt Studio suites (`tldw_Server_API/tests/prompt_studio/{unit,integration}`); consolidated tool-discovery flow: `manual:<no single end-to-end discovery automation>` |
 
 Mapping basis (2026-10-14, TASK-13640): test-directory inventory of `tldw_Server_API/tests/`; rows name the nearest owning backend suites and explicitly mark the residual manual surface instead of claiming full coverage.
 
