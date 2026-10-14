@@ -103,6 +103,7 @@ import {
   resolveExplicitProviderForSelectedModel
 } from "@/utils/resolve-api-provider"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
+import { createStreamingTextScheduler } from "@/hooks/chat/streamingThrottle"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { normalizeConversationState } from "@/utils/conversation-state"
 import {
@@ -215,7 +216,6 @@ type ChatModelSettingsStore = ChatModelSettings & {
 
 type PersonaMemoryMode = "read_only" | "read_write"
 
-const STREAMING_UPDATE_INTERVAL_MS = 80
 const toChatSubmitResult = normalizeChatSubmitResult
 
 const normalizePersonaMemoryMode = (value: unknown): PersonaMemoryMode | null =>
@@ -2133,48 +2133,21 @@ export const useChatActions = ({
         ? normalizeMessageVariants(regenerateFromMessage)
         : []
     const resolvedModel = model?.trim()
-    let streamingTimer: ReturnType<typeof setTimeout> | null = null
-    let pendingStreamingText = ""
-    let pendingReasoningTime = 0
-    let lastStreamingUpdateAt = 0
     let inactivityTimer: ReturnType<typeof setTimeout> | null = null
 
-    const flushStreamingUpdate = () => {
-      if (pendingStreamingText.length === 0 || servicePromptSnapshot?.scopeInvalidatedSignal.aborted) return
-      const text = pendingStreamingText
-      const reasoningTime = pendingReasoningTime
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === generateMessageId
-            ? updateActiveVariant(m, {
-                message: text,
-                reasoning_time_taken: reasoningTime
-              })
-            : m
-        )
-      )
-      pendingStreamingText = ""
-      pendingReasoningTime = 0
-      lastStreamingUpdateAt = Date.now()
-    }
+    // Shared 80ms streaming throttle (hooks/chat/streamingThrottle.ts): chunks
+    // coalesce into at most one transcript update per window, and the update
+    // replaces only the streaming message instead of cloning via prev.map.
+    // The shouldFlush gate preserves the former inline scope-invalidation guard.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+      {
+        shouldFlush: () =>
+          !servicePromptSnapshot?.scopeInvalidatedSignal.aborted
+      }
+    )
 
-    const scheduleStreamingUpdate = (text: string, reasoningTime: number) => {
-      pendingStreamingText = text
-      pendingReasoningTime = reasoningTime
-      if (streamingTimer !== null) return
-      const elapsed = Date.now() - lastStreamingUpdateAt
-      const delay = Math.max(0, STREAMING_UPDATE_INTERVAL_MS - elapsed)
-      streamingTimer = setTimeout(() => {
-        streamingTimer = null
-        flushStreamingUpdate()
-      }, delay)
-    }
-
-    const cancelStreamingUpdate = () => {
-      if (streamingTimer === null) return
-      clearTimeout(streamingTimer)
-      streamingTimer = null
-    }
     const emoteStream = createCharacterEmoteStream()
     const getExplicitEmoteMoodLabel = () =>
       emoteStream.events.length > 0
@@ -2652,7 +2625,7 @@ export const useChatActions = ({
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents)
 
         if (fullText !== previousFullText) {
-          scheduleStreamingUpdate(`${fullText}▋`, timetaken)
+          streamingScheduler.schedule(`${fullText}▋`, timetaken)
         }
         if (count === 0) {
           setIsProcessing(true)
@@ -2677,8 +2650,9 @@ export const useChatActions = ({
         if (executionSignal.aborted) break
       }
       throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
-      cancelStreamingUpdate()
-      flushStreamingUpdate()
+      // Flush any trailing streamed text (and disarm the timer) so the last
+      // chunk is never dropped.
+      streamingScheduler.flushNow()
       if (inactivityTimer) clearTimeout(inactivityTimer)
       flushCharacterEmoteStream()
 
@@ -3074,7 +3048,7 @@ export const useChatActions = ({
         return chatSubmitSkipped("Character chat turn aborted")
       }
 
-      cancelStreamingUpdate()
+      streamingScheduler.cancel()
       flushCharacterEmoteStream()
       const recoveryMoodLabel = getExplicitEmoteMoodLabel()
       const recoveryMetadataExtra = getExplicitEmoteMetadataExtra()
@@ -3300,7 +3274,7 @@ export const useChatActions = ({
       if (discardCurrentTurnOnAbortSignalRef.current === signal) {
         discardCurrentTurnOnAbortSignalRef.current = null
       }
-      cancelStreamingUpdate()
+      streamingScheduler.cancel()
       if (inactivityTimer) clearTimeout(inactivityTimer)
       // Only null the shared controller if this turn still owns it, so a newer
       // in-flight turn's controller is not clobbered (and stays cancellable).
