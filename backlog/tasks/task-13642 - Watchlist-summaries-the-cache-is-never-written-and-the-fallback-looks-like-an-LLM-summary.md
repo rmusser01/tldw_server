@@ -25,6 +25,7 @@ summarize_items_for_output (app/services/outputs_service.py) persists cached_sum
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From the PR review of TASK-13636/13637: after an enrichment failure (a quota refusal or any other error), the per-phase metadata (summary_status, grouping_status, group_summary_status) stays pending next to enrichment_status failed; set them to failed (or skipped) with the overall status.
+From the clean-session review of PR #3240: (1) when enrichment fails part-way, the per-phase statuses already written stay completed (grouping, group summaries) although no enriched_groups were stored; fix with the pending ones in the enrichment handler's except. (2) With summarize: true, POST /watchlists/outputs makes one LLM call per item, sequentially, for up to 1000 items, with no cap, no early stop after a provider error and no cache, so a large run can outlast client timeouts; bound or parallelise it alongside the cache.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

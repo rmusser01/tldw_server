@@ -23,6 +23,7 @@ With raise_on_error=True the audio_analyze stage (app/services/audio_jobs_worker
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From the PR review of TASK-13636/13637: the audio stage passes failure_code to fail_job but not SummaryProviderError.code, so provider failures record no error code; forward it (e.g. missing_model, authentication, rate_limit) when classifying retries.
+From the clean-session review of PR #3240: a job submitted without api_name falls back to openai and now really calls it; on a local-only install it fails on missing credentials and retries until quarantined (before PR #3240 it always failed). Use the configured default LLM provider, or skip analysis when none is configured, as the /media/process-* endpoints do.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

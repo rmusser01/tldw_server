@@ -1849,10 +1849,15 @@ def test_output_summaries_return_a_quota_refusal_as_402(client_with_user, monkey
     assert r.status_code == 200, r.text
     r = c.post(f"/api/v1/watchlists/jobs/{r.json()['id']}/run")
     assert r.status_code == 200, r.text
+    run_id = r.json()["id"]
 
     r = c.post(
         "/api/v1/watchlists/outputs",
-        json={"run_id": r.json()["id"], "summarize": True, "llm_provider": "openai", "llm_model": "test-model"},
+        json={"run_id": run_id, "summarize": True, "llm_provider": "openai", "llm_model": "test-model"},
     )
     assert r.status_code == 402, r.text
     assert r.json()["detail"]["error"] == "limit_exceeded"
+    # The refusal comes before the output is written: no output with fallback summaries is left behind.
+    r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 0
