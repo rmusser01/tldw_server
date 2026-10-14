@@ -3814,7 +3814,7 @@ export const SidepanelForm = ({
                       {/* Draft saved indicator */}
                       {draftSaved && (
                         <span
-                          className="absolute bottom-1 right-2 text-label text-text-subtle transition-opacity pointer-events-none"
+                          className="absolute bottom-1 right-2 text-label text-text-muted transition-opacity pointer-events-none"
                           role="status"
                           aria-live="polite"
                         >

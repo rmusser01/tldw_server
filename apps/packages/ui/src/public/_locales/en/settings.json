@@ -6718,5 +6718,8 @@
   },
   "manageCharacters_quickChat_retryAccount": {
     "message": "Retry verification"
+  },
+  "manageCharacters_quickChat_savedModelGuidance": {
+    "message": "This chat uses its saved model and provider. Review its settings in full chat."
   }
 }

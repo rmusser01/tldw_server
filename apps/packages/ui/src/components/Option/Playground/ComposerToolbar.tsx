@@ -848,7 +848,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     ? "border-warn/40 bg-warn/10 text-warn"
     : "border-border bg-surface2 text-text-muted"
   const advancedChipClass = casualAdvancedControlsOpen
-    ? "border-primary/40 bg-primary/10 text-primaryStrong"
+    ? "border-primary/40 bg-primary/10 text-text"
     : "border-border bg-surface2 text-text-muted"
   const formattingGuideToggleClass = appendFormattingGuidePrompt
     ? "bg-primary/10 text-primaryStrong"

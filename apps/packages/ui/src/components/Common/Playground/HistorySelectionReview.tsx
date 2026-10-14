@@ -62,6 +62,7 @@ export function HistorySelectionReview({
     (state) => state.serverChatRoleplaySetup
   )
   const savedChatId = useStoreMessageOption((state) => state.serverChatId)
+  const sendInProgress = useStoreMessageOption((state) => Boolean(state.isLoading || state.streaming || state.isProcessing))
   const { setController } = usePageAssist()
   const [retrying, setRetrying] = React.useState<string | null>(null)
   const retryAbort = React.useRef<AbortController | null>(null)
@@ -972,6 +973,22 @@ export function HistorySelectionReview({
         </details>
       )}
       <div className="flex flex-wrap items-center gap-2">
+        {selection.status === "ready" && selection.owner?.kind === "native" &&
+          selection.capture?.status === "captured" && selection.capture.view === selection.view &&
+          selection.bookmarkScope && selection.view?.conversation_id === selection.owner.conversation_id &&
+          nodes.length === 0 && recoveries.some(entry =>
+            entry.turn.persistence === "server" && entry.turn.owner_key === selection.view?.owner_key &&
+            entry.turn.conversation_id === selection.view?.conversation_id) && (
+          <Button variant="text" disabled={sendInProgress || Boolean(retrying || openingRecovery || recoveryAction?.pending)}
+            onClick={() => {
+              const state = useStoreMessageOption.getState()
+              if (mounted.current && !state.isLoading && !state.streaming && !state.isProcessing && !editorOpen() &&
+                renderedSource.isCurrent() && renderedSelectionIsCurrent() && selection.owner?.kind === "native" && selection.owner.validate_lease())
+                void selection.refresh()
+            }}>
+            {text("refresh", "Refresh history")}
+          </Button>
+        )}
         {nodes.length > 0 && (
           <Button
             ref={trigger}

@@ -1785,3 +1785,78 @@ it("explains explicit saved-history review before continuing an uncertain native
   expect(selection.view).toBe(originalView)
   expect(selection.choose).not.toHaveBeenCalled()
 })
+
+it.each([true, false])("provides explicit owned refresh for an empty retained native outcome with current lease=%s", (leaseCurrent) => {
+  const selection = recoveryController("server", "accepted_unsent")
+  const view = selection.recoveries[0].turn.origin_view!
+  Object.assign(selection, {
+    owner: { kind: "native", conversation_id: view.conversation_id, validate_lease: () => leaseCurrent },
+    view, bookmarkScope: selection.recoveries[0].scope,
+    capture: { status: "captured", view, snapshot: { nodes: [], source_digest: "empty" } },
+  })
+  const original = structuredClone(selection.recoveries)
+  render(<HistorySelectionReview selection={selection} />)
+  const refresh = screen.getByRole("button", { name: "Refresh history", exact: true })
+  expect(selection.refresh).not.toHaveBeenCalled()
+  fireEvent.click(refresh)
+  if (leaseCurrent) expect(selection.refresh).toHaveBeenCalledOnce()
+  else expect(selection.refresh).not.toHaveBeenCalled()
+  expect(selection.choose).not.toHaveBeenCalled()
+  expect(selection.view).toBe(view)
+  expect(selection.recoveries).toEqual(original)
+})
+
+it("rejects a retained empty-history refresh after its original view fence retires", () => {
+  let current = true
+  const selection = recoveryController("server", "accepted_unsent")
+  const view = selection.recoveries[0].turn.origin_view!
+  Object.assign(selection, {
+    owner: { kind: "native", conversation_id: view.conversation_id, validate_lease: () => true },
+    view, bookmarkScope: selection.recoveries[0].scope,
+    capture: { status: "captured", view, snapshot: { nodes: [], source_digest: "empty" } },
+    fence: () => () => current,
+  })
+  render(<HistorySelectionReview selection={selection} />)
+  const refresh = screen.getByRole("button", { name: "Refresh history", exact: true })
+  current = false
+  fireEvent.click(refresh)
+  expect(selection.refresh).not.toHaveBeenCalled()
+  expect(selection.choose).not.toHaveBeenCalled()
+})
+
+it.each(["local", "uncaptured", "different view", "missing bookmark", "foreign outcome"])("does not expose the empty native recovery refresh for %s", (boundary) => {
+  const selection = recoveryController("server", "accepted_unsent")
+  const view = selection.recoveries[0].turn.origin_view!
+  Object.assign(selection, {
+    owner: { kind: "native", conversation_id: view.conversation_id, validate_lease: () => true },
+    view, bookmarkScope: selection.recoveries[0].scope,
+    capture: { status: "captured", view, snapshot: { nodes: [], source_digest: "empty" } },
+  })
+  if (boundary === "local") Object.assign(selection, { owner: { ...selection.owner, kind: "local" } })
+  if (boundary === "uncaptured") Object.assign(selection.capture!, { status: "unavailable" })
+  if (boundary === "different view") Object.assign(selection.capture!, { view: { ...view, view_session_id: "other" } })
+  if (boundary === "missing bookmark") Object.assign(selection, { bookmarkScope: undefined })
+  if (boundary === "foreign outcome") Object.assign(selection.recoveries[0].turn, { owner_key: "foreign" })
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.queryByRole("button", { name: "Refresh history", exact: true })).toBeNull()
+  expect(selection.refresh).not.toHaveBeenCalled()
+})
+
+it.each(["isLoading", "streaming", "isProcessing"] as const)("prevents empty native refresh while %s", (flag) => {
+  const prior = useStoreMessageOption.getState()
+  const selection = recoveryController("server", "accepted_unsent")
+  const view = selection.recoveries[0].turn.origin_view!
+  Object.assign(selection, {
+    owner: { kind: "native", conversation_id: view.conversation_id, validate_lease: () => true },
+    view, bookmarkScope: selection.recoveries[0].scope,
+    capture: { status: "captured", view, snapshot: { nodes: [], source_digest: "empty" } },
+  })
+  try {
+    act(() => useStoreMessageOption.setState({ [flag]: true }))
+    render(<HistorySelectionReview selection={selection} />)
+    const refresh = screen.getByRole("button", { name: "Refresh history", exact: true })
+    expect(refresh).toBeDisabled()
+    fireEvent.click(refresh)
+    expect(selection.refresh).not.toHaveBeenCalled()
+  } finally { act(() => useStoreMessageOption.setState(prior, true)) }
+})

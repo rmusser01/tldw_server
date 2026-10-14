@@ -2039,7 +2039,8 @@
       "verifyingAccount": "Verify your account before chatting.",
       "retryCharacter": "Retry character",
       "retryAccount": "Retry verification",
-      "newTab": "(opens in a new tab)"
+      "newTab": "(opens in a new tab)",
+      "savedModelGuidance": "This chat uses its saved model and provider. Review its settings in full chat."
     },
     "versionHistory": {
       "title": "Version history: {{name}}",

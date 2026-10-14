@@ -1,5 +1,6 @@
 import { createDefaultActorSettings } from "@/types/actor"
 import React from "react"
+import { ConfigProvider } from "antd"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   act,
@@ -426,6 +427,7 @@ describe("CharactersManager first-use onboarding", () => {
     )
 
     useQueryClientMock.mockReturnValue({
+      getQueryState: vi.fn(),
       invalidateQueries: vi.fn(),
       setQueryData: vi.fn(),
       cancelQueries: vi.fn(async () => undefined)
@@ -3987,9 +3989,10 @@ describe("CharactersManager first-use onboarding", () => {
 
     tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
 
+    let currentModel = "openai:mock-chat-model"
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
+        return [currentModel, vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -4016,7 +4019,9 @@ describe("CharactersManager first-use onboarding", () => {
       return makeUseQueryResult({})
     })
 
-    render(<CharactersManager />)
+    // jsdom does not finish AntD CSS appear animations.
+    const popup = () => <ConfigProvider theme={{ token: { motion: false } }}><CharactersManager /></ConfigProvider>
+    const mounted = render(popup())
 
     await user.click(await screen.findByRole("button", { name: /More actions/i }))
     await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
@@ -4025,6 +4030,7 @@ describe("CharactersManager first-use onboarding", () => {
       "Ask this character a quick question..."
     )
 
+    expect(screen.getByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
     await user.type(input, "How do you help?")
     await user.click(screen.getByRole("button", { name: "Send" }))
 
@@ -4035,6 +4041,15 @@ describe("CharactersManager first-use onboarding", () => {
     expect(tldwClientMock.completeCharacterChatTurn).not.toHaveBeenCalled()
     expect(navigateMock).not.toHaveBeenCalled()
     expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
+    await waitFor(() => expect(screen.getByText("This chat uses its saved model and provider. Review its settings in full chat.")).toBeVisible())
+    currentModel = "openai:another-default"
+    mounted.rerender(popup())
+    expect(screen.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    await user.click(await screen.findByRole("button", { name: /More actions/i }))
+    await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
+    expect(await screen.findByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
   }, 30000)
 
   it("keeps the popup draft and does not send when private retention fails", async () => {

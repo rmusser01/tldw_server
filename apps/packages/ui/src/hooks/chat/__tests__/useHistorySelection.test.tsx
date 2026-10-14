@@ -1541,8 +1541,9 @@ it("a retained rendered recovery callback refuses an actual same-ID H1 refresh b
   )
   let controller!: HistorySelectionController
   function RecoveryView() {
-    controller = useHistorySelection()
-    return <HistorySelectionReview selection={controller} />
+    const selection = useHistorySelection()
+    React.useLayoutEffect(() => { controller = selection }, [selection])
+    return <HistorySelectionReview selection={selection} />
   }
   render(<RecoveryView />)
   await act(async () => {
@@ -2885,4 +2886,47 @@ describe("acknowledged recovery controller", () => {
     expect(mocks.dismissRecovery).not.toHaveBeenCalled()
     hook.unmount()
   })
+})
+
+it("explicitly refreshes empty native history after settlement without widening its chosen boundary or replaying recovery", async () => {
+  const native = {
+    kind: "native" as const, conversation_id: "chat", scope: { type: "global" as const },
+    request_scope: { userId: 1, config: { serverUrl: "https://owned-refresh.test", authMode: "single-user" as const } },
+    validate_lease: () => true,
+  }
+  const retained = [{ scope: { profile_id: "profile", client_session_id: "old-writer" }, turn: {
+    operation_id: "unknown-original", owner_key: "owner", conversation_id: "chat", persistence: "server", state: "unknown",
+    selection_digest: "original", request_context_digest: "original-command", created_at: 1,
+    input_text: "  original input  ", input_images: [], result_text: "",
+  } }]
+  mocks.recoveries.mockResolvedValue(retained)
+  let settled = false
+  mocks.capture.mockImplementation(async (_source, view) => {
+    const source = settled ? snapshot : { ...snapshot, source_digest: "empty", nodes: [] }
+    const bound = { ...view, owner_key: "owner" }
+    const selected = resolveHistorySelection(source, bound, "send", "")
+    if (selected.status !== "ready") throw new Error("fixture_selection_failed")
+    return { status: "captured", view: bound, snapshot: source, rows: selected.rows,
+      selected_content: selected.rows.map(row => ({ id: row.id, revision: row.revision, message: row.preview, images: [] })),
+      purpose: "send", storage_context_digest: "storage" }
+  })
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.open(native) })
+  await waitFor(() => expect(hook.result.current.recoveries).toEqual(retained))
+  expect(hook.result.current.capture?.snapshot.nodes).toHaveLength(0)
+  const originalView = hook.result.current.view
+  const originalScope = hook.result.current.bookmarkScope
+  const originalRecovery = structuredClone(hook.result.current.recoveries)
+  settled = true
+  await act(async () => { expect(await hook.result.current.refresh()).toBe(true) })
+  expect(hook.result.current.capture?.snapshot.nodes).toHaveLength(snapshot.nodes.length)
+  expect(hook.result.current.capture?.rows).toEqual([])
+  expect(hook.result.current.view).toEqual(originalView)
+  expect(hook.result.current.view?.cursor).toEqual({ kind: "empty" })
+  expect(hook.result.current.owner).toBe(native)
+  expect(hook.result.current.bookmarkScope).toBe(originalScope)
+  expect(hook.result.current.recoveries).toEqual(originalRecovery)
+  expect(mocks.capture).toHaveBeenCalledTimes(2)
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+  hook.unmount()
 })

@@ -888,6 +888,13 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             <span>{t(quickChatOwnerReady ? (quickChatLoading ? "settings:manageCharacters.quickChat.loadingCharacter" : "settings:manageCharacters.quickChat.characterNotLoaded") : "settings:manageCharacters.quickChat.verifyingAccount", { defaultValue: quickChatOwnerReady ? (quickChatLoading ? "Loading character…" : "Character not loaded") : "Verify your account before chatting." })}</span>
             {!quickChatLoading && <Button size="small" onClick={() => void retryQuickChat()}>{t(quickChatOwnerReady ? "settings:manageCharacters.quickChat.retryCharacter" : "settings:manageCharacters.quickChat.retryAccount", { defaultValue: quickChatOwnerReady ? "Retry character" : "Retry verification" })}</Button>}
           </div>}
+          {quickChatSessionId ? (
+            <p role="status" className="text-xs text-text-muted">
+              {t("settings:manageCharacters.quickChat.savedModelGuidance", {
+                defaultValue: "This chat uses its saved model and provider. Review its settings in full chat."
+              })}
+            </p>
+          ) : (
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted">
               {t("settings:manageCharacters.quickChat.modelLabel", {
@@ -910,6 +917,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               allowClear
             />
           </div>
+          )}
 
           {showQuickChatModelBlocker && (
             <DesignSystemAlert
