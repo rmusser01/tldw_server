@@ -167,14 +167,14 @@ for instance a duplicate living in `app/services/` — but do not audit it as a 
 ### 2. Read this prior art before you review anything
 
 Read these **selectively, by relevance to your scope** — not all seven every time. If you are
-reviewing one module with no existing ledger, `Codeslop-Vibecheck-SKILL.md` and any ADR touching
+reviewing one module with no existing ledger, `Docs/Development/Used_Prompts/Codeslop-Vibecheck-SKILL.md` and any ADR touching
 your module are usually the only ones that change a finding. The ledger and audit-format docs
 earn their cost when your module already has a ledger, or when you are producing the ranked
 cross-module table.
 
 | Path | Why |
 |---|---|
-| `Codeslop-Vibecheck-SKILL.md` (repo root) | **The rubric you apply.** Its three axes, per-axis flag / do-not-flag lists, severity guide, and "Common Mistakes" section. Follow it, with the two overrides in section 3. |
+| `Docs/Development/Used_Prompts/Codeslop-Vibecheck-SKILL.md` (repo root) | **The rubric you apply.** Its three axes, per-axis flag / do-not-flag lists, severity guide, and "Common Mistakes" section. Follow it, with the two overrides in section 3. |
 | `Docs/superpowers/reviews/rag/README.md` | The review rules and stage-file format you must reproduce. |
 | `Docs/superpowers/reviews/rag/` + `db-management/` | Already-complete reviews. Extend, do not redo. |
 | `audits/2026-07-04-test-suite-audit-round2.md` | The finding-ID and severity-ranking style to match. |
@@ -224,7 +224,7 @@ but search first, and say in the finding what the prior art says.
 
 ### 3. The rubric, and the two rules you must override
 
-Apply `Codeslop-Vibecheck-SKILL.md` as written — its axes, its flag and do-not-flag lists, its
+Apply `Docs/Development/Used_Prompts/Codeslop-Vibecheck-SKILL.md` as written — its axes, its flag and do-not-flag lists, its
 High/Medium/Low severity guide, and especially its Common Mistakes section, which already
 forbids the two ways this review most easily fails:
 
