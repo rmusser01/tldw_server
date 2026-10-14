@@ -14,7 +14,8 @@ import {
   generateWorkspaceId,
   WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY,
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
-  useWorkspaceStore
+  useWorkspaceStore,
+  workspacePersistWriterInternals
 } from "../workspace"
 import {
   LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
@@ -62,6 +63,9 @@ const ensureLocalStorage = () => {
 
 const resetWorkspaceStore = () => {
   ensureLocalStorage()
+  // WP-16: persist writes are coalesced off the set() path; drop any pending
+  // write so it cannot land in the next test's freshly cleared storage.
+  workspacePersistWriterInternals.cancelPendingWrite()
   localStorage.removeItem(STORAGE_KEY)
   localStorage.removeItem(STORAGE_SPLIT_FLAG_KEY)
   localStorage.removeItem(STORAGE_INDEXEDDB_FLAG_KEY)
@@ -1289,6 +1293,8 @@ describe("workspace store snapshot persistence", () => {
       serverChatId: "canonical-chat"
     })
 
+    // WP-16: drain the coalesced persist write before reading storage directly.
+    workspacePersistWriterInternals.flush()
     const splitIndexRaw = localStorage.getItem(STORAGE_KEY)
     expect(splitIndexRaw).toBeTruthy()
 
@@ -2069,6 +2075,8 @@ describe("workspace store snapshot persistence", () => {
       useWorkspaceStore.getState().getWorkspaceChatSession(workspaceId)?.messages
     ).toHaveLength(300)
 
+    // WP-16: drain the coalesced persist write before reading storage directly.
+    workspacePersistWriterInternals.flush()
     const persistedRaw = await Promise.resolve(
       createWorkspaceStorage().getItem(STORAGE_KEY)
     )
@@ -2099,6 +2107,8 @@ describe("workspace store snapshot persistence", () => {
       data: oversizedData
     })
 
+    // WP-16: drain the coalesced persist write before reading storage directly.
+    workspacePersistWriterInternals.flush()
     const persistedRaw = await Promise.resolve(
       createWorkspaceStorage().getItem(STORAGE_KEY)
     )
@@ -2493,6 +2503,8 @@ describe("workspace store snapshot persistence", () => {
       "Source A"
     ])
 
+    // WP-16: drain the coalesced persist write before reading storage directly.
+    workspacePersistWriterInternals.flush()
     const persisted = localStorage.getItem(STORAGE_KEY)
     expect(persisted).toBeTruthy()
 

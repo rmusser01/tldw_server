@@ -1872,6 +1872,190 @@ const createMemoryStorage = (): StateStorage => ({
   removeItem: () => {}
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Coalescing persist writer (WP-16)
+// ─────────────────────────────────────────────────────────────────────────────
+// Zustand persist calls `storage.setItem` synchronously on EVERY `set()`, so a
+// burst of mutations each ran the whole split-key persist chain (partialize ->
+// stringify -> parse -> per-workspace stringify/compare). This writer coalesces
+// them using the serialized-writer pattern from
+// `entries/background-session-store.ts` (`createSerializedSessionStateWriter`):
+// each call only records the latest job; while a write is in flight further
+// calls just replace the pending job, and one final trailing write runs with
+// the newest value once the in-flight write settles. Callers are never blocked
+// and an older snapshot can never overwrite a newer one.
+//
+// The drain is additionally deferred off the mutation's critical path via
+// `requestIdleCallback` (bounded by WORKSPACE_PERSIST_COALESCE_WINDOW_MS * 4 so
+// durability never lags far behind). Environments without
+// `requestIdleCallback` (jsdom) drain on the microtask queue instead, so a
+// single mutation still lands within a microtask of its `set()`. Pending
+// writes are flushed synchronously on pagehide/beforeunload and when the tab
+// is hidden, so unloading the page cannot lose the buffered envelope.
+
+export const WORKSPACE_PERSIST_COALESCE_WINDOW_MS = 300
+
+type WorkspacePersistWriteJob = {
+  name: string
+  value: string
+  perform: (name: string, value: string) => Promise<void>
+}
+
+type WorkspacePersistWaiter = {
+  resolve: () => void
+  reject: (error: unknown) => void
+}
+
+let pendingWorkspacePersistJob: WorkspacePersistWriteJob | null = null
+let workspacePersistDrainInFlight: Promise<void> | null = null
+let workspacePersistDrainCompleted = true
+let workspacePersistDrainScheduled = false
+let workspacePersistIdleHandle: number | null = null
+let workspacePersistLifecycleBound = false
+const workspacePersistWaiters: WorkspacePersistWaiter[] = []
+
+const settleWorkspacePersistWaiters = (
+  waiters: WorkspacePersistWaiter[],
+  error?: unknown
+): void => {
+  for (const waiter of waiters) {
+    if (error) {
+      waiter.reject(error)
+    } else {
+      waiter.resolve()
+    }
+  }
+}
+
+const drainWorkspacePersistWrites = async (): Promise<void> => {
+  workspacePersistDrainCompleted = false
+  try {
+    // Keep writing while newer jobs arrived. There is no `await` between the
+    // loop's pending check and the final `inFlight = null`, so a caller can
+    // only ever observe `inFlight` set (we are suspended on the write below)
+    // or fully idle — never in between (same ordering argument as the
+    // background session writer).
+    while (pendingWorkspacePersistJob) {
+      const job = pendingWorkspacePersistJob
+      pendingWorkspacePersistJob = null
+      const waiters = workspacePersistWaiters.splice(0)
+      try {
+        await job.perform(job.name, job.value)
+        settleWorkspacePersistWaiters(waiters)
+      } catch (error) {
+        settleWorkspacePersistWaiters(waiters, error)
+      }
+    }
+  } finally {
+    workspacePersistDrainCompleted = true
+    workspacePersistDrainInFlight = null
+  }
+}
+
+const startWorkspacePersistDrain = (): void => {
+  if (workspacePersistDrainInFlight) return
+  const drainPromise = drainWorkspacePersistWrites()
+  // A drain whose queue was already empty (or whose writes completed without
+  // ever suspending) runs to completion synchronously and releases the
+  // in-flight slot itself — before the assignment above would land. Re-claiming
+  // the slot with that settled promise would wedge the writer forever, so only
+  // take ownership when the drain is genuinely still running.
+  if (workspacePersistDrainCompleted) return
+  workspacePersistDrainInFlight = drainPromise
+}
+
+const cancelScheduledWorkspacePersistDrain = (): void => {
+  if (
+    workspacePersistIdleHandle !== null &&
+    typeof cancelIdleCallback === "function"
+  ) {
+    cancelIdleCallback(workspacePersistIdleHandle)
+  }
+  workspacePersistIdleHandle = null
+  workspacePersistDrainScheduled = false
+}
+
+const scheduleWorkspacePersistDrain = (): void => {
+  if (workspacePersistDrainScheduled || workspacePersistDrainInFlight) return
+  workspacePersistDrainScheduled = true
+  if (typeof requestIdleCallback === "function") {
+    workspacePersistIdleHandle = requestIdleCallback(
+      () => {
+        workspacePersistIdleHandle = null
+        workspacePersistDrainScheduled = false
+        startWorkspacePersistDrain()
+      },
+      { timeout: WORKSPACE_PERSIST_COALESCE_WINDOW_MS * 4 }
+    )
+    return
+  }
+  queueMicrotask(() => {
+    workspacePersistDrainScheduled = false
+    startWorkspacePersistDrain()
+  })
+}
+
+/**
+ * Flush any pending persist write NOW. The drain starts synchronously, so for
+ * localStorage-backed writes (everything except IndexedDB offload awaits) the
+ * data lands before this returns — page unload can safely call it.
+ */
+const flushWorkspacePersistWrites = (): void => {
+  cancelScheduledWorkspacePersistDrain()
+  startWorkspacePersistDrain()
+}
+
+const enqueueWorkspacePersistWrite = (
+  job: WorkspacePersistWriteJob
+): Promise<void> => {
+  pendingWorkspacePersistJob = job
+  bindWorkspacePersistLifecycleFlush()
+  scheduleWorkspacePersistDrain()
+  return new Promise<void>((resolve, reject) => {
+    workspacePersistWaiters.push({ resolve, reject })
+  })
+}
+
+const onWorkspacePersistVisibilityChange = (): void => {
+  if (
+    typeof document !== "undefined" &&
+    document.visibilityState === "hidden"
+  ) {
+    flushWorkspacePersistWrites()
+  }
+}
+
+const bindWorkspacePersistLifecycleFlush = (): void => {
+  if (
+    workspacePersistLifecycleBound ||
+    typeof window === "undefined" ||
+    typeof document === "undefined"
+  ) {
+    return
+  }
+  window.addEventListener("pagehide", flushWorkspacePersistWrites)
+  window.addEventListener("beforeunload", flushWorkspacePersistWrites)
+  document.addEventListener(
+    "visibilitychange",
+    onWorkspacePersistVisibilityChange
+  )
+  workspacePersistLifecycleBound = true
+}
+
+/**
+ * Test/inspection seam for the coalescing writer (module-scoped state cannot
+ * be observed through the storage adapter alone).
+ */
+export const workspacePersistWriterInternals = {
+  flush: flushWorkspacePersistWrites,
+  hasPendingWrite: () => pendingWorkspacePersistJob !== null,
+  cancelPendingWrite: () => {
+    cancelScheduledWorkspacePersistDrain()
+    pendingWorkspacePersistJob = null
+    settleWorkspacePersistWaiters(workspacePersistWaiters.splice(0))
+  }
+}
+
 /**
  * Custom storage adapter for localStorage with SSR-safe fallback.
  * Date revival is handled in `onRehydrateStorage`.
@@ -1896,6 +2080,10 @@ export const createWorkspaceStorage = (
 
   return {
     getItem: (name: string): string | null | Promise<string | null> => {
+      // Rehydration must observe what is actually at rest. Pending coalesced
+      // writes are NOT flushed here: a pending envelope reflects pre-mutation
+      // in-memory state and would clobber storage seeded out-of-band (and the
+      // only production reader, store creation, runs before any set()).
       if (name === WORKSPACE_STORAGE_KEY) {
         if (!splitStorageEnabled) {
           return localStorage.getItem(name)
@@ -1904,92 +2092,109 @@ export const createWorkspaceStorage = (
       }
       return localStorage.getItem(name)
     },
-    setItem: async (name: string, value: string): Promise<void> => {
-      try {
-        if (shouldSuppressInitialEmptyWorkspaceWrite(name, value)) return
-
-        const handledBySplitStorage = splitStorageEnabled
-          ? await writeSplitWorkspacePersistence(name, value, indexedDbAdapter)
-          : false
-        if (!handledBySplitStorage) {
-          localStorage.setItem(name, value)
-        }
-        broadcastWorkspaceStorageUpdate(name)
-      } catch (error) {
-        if (isQuotaExceededError(error)) {
-          const recoveryAttempt = attemptWorkspaceStorageRecovery(name, value)
-          if (!recoveryAttempt) {
-            emitWorkspaceStorageRecoveryEvent({
-              key: name,
-              action: "retry_skipped",
-              beforeBytes: estimateSerializedByteLength(value),
-              afterBytes: estimateSerializedByteLength(value),
-              recoveredBytes: 0,
-              reason:
-                error instanceof Error
-                  ? error.message
-                  : "Quota exceeded and no recoverable payload sections were found."
-            })
-            emitWorkspaceQuotaExceeded(name, error)
-            return
-          }
-
-          for (const mutation of recoveryAttempt.mutations) {
-            emitWorkspaceStorageRecoveryEvent({
-              key: name,
-              action: mutation.action,
-              workspaceId: mutation.workspaceId,
-              beforeBytes: mutation.beforeBytes,
-              afterBytes: mutation.afterBytes,
-              recoveredBytes: mutation.recoveredBytes
-            })
-          }
-
+    setItem: (name: string, value: string): Promise<void> =>
+      enqueueWorkspacePersistWrite({
+        name,
+        value,
+        perform: async (jobName, jobValue): Promise<void> => {
           try {
+            if (shouldSuppressInitialEmptyWorkspaceWrite(jobName, jobValue)) {
+              return
+            }
+
             const handledBySplitStorage = splitStorageEnabled
               ? await writeSplitWorkspacePersistence(
-                  name,
-                  recoveryAttempt.value,
+                  jobName,
+                  jobValue,
                   indexedDbAdapter
                 )
               : false
             if (!handledBySplitStorage) {
-              localStorage.setItem(name, recoveryAttempt.value)
+              localStorage.setItem(jobName, jobValue)
             }
-            broadcastWorkspaceStorageUpdate(name)
-            emitWorkspaceStorageRecoveryEvent({
-              key: name,
-              action: "retry_success",
-              beforeBytes: recoveryAttempt.beforeBytes,
-              afterBytes: recoveryAttempt.afterBytes,
-              recoveredBytes:
-                recoveryAttempt.beforeBytes - recoveryAttempt.afterBytes
-            })
-            return
-          } catch (retryError) {
-            if (!isQuotaExceededError(retryError)) {
-              throw retryError
+            broadcastWorkspaceStorageUpdate(jobName)
+          } catch (error) {
+            if (isQuotaExceededError(error)) {
+              const recoveryAttempt = attemptWorkspaceStorageRecovery(
+                jobName,
+                jobValue
+              )
+              if (!recoveryAttempt) {
+                emitWorkspaceStorageRecoveryEvent({
+                  key: jobName,
+                  action: "retry_skipped",
+                  beforeBytes: estimateSerializedByteLength(jobValue),
+                  afterBytes: estimateSerializedByteLength(jobValue),
+                  recoveredBytes: 0,
+                  reason:
+                    error instanceof Error
+                      ? error.message
+                      : "Quota exceeded and no recoverable payload sections were found."
+                })
+                emitWorkspaceQuotaExceeded(jobName, error)
+                return
+              }
+
+              for (const mutation of recoveryAttempt.mutations) {
+                emitWorkspaceStorageRecoveryEvent({
+                  key: jobName,
+                  action: mutation.action,
+                  workspaceId: mutation.workspaceId,
+                  beforeBytes: mutation.beforeBytes,
+                  afterBytes: mutation.afterBytes,
+                  recoveredBytes: mutation.recoveredBytes
+                })
+              }
+
+              try {
+                const handledBySplitStorage = splitStorageEnabled
+                  ? await writeSplitWorkspacePersistence(
+                      jobName,
+                      recoveryAttempt.value,
+                      indexedDbAdapter
+                    )
+                  : false
+                if (!handledBySplitStorage) {
+                  localStorage.setItem(jobName, recoveryAttempt.value)
+                }
+                broadcastWorkspaceStorageUpdate(jobName)
+                emitWorkspaceStorageRecoveryEvent({
+                  key: jobName,
+                  action: "retry_success",
+                  beforeBytes: recoveryAttempt.beforeBytes,
+                  afterBytes: recoveryAttempt.afterBytes,
+                  recoveredBytes:
+                    recoveryAttempt.beforeBytes - recoveryAttempt.afterBytes
+                })
+                return
+              } catch (retryError) {
+                if (!isQuotaExceededError(retryError)) {
+                  throw retryError
+                }
+                emitWorkspaceStorageRecoveryEvent({
+                  key: jobName,
+                  action: "retry_failed",
+                  beforeBytes: recoveryAttempt.beforeBytes,
+                  afterBytes: recoveryAttempt.afterBytes,
+                  recoveredBytes:
+                    recoveryAttempt.beforeBytes - recoveryAttempt.afterBytes,
+                  reason:
+                    retryError instanceof Error
+                      ? retryError.message
+                      : "Quota exceeded after recovery retry."
+                })
+                emitWorkspaceQuotaExceeded(jobName, retryError)
+                return
+              }
             }
-            emitWorkspaceStorageRecoveryEvent({
-              key: name,
-              action: "retry_failed",
-              beforeBytes: recoveryAttempt.beforeBytes,
-              afterBytes: recoveryAttempt.afterBytes,
-              recoveredBytes:
-                recoveryAttempt.beforeBytes - recoveryAttempt.afterBytes,
-              reason:
-                retryError instanceof Error
-                  ? retryError.message
-                  : "Quota exceeded after recovery retry."
-            })
-            emitWorkspaceQuotaExceeded(name, retryError)
-            return
+            throw error
           }
         }
-        throw error
-      }
-    },
+      }),
     removeItem: async (name: string): Promise<void> => {
+      // Removal must not race a pending coalesced write (the write would
+      // resurrect the removed key after this returns).
+      flushWorkspacePersistWrites()
       if (name === WORKSPACE_STORAGE_KEY) {
         const workspaceIds = getWorkspaceIdsFromStoredValue(
           localStorage.getItem(name)
