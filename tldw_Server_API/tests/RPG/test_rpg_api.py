@@ -778,3 +778,48 @@ def test_context_endpoint_rejects_tiny_budget():
     )
 
     assert response.status_code == 422  # nosec B101
+
+
+def test_list_campaigns_route_returns_created_campaign():
+    client = TestClient(app)
+
+    campaign = client.post(
+        "/api/v1/rpg/campaigns",
+        headers=_headers(**{"Idempotency-Key": "route-list-c"}),
+        json={"title": "Route Campaign", "default_adapter_key": "fate"},
+    )
+    listed = client.get("/api/v1/rpg/campaigns", headers=_headers())
+
+    assert listed.status_code == 200  # nosec B101
+    body = listed.json()
+    assert body["total_count"] >= 1  # nosec B101
+    assert any(item["id"] == campaign.json()["id"] for item in body["items"])  # nosec B101
+
+
+def test_read_routes_scope_matrix():
+    expected = {
+        ("GET", "/api/v1/rpg/campaigns"): {rpg_endpoint.RPG_CAMPAIGNS_READ},
+        ("GET", "/api/v1/rpg/campaigns/{campaign_id}"): {rpg_endpoint.RPG_CAMPAIGNS_READ},
+        ("GET", "/api/v1/rpg/campaigns/{campaign_id}/sessions"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}/snapshot"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}/events"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}/proposals"): {rpg_endpoint.RPG_PROPOSALS_REVIEW},
+    }
+    for (method, path), scopes in expected.items():
+        assert scopes <= _route_permissions(method, path), f"{method} {path} missing {scopes - _route_permissions(method, path)}"  # nosec B101
+
+
+def test_session_snapshot_events_and_foreign_404():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-read")
+
+    snap = client.get(f"/api/v1/rpg/sessions/{session_id}/snapshot", headers=_headers())
+
+    assert snap.status_code == 200 and snap.json()["snapshot_version"] == 0  # nosec B101
+
+    events = client.get(f"/api/v1/rpg/sessions/{session_id}/events", headers=_headers())
+
+    assert events.status_code == 200 and events.json()["items"] == []  # nosec B101
+    assert client.get("/api/v1/rpg/campaigns/999999", headers=_headers()).status_code == 404  # nosec B101
