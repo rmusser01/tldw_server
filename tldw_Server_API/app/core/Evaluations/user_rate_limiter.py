@@ -5,7 +5,8 @@ Per-user rate limiting for Evaluations module.
 - When ``RG_ENABLED=true``, evaluations/minute and evaluations/tokens daily
   caps are enforced by the ResourceGovernor via ``_maybe_enforce_with_rg_evaluations``.
 - Evaluation cost caps were removed; LLM spend is capped by the general
-  ``limits.llm_cost_per_day_usd`` / ``limits.llm_cost_per_month_usd`` quotas.
+  ``limits.llm_cost_per_day_usd`` / ``limits.llm_cost_per_month_usd`` quotas,
+  which apply only with ``USAGE_QUOTAS_ENABLED`` on (see Docs/Operations/Usage_Quotas.md).
 - When RG is disabled or unavailable, the per-minute checks are skipped
   (fail-open with deprecation warning). The per-user daily evaluations/tokens
   quotas (``limits.evaluations_per_day``, ``limits.evaluation_tokens_per_day``)
@@ -629,6 +630,7 @@ class UserRateLimiter:
         user_id: str,
         endpoint: str,
         tokens_used: int,
+        *,
         max_evaluations_per_day: float | None = None,
         max_tokens_per_day: float | None = None,
         evaluations_requested: int = 1,
@@ -721,6 +723,7 @@ class UserRateLimiter:
         user_id: str,
         endpoint: str,
         tokens_used: int,
+        *,
         reserved_tokens: int = 0,
     ):
         """Record a request's actual usage, replacing any tokens already reserved."""
@@ -1024,6 +1027,7 @@ class UserRateLimiter:
         user_id: str,
         endpoint: str,
         tokens_used: int,
+        *,
         reserved_tokens: int = 0,
     ) -> None:
         """Record actual usage after a request completes (if provider returns usage).

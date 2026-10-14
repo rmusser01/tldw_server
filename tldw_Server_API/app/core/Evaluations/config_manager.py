@@ -268,7 +268,8 @@ class EvaluationsConfigManager:
                 if removed:
                     logger.warning(
                         f"Ignoring {', '.join(removed)} in rate limit tier '{tier_name}': evaluation cost caps were "
-                        "removed; cap LLM spend with limits.llm_cost_per_day_usd / limits.llm_cost_per_month_usd"
+                        "removed; cap LLM spend with limits.llm_cost_per_day_usd / limits.llm_cost_per_month_usd "
+                        "and USAGE_QUOTAS_ENABLED=true (Docs/Operations/Usage_Quotas.md)"
                     )
             except _EVAL_CONFIG_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Invalid rate limit config for tier '{tier_name}': {e}")

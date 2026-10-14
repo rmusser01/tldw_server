@@ -3,6 +3,7 @@
 import dataclasses
 import inspect
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,20 @@ def test_limiter_methods_take_no_cost_parameter() -> None:
     assert not hasattr(UserRateLimiter, "_check_cost_limits")
 
 
+@pytest.mark.parametrize(
+    ("name", "keyword_only"),
+    [
+        ("_reserve_request_usage", {"max_evaluations_per_day", "max_tokens_per_day", "evaluations_requested"}),
+        ("_record_request", {"reserved_tokens"}),
+        ("record_actual_usage", {"reserved_tokens"}),
+    ],
+)
+def test_parameters_after_the_removed_cost_are_keyword_only(name: str, keyword_only: set[str]) -> None:
+    """A caller still passing the old positional cost fails loudly instead of landing in a cap or a reservation."""
+    params = inspect.signature(getattr(UserRateLimiter, name)).parameters
+    assert {p for p, v in params.items() if v.kind is inspect.Parameter.KEYWORD_ONLY} == keyword_only
+
+
 def test_shipped_yaml_validates_with_no_cost_fields() -> None:
     manager = EvaluationsConfigManager(config_path=_SHIPPED_YAML, enable_hot_reload=False)
     assert manager.validate_config() == []
@@ -79,6 +94,7 @@ def test_an_operator_yaml_that_still_has_cost_keys_still_loads(tmp_path: Path) -
     # The operator is told the keys do nothing, so nobody believes a cost cap is in force.
     warned = [m for m in messages if "'free'" in m and "max_cost_per_day" in m and "llm_cost_per_day_usd" in m]
     assert len(warned) == 1
+    assert "USAGE_QUOTAS_ENABLED" in warned[0]  # the quota keys do nothing until quotas are switched on
 
 
 async def test_usage_summary_has_no_cost_keys(tmp_path) -> None:
@@ -88,6 +104,15 @@ async def test_usage_summary_has_no_cost_keys(tmp_path) -> None:
     assert set(summary["usage"]) == {"today"}
     assert set(summary["usage"]["today"]) == {"evaluations", "tokens"}
     assert set(summary["remaining"]) == {"daily_evaluations", "daily_tokens"}
+
+
+@pytest.mark.parametrize(("days", "tier"), [(-1, UserTier.FREE), (1, UserTier.CUSTOM)])
+async def test_a_custom_tier_still_expires(tmp_path, days: int, tier: UserTier) -> None:
+    """`_get_user_config` reads `expires_at` from its new column position: an expired tier falls back to FREE."""
+    limiter = UserRateLimiter(db_path=str(tmp_path / "evals.db"))
+    expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+    assert await limiter.upgrade_user_tier("7", UserTier.CUSTOM, expires_at=expires_at)
+    assert (await limiter._get_user_config("7")).tier is tier
 
 
 async def test_custom_limits_with_cost_keys_are_ignored_and_warned_about(tmp_path) -> None:

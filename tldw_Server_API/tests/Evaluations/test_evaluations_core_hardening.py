@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import time
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -318,9 +319,18 @@ def test_postgresql_adapter_is_not_constructible_until_implemented() -> None:
 
 
 @pytest.mark.asyncio
-async def test_daily_cap_reservation_is_atomic_under_concurrency(tmp_path) -> None:
+async def test_daily_cap_reservation_is_atomic_under_concurrency(tmp_path, monkeypatch) -> None:
     """Two concurrent reservations against a daily cap of 1: exactly one is admitted."""
     limiter = UserRateLimiter(db_path=str(tmp_path / "rate_limits.db"))
+    write = limiter._write_request_usage
+
+    def _slow_write(*args, **kwargs):
+        # Hold the write open so the second reservation runs while the first is mid-transaction;
+        # without the lock both would read 0 used and both be admitted.
+        time.sleep(0.2)
+        return write(*args, **kwargs)
+
+    monkeypatch.setattr(limiter, "_write_request_usage", _slow_write)
     results = await asyncio.gather(
         limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=1),
         limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=1),
