@@ -14,7 +14,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Execution runtime | `MCP_unified/tool_execution/runtime.py` | `ToolExecutionRuntime.execute_prepared_tool_call` — rate-limit admission, module admission, observers |
 | Idempotency | `tool_execution/idempotency.py` | Redis-backed with a degraded-mode metric |
 | Modules | `MCP_unified/modules/{base,registry}.py` + `implementations/` (35+) | `BaseModule` (tools/resources/prompts, context-aware variants, per-module circuit breaker), `ModuleRegistry` routing maps + `execute_with_failover` |
-| Continuation | `implementations/prompts_catalog.py` | encoded continuation cursors (page clamp default 50/max 100), identifier-stripped for anonymity |
+| Continuation | `modules/implementations/prompts_catalog.py` | encoded continuation cursors (page clamp default 50/max 100), identifier-stripped for anonymity |
 | Config | `MCP_unified/config.py` | `MCPConfig(BaseSettings)` — every `MCP_*` key |
 | Transport/security | `MCP_unified/{auth,security,jsonrpc_transport,persona_scope,tool_observability}.py` | JWT manager, RBAC, rate limiter, IP filtering, JSON-RPC parsing |
 | Federation | `MCP_unified/external_servers/` | external server manager, config schema, transports |

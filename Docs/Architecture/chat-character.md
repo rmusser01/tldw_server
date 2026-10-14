@@ -52,7 +52,7 @@ Endpoint → payload validation (413 on size/length) → moderation → **histor
 | Persona-session generation | 409 |
 | Character stream caps | SSE error frame + stop |
 | Chatbook download expired | 410 |
-| Chatbook file > 100 MB | 400 |
+| Chatbook file > 100 MB | 413 |
 | Invalid job id / not owner / not completed | 400 / 403 / 400 |
 | OpenWebUI import over caps | Rejected by the adapter |
 

@@ -15,14 +15,14 @@ All paths under `tldw_Server_API/` unless noted.
 | Sessions | `app/core/AuthNZ/session_manager.py` | `SessionManager` — server-side sessions, Fernet at-rest token encryption, Redis or ephemeral KV |
 | Blacklist / lockout | `token_blacklist.py`, `lockout_tracker.py` | JTI revocation with strict/non-strict propagation; composite client+login lockout keys |
 | Passwords / MFA | `password_service.py`, `mfa_service.py` | Argon2id with transparent rehash, history, breached list, registration codes; TOTP with Fernet-encrypted secrets and backup codes |
-| API keys | `api_key_manager.py`, `api_key_crypto.py`, `virtual_keys.py` | `tldw_<id>_<secret>` format; PBKDF2-KDF hashes with legacy HMAC fallback for dual-secret rotations; scopes read/write/admin/service; usage recording; virtual-key budgets |
+| API keys | `api_key_manager.py`, `api_key_crypto.py`, `virtual_keys.py` | `tldw_<id>.<secret>` format (dot separator); PBKDF2-KDF hashes with legacy HMAC fallback for dual-secret rotations; scopes read/write/admin/service; usage recording; virtual-key budgets |
 | RBAC | `rbac.py`, `rbac_seed.py`, `permissions.py`, `org_rbac.py`, `platform_admin.py` | effective-permission resolution; seeded roles (admin/user/viewer/reviewer/moderator); scoped org/team overlay; the single `PLATFORM_ADMIN_ROLES` source of truth |
 | Single user | `single_user_session.py`, `ip_allowlist.py` | opaque cookie sessions (fail-closed validation); trusted-proxy-aware client IP; IP allowlists |
 | CSRF | `csrf_protection.py` | double-submit cookie; optional HMAC binding to the user |
 | User persistence | `User_DB_Handling.py`, `repos/` (41 modules) | `verify_jwt_and_fetch_user` (incl. scoped-token enforcement), `authenticate_api_key_user`, RBAC enrichment; repos are the only persistence boundary |
 | BYOK | `byok_*.py`, `user_provider_secrets.py`, `provider_credential_runtime.py` | enablement/allowlists, encrypted envelopes, runtime resolution, rotation |
 | Auth routes | `app/api/v1/endpoints/auth.py` | router prefix `/auth` under `/api/v1`: login, refresh, logout, MFA flows, register, password reset, sessions CRUD, single-user cookie session |
-| Admin surface | `app/api/v1/endpoints/admin/__init__.py` (33 submodules) + `app/services/admin_*_service.py` (~40) | router gated by `Depends(RequireRole("admin"))`; see the pattern below |
+| Admin surface | `app/api/v1/endpoints/admin/__init__.py` (32 submodules; 33 files including `__init__.py`) + `app/services/admin_*_service.py` (~40) | router gated by `Depends(RequireRole("admin"))`; see the pattern below |
 | Billing | `app/core/Billing/` | `BillingEnforcer` plan-limit enforcement (OSS: limits, not payments); `PlanTier`/`get_plan_limits`; Stripe only for injected clients; per-user quotas live in UserProfiles `limits.*` (ADR-064) |
 | Governance / Audit | `app/core/Governance/`, `app/core/Audit/` | policy-rule resolution (allow/warn/require_approval/deny) feeding MCP and ACP; `UnifiedAuditService` with PII detection, risk scoring, JSONL fallback queue, 90-day retention |
 
@@ -38,7 +38,7 @@ All paths under `tldw_Server_API/` unless noted.
 
 ## API key / single-user request (dataflow)
 
-1. `X-API-KEY: tldw_…` → parse the embedded key id → active-row fetch → PBKDF2-KDF hash verify (legacy HMAC candidates for rotating secrets) → status/expiry/IP-allowlist/scope checks → usage recorded.
+1. `X-API-KEY: tldw_<id>.<secret>` → parse the embedded key id → active-row fetch → PBKDF2-KDF hash verify (legacy HMAC candidates for rotating secrets) → status/expiry/IP-allowlist/scope checks → usage recorded.
 2. Single-user mode routes through the same API-key flow and asserts the resolved id equals `SINGLE_USER_FIXED_ID`; the single-user IP allowlist applies.
 3. Optionally, `POST /auth/single-user/session` mints an opaque cookie session after verifying an explicit `X-API-KEY` (with CSRF enabled — 503 otherwise); validation fails closed; logout revokes exactly that session. Single-user `/login` returns the configured `SINGLE_USER_API_KEY` itself as both tokens.
 

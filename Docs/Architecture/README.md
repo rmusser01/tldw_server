@@ -55,7 +55,7 @@ These existing guides were spot-checked against code while writing this referenc
 | `Code_Map.md` | Partly stale (router-registry model, no `/api/v2`, ~120 missing endpoint modules) |
 | `Data_Flow_Atlas.md` | Mostly current, but presents Redis as a jobs backend — Jobs is strictly SQLite/Postgres |
 | `Ingestion_Media_Processing.md`, `Ingestion_Pipeline_Video.md` | Current |
-| `Ingestion_Pipeline_{Audio,PDF}.md` | Current on signatures, older |
+| `Ingestion_Pipeline_{Audio,PDF}.md` | Current on signatures, otherwise older |
 | `Ingestion_Pipeline_{Documents,Ebooks,MediaWiki}.md` | Older; signatures still accurate |
 | `Embeddings-Developer-Guide.md`, `Embeddings-Documentation.md` | Current |
 | `Chunking-Module.md` | Stale-ish (predates timecode/frontmatter/propositions; claims a nonexistent template library) |

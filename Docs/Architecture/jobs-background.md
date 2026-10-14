@@ -14,7 +14,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Worker SDK | `Jobs/worker_sdk.py` | `WorkerSDK`, `WorkerConfig` (lease 30 s default), lease-evidence contexts |
 | Fair share | `Jobs/fair_share.py` | owner/domain fair-share scoring mapped to priority |
 | Events/telemetry | `Jobs/event_stream.py`, `metrics.py`, `audit_bridge.py` | outbox + SSE events, gauges, audit hooks |
-| Admin surface | `app/api/v1/endpoints/jobs_admin.py` | ~30 routes: queue control, reschedule, retry-now, SLA policies, events SSE, stats, archive, batch ops |
+| Admin surface | `app/api/v1/endpoints/jobs_admin.py` | ~25 routes: queue control, reschedule, retry-now, SLA policies, events SSE, stats, archive, batch ops |
 | Deps | `app/api/v1/API_Deps/jobs_deps.py` | `get_job_manager()` — LRU-cached per jobs DB |
 | Worker lifecycle | `app/services/lifecycle_workers.py`, `startup_*_jobs_pollers.py` | `ManagedWorker` registry, graceful stop, poller bootstrap |
 | Scheduling services | `services/reminders_scheduler.py` + `reminder_jobs_worker.py`, `scheduled_task_automation_scheduler.py`, `scheduled_task_recurring_question_scheduler.py` | APScheduler feeds enqueuing Jobs (see below) |
