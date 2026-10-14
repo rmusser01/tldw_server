@@ -8,7 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       base_sha:
-        description: Exact base commit for change detection (the merge queue passes dev's tip)
+        description: Exact base commit for change detection (manual diagnostic dispatches)
+        required: false
+        type: string
+      queue_kick:
+        description: Set to 'true' only by the merge queue, on dev; runs the queue instead of the gate
+        required: false
+        type: string
+      wait_run:
+        description: With queue_kick, the id of a run the queue waits for before deciding
         required: false
         type: string
 
@@ -18,7 +26,9 @@ permissions:
 
 concurrency:
   group: security-required-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
-  cancel-in-progress: true
+  # A queue kick (spec 4.6 of the 2026-10-11 merge-queue redesign) must never cancel a running kick;
+  # every other run keeps cancel-in-progress.
+  cancel-in-progress: ${{ github.event.inputs.queue_kick != 'true' }}
 
 jobs:
   admission:
@@ -50,6 +60,7 @@ jobs:
     needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
+      (github.event.inputs.queue_kick != 'true' || github.ref != 'refs/heads/dev') &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -118,6 +129,7 @@ jobs:
     # and GitHub counts a skipped required job as satisfied (TASK-13502).
     if: >-
       always() && !cancelled() &&
+      (github.event.inputs.queue_kick != 'true' || github.ref != 'refs/heads/dev') &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -251,15 +263,12 @@ jobs:
           print("No unallowlisted HIGH/CRITICAL findings detected.")
           PY
 
-  # Wakes the merge queue when the gate above fails (TASK-13462, section 4.6 of
-  # Docs/superpowers/specs/2026-10-04-merge-queue-design.md). A red gate causes
-  # none of the events merge-queue.yml listens for, so without this a failed
-  # front PR would never be retried or removed from the line.
-  #
-  # Not required and in no job's `needs`, so it cannot turn the required check
-  # red. Skipped on every run while the repository variable MERGE_QUEUE is unset
-  # or off, and for fork PRs. It checks out dev, never the PR, so the queue
-  # script that runs with these write permissions is dev's copy.
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
   queue-tick:
     name: Merge queue tick
     needs: [security-required]
@@ -267,17 +276,37 @@ jobs:
       always() && !cancelled() &&
       needs.security-required.result == 'failure' &&
       (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        )
-      )
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
-      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
+      actions: write
+    steps:
+      - name: Wake the merge queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"
+
+  # The merge queue's wake-up (spec 4.6, D3). A queue-tick, or the queue itself, dispatches this
+  # workflow on dev with queue_kick=true: GitHub starts a dispatch only for a workflow file that
+  # exists on main, and merge-queue.yml does not yet. Every gate job above skips; this job waits
+  # for the run named by wait_run (if any), then runs the queue. It checks out dev, never a pull
+  # request, so the code holding these write permissions is always dev's.
+  queue-kick:
+    name: Merge queue kick
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.queue_kick == 'true' &&
+      github.ref == 'refs/heads/dev' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on')
+    runs-on: ubuntu-latest
+    # Same budget as merge-queue.yml's job: a kick may wait 3 minutes for its run, then re-run up to six gates.
+    timeout-minutes: 15
+    permissions:
+      # write: rebase the front PR's branch, comment and disarm, approve/re-run/cancel/delete runs.
       contents: write
       pull-requests: write
       actions: write
@@ -294,4 +323,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_QUEUE: ${{ vars.MERGE_QUEUE }}
+          WAIT_RUN: ${{ github.event.inputs.wait_run }}
         run: python3 -m Helper_Scripts.ci.merge_queue

@@ -437,11 +437,8 @@ def _evaluate_flat_expression(expression: str, context: dict[str, str]) -> objec
 
 @pytest.mark.unit
 def test_manual_dispatch_cannot_publish_the_required_check_name() -> None:
-    """Keep diagnostic manual ratchets from satisfying branch protection.
-
-    The one dispatch that may publish the protected name is the merge queue's, which is made
-    with GITHUB_TOKEN and therefore runs as `github-actions[bot]` (TASK-13462, spec 4.8).
-    """
+    """Keep diagnostic manual ratchets from satisfying branch protection: no dispatch, by anyone,
+    publishes the protected name (D2 of the 2026-10-11 merge-queue redesign)."""
 
     workflow = yaml.safe_load(
         Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8")
@@ -453,12 +450,8 @@ def test_manual_dispatch_cannot_publish_the_required_check_name() -> None:
             name, {"github.event_name": event_name, "github.actor": actor}
         )
 
-    # A dispatch started by anyone but the queue stays diagnostic. `[` cannot appear in a
-    # user login, so no account can be named like the exempted actor.
-    for actor in ("octocat", "github-actions", "dependabot[bot]", ""):
+    for actor in ("octocat", "github-actions", "github-actions[bot]", "dependabot[bot]", ""):
         assert published("workflow_dispatch", actor) == "frontend-required-diagnostic"
-    # The queue's own dispatch publishes the required name.
-    assert published("workflow_dispatch", "github-actions[bot]") == "frontend-required"
     # The events that always published the required name still do, whoever the actor is.
     for event_name in ("pull_request", "workflow_run"):
         for actor in ("octocat", "github-actions[bot]"):
