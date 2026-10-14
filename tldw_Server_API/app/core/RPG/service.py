@@ -470,6 +470,8 @@ class RPGService:
         source_type: str | None = None,
         event_type: str | None = None,
     ) -> list[RPGSessionEvent]:
+        # Existence/ownership check: foreign or unknown session ids 404.
+        self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
         return self.repo.list_events(
             owner_user_id=self.owner_user_id,
             session_id=session_id,
@@ -487,6 +489,8 @@ class RPGService:
         limit: int = 25,
         offset: int = 0,
     ) -> tuple[list[RPGProposalRecord], int]:
+        # Existence/ownership check: foreign or unknown session ids 404.
+        self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
         return self.repo.list_proposals(
             owner_user_id=self.owner_user_id,
             session_id=session_id,

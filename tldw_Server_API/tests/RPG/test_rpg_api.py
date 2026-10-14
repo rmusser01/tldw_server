@@ -12,9 +12,12 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collecti
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import rpg as rpg_endpoint
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RPG.context import SessionContext
 from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
+from tldw_Server_API.app.core.RPG.service import RPGService
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.PrivilegeCatalog.test_endpoint_scope_catalog_sync import load_catalog_scope_ids
@@ -823,6 +826,83 @@ def test_session_snapshot_events_and_foreign_404():
 
     assert events.status_code == 200 and events.json()["items"] == []  # nosec B101
     assert client.get("/api/v1/rpg/campaigns/999999", headers=_headers()).status_code == 404  # nosec B101
+    assert client.get("/api/v1/rpg/sessions/999999/events", headers=_headers()).status_code == 404  # nosec B101
+    assert client.get("/api/v1/rpg/sessions/999999/proposals", headers=_headers()).status_code == 404  # nosec B101
+
+
+def test_session_events_list_with_rows_and_proposals(tmp_path):
+    # The Phase-1 POST /events route hardcodes source_type="user" (no mcp/model
+    # ingest route yet), so a real service is shared with the routes via
+    # dependency override purely to seed one mcp-sourced event; every assertion
+    # below still exercises the HTTP surface. The DB must be file-backed and
+    # unique: TestClient serves on a worker thread, and a fresh connection to
+    # ":memory:" from another thread is a new empty database.
+    service = RPGService(
+        repo=RPGRepository.initialized(CharactersRAGDB(str(tmp_path / "rpg_events_rows.db"), "rpg-api-events-test")),
+        owner_user_id=42,
+    )
+    app.dependency_overrides[rpg_endpoint._service] = lambda: service
+    try:
+        client = TestClient(app)
+        _campaign_id, session_id = _create_campaign_and_session(client, "route-events-rows")
+
+        for index in range(3):
+            recorded = client.post(
+                f"/api/v1/rpg/sessions/{session_id}/events",
+                headers=_headers(**{"Idempotency-Key": f"route-events-rows-{index}"}),
+                json={
+                    "expected_last_event_sequence": index,
+                    "events": [
+                        {
+                            "event_type": "note.added",
+                            "event_payload": {"note_id": f"n{index}", "text": f"Note {index}"},
+                        }
+                    ],
+                },
+            )
+            assert recorded.status_code == 200  # nosec B101
+            assert recorded.json()["committed_events"][0]["sequence_number"] == index + 1  # nosec B101
+
+        listed = client.get(f"/api/v1/rpg/sessions/{session_id}/events", headers=_headers())
+
+        assert listed.status_code == 200  # nosec B101
+        body = listed.json()
+        assert [item["sequence_number"] for item in body["items"]] == [1, 2, 3]  # nosec B101
+        assert body["next_after_sequence"] == 3  # nosec B101
+        assert all(item["event_type"] == "note.added" for item in body["items"])  # nosec B101
+        assert [item["event_payload"]["note_id"] for item in body["items"]] == ["n0", "n1", "n2"]  # nosec B101
+
+        paged = client.get(
+            f"/api/v1/rpg/sessions/{session_id}/events",
+            params={"limit": 1, "after_sequence": 1},
+            headers=_headers(),
+        )
+
+        assert paged.status_code == 200  # nosec B101
+        paged_body = paged.json()
+        assert [item["sequence_number"] for item in paged_body["items"]] == [2]  # nosec B101
+        assert paged_body["next_after_sequence"] == 2  # nosec B101
+
+        # Seed one mcp-sourced event directly (default authority settings keep
+        # mcp events pending as proposals), then verify the list route shape.
+        mcp_result = service.record_events(
+            session_id=session_id,
+            events=[{"event_type": "note.added", "event_payload": {"note_id": "m1", "text": "Mcp note"}}],
+            source_type="mcp",
+            expected_last_event_sequence=3,
+            idempotency_key="route-events-rows-mcp",
+        )
+        assert mcp_result.proposal is not None  # nosec B101
+
+        proposals = client.get(f"/api/v1/rpg/sessions/{session_id}/proposals", headers=_headers())
+
+        assert proposals.status_code == 200  # nosec B101
+        proposals_body = proposals.json()
+        assert proposals_body["total_count"] >= 1  # nosec B101
+        assert proposals_body["items"][0]["session_id"] == session_id  # nosec B101
+        assert proposals_body["items"][0]["status"] == "pending"  # nosec B101
+    finally:
+        app.dependency_overrides.pop(rpg_endpoint._service, None)
 
 
 def test_patch_campaign_archive_and_conflict():

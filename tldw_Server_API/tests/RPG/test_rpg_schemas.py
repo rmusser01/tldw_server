@@ -39,3 +39,5 @@ def test_authority_settings_request_strict_shape():
         RPGAuthoritySettingsReplaceRequest(**base, expected_version=2, surprise=1)
     with pytest.raises(ValidationError):  # missing field
         RPGAuthoritySettingsReplaceRequest(import_auto_commit=False, mcp_auto_commit=False, model_auto_commit=False, expected_version=2)
+    with pytest.raises(ValidationError):  # integer 1 must not coerce to bool
+        RPGAuthoritySettingsReplaceRequest(**{**base, "mcp_auto_commit": 1}, expected_version=2)

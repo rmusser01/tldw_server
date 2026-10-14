@@ -274,9 +274,9 @@ class RPGAuthoritySettingsReplaceRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    import_auto_commit: bool
-    mcp_auto_commit: bool
-    model_auto_commit: bool
+    import_auto_commit: StrictBool
+    mcp_auto_commit: StrictBool
+    model_auto_commit: StrictBool
     model_auto_commit_event_types: list[Annotated[str, Field(min_length=1, max_length=120)]]
     expected_version: int = Field(ge=1)
 
