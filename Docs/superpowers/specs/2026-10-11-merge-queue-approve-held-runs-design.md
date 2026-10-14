@@ -42,7 +42,14 @@ Not yet verified here; the one-PR trial (section 7) answers them:
   `workflow_dispatch`, so it should not apply.
 - A re-run of a failed gate run adds an attempt to the same check suite and is read as the newer result (tldw_chatbook V3).
 - The `queue-tick` job's write permissions are granted inside an approved run.
-- What a gate job reports when it hits its timeout.
+- What a gate job reports when it hits its timeout. If it is `cancelled`, nothing wakes the queue (the tick fires on
+  `failure`); the tick should then also fire on `cancelled`.
+- Whether `rerun-failed-jobs` re-runs the dependent `queue-tick`, so a retry that fails wakes the queue too.
+- Whether the `dev` ruleset asks for an approving review on the queue's rebased commits. Its
+  `require_extra_approval_for_unattributed_changes` is on; the rebased commits keep their author but are committed by
+  `github-actions[bot]`, and no such commit has merged here before. If it asks, the owner switches the option off for
+  `dev`; the queue cannot change who commits a rebase.
+- That the kick's skipped `security-required` check on `dev`'s tip shows on no PR, including a `dev` -> `main` release.
 
 ## 3. The change in one paragraph
 
@@ -62,12 +69,18 @@ approved, so a queue rebase never re-runs the full suite; that keeps old 4.5's d
 
 The verdict order (evict, retry, wait, start, green) is unchanged. Only "start" and "retry" act differently:
 
-- **Start** (a context is missing on a head older than 3 minutes): approve its held run. With no held run, re-run the
-  workflow's completed run on that head (a cancelled run, or one that never reported its check). With no run at all, evict
-  (`evict-no-run`): the queue has nothing it may act on, and dispatching would not count (S5).
+- **Start** (a context is missing on a head older than 3 minutes): approve its held run. With no held run, restart the
+  workflow's cancelled run on that head, once per gate per head (marker `restart-<context>`); a second cancellation on
+  the same head evicts (`evict-rerun`), so a gate that keeps hitting its timeout cannot hold the line. With no run at
+  all, a `no-run` strike, then eviction (`evict-no-run`): the queue has nothing it may act on, and dispatching would not
+  count (S5).
+- **A run that never reported its check** (any completed gate `pull_request` run with no check in its suite, unless it
+  was cancelled or is held) counts as one failure of its gate: retried once, evicted on the second. That covers a startup
+  failure, a timeout before the gate job, and a branch that renamed or removed its gate job, none of which a re-run on
+  every wake would fix.
 - **Retry** (a context failed once): re-run the failed jobs of that context's run. GitHub may hold the re-run because the
-  token caused it; the queue approves it.
-- The license status keeps its dispatch for both.
+  token caused it; the queue approves it. A retry attempt that ends cancelled is restarted once, as above.
+- The license status keeps its dispatch for both, and goes first on a retry as on a start.
 
 **4.2 is replaced** by S2 and S3.
 
@@ -77,7 +90,9 @@ and the dependency-review dispatch arm stay in the workflows as a manual diagnos
 
 **4.4, the license status.** Unchanged, and now ordered: the queue dispatches it **before** approving the gates. Each
 gate's `await_license` job runs in a `pull_request` run and, when `LICENSE_FIRST_CI_ENABLED` is `true`, waits up to 15
-minutes for that status on the head. With the variable unset, as it is today, the wait passes at once.
+minutes for that status on the head. With the variable unset, as it is today, the wait passes at once. Re-enabling
+it also needs a gate the license refused to be re-run in full, not by failed jobs: a failed-jobs re-run keeps the old
+`await_license` verdict.
 
 **4.5, non-required workflows.** Still not run on the rebased head. Their six held runs are deleted, as the queue already
 does for every held run today (`cleanup_approval_runs`); the function now skips the six gate workflows. Deleting removes
@@ -93,7 +108,9 @@ completed, so a tick can no longer retry its own gate directly. Instead:
 GitHub only starts a `workflow_dispatch` run for a workflow file that exists on `main`, and `merge-queue.yml` does not
 yet. The kick is therefore hosted by `security-required.yml`, which does: a dispatch on `refs/heads/dev` with
 `queue_kick=true` skips every gate job and runs only a `queue-kick` job with the queue's permissions. On any other ref,
-or without the flag, the workflow behaves as today. Every gate workflow's concurrency group is pinned with
+or without the flag, the workflow behaves as today. `queue_kick` is a string input (`'true'`), compared through
+`github.event.inputs`. The kick job's timeout is 15 minutes, as `merge-queue.yml`'s: it may wait 3 minutes for its run
+and then re-run up to six gates. Every gate workflow's concurrency group is pinned with
 `cancel-in-progress: true`, which would let a second kick cancel a running one. For a kick it is false instead
 (`cancel-in-progress: ${{ github.event.inputs.queue_kick != 'true' }}`), so one kick never cancels another mid-run;
 GitHub keeps one running and one pending. A hand dispatch of `security-required.yml` on `dev` without the flag still
@@ -103,8 +120,8 @@ cancels a running kick; nothing does that in normal use, and the next queue even
 The tick itself shrinks to what a kick needs: `actions: write`, no checkout, one `gh api` dispatch. It no longer fires
 on a `workflow_dispatch` run: the queue dispatches no gate, and a dispatched gate's result does not count (S5).
 
-The queue also sends a kick when it rebases a PR but cannot see the new head in time, or loses a race to another queue
-run, exactly where the chatbook queue does.
+The queue also sends a kick when it rebases a PR but cannot see the new head in time, loses a race to another queue
+run, or fails after its rebase took effect (the new head's gate runs are held and nothing else would approve them).
 
 The "host workflow dispatched last" rule of old 4.6 goes away with the dispatches.
 
@@ -120,8 +137,9 @@ required name. See decision D2.
 **Section 6, the `BEHIND` row** becomes: rebase, wait for the new head, dispatch the license status, approve the six held
 gate runs, delete the other held runs, cancel the old head's live runs, comment once.
 
-**Section 6, the stuck row** (added at planning, 2026-10-14; strike it if unwanted): before evicting a green PR as
-stuck, the queue asks `compare/dev...<head>` and rebases instead when `dev` has commits the head lacks. Right after a
+**Section 6, the stuck and green rows** (added at planning, 2026-10-14; strike it if unwanted): before evicting a green
+PR as stuck, or waiting on a green PR for auto-merge, the queue asks `compare/dev...<head>` and rebases instead when
+`dev` has commits the head lacks; auto-merge cannot fire on a head that is behind. Right after a
 merge the next PR's merge state can still read up to date while its green runs are hours old; tldw_chatbook evicted
 #3070 twice that way on 2026-10-11 (TASK-34948, PR #3103).
 
@@ -180,8 +198,9 @@ check does not count (S5).
 2. Owner switches on **Allow auto-merge**.
 3. `MERGE_QUEUE=dry` for about a day; compare the logged decisions with what armed PRs do.
 4. One throwaway PR under `on`, with the switch set and restored by the same watching command, on a deadline. It must
-   show: the rebase, the license status, six approved gates in the rollup, auto-merge firing, and the four open points of
-   section 2. A deliberately failing gate on a second throwaway PR shows the tick, the kick and the retry.
+   show: the rebase, the license status, six approved gates in the rollup, auto-merge firing without an approving
+   review, and the open points of section 2. A deliberately failing gate on a second throwaway PR shows the tick, the
+   kick, the retry, and the retry's own tick.
 5. `on` for all traffic.
 
 Rollback at any step: `gh variable set MERGE_QUEUE --body off`.
