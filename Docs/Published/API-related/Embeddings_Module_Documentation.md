@@ -7,8 +7,8 @@
 4. [Configuration](#configuration)
 5. [Security Features](#security-features)
 6. [Provider Integration](#provider-integration)
-7. [Performance & Scaling](#performance-scaling)
-8. [Monitoring & Observability](#monitoring-observability)
+7. [Performance & Scaling](#performance--scaling)
+8. [Monitoring & Observability](#monitoring--observability)
 9. [Troubleshooting](#troubleshooting)
 10. [Development Guide](#development-guide)
 

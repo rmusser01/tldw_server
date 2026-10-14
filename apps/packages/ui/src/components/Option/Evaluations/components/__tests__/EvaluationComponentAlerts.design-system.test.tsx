@@ -120,21 +120,15 @@ describe("Evaluation component product-state alerts", () => {
           limits: {
             evaluations_per_minute: 10,
             evaluations_per_day: null,
-            tokens_per_day: null,
-            cost_per_day: 0,
-            cost_per_month: 0
+            tokens_per_day: null
           },
           usage: {
             evaluations_today: 4,
-            tokens_today: 1200,
-            cost_today: 0,
-            cost_month: 0
+            tokens_today: 1200
           },
           remaining: {
             daily_evaluations: null,
-            daily_tokens: null,
-            daily_cost: 0,
-            monthly_cost: 0
+            daily_tokens: null
           },
           reset_at: "2026-05-29T23:00:00Z"
         }}
