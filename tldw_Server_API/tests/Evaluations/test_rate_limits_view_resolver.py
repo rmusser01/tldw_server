@@ -77,4 +77,5 @@ async def test_no_cost_headers_are_sent(caps: dict, tmp_path) -> None:
     """The evaluation cost caps are gone, so no X-RateLimit-*-Cost-Remaining header is advertised."""
     caps["limits.evaluations_per_day"] = 5
     headers = await _headers_for(tmp_path)
+    assert headers["x-ratelimit-daily-limit"] == "5"  # the headers were applied, so the next check is not vacuous
     assert not [h for h in headers if "cost" in h]
