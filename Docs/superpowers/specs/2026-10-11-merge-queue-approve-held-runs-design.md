@@ -70,7 +70,7 @@ approved, so a queue rebase never re-runs the full suite; that keeps old 4.5's d
 The verdict order (evict, retry, wait, start, green) is unchanged. Only "start" and "retry" act differently:
 
 - **Start** (a context is missing on a head older than 3 minutes): approve its held run. With no held run, restart the
-  workflow's cancelled run on that head, once per gate per head (marker `restart-<context>`); a second cancellation on
+  workflow's completed run on that head (cancelled, or with its gate job cancelled), once per gate per head (marker `restart-<context>`); a second cancellation on
   the same head evicts (`evict-rerun`), so a gate that keeps hitting its timeout cannot hold the line. With no run at
   all, a `no-run` strike, then eviction (`evict-no-run`): the queue has nothing it may act on, and dispatching would not
   count (S5).
