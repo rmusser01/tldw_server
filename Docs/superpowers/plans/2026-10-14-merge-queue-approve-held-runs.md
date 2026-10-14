@@ -2956,6 +2956,8 @@ only on the owner's word.
 
 ## Known gap, not in this plan
 
-A failed **license** status wakes nothing: the license gate runs on `dev` and has no queue-tick. With every gate green
-and the license red, the front PR waits for the next arm, disarm, close or push to `dev`. This was true before the
+A failed or lost **license** status wakes nothing: the license gate runs on `dev` and has no queue-tick. With every gate
+green and the license red (or never posted, when no rebase-path wake fired), the front PR waits for the next arm,
+disarm, close or push to `dev`. A missing license is started on the next decision even while gates run (spec section 7,
+"Missing contexts"); this gap is only about the case where no decision happens. This was true before the
 redesign too; the spec does not change it. Raise it with the owner if the trial shows it.

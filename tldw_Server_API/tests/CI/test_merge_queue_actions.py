@@ -1078,8 +1078,8 @@ def test_a_refused_approval_strikes_then_evicts_after_the_gap():
     refused = "gh: Resource not accessible by integration (HTTP 403)"
     first = FakeGh([_node(1)], runs={OLD: [_held(31)]}, approve_error=refused)
     assert mq._approve_strictly(first, _pr_state(), _held(31), lambda m: None, lambda: NOW) is False
-    assert first.calls[-1][0] == "comment" and f"merge-queue:approve-error:{OLD}" in first.calls[-1][2]
-    warned = (f"<!-- merge-queue:approve-error:{OLD} -->\nx", "2026-10-04T11:49:00Z")  # 11 minutes old
+    assert first.calls[-1][0] == "comment" and f"merge-queue:approve-error-backend-required.yml:{OLD}" in first.calls[-1][2]
+    warned = (f"<!-- merge-queue:approve-error-backend-required.yml:{OLD} -->\nx", "2026-10-04T11:49:00Z")  # 11 minutes old
     later = FakeGh([_node(1)], runs={OLD: [_held(31)]}, approve_error=refused, comments={1: [warned]})
     assert mq._approve_strictly(later, _pr_state(), _held(31), lambda m: None, lambda: NOW) is True
     assert [c[0] for c in later.calls] == ["approve", "comment", "disarm"]
@@ -1136,21 +1136,21 @@ def test_wait_for_run_returns_once_the_run_completes_and_gives_up_after_the_boun
 def test_rerun_refusals(error, outcome):
     run = _run_of("e2e-required.yml", 70, "completed", "failure")
     gh = FakeGh([_node(1)], runs={OLD: [run]}, rerun_error=error)
-    assert mq._rerun(gh, _pr_state(), run, True, lambda m: None, lambda s: None, lambda: NOW) == outcome
+    assert mq._rerun(gh, _pr_state(), run, True, lambda m: None, lambda s: None, lambda: NOW, E2E) == outcome
 
 
 def test_a_rerun_answered_with_an_error_while_a_racing_run_re_ran_it_stands_down():
     run = _run_of("e2e-required.yml", 70, "completed", "failure")
     gh = FakeGh([_node(1)], runs={OLD: [run]}, rerun_error="gh: Conflict (HTTP 409)",
                 run_status={70: ["in_progress"]})
-    assert mq._rerun(gh, _pr_state(), run, True, lambda m: None, lambda s: None, lambda: NOW) == "started"
+    assert mq._rerun(gh, _pr_state(), run, True, lambda m: None, lambda s: None, lambda: NOW, E2E) == "started"
 
 
 def test_a_held_rerun_is_approved():
     run = _run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)
     gh = FakeGh([_node(1)], runs={OLD: [run, _held(71, "e2e-required.yml")]},
                 run_status={70: ["completed", "in_progress"]})
-    assert mq._rerun(gh, _pr_state(), run, True, lambda m: None, lambda s: None, lambda: NOW) == "started"
+    assert mq._rerun(gh, _pr_state(), run, True, lambda m: None, lambda s: None, lambda: NOW, E2E) == "started"
     assert ("rerun", "70", "failed") in gh.calls and ("approve", "71") in gh.calls
 
 
@@ -1325,8 +1325,8 @@ def test_start_dispatches_a_missing_license_on_dev_and_nothing_for_the_gates_tha
 def test_start_with_no_run_at_all_warns_then_evicts_after_the_gap():
     first = FakeGh([_node(1, state="BLOCKED")], **_green({E2E: None}))
     _run(first)
-    assert [c[0] for c in first.calls] == ["comment"] and f"merge-queue:no-run:{OLD}" in first.calls[0][2]
-    warned = (f"<!-- merge-queue:no-run:{OLD} -->\nx", "2026-10-04T11:45:00Z")
+    assert [c[0] for c in first.calls] == ["comment"] and f"merge-queue:no-run-{E2E}:{OLD}" in first.calls[0][2]
+    warned = (f"<!-- merge-queue:no-run-{E2E}:{OLD} -->\nx", "2026-10-04T11:45:00Z")
     later = FakeGh([_node(1, state="BLOCKED")], comments={1: [warned]}, **_green({E2E: None}))
     _run(later)
     assert [c[0] for c in later.calls] == ["comment", "disarm"]
@@ -1486,7 +1486,7 @@ def test_a_pending_rerun_wakes_a_kick_and_the_kick_does_not_evict_while_github_s
     kick = _failed_e2e(run_status={70: [old_attempt]}, comments={1: [retry_comment]})
     _run(kick)
     assert not any(c[0] == "disarm" for c in kick.calls)
-    assert any(c[0] == "comment" and f"merge-queue:rerun-unseen-{E2E}:{OLD}" in c[2] for c in kick.calls)
+    assert any(c[0] == "comment" and f"merge-queue:rerun-unseen-{E2E}-1:{OLD}" in c[2] for c in kick.calls)
 
 
 def test_a_pending_restart_wakes_a_kick():
@@ -1551,6 +1551,59 @@ def test_a_non_gate_held_run_listed_after_the_first_cleanup_is_deleted_too():
     gh = LateHeld([_node(1)], runs={NEW: _six_held()})
     _run(gh)
     assert ("delete", "40") in gh.calls
+
+
+def test_a_gate_whose_held_run_was_not_approved_is_started_while_the_other_gates_run():
+    """A held gate run the decide step could not approve reads as missing; with other gates running,
+    nothing else would wake the queue for it."""
+    runs = [_held(35, "e2e-required.yml"), _run_of("backend-required.yml", 60)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: runs}, approve_error="gh: Unprocessable (HTTP 422)",
+                run_status={35: [{"status": "completed", "conclusion": "action_required"}]},
+                **_green({E2E: None, BACKEND: None}))
+    decision = _run(gh)[0][1]
+    assert (decision.kind, decision.contexts) == ("start", (E2E,))
+    assert f"merge-queue:approve-error-e2e-required.yml:{OLD}" in gh.calls[-1][2]
+
+
+def test_start_never_restarts_a_held_rerun_of_a_run_whose_gate_job_was_cancelled():
+    """A re-run keeps its check suite, so a held re-run would match the cancelled gate job's suite."""
+    held = dict(_held(70, "e2e-required.yml", actor="some-agent[bot]"), check_suite_id=700)
+    checks = _checks({E2E: None}) + [_check(E2E, "cancelled", suite=700)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [held]}, checks={OLD: checks}, statuses={OLD: [_status()]})
+    _run(gh)
+    assert not any(c[0] in ("rerun", "approve", "disarm") for c in gh.calls)
+    assert f"merge-queue:held-{E2E}:{OLD}" in gh.calls[-1][2]
+
+
+def test_a_retry_attempt_whose_gate_job_was_cancelled_is_restarted_not_evicted():
+    """The run concluded `failure` (another job failed) while the retry attempt's gate job was cancelled."""
+    run = _run_of("e2e-required.yml", 70, "completed", "failure", check_suite_id=700)
+    checks = _checks({E2E: None}) + [_check(E2E, "failure", completed="2026-10-04T11:00:00Z", suite=700),
+                                     _check(E2E, "cancelled", completed="2026-10-04T11:30:00Z", suite=700)]
+    marker = f"<!-- merge-queue:retry-{E2E}:{OLD} -->\nx\n<!-- merge-queue-attempt:1 -->"
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [run]}, checks={OLD: checks}, statuses={OLD: [_status()]},
+                comments={1: [marker]}, run_status={70: ["in_progress"]})
+    _run(gh)
+    assert ("rerun", "70", "all") in gh.calls
+    assert not any(c[0] == "disarm" for c in gh.calls)
+
+
+def test_a_no_run_warning_for_one_gate_never_evicts_on_another_gates_first_one():
+    old_warning = (f"<!-- merge-queue:no-run-{BACKEND}:{OLD} -->\nx", "2026-10-04T11:40:00Z")
+    gh = FakeGh([_node(1, state="BLOCKED")], comments={1: [old_warning]}, **_green({E2E: None}))
+    _run(gh)
+    assert not any(c[0] == "disarm" for c in gh.calls)
+    assert f"merge-queue:no-run-{E2E}:{OLD}" in gh.calls[-1][2]
+
+
+def test_a_rerun_that_ran_but_reported_no_result_yet_stands_down():
+    rerun = _run_of("e2e-required.yml", 70, "completed", "success", check_suite_id=700, run_attempt=2)
+    checks = _checks({E2E: None}) + [_check(E2E, "success", completed="2026-10-04T11:30:00Z", suite=700)]
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [rerun]}, checks={OLD: checks}, statuses={OLD: [_status()]})
+    stale = _pr_state(checks=(mq.CheckRun(E2E, "completed", "failure", NOW, "u", 700),))
+    assert mq._after_rerun(gh, stale, mq.BY_NAME[E2E], rerun, 1, lambda fresh, state: state in (mq.FAILED, mq.FAILED_TWICE),
+                           mq.Action("evict", "x", slug="failed-twice"), lambda m: None, lambda: NOW) is False
+    assert gh.calls == []
 
 
 def test_a_marker_in_someone_elses_comment_is_ignored():

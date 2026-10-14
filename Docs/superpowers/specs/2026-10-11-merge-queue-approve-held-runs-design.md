@@ -1,8 +1,8 @@
 # Merge queue for `dev`: approve the held gate runs instead of dispatching them
 
 - **Date:** 2026-10-11
-- **Status:** Approved by the owner on 2026-10-14, with D1-D3 as recommended. Not implemented yet. Plan:
-  `Docs/superpowers/plans/2026-10-14-merge-queue-approve-held-runs.md`.
+- **Status:** Approved by the owner on 2026-10-14, with D1-D3 as recommended. Implemented in tldw_server PR #3237
+  (TASK-13639); ships with `MERGE_QUEUE` unset. Plan: `Docs/superpowers/plans/2026-10-14-merge-queue-approve-held-runs.md`.
 - **Amends:** `Docs/superpowers/specs/2026-10-04-merge-queue-design.md` (TASK-13462, ADR-063), merged switched off in
   #3188. Sections of that spec are cited as "old 4.2" and so on. Anything this document does not mention stays as written
   there.
@@ -69,7 +69,8 @@ approved, so a queue rebase never re-runs the full suite; that keeps old 4.5's d
 | `backend-required`, `security-required`, `coverage-required`, `frontend-required`, `e2e-required`, `container-build-check` | dispatch on the PR branch | approve the held `pull_request` run on the head; if there is none, re-run the head's existing run for that workflow |
 | `frontend-license-policy/trusted/dev` | dispatch on `dev` with `pr` | unchanged |
 
-The verdict order (evict, retry, wait, start, green) is unchanged. Only "start" and "retry" act differently:
+The verdict order (evict, retry, wait, start, green) is unchanged, except that a missing context is started even while
+others run (section 7, "Missing contexts"). Only "start" and "retry" act differently:
 
 - **Start** (a context is missing on a head older than 3 minutes): approve its held run. With no held run, restart the
   workflow's completed run on that head (cancelled, or with its gate job cancelled), once per gate per head (marker `restart-<context>`); a second cancellation on
@@ -168,9 +169,17 @@ check" read as "each of the six gate contexts". The ones that matter most:
 - **Markers are the queue's own.** Retry, restart and strike markers count only in comments the queue posted (GraphQL
   author `github-actions`, a Bot). A marker hidden in anyone else's comment is ignored, so no commenter can turn a first
   failure into an eviction.
-- **The license is never left behind running gates.** It has no queue-tick, so a license status missing while the gates
-  run (a dispatch lost around a rebase) is dispatched again once the head is older than 3 minutes.
-- **Evictions** name their cause (`evict-no-run`, `evict-rerun`, `evict-approve` join the existing kinds), post the
+- **Missing contexts are started even while others run** (code review of #3237). A passing gate wakes nothing and the
+  license gate has no queue-tick, so a gate whose held run was not approved, or a license dispatch lost around a
+  rebase, would otherwise wait for an unrelated event. Once the head is older than 3 minutes the queue starts them on
+  its next decision. That needs a decision during the run: the paths that lose a dispatch or an approval around a
+  rebase (a failure after the branch moved, a branch that moved late, a partial approval) each wake a kick, which
+  waits out the young head and decides again. A license status lost with no such wake, or a failed license with
+  every gate green, still waits for the next event (plan, "Known gap").
+- **Strikes are per gate.** `no-run-<context>`, `approve-error-<workflow>`, `rerun-refused-<context>`,
+  `rerun-error-<context>`, `held-<context>` and `rerun-unseen-<context>-<attempt>`: a warning about one gate never
+  evicts on another's first one.
+- **Evictions** name their cause (`evict-no-run`, `evict-rerun`, `evict-approve`, `evict-held` join the existing kinds), post the
   comment first and disarm second.
 
 **Section 9, agent rules.** "Never click Approve and run on a queue-rebased PR" becomes: the queue approves the gate runs

@@ -274,7 +274,8 @@ gh variable get MERGE_QUEUE
    a required gate by hand to unblock a PR: a dispatched run's check does not count toward the PR's required statuses,
    so the PR stays blocked.
 5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, a gate run GitHub would not re-run or
-   approve, a gate kept being cancelled, `dev` changed workflow files, auto-merge did not fire). Fix the cause and arm
+   approve, a gate kept being cancelled, a gate run waiting for someone else's approval, `dev` changed workflow files,
+   auto-merge did not fire). Fix the cause and arm
    again.
 
 Fork PRs and PRs opened by bots or apps are never queued and stay manual.

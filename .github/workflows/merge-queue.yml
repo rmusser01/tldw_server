@@ -1,7 +1,8 @@
 name: Merge Queue
 
 # One-at-a-time merge queue for dev (TASK-13462).
-# Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
+# Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md, amended by
+# Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md.
 #
 # Wakes when a PR into dev is armed for auto-merge, disarmed or closed, and on every push to
 # dev. After a failed gate, that gate's queue-tick dispatches security-required.yml on dev with

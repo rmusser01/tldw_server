@@ -144,7 +144,7 @@ def test_context_state_table(runs: list[mq.CheckRun], state: str) -> None:
         (_pr(merge_state="BLOCKED", checks=_green(without=(E2E, CONTAINER)) + (_run(E2E, "failure"),)),
          "retry", (E2E,)),
         (_pr(merge_state="BLOCKED", checks=_green(without=(E2E, CONTAINER)) + (_run(E2E, status="queued"),)),
-         "wait", (E2E,)),
+         "start", (CONTAINER,)),
     ],
     ids=[
         "unknown-waits", "behind-rebases-and-starts-all-seven", "dirty-evicts",
@@ -154,7 +154,7 @@ def test_context_state_table(runs: list[mq.CheckRun], state: str) -> None:
         "green-clean-waits", "green-unstable-waits", "stuck-green-evicts",
         "green-is-timed-from-the-last-context-to-finish",
         "green-blocked-waits-for-auto-merge", "retry-that-passed-waits", "green-other-merge-state-waits",
-        "failed-twice-beats-failed-once", "failed-once-beats-missing", "running-beats-missing",
+        "failed-twice-beats-failed-once", "failed-once-beats-missing", "missing-is-started-while-others-run",
     ],
 )
 def test_decide_front_table(pr: mq.PrState, kind: str, contexts: tuple[str, ...]) -> None:
@@ -214,4 +214,4 @@ def test_a_missing_license_is_started_while_gates_run_unless_the_head_is_young()
     old = mq.decide_front(_pr(merge_state="BLOCKED", checks=running), NOW)
     assert (old.kind, old.contexts) == ("start", (LICENSE,))
     young = mq.decide_front(_pr(merge_state="BLOCKED", checks=running, head_committed_at=NOW - timedelta(minutes=1)), NOW)
-    assert (young.kind, young.slug, young.contexts) == ("wait", "young", (E2E, LICENSE))
+    assert (young.kind, young.slug, young.contexts) == ("wait", "young", (LICENSE,))

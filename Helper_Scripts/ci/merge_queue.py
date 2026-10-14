@@ -59,7 +59,8 @@ QUEUE_ACTOR = "github-actions[bot]"
 # The queue's own comments, as GraphQL names their author: a Bot whose login has no `[bot]`
 # (checked on tldw_chatbook's queue comments, 2026-10-14). Retry, restart and strike markers count
 # only in these: in anyone else's comment they would let any commenter turn a first failure into
-# an eviction.
+# an eviction. Only the queue posts comments with this repository's token: the only jobs that can
+# write to PRs are merge-queue.yml and security-required.yml's queue-kick, both running this script.
 QUEUE_COMMENTER = "github-actions"
 HELD_RUN_POLLS = 10
 HELD_RUN_POLL_S = 3
@@ -289,14 +290,16 @@ def decide_front(pr: PrState, now: datetime) -> Action:
         return Action("retry", f"{', '.join(once)} failed once; retrying", failed_urls(once, 1), contexts=once)
     running, missing = named(RUNNING), named(MISSING)
     if running:
-        if LICENSE.name in missing:
-            # The license gate runs on dev and has no queue-tick: with its status missing while the
-            # gates run, nothing would start it once they finish, and the line would wait for an
-            # unrelated event. On a young head its run may not be visible yet: wait that out.
+        if missing:
+            # A missing context is started even while others run: a passing gate wakes nothing, and
+            # the license gate has no queue-tick at all, so a gate whose held run was not approved, or
+            # a license dispatch lost around a rebase, would otherwise wait for an unrelated event.
+            # On a young head its run may not be visible yet: wait that out.
             if abs(now - pr.head_committed_at) <= YOUNG_HEAD:
-                return Action("wait", f"running: {', '.join(running)}; the license status may not be visible yet",
-                              slug="young", contexts=running + (LICENSE.name,))
-            return Action("start", f"no license status while {', '.join(running)} run", contexts=(LICENSE.name,))
+                return Action("wait", f"running: {', '.join(running)}; {', '.join(missing)} may not be visible yet",
+                              slug="young", contexts=missing)
+            return Action("start", f"no counted run of {', '.join(missing)} while {', '.join(running)} run",
+                          contexts=missing)
         return Action("wait", f"running: {', '.join(running)}", contexts=running)
     if missing:
         # The commit date comes from the author's clock: one a little ahead counts as young too, one
@@ -757,15 +760,6 @@ def _marker(gh: GhApi, number: int, kind: str, sha: str) -> dict | None:
     return next((n for n in _queue_comments(gh, number) if marker in (n.get("body") or "")), None)
 
 
-def has_comment(gh: GhApi, number: int, kind: str, sha: str) -> bool:
-    """Whether the queue already posted a comment of this kind for this head.
-
-    Raises:
-        GhError: The read failed.
-    """
-    return _marker(gh, number, kind, sha) is not None
-
-
 def marker_age(gh: GhApi, number: int, kind: str, sha: str, now: datetime) -> timedelta | None:
     """How long ago the queue posted a comment of this kind for this head.
 
@@ -1041,8 +1035,8 @@ def _approve_strictly(gh: GhApi, pr: PrState, run: dict, log: Callable[[str], No
             return False
         error = str(exc)[:200]
         return _strike(
-            gh, pr, "approve-error",
-            f"Merge queue: GitHub refused to approve one of this PR's gate runs ({error}). It will try again, and "
+            gh, pr, f"approve-error-{_workflow_name(run)}",
+            f"Merge queue: GitHub refused to approve this PR's {_workflow_name(run)} run ({error}). It will try again, and "
             "remove it from the line if GitHub still refuses 10 minutes from now.",
             Action("evict", f"GitHub keeps refusing to approve its gate run: {error}", slug="approve"), False, log, now,
         )
@@ -1069,7 +1063,7 @@ def _rerun_error(exc: GhError) -> str:
 
 
 def _rerun(gh: GhApi, pr: PrState, run: dict, failed_only: bool, log: Callable[[str], None],
-           sleep: Callable[[float], None], now: Callable[[], datetime], context: str = "") -> str:
+           sleep: Callable[[float], None], now: Callable[[], datetime], context: str) -> str:
     """Re-run a gate run in place, then approve the re-run if GitHub holds it.
 
     A re-run adds an attempt to the same check suite, so it replaces the old result for branch
@@ -1098,7 +1092,7 @@ def _rerun(gh: GhApi, pr: PrState, run: dict, failed_only: bool, log: Callable[[
             log(f"  #{pr.number}: run {run['id']} was re-run by a racing queue run; standing down")
             return "started"
         if kind == "unknown":
-            warning = f"rerun-error-{context}" if context else "rerun-error"
+            warning = f"rerun-error-{context}"
             age = marker_age(gh, pr.number, warning, pr.head_sha, now())
             if age is None:
                 comment_once(
@@ -1294,7 +1288,7 @@ def _after_rerun(gh: GhApi, pr: PrState, ctx: Context, run: dict, attempt: int,
     GitHub has not shown it yet. So the run is read fresh, and the PR is evicted only when the
     queue's re-run has run (a higher `run_attempt` than the marker recorded) and still went wrong.
     A run that is live or held, or whose gate is fine since the decision, is left alone. A re-run
-    not visible yet is a `rerun-unseen-<context>` strike: one warning and a kick, an eviction only
+    not visible yet is a `rerun-unseen-<context>-<attempt>` strike: one warning and a kick, an eviction only
     if it still has not run 10 minutes later.
 
     Args:
@@ -1320,7 +1314,7 @@ def _after_rerun(gh: GhApi, pr: PrState, ctx: Context, run: dict, attempt: int,
         return False
     if int(fresh.get("run_attempt") or 1) <= attempt:
         return _strike(
-            gh, pr, f"rerun-unseen-{ctx.name}",
+            gh, pr, f"rerun-unseen-{ctx.name}-{attempt}",
             f"Merge queue: the queue's re-run of {ctx.name} on `{pr.head_sha[:10]}` has not started yet. A queue run "
             "will look again, and remove it from the line if it still has not run 10 minutes from now.",
             Action("evict", f"the queue's re-run of {ctx.name} never started", eviction.links, "rerun"), True, log, now,
@@ -1363,7 +1357,8 @@ def _restart_cancelled(gh: GhApi, pr: PrState, ctx: Context, run: dict, links: t
             lambda fresh, state: fresh.get("conclusion") == "cancelled" or state == MISSING,
             Action("evict", f"{ctx.name} was cancelled again after the queue restarted it", links, "rerun"), log, now,
         )
-    note = _attempt_note(run)  # the attempt being re-run, read before the re-run changes it
+    # The attempt being re-run, read fresh (the listing can be older) and before the re-run changes it.
+    note = _attempt_note(gh.rest("GET", f"repos/{REPO}/actions/runs/{run['id']}") or run)
     outcome = _rerun(gh, pr, run, False, log, sleep, now, ctx.name)
     if outcome == "final":
         return _evict(gh, pr, Action("evict", f"GitHub will not restart the cancelled {ctx.name} run; push a "
@@ -1418,27 +1413,39 @@ def _start(gh: GhApi, pr: PrState, names: tuple[str, ...], log: Callable[[str], 
                 continue
             # Restart only a run that was cancelled, or whose gate job was: any other completed run
             # without the check is a failure stand-in, and a run that passed since the decision must
-            # not be restarted. (A held run is neither: it has no conclusion and no checks yet.)
+            # not be restarted. Never a held run: a re-run keeps its check suite, so a held re-run of
+            # a run whose gate job was cancelled would match; one held for someone else is theirs.
             cancelled_suites = {c.suite_id for c in pr.checks
                                 if c.context == name and c.conclusion == "cancelled" and c.suite_id is not None}
-            redo = next((r for r in mine if r.get("status") == "completed"
+            redo = next((r for r in mine if r.get("status") == "completed" and not _is_held(r)
                          and (r.get("conclusion") == "cancelled" or r.get("check_suite_id") in cancelled_suites)), None)
             if redo is None:
                 continue
             if _restart_cancelled(gh, pr, BY_NAME[name], redo, (), log, sleep, now):
                 return True
             del pending[workflow]
-    if not pending:
-        return False
-    which = ", ".join(sorted(pending.values()))
-    return _strike(
-        gh, pr, "no-run",
-        f"Merge queue: found no run of {which} on this head that the queue can start. It will look again, and "
-        "remove it from the line if there is still none 10 minutes from now. A push, or closing and reopening the "
-        "PR, starts its CI.",
-        Action("evict", f"no run of {which} on this head that the queue can start; push a commit, or close and "
-               "reopen the PR", slug="no-run"), False, log, now,
-    )
+    runs = _gate_runs(gh, pr.head_sha) if pending else []
+    for workflow, name in sorted(pending.items(), key=lambda item: item[1]):
+        # One strike per gate: a warning about one gate must never evict on another's first one.
+        if any(_is_held(r) and not _queue_held(r) for r in runs if _workflow_name(r) == workflow):
+            evicted = _strike(
+                gh, pr, f"held-{name}",
+                f"Merge queue: {name}'s run on `{pr.head_sha[:10]}` is waiting for someone else's approval, which the "
+                "queue never gives. Approve it, or the PR leaves the line 10 minutes from now.",
+                Action("evict", f"{name}'s run is waiting for someone else's approval", slug="held"), False, log, now,
+            )
+        else:
+            evicted = _strike(
+                gh, pr, f"no-run-{name}",
+                f"Merge queue: found no run of {name} on this head that the queue can start. It will look again, and "
+                "remove it from the line if there is still none 10 minutes from now. A push, or closing and reopening "
+                "the PR, starts its CI.",
+                Action("evict", f"no run of {name} on this head that the queue can start; push a commit, or close "
+                       "and reopen the PR", slug="no-run"), False, log, now,
+            )
+        if evicted:
+            return True
+    return False
 
 
 def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], log: Callable[[str], None],
@@ -1483,7 +1490,12 @@ def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], lo
             "queue never gives. Approve it, or the PR leaves the line 10 minutes from now.",
             Action("evict", f"{ctx.name}'s run is waiting for someone else's approval", links, "held"), False, log, now,
         )
-    if run.get("conclusion") == "cancelled":
+    latest = max((c for c in pr.checks if c.context == ctx.name and c.status == "completed"),
+                 key=lambda c: c.completed_at or datetime.min.replace(tzinfo=timezone.utc), default=None)
+    gate_cancelled = (latest is not None and latest.conclusion == "cancelled"
+                      and latest.suite_id is not None and latest.suite_id == run.get("check_suite_id"))
+    if run.get("conclusion") == "cancelled" or gate_cancelled:
+        # The run, or the retry attempt's gate job, was cancelled (a timeout, a person): a restart, not a failure.
         return _restart_cancelled(gh, pr, ctx, run, links, log, sleep, now)
     kind = f"retry-{ctx.name}"
     attempt = marker_attempt(gh, pr.number, kind, pr.head_sha)
@@ -1493,7 +1505,8 @@ def _retry_gate(gh: GhApi, pr: PrState, ctx: Context, links: tuple[str, ...], lo
             why += " (its run ended without reporting the check; was the gate job renamed or removed?)"
         return _after_rerun(gh, pr, ctx, run, attempt, lambda fresh, state: state in (FAILED, FAILED_TWICE),
                             Action("evict", why, links, "failed-twice"), log, now)
-    note = _attempt_note(run)  # the attempt being re-run, read before the re-run changes it
+    # The attempt being re-run, read fresh (the listing can be older) and before the re-run changes it.
+    note = _attempt_note(gh.rest("GET", f"repos/{REPO}/actions/runs/{run['id']}") or run)
     outcome = _rerun(gh, pr, run, suite is not None, log, sleep, now, ctx.name)
     if outcome == "final":
         return _evict(gh, pr, Action("evict", f"{ctx.name} failed once and GitHub will not re-run it",
