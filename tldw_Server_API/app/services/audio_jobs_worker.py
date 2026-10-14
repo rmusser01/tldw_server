@@ -303,6 +303,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             updated_payload = dict(payload)
             ok = True
             msg_err = ""
+            failure: Exception | None = None
             try:
                 if jtype == "audio_download":
                     # Download to temp path
@@ -351,7 +352,16 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         segs = updated_payload.get("segments") or []
                         text = " ".join((s.get("Text", "").strip() if isinstance(s, dict) else "") for s in segs).strip()
                     with llm_call_root(owner):
-                        analysis = await asyncio.to_thread(analyze, text, payload.get("api_name") or "openai")
+                        analysis = await asyncio.to_thread(
+                            analyze,
+                            payload.get("api_name") or "openai",
+                            text,
+                            None,  # jobs carry no prompt: analyze's default system prompt (bulleted notes)
+                            input_is_literal_text=True,
+                            raise_on_error=True,
+                        )
+                    if isinstance(analysis, str) and analysis.startswith("Error:"):
+                        raise RuntimeError(analysis)
                     updated_payload["analysis"] = analysis
                     next_type = "audio_store"
                 elif jtype == "audio_store":
@@ -365,6 +375,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             except Exception as e:
                 ok = False
                 msg_err = str(e)
+                failure = e
 
             if ok:
                 if next_type:
@@ -381,7 +392,16 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                 else:
                     jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
             else:
-                jm.fail_job(int(job["id"]), error=msg_err, retryable=True, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+                # An error that says it is not retryable (an LLM quota refusal) fails the job now.
+                jm.fail_job(
+                    int(job["id"]),
+                    error=msg_err,
+                    retryable=bool(getattr(failure, "retryable", True)),
+                    error_code=getattr(failure, "failure_code", None),
+                    worker_id=worker_id,
+                    lease_id=str(job.get("lease_id")),
+                    completion_token=str(job.get("lease_id")),
+                )
 
         except asyncio.CancelledError:
             raise

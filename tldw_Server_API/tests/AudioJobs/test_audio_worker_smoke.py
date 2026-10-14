@@ -2,6 +2,7 @@ import os
 import shutil
 import asyncio
 import tempfile
+from types import SimpleNamespace
 import numpy as np
 import soundfile as sf
 import pytest
@@ -743,3 +744,128 @@ async def test_audio_worker_owner_over_limit_defers_repeatedly_without_quarantin
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2.0)
+
+
+# --- audio_analyze through the real analyze() (TASK-13637) ---
+
+
+class _AnalysisAdapter:
+    """The provider adapter below analyze(): records each request and replies or raises."""
+
+    def __init__(self):
+        self.reply = "Model analysis."
+        self.error = None
+        self.requests = []
+
+    def chat(self, request, timeout=None):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return {"choices": [{"message": {"content": self.reply}}]}
+
+
+@pytest.fixture
+def analyze_worker(monkeypatch, tmp_path):
+    """The audio worker with quota stubs, a fresh jobs DB and a fake provider adapter."""
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_analyze.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    async def _unlimited(user_id: int):
+        return {"concurrent_jobs": None}
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _unlimited)
+    monkeypatch.setattr(worker, "can_start_job", _yes)
+    monkeypatch.setattr(worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(worker, "finish_job", _noop)
+
+    adapter = _AnalysisAdapter()
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter))
+    monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {"model": "configured-model"}})
+    return worker, JobManager(), adapter
+
+
+async def _run_worker_until(worker, done) -> None:
+    stop = asyncio.Event()
+    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if task.done():
+                pytest.fail(f"audio worker crashed: {task.exception()!r}")
+            if done():
+                break
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+
+def _analyze_job(jm, text: str) -> int:
+    row = jm.create_job(
+        domain="audio", queue="default", job_type="audio_analyze",
+        payload={"text": text, "api_name": "openai", "model": "whisper-1", "perform_analysis": True}, owner_user_id="7",
+    )
+    return int(row["id"])
+
+
+@pytest.mark.unit
+async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    _analyze_job(jm, "hello transcript")
+
+    def stored():
+        return jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")
+
+    await _run_worker_until(worker, stored)
+    assert stored(), "audio_analyze did not hand over to audio_store"
+    assert stored()[0]["payload"]["analysis"] == "Model analysis."
+    assert [r["messages"][0]["content"] for r in adapter.requests] == ["hello transcript"]
+    assert adapter.requests[0]["model"] == "configured-model"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_fails_the_stage_on_an_error_result(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    job_id = _analyze_job(jm, "")  # analyze() returns "Error: Could not extract text content."
+    await _run_worker_until(worker, lambda: int((jm.get_job(job_id) or {}).get("retry_count") or 0) >= 1)
+    job = jm.get_job(job_id) or {}
+    assert int(job.get("retry_count") or 0) >= 1
+    assert "Could not extract text content" in str(job.get("error_message") or job.get("last_error"))
+    assert jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7") == []
+
+
+@pytest.mark.unit
+async def test_audio_analyze_quota_refusal_fails_the_job_without_retry(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = LLMQuotaExceededError(
+        category="llm_tokens_month", current=12, limit=10, message="over", retry_after=60
+    )
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") == "failed")
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "llm_quota_exceeded"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_provider_failure_still_retries(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    adapter.reply = ""  # no usable analysis: a provider failure, not a refusal
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: int((jm.get_job(job_id) or {}).get("retry_count") or 0) >= 1)
+    job = jm.get_job(job_id) or {}
+    assert int(job.get("retry_count") or 0) >= 1
+    assert job.get("status") != "failed"
+    assert len(adapter.requests) >= 1
