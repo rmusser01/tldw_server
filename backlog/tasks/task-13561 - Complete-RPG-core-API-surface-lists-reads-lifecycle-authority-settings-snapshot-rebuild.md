@@ -2,7 +2,7 @@
 id: TASK-13561
 title: 'Complete RPG core API surface: lists, reads, lifecycle, authority settings,
   snapshot rebuild'
-status: In Progress
+status: Done
 labels:
 - rpg
 - backend
@@ -17,13 +17,13 @@ The RPG module backend ships create/record/review mutations but almost no read o
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 List/read endpoints for campaigns, sessions, events, proposals, and snapshots exposed under /api/v1/rpg, owner-scoped, using existing rpg.* permission families
-- [ ] #2 PATCH campaign/session metadata with status transitions (active/archived) using expected_version CAS, Idempotency-Key header, and exact replay on retry
-- [ ] #3 PUT session authority-settings full-replace with strict bools and event-type whitelist validated against the event registry
-- [ ] #4 POST snapshot rebuild replays the full event log through the pure reducer in one transaction; concurrent-commit races map to retryable 409
-- [ ] #5 Resource Governor route map / route-auth ratchet artifacts and the permission catalog sync test updated for all new routes
-- [ ] #6 RPG README route table and non-goals updated
-- [ ] #7 Unit and integration tests for the new surface added; full existing RPG suite stays green
+- [x] #1 List/read endpoints for campaigns, sessions, events, proposals, and snapshots exposed under /api/v1/rpg, owner-scoped, using existing rpg.* permission families
+- [x] #2 PATCH campaign/session metadata with status transitions (active/archived) using expected_version CAS, Idempotency-Key header, and exact replay on retry
+- [x] #3 PUT session authority-settings full-replace with strict bools and event-type whitelist validated against the event registry
+- [x] #4 POST snapshot rebuild replays the full event log through the pure reducer in one transaction; concurrent-commit races map to retryable 409
+- [x] #5 Resource Governor route map / route-auth ratchet artifacts and the permission catalog sync test updated for all new routes
+- [x] #6 RPG README route table and non-goals updated
+- [x] #7 Unit and integration tests for the new surface added; full existing RPG suite stays green
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,11 +34,13 @@ Second-pass spec review (2026-10-13): corrected Idempotency-Key header claim (ba
 Implementation plan written and committed: Docs/superpowers/plans/2026-10-13-rpg-core-api-surface-completion-implementation-plan.md (10 TDD tasks: repo reads -> repo CAS mutations -> authority replace -> rebuild -> schemas -> service reads -> service mutations -> REST reads -> REST mutations -> docs/CI/verification). Spec coverage, placeholder, and type-consistency self-review recorded in the plan.
 Task 8 (REST read routes): appended 8 GET routes to tldw_Server_API/app/api/v1/endpoints/rpg.py (campaigns list/detail, campaign sessions, flat sessions w/ foreign-campaign 404, session detail, snapshot w/ ?version=, events cursor pagination, proposals list) + 3 tests to tests/RPG/test_rpg_api.py. Scope matrix per spec table; RPGSessionListItem pending_proposal_count served per item via repo.count_pending_proposals (spec-blessed filtered COUNT). Full file 35 passed; bandit: no new findings.
 Implementation complete: 12 routes across 10 tasks (repo queries, CAS mutations, authority replace, rebuild, schemas, service, REST reads/mutations); suite green; RG lint + auth ratchet clean; Bandit no new findings. Review in progress.
+Final-review reconciliation: the spec's RG route-map regeneration requirement was satisfied as a no-op — resource_governor_policies.yaml contains no RPG route_map entries at all (pre-existing routes equally absent); the lint only flags dead/shadowed entries and exits 0. Named follow-ups before Phase 3/4: (1) service-level batched pending-proposal counts (GROUP BY) replacing the endpoint's bounded N+1 reach-through; (2) one README/client-doc line clarifying replay serves current state, not point-in-time, and PATCH cannot null out description (COALESCE semantics).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered the Phase-1 RPG core API surface on branch codex/rpg-core-api-surface (commits 8c4ba7e..f6b44da9): 12 new REST routes (8 reads incl. list campaigns/sessions/events/proposals + snapshot by version; PATCH campaign/session with active/archived transitions; PUT authority-settings full-replace with StrictBool + event-type whitelist; POST snapshot/rebuild with transactional full-log replay and retryable 409s), backed by new repository list/CAS methods, service wrappers, and schemas — zero DDL/reducer/event-registry changes, all following the module's metadata-CAS + idempotency patterns. Verified: 204 RPG tests green, rg_route_map_lint + route_auth_ratchet exit 0, Bandit 0 findings, README/spec/backlog updated. Executed via subagent-driven development (10 tasks, per-task reviews, final whole-branch review + fix wave).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
