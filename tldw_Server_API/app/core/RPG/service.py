@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.RPG.models import (
     RPGSessionEvent,
     RPGSnapshotState,
 )
+from tldw_Server_API.app.core.RPG.proposals import RPGProposalRecord
 from tldw_Server_API.app.core.RPG.reducer import reduce_events
 from tldw_Server_API.app.core.RPG.rules.adapters import RuleAdapterRegistry, build_default_adapter_registry
 from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
@@ -388,16 +389,105 @@ class RPGService:
             proposed_events=rejected.proposed_events,
         )
 
-    def get_snapshot(self, session_id: int) -> SnapshotResult:
-        record = self.repo.get_latest_snapshot(
-            owner_user_id=self.owner_user_id,
-            session_id=session_id,
-        )
+    def get_snapshot(self, session_id: int, snapshot_version: int | None = None) -> SnapshotResult:
+        if snapshot_version is not None:
+            record = self.repo.get_snapshot_by_version(
+                owner_user_id=self.owner_user_id,
+                session_id=session_id,
+                snapshot_version=snapshot_version,
+            )
+        else:
+            record = self.repo.get_latest_snapshot(
+                owner_user_id=self.owner_user_id,
+                session_id=session_id,
+            )
         return SnapshotResult(
             snapshot_version=record.snapshot_version,
             last_event_sequence=record.last_event_sequence,
             snapshot=RPGSnapshotState(**record.snapshot_json),
             diagnostics=record.diagnostics_json,
+        )
+
+    def list_campaigns(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGCampaign], int]:
+        return self.repo.list_campaigns(
+            owner_user_id=self.owner_user_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_campaign_detail(self, campaign_id: int) -> tuple[RPGCampaign, int]:
+        campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        session_count = self.repo.count_campaign_sessions(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+        )
+        return campaign, session_count
+
+    def list_sessions(
+        self,
+        *,
+        campaign_id: int | None = None,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGSession], int]:
+        if campaign_id is not None:
+            self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        return self.repo.list_sessions(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_session_detail(self, session_id: int) -> tuple[RPGSession, int]:
+        session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        pending_proposal_count = self.repo.count_pending_proposals(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+        )
+        return session, pending_proposal_count
+
+    def list_events(
+        self,
+        session_id: int,
+        *,
+        after_sequence: int = 0,
+        limit: int = 50,
+        source_type: str | None = None,
+        event_type: str | None = None,
+    ) -> list[RPGSessionEvent]:
+        return self.repo.list_events(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            source_type=source_type,
+            event_type=event_type,
+        )
+
+    def list_proposals(
+        self,
+        session_id: int,
+        *,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGProposalRecord], int]:
+        return self.repo.list_proposals(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            status=status,
+            limit=limit,
+            offset=offset,
         )
 
     async def lookup_rules(
