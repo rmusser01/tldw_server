@@ -3,6 +3,7 @@ import { normalizeTldwModels } from "@/services/tldw/model-normalization"
 import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   buildCharacterChatReadiness,
+  buildCharacterChatSendReadiness,
   buildAvailableChatModelIds,
   buildChatModelUsability,
   findUnavailableChatModel,
@@ -13,6 +14,13 @@ import {
 } from "../chat-model-availability"
 
 describe("chat model availability utilities", () => {
+  it.each([
+    [{}, "ready", null],
+    [{ isSendBlocked: true }, "blocked", "chat-send"],
+    [{ isServerConnected: false, isSendBlocked: true }, "blocked", "server-connection"],
+  ] as const)("reports qualified saved-source send state without live setup: %j", (input, status, missingRequirement) => {
+    expect(buildCharacterChatSendReadiness(input)).toMatchObject({ status, missingRequirement });
+  });
   it.each([
     "poe",
     "minimax",
@@ -1006,7 +1014,8 @@ describe("character chat readiness", () => {
       buildCharacterChatReadiness({
         isServerConnected: true,
         selectedCharacter: null,
-        selectedModel: "gpt-4o-mini"
+        selectedModel: "gpt-4o-mini",
+        availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }]
       })
     ).toMatchObject({
       status: "blocked",
@@ -1015,7 +1024,7 @@ describe("character chat readiness", () => {
     })
   })
 
-  it("does not reuse character-selection copy as model usability detail", () => {
+  it("uses matching model setup copy before character selection when the model is missing", () => {
     const readiness = buildCharacterChatReadiness({
       isServerConnected: true,
       selectedCharacter: null,
@@ -1032,7 +1041,7 @@ describe("character chat readiness", () => {
     })
 
     expect(readiness).toMatchObject({
-      missingRequirement: "selected-character"
+      missingRequirement: "chat-model"
     })
     expect(modelUsability).toMatchObject({
       status: "no_selection",
@@ -1044,7 +1053,7 @@ describe("character chat readiness", () => {
         readiness,
         readinessTitle: readinessCopy.title
       })
-    ).toBeNull()
+    ).toBe(readinessCopy.title)
   })
 
   it("blocks character chat when no chat model is available", () => {
@@ -1325,4 +1334,9 @@ describe("character chat readiness", () => {
 it("keeps an unavailable offline catalog unknown while strict dispatch rejects the same empty set", () => {
   expect(findUnavailableChatModel(["openai:gpt-4o-mini"], new Set())).toBeNull()
   expect(findUnavailableChatModel(["openai:gpt-4o-mini"], new Set(), true)).toBe("openai:gpt-4o-mini")
+})
+
+it("prioritizes prospective model setup before character selection when both are missing", () => {
+  expect(buildCharacterChatReadiness({ isServerConnected: true, selectedCharacter: null, selectedModel: null,
+    requireExplicitProvider: true, availableModels: [] })).toMatchObject({ missingRequirement: "chat-model", recommendedAction: "open-model-settings" })
 })

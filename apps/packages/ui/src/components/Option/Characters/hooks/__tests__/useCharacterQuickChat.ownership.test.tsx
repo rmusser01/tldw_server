@@ -72,10 +72,12 @@ beforeEach(() => {
   mocks.complete.mockResolvedValue({ assistant_content: "Owned reply", saved: true })
   mocks.nativeSend.mockImplementation(async (params) => {
     try {
-      const created = await mocks.create()
-      mocks.selection = { status: "ready", owner: { kind: "native", conversation_id: created.id, owner_key: "popup-owner", request_scope: mocks.requestScope, validate_lease: () => true },
-        view: { owner_key: "popup-owner", conversation_id: created.id }, capture: { status: "captured" } }
+      const created = params.serverChatId ? { id: params.serverChatId } : await mocks.create()
+      if (!params.serverChatId) mocks.selection = { status: "ready", owner: { kind: "native", conversation_id: created.id, owner_key: "popup-owner", request_scope: mocks.requestScope, validate_lease: () => true },
+        view: { owner_key: "popup-owner", conversation_id: created.id }, capture: { status: "captured" },
+        bookmarkScope: { profile_id: "p", client_session_id: "popup" } }
       params.setServerChatId(created.id)
+      expect(params.originIsCurrent()).toBe(true)
       const response = await mocks.complete()
       params.setMessages([{ id: "assistant-result", isBot: true, name: "Assistant", message: response.assistant_content, createdAt: 1, sources: [] }])
     } finally { params.releaseActivity() }
@@ -150,8 +152,8 @@ describe("Character Quick Chat owned lifetime", () => {
     await act(async () => { await view.result.current.sendQuickChatMessage() })
     act(() => view.result.current.setQuickChatDraft("Second private question"))
     await act(async () => { await view.result.current.sendQuickChatMessage() })
-    expect(mocks.scene.mock.calls.map(([args]) => args.target!.address?.kind)).toEqual(["fresh", "native"])
-    expect(mocks.scene.mock.calls[1][0].target?.address).toMatchObject({ kind: "native", id: "quick-session", ownerKey: "popup-owner" })
+    expect(mocks.scene.mock.calls.map(([args]) => args.target!.address?.kind)).toEqual(["fresh"])
+    expect(mocks.nativeSend.mock.calls[1][0].actorSceneSend).toBeUndefined()
     expect(mocks.nativeSend.mock.calls[1][0].privateDraft.handle.address.kind).toBe("fresh")
   })
 
@@ -507,4 +509,62 @@ it("requires created-chat Review when a native owner exists without qualified hi
   expect(mocks.nativeSend).toHaveBeenCalledOnce()
   await act(async () => { await result.current.handlePromoteQuickChat() })
   expect(mocks.navigate).toHaveBeenCalledWith("/chat")
+})
+
+describe("qualified saved popup readiness", () => {
+  it("continues a bound source without a live global model or catalog and without another Scene read", async () => {
+    const view = renderHook(({ model, models }) => useCharacterQuickChat({ ...deps, activeQuickChatModel: model, availableModels: models }),
+      { initialProps: { model: deps.activeQuickChatModel as string | undefined, models: deps.availableModels } })
+    await start(view.result)
+    await act(async () => { await view.result.current.sendQuickChatMessage() })
+    const originalOwner = mocks.selection!.owner
+    view.rerender({ model: undefined, models: [] })
+    act(() => view.result.current.setQuickChatDraft("Bound original-model question"))
+    expect(view.result.current.quickChatReadiness.canStart).toBe(true)
+    await act(async () => { await view.result.current.sendQuickChatMessage() })
+    expect(mocks.nativeSend).toHaveBeenCalledTimes(2)
+    expect(mocks.nativeSend.mock.calls[1][0]).toMatchObject({ serverChatId: "quick-session", message: "Bound original-model question" })
+    expect(mocks.nativeSend.mock.calls[1][0].actorSceneSend).toBeUndefined()
+    expect(mocks.scene).toHaveBeenCalledOnce()
+    expect(mocks.nativeSend.mock.calls[1][0].controller.getCurrent().owner).toBe(originalOwner)
+    view.unmount()
+  })
+  it("keeps bound retention independent of changed global model/settings", async () => {
+    const view = renderHook(({ model }) => useCharacterQuickChat({ ...deps, activeQuickChatModel: model }), { initialProps: { model: deps.activeQuickChatModel } })
+    await start(view.result)
+    await act(async () => { await view.result.current.sendQuickChatMessage() })
+    act(() => view.result.current.setQuickChatDraft("Exact bound retained input  "))
+    const pending = held<boolean>(); mocks.retain.mockReturnValueOnce(pending.promise)
+    let send!: Promise<void>
+    act(() => { send = view.result.current.sendQuickChatMessage() })
+    await waitFor(() => expect(mocks.retain).toHaveBeenCalledTimes(2))
+    act(() => useStoreChatModelSettings.getState().updateSettings({ minP: 0.2, apiProvider: "changed-provider" }))
+    view.rerender({ model: "other-provider:changed-model" })
+    await act(async () => { pending.resolve(true); await send })
+    expect(mocks.nativeSend).toHaveBeenCalledTimes(2)
+    expect(mocks.nativeSend.mock.calls[1][0]).toMatchObject({ serverChatId: "quick-session", message: "Exact bound retained input  " })
+    expect(mocks.nativeSend.mock.calls[1][0].actorSceneSend).toBeUndefined()
+    expect(mocks.scene).toHaveBeenCalledOnce()
+    view.unmount()
+  })
+  it.each(["view", "account", "input", "disconnect", "reconnect"] as const)("refuses held bound retention after %s retirement", async boundary => {
+    const view = renderHook(({ connected }) => useCharacterQuickChat({ ...deps, isServerConnected: connected }), { initialProps: { connected: true } })
+    await start(view.result)
+    await act(async () => { await view.result.current.sendQuickChatMessage() })
+    act(() => view.result.current.setQuickChatDraft("Keep original bound question  "))
+    const pending = held<boolean>(); mocks.retain.mockReturnValueOnce(pending.promise)
+    let send!: Promise<void>
+    act(() => { send = view.result.current.sendQuickChatMessage() })
+    await waitFor(() => expect(mocks.retain).toHaveBeenCalledTimes(2))
+    if (boundary === "view") mocks.selection = { ...mocks.selection, view: { ...(mocks.selection!.view as object), selection_revision: 2 } }
+    if (boundary === "account") act(() => { mocks.ownerGeneration++; mocks.accountClear?.() })
+    if (boundary === "input") act(() => view.result.current.setQuickChatDraft("Keep newer bound question"))
+    if (boundary === "disconnect" || boundary === "reconnect") view.rerender({ connected: false })
+    if (boundary === "reconnect") view.rerender({ connected: true })
+    await act(async () => { pending.resolve(true); await send })
+    expect(mocks.nativeSend).toHaveBeenCalledOnce()
+    expect(mocks.scene).toHaveBeenCalledOnce()
+    if (boundary === "input") expect(view.result.current.quickChatDraft).toBe("Keep newer bound question")
+    view.unmount()
+  })
 })

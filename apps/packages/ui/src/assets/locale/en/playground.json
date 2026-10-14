@@ -1554,6 +1554,9 @@
       "explicitSelectionTitle": "Choose a model and provider before starting character chat",
       "explicitSelectionDescription": "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use.",
       "explicitSelectionAction": "Choose model and provider"
+    },
+    "character": {
+      "description": "Choose an available model with a configured provider, then choose the character for your new chat."
     }
   },
   "characterRail": {

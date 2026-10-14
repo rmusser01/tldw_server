@@ -4456,5 +4456,8 @@
   },
   "historySelection_branchPending": {
     "message": "Your next message will branch from this point. The existing conversation is kept."
+  },
+  "characterChatReadiness_character_description": {
+    "message": "Choose an available model with a configured provider, then choose the character for your new chat."
   }
 }

@@ -167,6 +167,7 @@ import {
 import {
   buildChatModelUsability,
   buildCharacterChatReadiness,
+  buildCharacterChatSendReadiness,
   getCharacterChatReadinessCopy,
   getMatchingCharacterChatModelUsabilityCopy,
   type CharacterChatReadinessAction,
@@ -2801,9 +2802,19 @@ const PlaygroundContent = () => {
       serverReadinessState,
     ],
   );
+  const savedRoleplayConversation = isSavedRoleplayConversation(historySelection);
+  const savedRoleplaySource = historySelection.getCurrent();
+  const savedRoleplaySendBlocked = savedRoleplaySource.status !== "ready" ||
+    savedRoleplaySource.capture?.status !== "captured" || !savedRoleplaySource.bookmarkScope ||
+    savedRoleplaySource.owner?.kind !== "native" || !savedRoleplaySource.owner.validate_lease();
   const characterChatReadiness = React.useMemo(
     () =>
-      buildCharacterChatReadiness({
+      savedRoleplayConversation
+        ? buildCharacterChatSendReadiness({
+            isServerConnected: serverReadinessState !== "blocked",
+            isSendBlocked: savedRoleplaySendBlocked || Boolean(streaming || isProcessing || isLoading),
+          })
+        : buildCharacterChatReadiness({
         isServerConnected: serverReadinessState !== "blocked",
         selectedCharacter: activeCharacterSelection,
         requireExplicitProvider: true,
@@ -2817,6 +2828,8 @@ const PlaygroundContent = () => {
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
+      savedRoleplayConversation,
+      savedRoleplaySendBlocked,
       isLoading,
       isProcessing,
       selectedModel,
@@ -2843,10 +2856,10 @@ const PlaygroundContent = () => {
         : null,
     [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
   );
-  const activeCharacterChatModelUsability = characterWorkflowActive
+  const activeCharacterChatModelUsability = characterWorkflowActive && !savedRoleplayConversation
     ? standardChatModelUsability
     : null;
-  const activeChatModelUsability = standardChatModelUsability;
+  const activeChatModelUsability = savedRoleplayConversation ? null : standardChatModelUsability;
   const characterChatModelUsabilityMessage =
     getMatchingCharacterChatModelUsabilityCopy({
       modelUsability: activeCharacterChatModelUsability,

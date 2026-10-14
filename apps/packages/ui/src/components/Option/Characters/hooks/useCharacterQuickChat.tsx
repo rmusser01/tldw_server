@@ -6,8 +6,7 @@ import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import { useDraftPersistence, type DraftMetadataObject } from "@/hooks/useDraftPersistence"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
-import { captureActorSceneSendForTarget } from "@/hooks/chat/actor-scene-source"
-import { chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { captureActorSceneSendForTarget, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { sendNativeHistoryCharacter } from "@/hooks/chat/native-history-character-send"
 import { NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
@@ -19,7 +18,7 @@ import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { listChatCreationRecovery, readChatCreationRecovery } from "@/services/pending-chat-promotion"
 import { conversationDraftKey, freshChatDraftAddress, type ChatDraftHandle } from "@/utils/chat-draft-address"
 import { requestSettingsNavigation } from "@/utils/settings-return"
-import { buildCharacterChatReadiness, getCharacterChatReadinessCopy, type ModelDescriptor } from "@/utils/chat-model-availability"
+import { buildCharacterChatReadiness, buildCharacterChatSendReadiness, getCharacterChatReadinessCopy, type ModelDescriptor } from "@/utils/chat-model-availability"
 import { buildCharacterChatPath } from "@/routes/route-paths"
 import { buildCharacterSelectionPayload } from "../utils"
 import type { Message } from "@/store/option"
@@ -124,9 +123,20 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
   const modelSelection = resolveModelSelectorSelection(availableModels, activeQuickChatModel, settingsState.apiProvider,
     { scope: settingsState.activeSettingsScope, providerOverride: settingsState.apiProvider })
   const settings = settingsState.getEffectiveSettings(modelSelection.settingsScope)
-  const quickChatReadiness = buildCharacterChatReadiness({ isServerConnected, selectedCharacter: quickChatCharacter,
-    selectedModel: activeQuickChatModel, explicitProvider: settings.apiProvider, requireExplicitProvider: true, availableModels,
-    isSendBlocked: !verified.current || !owner.isCurrent() || !persistence.draftReady || quickChatSending || quickChatNeedsReview })
+  const readBoundPrivateSource = (id: string | null) => {
+    const selected = controller.getCurrent()
+    return id && selected.status === "ready" && selected.owner?.kind === "native" &&
+      selected.owner.scope?.type !== "workspace" && selected.owner.conversation_id === id &&
+      selected.view?.conversation_id === id && selected.capture?.status === "captured" && selected.bookmarkScope &&
+      selected.owner.validate_lease() && owner.isCurrent()
+      ? { owner: selected.owner, view: selected.view } : null
+  }
+  const popupSendBlocked = !verified.current || !owner.isCurrent() || !persistence.draftReady || quickChatSending || quickChatNeedsReview
+  const quickChatReadiness = quickChatSessionId
+    ? buildCharacterChatSendReadiness({ isServerConnected, isSendBlocked: popupSendBlocked || !readBoundPrivateSource(quickChatSessionId) })
+    : buildCharacterChatReadiness({ isServerConnected, selectedCharacter: quickChatCharacter,
+      selectedModel: activeQuickChatModel, explicitProvider: settings.apiProvider, requireExplicitProvider: true, availableModels,
+      isSendBlocked: popupSendBlocked })
   const reviewOutcome = async (isCurrent: () => boolean) => {
     if (!handle || !isCurrent()) return
     try {
@@ -235,27 +245,29 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
     const generation = connectionGeneration.current
     const revision = form.getRevision()
     const popupCurrent = current
+    const boundSource = readBoundPrivateSource(sessionId.current)
     const preparing = () => popupCurrent() && request.current === operation && !operation.abort.signal.aborted &&
-      form.getRevision() === revision && live.current.activeQuickChatModel === activeQuickChatModel &&
-      live.current.isServerConnected && connectionGeneration.current === generation && useStoreChatModelSettings.getState() === settingsState
+      form.getRevision() === revision && live.current.isServerConnected && connectionGeneration.current === generation &&
+      (boundSource ? controller.getCurrent().owner === boundSource.owner && controller.getCurrent().view === boundSource.view && boundSource.owner.validate_lease()
+        : live.current.activeQuickChatModel === activeQuickChatModel && useStoreChatModelSettings.getState() === settingsState)
     setQuickChatSending(true)
     setQuickChatError(null)
     try {
-      const selected = controller.getCurrent()
-      const privateNative = sessionId.current && selected.status === "ready" && selected.owner?.kind === "native" &&
-        selected.owner.conversation_id === sessionId.current && selected.view?.conversation_id === sessionId.current
-        ? { owner: selected.owner, view: selected.view } : null
-      const sceneAddress = sessionId.current ? privateNative && chatDraftAddressForReceipt(privateNative)
-        : selected.status === "idle" && !selected.owner && !selected.view ? handle.address : null
-      const historyIsCurrent = controller.fence()
-      const target = captureActorSettingsTarget({ address: sceneAddress, owner: privateNative?.owner, view: privateNative?.view,
-        requestScope: owner.requestScope, accountIsCurrent: owner.isCurrent, isCurrent: () => preparing() && historyIsCurrent() })
-      const capture = captureActorSceneSendForTarget(target, target?.account, () => preparing() && historyIsCurrent())
-      if (!capture) throw new Error("actor_settings_unavailable")
-      const actorSceneSend = await capture.read()
-      if (!preparing()) return
-      validateNativeCharacterConfiguration({ temporary: false, settings, model: activeQuickChatModel!, toolChoice: "none", clientToolCount: 0,
-        actorEnabled: actorSceneSend.scene.settings.isEnabled })
+      let actorSceneSend: ActorSceneSend | undefined
+      if (!boundSource) {
+        if (sessionId.current) throw new Error("roleplay_resume_unavailable")
+        const selected = controller.getCurrent()
+        const sceneAddress = selected.status === "idle" && !selected.owner && !selected.view ? handle.address : null
+        const historyIsCurrent = controller.fence()
+        const target = captureActorSettingsTarget({ address: sceneAddress,
+          requestScope: owner.requestScope, accountIsCurrent: owner.isCurrent, isCurrent: () => preparing() && historyIsCurrent() })
+        const capture = captureActorSceneSendForTarget(target, target?.account, () => preparing() && historyIsCurrent())
+        if (!capture) throw new Error("actor_settings_unavailable")
+        actorSceneSend = await capture.read()
+        if (!preparing()) return
+        validateNativeCharacterConfiguration({ temporary: false, settings, model: activeQuickChatModel!, toolChoice: "none", clientToolCount: 0,
+          actorEnabled: actorSceneSend.scene.settings.isEnabled })
+      }
       if (!(await retain(preparing))) throw new Error("native_history_draft_not_retained")
       const outstanding = await listChatCreationRecovery(handle.ownerHash, { type: "global" })
       if (!preparing()) return
@@ -264,6 +276,7 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
         markReview()
         throw new Error(t("settings:manageCharacters.quickChat.previousAttempt", { defaultValue: "An earlier attempt may have saved this character chat. Review retained drafts in full chat before starting another conversation." }))
       }
+      if (!boundSource && !actorSceneSend?.isCurrent()) return
       await sendNativeHistoryCharacter({ controller, actorSceneSend, privateDraft: { handle, requestScope: owner.requestScope!, isCurrent: popupCurrent }, surface: "playground",
         originIsCurrent: preparing, signal: operation.abort.signal, temporary: false,
         serverChatId: sessionId.current, scope: { type: "global" }, characterId: numericId(quickChatCharacter),

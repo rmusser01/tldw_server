@@ -1,13 +1,16 @@
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import { writeFileSync } from "node:fs"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { expect, it, vi } from "vitest"
 import type { TFunction } from "i18next"
 import type { BgRequestInit } from "@/services/background-proxy"
 import type { HistorySelectionCaptureV1, HistoryViewSelectionV1 } from "@/types/history-selection"
+import { parseRoleplayResumeCompletionRequest } from "@/services/tldw/roleplay-resume"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 // Opt-in owned local fixture only. The server calls its local mock provider, never a paid provider.
-const fixture = vi.hoisted(() => ({ url: "http://127.0.0.1:19765", apiKey: "chat-ux-first-save-review-19765",
+const fixture = vi.hoisted(() => ({ url: process.env.TLDW_E2E_SERVER_URL ?? "", apiKey: process.env.TLDW_E2E_API_KEY ?? "",
+  characterId: Number(process.env.TLDW_E2E_CHARACTER_ID),
   hits: [] as Array<{ method: string; path: string; body: Record<string, unknown> }>, navigate: vi.fn() }))
 const scope = { userId: "1", config: { serverUrl: fixture.url, authMode: "single-user" as const, apiKey: fixture.apiKey,
   expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", fixture.apiKey) } }
@@ -48,7 +51,12 @@ vi.mock("@/services/background-proxy", async original => {
   }
 })
 
-it.skipIf(process.env.TLDW_QUICK_CHAT_NATIVE_FIXTURE !== "1")("saves two private Quick turns as one canonical native path and cold retains the next input", async () => {
+it.skipIf(process.env.TLDW_QUICK_CHAT_NATIVE_FIXTURE !== "1")("saves private Quick turns on original frozen authority after live setup clears and cold retains the next input", async () => {
+  expect(new URL(fixture.url).hostname).toMatch(/^(127\.0\.0\.1|localhost)$/)
+  expect(fixture.apiKey).toBeTruthy()
+  expect(Number.isInteger(fixture.characterId) && fixture.characterId > 0).toBe(true)
+  const actorSettings = await import("@/services/actor-settings")
+  const sceneRead = vi.spyOn(actorSettings, "getActorSceneForChat")
   const { useCharacterQuickChat } = await import("../useCharacterQuickChat")
   const { useStoreMessageOption } = await import("@/store/option")
   const { useStoreChatModelSettings } = await import("@/store/model")
@@ -65,18 +73,24 @@ it.skipIf(process.env.TLDW_QUICK_CHAT_NATIVE_FIXTURE !== "1")("saves two private
   useStoreMessageOption.getState().startNewChatDraft()
   const source = useStoreMessageOption.getState()
   const t = ((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key) as TFunction
-  const popup = renderHook(() => useCharacterQuickChat({ t, activeQuickChatModel: "custom-openai-api:gpt-4o-mini", isServerConnected: true,
-    availableModels: [{ model: "gpt-4o-mini", provider: "custom_openai_api", is_configured: true }] }))
+  let model: string | null = "openai:gpt-4.1-mini"
+  let models = [{ model: "gpt-4.1-mini", provider: "openai", is_configured: true }]
+  const popup = renderHook(() => useCharacterQuickChat({ t, activeQuickChatModel: model, isServerConnected: true, availableModels: models }))
   await waitFor(() => expect(popup.result.current.quickChatOwnerReady).toBe(true))
-  await act(async () => { await popup.result.current.openQuickChat({ id: 4 }) })
+  await act(async () => { await popup.result.current.openQuickChat({ id: fixture.characterId }) })
   await waitFor(() => expect(popup.result.current.quickChatReadiness.canStart).toBe(true))
   for (const input of ["  FIRST PRIVATE TURN\nExact spacing  ", "SECOND PRIVATE TURN  "]) {
+    if (popup.result.current.quickChatSessionId) {
+      act(() => { model = null; models = []; useStoreChatModelSettings.setState({ apiProvider: "unrelated-global-provider", minP: 0.1 }); popup.rerender() })
+      expect(popup.result.current.quickChatReadiness.canStart).toBe(true)
+    }
     act(() => popup.result.current.setQuickChatDraft(input))
     await act(async () => { await popup.result.current.sendQuickChatMessage() })
     expect(popup.result.current.quickChatError).toBeNull()
     expect(popup.result.current.quickChatDraft).toBe("")
     expect(popup.result.current.quickChatNeedsReview).toBe(false)
   }
+  expect(sceneRead).toHaveBeenCalledOnce()
   const id = popup.result.current.quickChatSessionId!
   expect(id).toBeTruthy()
   const rows = await tldwClient.listChatMessages(id, {}, { requestScope: scope, fresh: true })
@@ -95,13 +109,19 @@ it.skipIf(process.env.TLDW_QUICK_CHAT_NATIVE_FIXTURE !== "1")("saves two private
   } }, { requestScope: scope }) as HistorySelectionCaptureV1
   expect(path.status).toBe("captured")
   expect(path.rows.map(row => row.role)).toEqual(["user", "assistant", "user", "assistant"])
-  // Existing shared request/server normalization trims outer whitespace; exact unsent retention is asserted below.
-  expect(path.selected_content[0].message).toBe("FIRST PRIVATE TURN\nExact spacing")
-  expect(path.selected_content[2].message).toBe("SECOND PRIVATE TURN")
-  expect(fixture.hits.filter(hit => hit.path.split("?")[0] === "/api/v1/chat/completions")).toHaveLength(2)
-  const turns = fixture.hits.filter(hit => hit.path.split("?")[0] === "/api/v1/chat/completions")
-  expect((turns[1].body.tldw_history_selection_v1 as { messages: unknown[] }).messages).toHaveLength(2)
-  expect(fixture.hits.some(hit => hit.path.includes("complete-v2"))).toBe(false)
+  expect(path.selected_content[0].message).toBe("  FIRST PRIVATE TURN\nExact spacing  ")
+  expect(path.selected_content[2].message).toBe("SECOND PRIVATE TURN  ")
+  expect(fixture.hits.filter(hit => hit.path.split("?")[0] === "/api/v1/chat/completions")).toHaveLength(0)
+  const turns = fixture.hits.filter(hit => hit.path.includes("complete-v2"))
+  expect(turns).toHaveLength(2)
+  for (const turn of turns) {
+    expect(turn.body).not.toHaveProperty("model")
+    expect(turn.body).not.toHaveProperty("api_provider")
+  }
+  const appends = fixture.hits.filter(hit => hit.method === "POST" && hit.path.endsWith("/messages"))
+  expect(appends).toHaveLength(2)
+  expect(appends.map(hit => hit.body.content)).toEqual(["  FIRST PRIVATE TURN\nExact spacing  ", "SECOND PRIVATE TURN  "])
+  expect(turns.map(hit => parseRoleplayResumeCompletionRequest(hit.body).tldw_roleplay_resume_v1.input_message_id)).toEqual(appends.map(hit => hit.body.message_id))
   expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source.chatDraftAddress)
   expect(useStoreMessageOption.getState().chatDraftRevision).toBe(source.chatDraftRevision)
   act(() => popup.result.current.setQuickChatDraft("  NEXT UNSENT\nTrailing spaces  "))
@@ -114,8 +134,7 @@ it.skipIf(process.env.TLDW_QUICK_CHAT_NATIVE_FIXTURE !== "1")("saves two private
   expect(retained).toMatchObject({ content: "  NEXT UNSENT\nTrailing spaces  ", creationAttempt: { state: "settled", chatId: id } })
   expect(fixture.hits.some(hit => hit.method === "DELETE")).toBe(false)
   writeFileSync("/private/tmp/chat-quick-native-runtime-proof.json", JSON.stringify({ chatId: id, roles: path.rows.map(row => row.role), roots: 1,
-    turns: turns.length, historyMembersInSecondTurn: 2, coldDraft: retained?.content, coreSourceUnchanged: true,
-    sendFormattingLimit: "Existing shared request/server normalization trims outer whitespace; retained/copied unsent input remains exact.",
-    limits: "Actual Quick/native sender/API client/controller and real owned server; scoped HTTP/SSE and account-verification IO adapters, existing profile/bookmark database IO adapter. No packaged/native browser or progressive transport timing claim." }, null, 2))
+    legacyTurns: 0, savedFrozenTurns: turns.length, globalModelCleared: true, coldDraft: retained?.content, coreSourceUnchanged: true,
+    limits: "Actual Quick/native sender/API client/controller and real owned server; scoped HTTP/SSE and account-verification IO adapters, existing profile/bookmark database IO adapter and actual storage shim; fresh Scene reads remain real. No packaged/native browser or progressive transport timing claim." }, null, 2), { mode: 0o600 })
   cold.unmount()
 }, 60000)

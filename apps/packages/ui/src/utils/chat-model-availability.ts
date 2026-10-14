@@ -872,6 +872,16 @@ const blockedCharacterChatReadiness = (
   reason
 })
 
+/** Send-state gates after fresh setup or saved-source qualification; never dispatch authority. */
+export function buildCharacterChatSendReadiness({ isServerConnected = true, isSendBlocked = false }: {
+  isServerConnected?: boolean
+  isSendBlocked?: boolean
+}): CharacterChatReadiness {
+  if (!isServerConnected) return blockedCharacterChatReadiness("server-connection", "server-unavailable", "open-server-settings")
+  if (isSendBlocked) return blockedCharacterChatReadiness("chat-send", "send-disabled", "retry")
+  return { status: "ready", canStart: true, missingRequirement: null, recommendedAction: null, reason: null }
+}
+
 export function buildCharacterChatReadiness({
   isServerConnected = true,
   selectedCharacter,
@@ -890,14 +900,6 @@ export function buildCharacterChatReadiness({
       "server-connection",
       "server-unavailable",
       "open-server-settings"
-    )
-  }
-
-  if (!selectedCharacter) {
-    return blockedCharacterChatReadiness(
-      "selected-character",
-      "missing-character",
-      "choose-character"
     )
   }
 
@@ -979,21 +981,15 @@ export function buildCharacterChatReadiness({
       break
   }
 
-  if (isSendBlocked) {
+  if (!selectedCharacter) {
     return blockedCharacterChatReadiness(
-      "chat-send",
-      "send-disabled",
-      "retry"
+      "selected-character",
+      "missing-character",
+      "choose-character"
     )
   }
 
-  return {
-    status: "ready",
-    canStart: true,
-    missingRequirement: null,
-    recommendedAction: null,
-    reason: null
-  }
+  return buildCharacterChatSendReadiness({ isServerConnected, isSendBlocked })
 }
 
 export function getMatchingCharacterChatModelUsabilityCopy({
@@ -1081,7 +1077,7 @@ export function getCharacterChatReadinessCopy(
       description: translateReadinessCopy(
         t,
         "characterChatReadiness.character.description",
-        "Character chat starts with the character, then checks model readiness before the first message."
+        "Choose an available model with a configured provider, then choose the character for your new chat."
       ),
       actionLabel: translateReadinessCopy(
         t,

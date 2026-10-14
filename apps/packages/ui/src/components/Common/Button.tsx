@@ -12,7 +12,7 @@ type ButtonSize = "sm" | "md" | "lg"
 type ButtonShape = "rounded" | "pill"
 type ButtonHtmlType = "button" | "submit" | "reset"
 
-type ButtonProps = {
+type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   variant?: ButtonVariant
   size?: ButtonSize | "small"
   shape?: ButtonShape
@@ -83,7 +83,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       ariaLabel,
       "aria-describedby": ariaDescribedBy,
       title,
-      "data-testid": dataTestId
+      "data-testid": dataTestId,
+      ...nativeProps
     },
     ref
   ) => {
@@ -102,6 +103,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     return (
       <button
+        {...nativeProps}
         ref={ref}
         type={resolvedType}
         className={[
@@ -117,9 +119,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         onClick={onClick}
         onKeyDown={onKeyDown}
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ?? nativeProps["aria-label"]}
         aria-describedby={ariaDescribedBy}
-        aria-busy={loading}
+        aria-busy={loading ?? nativeProps["aria-busy"]}
         title={title ?? ariaLabel}
         data-testid={dataTestId}>
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
