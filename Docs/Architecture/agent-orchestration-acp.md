@@ -56,7 +56,7 @@ All paths under `tldw_Server_API/` unless noted.
 
 ## Config keys (selection)
 
-`[ACP]`: `runner_command` (default `go run ./cmd/tldw-agent-acp`), `runner_args/env/cwd/binary_path` (relative paths resolve against **Config_Files**, not the process cwd), `startup_timeout_ms`; env `ACP_RUNNER_*`, `ACP_ALLOWED_SESSION_CWD_ROOTS`, `ACP_ALLOW_SESSION_ENV`, `ACP_ALLOW_INLINE_STDIO_MCP`, `ACP_ALLOW_PRIVATE_MCP_HTTP`. `[ACP-WORKSPACE]`: `allowed_base_paths`, discovery depth/patterns. `[ACP-SANDBOX]`: `enabled` (false), runtime, image, network policy (`deny_all`), egress allowlist, SSH range, TTL/concurrency/token/duration caps, retention. Also `ACP_SESSIONS_DB_PATH`, buffer caps, and the first-run rollout experiment knobs.
+`[ACP]`: `runner_command`/`runner_args` — the shipped config composes the default launch `go run ./cmd/tldw-agent-acp`; the **code** default for `runner_command` is empty (with a loud warning), so sessions are disabled until configured — plus `runner_env/cwd/binary_path` (relative paths resolve against **Config_Files**, not the process cwd), `startup_timeout_ms`; env `ACP_RUNNER_*`, `ACP_ALLOWED_SESSION_CWD_ROOTS`, `ACP_ALLOW_SESSION_ENV`, `ACP_ALLOW_INLINE_STDIO_MCP`, `ACP_ALLOW_PRIVATE_MCP_HTTP`. `[ACP-WORKSPACE]`: `allowed_base_paths`, discovery depth/patterns. `[ACP-SANDBOX]`: `enabled` (false), runtime, image, network policy (`deny_all`), egress allowlist, SSH range, TTL/concurrency/token/duration caps, retention. Also `ACP_SESSIONS_DB_PATH`, buffer caps, and the first-run rollout experiment knobs.
 
 ## Verified gotchas
 
@@ -70,7 +70,7 @@ All paths under `tldw_Server_API/` unless noted.
 
 ## Governing decisions and docs
 
-ADR-016 (`Docs/ADR/016-acp-session-and-orchestration-persistence.md` — the shared-sessions vs per-user-orchestration split), ADR-041 (scheduled agent execution feasibility), ADR-010 (sandbox runtime), ADR-052 (adjacent). Current: both module READMEs, `Docs/Development/Agent_Client_Protocol.md`, the ADR production-readiness family. Tests: `tests/Agent_Client_Protocol/` (33 files), `tests/Agent_Orchestration/`.
+ADR-016 (`Docs/ADR/016-acp-session-and-orchestration-persistence.md` — the shared-sessions vs per-user-orchestration split), ADR-041 (scheduled agent execution feasibility), ADR-010 (sandbox runtime), ADR-052 (adjacent). Current: both module READMEs, `Docs/Development/Agent_Client_Protocol.md`, the ADR production-readiness family. Tests: `tests/Agent_Client_Protocol/` (72 test files), `tests/Agent_Orchestration/`.
 
 ## Related docs
 
