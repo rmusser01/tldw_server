@@ -1,7 +1,7 @@
 ---
 id: TASK-13647
 title: 'Admin-webui perf PR #3218 follow-up fixes'
-status: Done
+status: In Progress
 labels:
 - backend
 - frontend
@@ -21,6 +21,9 @@ Follow-ups from merged admin-webui performance PR #3218: (1) getDailyUsage sent 
 - [ ] #2 group_by=user counts each usage row once for multi-org members; group_by=org keeps row-per-org attribution; PG + SQLite dialects covered
 - [ ] #3 list_backup_items skips rows whose file vanished between scan and page build instead of raising
 - [ ] #4 Password-reset test root-caused with evidence and stabilized; file passes 3x
+- [ ] #5 getDailyUsage sends start/end matching backend /usage/daily params; range selector changes daily chart; test pins param names
+- [ ] #6 cost-attribution group_by=user under multi-org scope counts each usage row once (semi-join); group_by=org keeps per-org attribution; test with user in two orgs
+- [ ] #7 _backup_file_from_row skips rows whose file vanished (OSError) instead of 500; test covers vanish-mid-window
 <!-- AC:END -->
 
 ## Implementation Notes
