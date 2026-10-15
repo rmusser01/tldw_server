@@ -1325,7 +1325,8 @@ const cleanupWorkspaceIndexedDbRecords = async (
 
 const removeWorkspaceLocalPersistenceForId = async (
   workspaceId: string,
-  indexedDbAdapter: WorkspaceIndexedDbAdapter
+  indexedDbAdapter: WorkspaceIndexedDbAdapter,
+  durability: WorkspacePersistDurability = "coalesced"
 ): Promise<void> => {
   const snapshot = readWorkspaceSnapshotFromStorage(workspaceId)
   const chatKey = buildWorkspaceChatStorageKey(workspaceId)
@@ -1341,10 +1342,23 @@ const removeWorkspaceLocalPersistenceForId = async (
 
   if (!indexedDbAdapter.isAvailable()) return
 
-  await cleanupWorkspaceIndexedDbRecords(workspaceId, snapshot, indexedDbAdapter)
-  if (chatPointerKey) {
-    await indexedDbAdapter.deleteChatRecord(chatPointerKey)
+  const cleanupIndexedDbRecords = cleanupWorkspaceIndexedDbRecords(
+    workspaceId,
+    snapshot,
+    indexedDbAdapter
+  ).then(async () => {
+    if (chatPointerKey) {
+      await indexedDbAdapter.deleteChatRecord(chatPointerKey)
+    }
+  })
+  if (durability === "lifecycle") {
+    // Best-effort on lifecycle flush: the localStorage removals above already
+    // landed synchronously; awaiting IndexedDB here would put the split-index
+    // write of the calling pass at risk of page death.
+    void cleanupIndexedDbRecords.catch(() => {})
+    return
   }
+  await cleanupIndexedDbRecords
 }
 
 const omitTombstonedWorkspaceRecords = <T>(
@@ -1832,11 +1846,20 @@ const writeSplitWorkspacePersistence = async (
   options?: {
     /** Trust the module-level partialize records as identity anchors. */
     trustPartializeRecords?: boolean
+    /**
+     * "lifecycle": this pass was flushed by pagehide/beforeunload/tab-hidden.
+     * Every IndexedDB await is skipped (artifact/chat offload and record
+     * reconciliation) so all localStorage writes land synchronously — page
+     * death cannot lose the buffered state. Oversized artifacts stay INLINE
+     * for this pass; the next coalesced pass re-offloads them.
+     */
+    durability?: WorkspacePersistDurability
   }
 ): Promise<boolean> => {
   if (name !== WORKSPACE_STORAGE_KEY) return false
 
   const recordsTrusted = options?.trustPartializeRecords === true
+  const lifecycleFlush = options?.durability === "lifecycle"
   const envelope = parsePersistedWorkspaceEnvelope(serializedValue)
   if (!envelope) return false
 
@@ -1900,7 +1923,8 @@ const writeSplitWorkspacePersistence = async (
       if (!cleanedUpMigrationTombstoneWorkspaceIds.has(workspaceStorageId)) {
         await removeWorkspaceLocalPersistenceForId(
           workspaceStorageId,
-          indexedDbAdapter
+          indexedDbAdapter,
+          lifecycleFlush ? "lifecycle" : "coalesced"
         )
         cleanedUpMigrationTombstoneWorkspaceIds.add(workspaceStorageId)
       }
@@ -1958,7 +1982,7 @@ const writeSplitWorkspacePersistence = async (
       if (snapshot) {
         let snapshotForStorage = snapshot
         let offloadedArtifactIds = new Set<string>()
-        if (indexedDbAdapter.isAvailable()) {
+        if (indexedDbAdapter.isAvailable() && !lifecycleFlush) {
           const offloadResult = await offloadWorkspaceSnapshotArtifacts(
             workspaceStorageId,
             snapshot,
@@ -2014,10 +2038,15 @@ const writeSplitWorkspacePersistence = async (
               ? previousRevision + 1
               : previousRevision,
             previousArtifactIds: nextArtifactIds,
-            previousArtifactPointerKeys:
-              collectWorkspaceArtifactPointerKeysFromSnapshot(
-                persistedSnapshotForIndex
-              )
+            // Lifecycle flushes write artifacts INLINE, so the freshly written
+            // snapshot holds no pointers — carry the previous pointer-key cache
+            // forward instead so the next coalesced pass can still reconcile
+            // (delete) the records this pass deliberately left in place.
+            previousArtifactPointerKeys: lifecycleFlush
+              ? previousArtifactPointerKeys
+              : collectWorkspaceArtifactPointerKeysFromSnapshot(
+                  persistedSnapshotForIndex
+                )
           }
         })
       } else {
@@ -2036,7 +2065,7 @@ const writeSplitWorkspacePersistence = async (
         })
       }
 
-      if (indexedDbAdapter.isAvailable()) {
+      if (indexedDbAdapter.isAvailable() && !lifecycleFlush) {
         const artifactPayloadKeysToDelete = new Set<string>(
           previousArtifactPointerKeys
         )
@@ -2105,6 +2134,7 @@ const writeSplitWorkspacePersistence = async (
         let chatReference: PersistedWorkspaceChatSessionReference = chatSession
         if (
           indexedDbAdapter.isAvailable() &&
+          !lifecycleFlush &&
           estimateSerializedByteLength(chatSession) >=
             WORKSPACE_CHAT_OFFLOAD_MIN_BYTES
         ) {
@@ -2143,7 +2173,12 @@ const writeSplitWorkspacePersistence = async (
           rawRef: chatRawRef ?? null,
           persistedReference: chatReference,
           serializedValue: nextChatValue,
-          previousPointerKey: retainedChatRecordKey
+          // Lifecycle flushes skip the chat offload, so no record was
+          // retained this pass — carry the previous pointer forward so the
+          // next coalesced pass can still reconcile the record left in place.
+          previousPointerKey: lifecycleFlush
+            ? previousChatPointerKey
+            : retainedChatRecordKey
         }
       } else {
         if (chatKey in localStorage) {
@@ -2157,7 +2192,7 @@ const writeSplitWorkspacePersistence = async (
         }
       }
 
-      if (indexedDbAdapter.isAvailable()) {
+      if (indexedDbAdapter.isAvailable() && !lifecycleFlush) {
         const chatKeysToDelete = new Set<string>()
         chatKeysToDelete.add(
           buildWorkspaceIndexedDbChatRecordKey(workspaceStorageId)
@@ -2196,13 +2231,21 @@ const writeSplitWorkspacePersistence = async (
     invalidateWorkspacePersistIndexStamp()
 
     if (indexedDbAdapter.isAvailable()) {
-      await cleanupWorkspaceIndexedDbRecords(
+      const staleRecordCleanup = cleanupWorkspaceIndexedDbRecords(
         staleWorkspaceId,
         staleSnapshot,
         indexedDbAdapter
-      )
-      if (staleChatPointerKey) {
-        await indexedDbAdapter.deleteChatRecord(staleChatPointerKey)
+      ).then(async () => {
+        if (staleChatPointerKey) {
+          await indexedDbAdapter.deleteChatRecord(staleChatPointerKey)
+        }
+      })
+      if (lifecycleFlush) {
+        // Best-effort on lifecycle flush: localStorage removals above already
+        // landed; do not gate the split-index write on IndexedDB deletes.
+        void staleRecordCleanup.catch(() => {})
+      } else {
+        await staleRecordCleanup
       }
     }
   }
@@ -2335,26 +2378,40 @@ const createMemoryStorage = (): StateStorage => ({
 // burst of mutations each ran the whole split-key persist chain (partialize ->
 // stringify -> parse -> per-workspace stringify/compare). This writer coalesces
 // them using the serialized-writer pattern from
-// `entries/background-session-store.ts` (`createSerializedSessionStateWriter`):
-// each call only records the latest job; while a write is in flight further
-// calls just replace the pending job, and one final trailing write runs with
-// the newest value once the in-flight write settles. Callers are never blocked
-// and an older snapshot can never overwrite a newer one.
+// `entries/background-session-store.ts` (`createSerializedSessionStateWriter`).
+// Pending jobs are keyed BY STORAGE KEY: a write for a different key arriving
+// inside the coalescing window (e.g. the Research onboarding sidecar) can
+// never displace the buffered workspace envelope, while a same-key write
+// replaces the pending job for that key and inherits its waiters (the newest
+// value supersedes theirs too). While a write is in flight further calls for
+// that key just replace the pending job, and one final trailing write runs
+// with the newest value once the in-flight write settles. Callers are never
+// blocked and an older snapshot can never overwrite a newer one.
 //
-// The drain is additionally deferred off the mutation's critical path via
-// `requestIdleCallback` (bounded by WORKSPACE_PERSIST_COALESCE_WINDOW_MS * 4 so
-// durability never lags far behind). Environments without
-// `requestIdleCallback` (jsdom) drain on the microtask queue instead, so a
-// single mutation still lands within a microtask of its `set()`. Pending
-// writes are flushed synchronously on pagehide/beforeunload and when the tab
-// is hidden, so unloading the page cannot lose the buffered envelope.
+// A buffered write is delivered on the FIRST of:
+//   - `requestIdleCallback`, where available (a delivery hint that keeps the
+//     write off the keystroke's critical path),
+//   - the microtask queue in environments without `requestIdleCallback`
+//     (jsdom), so single mutations still land promptly in tests,
+//   - the trailing timer: WORKSPACE_PERSIST_TRAILING_FLUSH_MS after the write
+//     was buffered. This is the worst-case landing bound — the plan's "300ms
+//     trailing" debounce — and it is unconditional: a busy main thread can
+//     delay idle delivery, never the timer.
+//
+// Lifecycle flushes (pagehide/beforeunload/tab hidden) drain immediately in
+// "lifecycle" durability mode: IndexedDB offload is skipped for that pass so
+// every localStorage write (snapshots, chat references, split index) lands
+// synchronously before the flush call returns — page death cannot lose the
+// buffered state. The next coalesced pass re-offloads oversized artifacts and
+// pointer-izes the snapshot again.
 
-export const WORKSPACE_PERSIST_COALESCE_WINDOW_MS = 300
+export const WORKSPACE_PERSIST_TRAILING_FLUSH_MS = 300
 
 type WorkspacePersistWriteJob = {
   name: string
   value: string
   perform: (name: string, value: string) => Promise<void>
+  waiters: WorkspacePersistWaiter[]
 }
 
 type WorkspacePersistWaiter = {
@@ -2362,14 +2419,22 @@ type WorkspacePersistWaiter = {
   reject: (error: unknown) => void
 }
 
-let pendingWorkspacePersistJob: WorkspacePersistWriteJob | null = null
+type WorkspacePersistDurability = "coalesced" | "lifecycle"
+
+const pendingWorkspacePersistJobs = new Map<string, WorkspacePersistWriteJob>()
 let workspacePersistDrainInFlight: Promise<void> | null = null
 let workspacePersistDrainCompleted = true
 let workspacePersistDrainScheduled = false
 let workspacePersistIdleHandle: number | null = null
+let workspacePersistTrailingHandle: ReturnType<typeof setTimeout> | null = null
 let workspacePersistLifecycleBound = false
-const workspacePersistWaiters: WorkspacePersistWaiter[] = []
+// True while the current drain was initiated by a lifecycle flush (or overlaps
+// one): jobs performed under it skip IndexedDB awaits so their localStorage
+// writes land synchronously. Cleared when the drain settles.
+let workspacePersistLifecycleFlushActive = false
 
+const hasPendingWorkspacePersistWrite = (): boolean =>
+  pendingWorkspacePersistJobs.size > 0
 const settleWorkspacePersistWaiters = (
   waiters: WorkspacePersistWaiter[],
   error?: unknown
@@ -2390,21 +2455,24 @@ const drainWorkspacePersistWrites = async (): Promise<void> => {
     // loop's pending check and the final `inFlight = null`, so a caller can
     // only ever observe `inFlight` set (we are suspended on the write below)
     // or fully idle — never in between (same ordering argument as the
-    // background session writer).
-    while (pendingWorkspacePersistJob) {
-      const job = pendingWorkspacePersistJob
-      pendingWorkspacePersistJob = null
-      const waiters = workspacePersistWaiters.splice(0)
+    // background session writer). Jobs drain in insertion order; a same-key
+    // write that replaced a pending job keeps that key's original position.
+    while (pendingWorkspacePersistJobs.size > 0) {
+      const nextJob = pendingWorkspacePersistJobs.entries().next()
+      if (nextJob.done) break
+      const [jobKey, job] = nextJob.value
+      pendingWorkspacePersistJobs.delete(jobKey)
       try {
         await job.perform(job.name, job.value)
-        settleWorkspacePersistWaiters(waiters)
+        settleWorkspacePersistWaiters(job.waiters)
       } catch (error) {
-        settleWorkspacePersistWaiters(waiters, error)
+        settleWorkspacePersistWaiters(job.waiters, error)
       }
     }
   } finally {
     workspacePersistDrainCompleted = true
     workspacePersistDrainInFlight = null
+    workspacePersistLifecycleFlushActive = false
   }
 }
 
@@ -2428,48 +2496,103 @@ const cancelScheduledWorkspacePersistDrain = (): void => {
     cancelIdleCallback(workspacePersistIdleHandle)
   }
   workspacePersistIdleHandle = null
+  if (workspacePersistTrailingHandle !== null) {
+    clearTimeout(workspacePersistTrailingHandle)
+    workspacePersistTrailingHandle = null
+  }
   workspacePersistDrainScheduled = false
 }
 
 const scheduleWorkspacePersistDrain = (): void => {
   if (workspacePersistDrainScheduled || workspacePersistDrainInFlight) return
   workspacePersistDrainScheduled = true
+  // First delivery path to fire wins; deliver() cancels the others. The
+  // trailing timer is unconditional — it is the worst-case landing bound, not
+  // a fallback for missing idle callbacks.
+  const deliverPendingWorkspacePersistWrite = (): void => {
+    if (!workspacePersistDrainScheduled) return
+    cancelScheduledWorkspacePersistDrain()
+    startWorkspacePersistDrain()
+  }
+  workspacePersistTrailingHandle = setTimeout(
+    deliverPendingWorkspacePersistWrite,
+    WORKSPACE_PERSIST_TRAILING_FLUSH_MS
+  )
   if (typeof requestIdleCallback === "function") {
     workspacePersistIdleHandle = requestIdleCallback(
-      () => {
-        workspacePersistIdleHandle = null
-        workspacePersistDrainScheduled = false
-        startWorkspacePersistDrain()
-      },
-      { timeout: WORKSPACE_PERSIST_COALESCE_WINDOW_MS * 4 }
+      deliverPendingWorkspacePersistWrite,
+      { timeout: WORKSPACE_PERSIST_TRAILING_FLUSH_MS }
     )
     return
   }
-  queueMicrotask(() => {
-    workspacePersistDrainScheduled = false
-    startWorkspacePersistDrain()
-  })
+  // No `requestIdleCallback` (jsdom): deliver on the microtask queue. The
+  // trailing timer above still bounds the write if even microtask delivery
+  // were starved.
+  queueMicrotask(deliverPendingWorkspacePersistWrite)
 }
 
 /**
- * Flush any pending persist write NOW. The drain starts synchronously, so for
- * localStorage-backed writes (everything except IndexedDB offload awaits) the
- * data lands before this returns — page unload can safely call it.
+ * Flush any pending persist write NOW. The drain starts synchronously. In
+ * "lifecycle" durability mode (pagehide/beforeunload/tab hidden) IndexedDB
+ * offload is skipped for the drained pass, so every localStorage write lands
+ * before this returns — page unload cannot lose the buffered state.
  */
-const flushWorkspacePersistWrites = (): void => {
+const flushWorkspacePersistWrites = (
+  durability: WorkspacePersistDurability = "coalesced"
+): void => {
+  if (durability === "lifecycle") {
+    workspacePersistLifecycleFlushActive = true
+  }
   cancelScheduledWorkspacePersistDrain()
   startWorkspacePersistDrain()
 }
 
+/**
+ * Read-side drain: awaits any in-flight write chain and drains whatever is
+ * still buffered (bounded loop — each cycle either awaits a drain or starts
+ * one, and a drain's loop consumes everything pending). Production readers
+ * that must observe their own just-buffered write (use-research-workspace-
+ * prefill verifying an import persisted) call this before reading, keeping
+ * getItem itself storage-wins for rehydration.
+ */
+export const flushWorkspacePersistence = async (): Promise<void> => {
+  for (let cycle = 0; cycle < 10; cycle += 1) {
+    if (
+      !hasPendingWorkspacePersistWrite() &&
+      !workspacePersistDrainInFlight
+    ) {
+      return
+    }
+    flushWorkspacePersistWrites()
+    if (workspacePersistDrainInFlight) {
+      await workspacePersistDrainInFlight.catch(() => {})
+    }
+  }
+}
+
 const enqueueWorkspacePersistWrite = (
-  job: WorkspacePersistWriteJob
+  job: {
+    name: string
+    value: string
+    perform: (name: string, value: string) => Promise<void>
+  }
 ): Promise<void> => {
-  pendingWorkspacePersistJob = job
-  bindWorkspacePersistLifecycleFlush()
-  scheduleWorkspacePersistDrain()
   return new Promise<void>((resolve, reject) => {
-    workspacePersistWaiters.push({ resolve, reject })
+    // Per-key single slot: a write for a DIFFERENT key must never displace a
+    // buffered job for another key; a same-key write replaces the pending job
+    // and carries its waiters forward (the newest value satisfies them).
+    const previous = pendingWorkspacePersistJobs.get(job.name)
+    pendingWorkspacePersistJobs.set(job.name, {
+      ...job,
+      waiters: [...(previous?.waiters ?? []), { resolve, reject }]
+    })
+    bindWorkspacePersistLifecycleFlush()
+    scheduleWorkspacePersistDrain()
   })
+}
+
+const handleWorkspacePersistLifecycleFlush = (): void => {
+  flushWorkspacePersistWrites("lifecycle")
 }
 
 const onWorkspacePersistVisibilityChange = (): void => {
@@ -2477,7 +2600,7 @@ const onWorkspacePersistVisibilityChange = (): void => {
     typeof document !== "undefined" &&
     document.visibilityState === "hidden"
   ) {
-    flushWorkspacePersistWrites()
+    handleWorkspacePersistLifecycleFlush()
   }
 }
 
@@ -2489,8 +2612,8 @@ const bindWorkspacePersistLifecycleFlush = (): void => {
   ) {
     return
   }
-  window.addEventListener("pagehide", flushWorkspacePersistWrites)
-  window.addEventListener("beforeunload", flushWorkspacePersistWrites)
+  window.addEventListener("pagehide", handleWorkspacePersistLifecycleFlush)
+  window.addEventListener("beforeunload", handleWorkspacePersistLifecycleFlush)
   document.addEventListener(
     "visibilitychange",
     onWorkspacePersistVisibilityChange
@@ -2504,11 +2627,14 @@ const bindWorkspacePersistLifecycleFlush = (): void => {
  */
 export const workspacePersistWriterInternals = {
   flush: flushWorkspacePersistWrites,
-  hasPendingWrite: () => pendingWorkspacePersistJob !== null,
+  hasPendingWrite: hasPendingWorkspacePersistWrite,
   cancelPendingWrite: () => {
     cancelScheduledWorkspacePersistDrain()
-    pendingWorkspacePersistJob = null
-    settleWorkspacePersistWaiters(workspacePersistWaiters.splice(0))
+    const displaced = Array.from(pendingWorkspacePersistJobs.values())
+    pendingWorkspacePersistJobs.clear()
+    settleWorkspacePersistWaiters(
+      displaced.flatMap((job) => job.waiters)
+    )
   }
 }
 
@@ -2536,10 +2662,18 @@ export const createWorkspaceStorage = (
 
   return {
     getItem: (name: string): string | null | Promise<string | null> => {
-      // Rehydration must observe what is actually at rest. Pending coalesced
-      // writes are NOT flushed here: a pending envelope reflects pre-mutation
-      // in-memory state and would clobber storage seeded out-of-band (and the
-      // only production reader, store creation, runs before any set()).
+      // Rehydration observes what is actually AT REST, not what is buffered:
+      // a pending coalesced write reflects pre-mutation in-memory state and
+      // flushing it here would clobber storage written out-of-band after the
+      // write was buffered — a cross-tab write, or a caller that seeded
+      // storage and rehydrates from it (the reload pattern; storage must win
+      // over our buffered envelope). Store creation is therefore safe (it
+      // runs before any set()), and so is zustand rehydrate.
+      //
+      // Production readers that need READ-YOUR-WRITES semantics — verifying a
+      // just-buffered write landed, like use-research-workspace-prefill —
+      // must flush first via `flushWorkspacePersistence()`; that drains (and,
+      // when a write chain is mid-drain, awaits it) before they read.
       if (name === WORKSPACE_STORAGE_KEY) {
         if (!splitStorageEnabled) {
           return localStorage.getItem(name)
@@ -2569,7 +2703,12 @@ export const createWorkspaceStorage = (
                   jobName,
                   jobValue,
                   indexedDbAdapter,
-                  { trustPartializeRecords }
+                  {
+                    trustPartializeRecords,
+                    durability: workspacePersistLifecycleFlushActive
+                      ? "lifecycle"
+                      : "coalesced"
+                  }
                 )
               : false
             if (!handledBySplitStorage) {
@@ -2614,7 +2753,12 @@ export const createWorkspaceStorage = (
                   ? await writeSplitWorkspacePersistence(
                       jobName,
                       recoveryAttempt.value,
-                      indexedDbAdapter
+                      indexedDbAdapter,
+                      {
+                        durability: workspacePersistLifecycleFlushActive
+                          ? "lifecycle"
+                          : "coalesced"
+                      }
                     )
                   : false
                 if (!handledBySplitStorage) {

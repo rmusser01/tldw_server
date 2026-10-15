@@ -9,7 +9,12 @@
 //   - an artifact whose (id + payload content hash) already has an offload
 //     record is NOT re-put — the snapshot is still pointer-ized,
 //   - only artifacts whose content changed are re-put, exactly once each,
-//     in parallel with the other changed artifacts.
+//     in parallel with the other changed artifacts,
+//   - a REMOVED-then-re-added artifact with identical content is re-put (the
+//     stale stamp was invalidated when the record was deleted — otherwise the
+//     persisted pointer would reference a deleted record),
+//   - a FAILED put keeps the artifact inline in localStorage and is retried
+//     on the next dirty pass.
 //
 // The fake adapter defers each put by a macrotask so concurrency is
 // observable. jsdom note: Storage.prototype spies only.
@@ -106,8 +111,11 @@ const buildEnvelope = (
 
 type FakeAdapterState = {
   putCalls: Array<{ key: string; artifactId: string }>
+  deleteCalls: string[]
   activePuts: number
   maxActivePuts: number
+  /** While > 0, each put consumes one token and reports failure. */
+  failNextPuts: number
 }
 
 const createFakeAdapter = (): {
@@ -116,8 +124,10 @@ const createFakeAdapter = (): {
 } => {
   const state: FakeAdapterState = {
     putCalls: [],
+    deleteCalls: [],
     activePuts: 0,
-    maxActivePuts: 0
+    maxActivePuts: 0,
+    failNextPuts: 0
   }
   return {
     state,
@@ -132,10 +142,17 @@ const createFakeAdapter = (): {
         state.putCalls.push({ key: record.key, artifactId: record.artifactId })
         await new Promise((resolve) => setTimeout(resolve, 0))
         state.activePuts -= 1
+        if (state.failNextPuts > 0) {
+          state.failNextPuts -= 1
+          return false
+        }
         return true
       },
       getArtifactPayloadRecord: async () => null,
-      deleteArtifactPayloadRecord: async () => true
+      deleteArtifactPayloadRecord: async (key: string) => {
+        state.deleteCalls.push(key)
+        return true
+      }
     }
   }
 }
@@ -267,5 +284,92 @@ describe("workspace persist artifact offload dedup", () => {
       new Set(["art-1", "art-2"])
     )
     expect(state.maxActivePuts).toBe(2)
+  })
+
+  it("re-puts a removed-then-re-added artifact with identical content", async () => {
+    const workspaceId = workspaceIdFor("readd")
+    const { adapter, state } = createFakeAdapter()
+    const storage = createWorkspaceStorage({ indexedDbAdapter: adapter })
+
+    const artifacts = [makeArtifact("art-1", "one")]
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope(workspaceId, "notes v1", artifacts)
+    )
+    await settlePersistWrites()
+    expect(state.putCalls).toHaveLength(1)
+    const recordKey = state.putCalls[0]?.key
+    expect(recordKey).toBeTruthy()
+    state.putCalls.length = 0
+
+    // Remove the artifact: the pass reconciles the now-orphaned record away,
+    // invalidating the dedup stamp with it.
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope(workspaceId, "notes v2", [])
+    )
+    await settlePersistWrites()
+    expect(state.deleteCalls).toContain(recordKey)
+    state.putCalls.length = 0
+
+    // Re-add identical content: the stale stamp was invalidated with the
+    // record's deletion, so the artifact MUST be re-put — otherwise the
+    // persisted pointer would reference the deleted record and hydration
+    // would silently see stale/missing content.
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope(workspaceId, "notes v3", artifacts)
+    )
+    await settlePersistWrites()
+
+    expect(state.putCalls).toHaveLength(1)
+    expect(state.putCalls[0]?.key).toBe(recordKey)
+    const stored = JSON.parse(
+      localStorage.getItem(snapshotKey(workspaceId)) || "{}"
+    )
+    expect(stored.generatedArtifacts[0]?.__tldwArtifactPayloadRef?.key).toBe(
+      recordKey
+    )
+    expect(stored.generatedArtifacts[0]?.content).toBeUndefined()
+  })
+
+  it("keeps a failed put inline in localStorage and retries it on the next pass", async () => {
+    const workspaceId = workspaceIdFor("failed-put")
+    const { adapter, state } = createFakeAdapter()
+    state.failNextPuts = 1
+    const storage = createWorkspaceStorage({ indexedDbAdapter: adapter })
+
+    const artifacts = [makeArtifact("art-1", "one")]
+
+    // Pass 1: the put fails — the artifact must stay INLINE in the persisted
+    // snapshot (no pointer to a record that was never written).
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope(workspaceId, "notes v1", artifacts)
+    )
+    await settlePersistWrites()
+    expect(state.putCalls).toHaveLength(1)
+    let stored = JSON.parse(
+      localStorage.getItem(snapshotKey(workspaceId)) || "{}"
+    )
+    expect(stored.generatedArtifacts[0]?.content).toBe(artifacts[0].content)
+    expect(
+      stored.generatedArtifacts[0]?.__tldwArtifactPayloadRef
+    ).toBeUndefined()
+
+    // Pass 2 (workspace dirty again): the put is retried and now succeeds.
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope(workspaceId, "notes v2", artifacts)
+    )
+    await settlePersistWrites()
+    expect(state.putCalls).toHaveLength(2)
+    stored = JSON.parse(
+      localStorage.getItem(snapshotKey(workspaceId)) || "{}"
+    )
+    expect(stored.generatedArtifacts[0]?.__tldwArtifactPayloadRef?.key).toBe(
+      state.putCalls[1]?.key
+    )
+    expect(stored.generatedArtifacts[0]?.content).toBeUndefined()
   })
 })
