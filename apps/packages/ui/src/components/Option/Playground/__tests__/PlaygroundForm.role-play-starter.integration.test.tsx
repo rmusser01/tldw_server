@@ -7195,9 +7195,9 @@ describe("PlaygroundForm role-play starter", () => {
     render(<PlaygroundForm droppedFiles={[]} />)
     await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
     if (origin === "template") {
-      await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
+      await user.click(await screen.findByRole("button", { name: "Preview saved setup" }))
       await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
-    } else await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
+    } else await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
     const updatesBefore = chatModelSettingsState.updateSettings.mock.calls.length
     const promptsBefore = chatModelSettingsState.updateSetting.mock.calls.length
     if (change === "target") playgroundFormMessageOptionState.value.serverChatId = "newer-chat"
@@ -7218,9 +7218,9 @@ describe("PlaygroundForm role-play starter", () => {
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
     if (origin === "template") {
-      await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
+      await user.click(await screen.findByRole("button", { name: "Preview saved setup" }))
       await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
-    } else await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
+    } else await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
     const updatesBefore = chatModelSettingsState.updateSettings.mock.calls.length
     view.unmount()
     await act(async () => { finishCommit(); await pending })
@@ -7234,7 +7234,7 @@ describe("PlaygroundForm role-play starter", () => {
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
     await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
-    await user.click(screen.getByRole("button", { name: "Apply clear identity" }))
+    await user.click(await screen.findByRole("button", { name: "Apply clear identity" }))
     await screen.findByText("Applied")
     expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledTimes(ready ? 0 : 1)
   })
