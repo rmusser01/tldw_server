@@ -215,8 +215,14 @@ async def test_cost_attribution_groups_by_user(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cost_attribution_org_scoped_uses_join(tmp_path, monkeypatch) -> None:
-    """Org scoping filters to org members via the org_members JOIN (SQLite)."""
+async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch) -> None:
+    """Org scoping filters to org members via a semi-join (SQLite).
+
+    group_by=user must not plain-JOIN org_members: that emits one row per
+    membership and double-counts multi-org members (TASK-13647). SQLite gets
+    the semi-join as an IN-subquery because the planner keeps an indexed
+    (user_id, ts) search for it, unlike an EXISTS (full index scan).
+    """
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
@@ -255,15 +261,85 @@ async def test_cost_attribution_org_scoped_uses_join(tmp_path, monkeypatch) -> N
         entity_ids = sorted(int(item["entity_id"]) for item in result["items"])
         assert entity_ids == [1, 2], "only org-10 members' usage must be returned"
         sql, params = _find_query_with_params(recorder.queries, ("FROM llm_usage_log", "GROUP BY"))
-        assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" in sql
+        assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" not in sql
+        assert (
+            "llm_usage_log.user_id IN (SELECT om2.user_id FROM org_members om2"
+            " WHERE om2.org_id IN (?))" in sql
+        )
         assert params == ("-7 days", 10)
         plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), sql, params)
-        # Stage 3 (admin perf A) delivered idx_org_members_org_user; the join's
-        # org_members side must be an index search, not a table scan.
+        # Stage 3 (admin perf A) delivered idx_org_members_org_user; the
+        # semi-join's org_members side must be an index search, not a table scan.
         assert "idx_org_members_org_user" in plan_detail, (
             f"org_members lookup not served by idx_org_members_org_user, plan: {plan_detail}"
         )
         assert "SCAN om" not in plan_detail
+    finally:
+        await reset_db_pool()
+
+
+@pytest.mark.asyncio
+async def test_cost_attribution_org_scoped_multi_org_user_not_double_counted(
+    tmp_path, monkeypatch
+) -> None:
+    """group_by=user must count each usage row once for multi-org members.
+
+    A user who belongs to two orgs inside the admin's scope would be summed
+    twice per row under the previous INNER JOIN (one row per membership).
+    group_by=org must keep the row-per-org attribution instead (TASK-13647).
+    """
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+
+    pool = await _make_authnz_pool(tmp_path, monkeypatch)
+    now = _utc_iso()
+    try:
+        with sqlite3.connect(Path(pool.db_path)) as conn:
+            _seed_users(conn, range(1, 3))
+            conn.executemany(
+                "INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)",
+                [(10, "Org Ten", "org-ten"), (20, "Org Twenty", "org-twenty")],
+            )
+            conn.executemany(
+                "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
+                # User 1 is a member of BOTH scoped orgs; user 2 only org 10.
+                [(10, 1), (20, 1), (10, 2)],
+            )
+            conn.executemany(
+                _INSERT_USAGE,
+                [
+                    (now, 1, 100, 50, 150),
+                    (now, 1, 10, 5, 15),
+                    (now, 1, 30, 20, 50),
+                    (now, 2, 40, 10, 50),
+                ],
+            )
+
+        async def _two_org_ids(_principal: AuthPrincipal) -> list[int]:
+            return [10, 20]
+
+        monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _two_org_ids)
+
+        async with pool.acquire() as db:
+            by_user = await get_cost_attribution(
+                principal=_admin_principal(), db=db, group_by="user", range_days=7
+            )
+        user_items = {int(item["entity_id"]): item for item in by_user["items"]}
+        assert set(user_items) == {1, 2}
+        assert user_items[1]["request_count"] == 3, "each usage row counted exactly once"
+        assert user_items[1]["total_tokens"] == 215
+        assert user_items[2]["request_count"] == 1
+        assert user_items[2]["total_tokens"] == 50
+
+        async with pool.acquire() as db:
+            by_org = await get_cost_attribution(
+                principal=_admin_principal(), db=db, group_by="org", range_days=7
+            )
+        org_items = {int(item["entity_id"]): item for item in by_org["items"]}
+        assert set(org_items) == {10, 20}, "group_by=org must keep row-per-org attribution"
+        assert org_items[10]["request_count"] == 4
+        assert org_items[10]["total_tokens"] == 265
+        assert org_items[20]["request_count"] == 3
+        assert org_items[20]["total_tokens"] == 215
     finally:
         await reset_db_pool()
 
@@ -327,7 +403,7 @@ class _PgCostDb:
 
 
 @pytest.mark.asyncio
-async def test_cost_attribution_pg_dialect_uses_llm_usage_log_and_org_join(
+async def test_cost_attribution_pg_dialect_uses_llm_usage_log_and_org_semi_join(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = _PgCostDb()
@@ -346,7 +422,33 @@ async def test_cost_attribution_pg_dialect_uses_llm_usage_log_and_org_join(
     assert "llm_usage_v2" not in sql
     assert "ts >= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 day')" in sql
     assert "datetime(created_at)" not in sql
+    assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" not in sql
+    assert (
+        "EXISTS (SELECT 1 FROM org_members om2"
+        " WHERE om2.user_id = llm_usage_log.user_id AND om2.org_id = ANY($2))" in sql
+    )
+    assert "GROUP BY llm_usage_log.user_id" in sql
+    assert params == (7, [10])
+
+
+@pytest.mark.asyncio
+async def test_cost_attribution_pg_dialect_org_grouping_keeps_plain_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """group_by=org must retain the row-per-org JOIN semantics (TASK-13647)."""
+    db = _PgCostDb()
+
+    async def _org_ten_ids(_principal: AuthPrincipal) -> list[int]:
+        return [10]
+
+    monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _org_ten_ids)
+
+    await get_cost_attribution(
+        principal=_admin_principal(), db=db, group_by="org", range_days=7
+    )
+    sql, params = db.fetch_calls[0]
     assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" in sql
     assert "om.org_id = ANY($2)" in sql
-    assert "GROUP BY llm_usage_log.user_id" in sql
+    assert "GROUP BY om.org_id" in sql
+    assert "EXISTS" not in sql
     assert params == (7, [10])

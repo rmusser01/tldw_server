@@ -297,7 +297,10 @@ export const adminMethods = {
 
   // ── Admin Usage Analytics ──
 
-  async getDailyUsage(params?: { start_date?: string; end_date?: string }): Promise<any> {
+  // `start`/`end` are the documented backend params on /usage/daily
+  // (YYYY-MM-DD inclusive, admin_usage.py); the old start_date/end_date
+  // keys were silently ignored by the daily chart's range selector.
+  async getDailyUsage(params?: { start?: string; end?: string }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({ path: `/api/v1/admin/usage/daily${query}`, method: "GET" })
   },
