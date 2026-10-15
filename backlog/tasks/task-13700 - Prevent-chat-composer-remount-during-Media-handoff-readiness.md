@@ -1,7 +1,7 @@
 ---
 id: TASK-13700
 title: Prevent chat composer remount during Media handoff readiness
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -28,20 +28,21 @@ Local repair qualification complete: causal WebUI/native/extension tests,193file
 Final review lead disposition found a second important reachable ordering defect at usePlaygroundSessionPersistence.tsx fresh-handle admission: cold B composer hydrates while saved fresh A restore awaits getConfig; Media accepts into B and advances only sourceSelectionRevision; delayed A adoption can then rehydrate old/empty text. Existing source/history merging must remain. Reopened this related handoff-readiness unit before edits. Add held-config real composer/draft-persistence regression first, then narrow fresh-address adoption fence; do not globally cancel historical restore. Current public50f600 critical46 and UX20 pass, but this new reachable race blocks merge until repaired and requalified.
 Fresh-only restore ordering repair verified red2fail45pass then green47; exact B pointer publication and cold reopen retain complete source, old A bytes unchanged, historical merges untouched. Seven connected suites187/profile native/WebUI/extension; owned WebUI coverage193files2380pass14existing skips116.65s; fresh101-hash build djqgo1P99_kCc9XFkLCg9,969JSON1134refs0missing,6actual stable Media handoffs,23cockpitpass66.66s0skip/retry/errors; original9conv28rows unchanged. Types pass; zero lint errors,18 parent-identical warnings. No Python changed relative to broader parent-identical Bandit qualification. Both independent working-diff reviews clear. Remote dev advanced d7e43120e6; final topology-preserving rebase, exact committed reviews and all current-head checks remain mandatory.
 Integrated current remote dev d7e43120e6 with30 merge commits preserved; exact41incoming-path delta and no frontend source changes. Six historical conflict resolutions verified exact prior merge tree.342 current combined workflow/queue contracts, actionlint and normal hooks pass. Fresh152-file Bandit7077findings0scanerrors; no differences for nonintegrated files; incoming2CI files have no additional findings versus currentdev, including literal GitHub token expression. No new production findings. Selective exact committed-head integration reviews clear; all current-head GitHub checks/merge remain pending.
+Implementation qualification complete: both shell/migration lifetime and saved-fresh/source ordering roots fixed; actual current-head f2b9 critical46/UX20 and all7required statuses pass. Complete source and durable pointer/reopen checks pass; broader unrelated incoming queue-concurrency guard failure is tracked/fixed separately in TASK13705. PR landing still requires final current-head broader CI and pending task-renumber exception.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Prevented full-to-empty composer transitions at their source: WebUI root nesting now uses actual React ancestry instead of a retiring global registration, and shared migration readiness blocks initial idle before children mount. Preserved native global overrides, account/draft/history guards and original full-source oracles. Added causal regressions and validated a fresh100-hash production build, six stable handoffs,23 cockpit cases,9 protected conversations/28rows,2380 WebUI-owned cases and101 native/101 extension cases. Exact-head CI and merge remain the PR landing gate; original full journey is not claimed passed locally.
+Preserved Media handoff composer lifetime through shell/migration readiness and prevented delayed saved-fresh restoration from replacing newer accepted source text. Existing owner guards and historical source merging remain. Qualified fresh101-hash production build,6stable handoffs,23cockpit cases,9protected conversations/28unchanged rows,2380WebUI-owned cases and187connected cases perprofile. Actual published f2b9 passes46critical/20UX cases and all7required statuses; separate broader guard integration and task-ID repair remain PR landing work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
