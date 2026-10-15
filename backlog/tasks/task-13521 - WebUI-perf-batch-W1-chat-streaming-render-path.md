@@ -1,7 +1,7 @@
 ---
 id: TASK-13521
 title: 'WebUI perf batch W1: chat streaming render path'
-status: In Progress
+status: Done
 created_date: 2026-10-07 04:14
 ---
 
@@ -29,15 +29,15 @@ Stage 5 (WP-13/WP-14) landed: research.tsx textToStringList now Set-deduped + ex
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+W1 landed as six commits on codex/webui-perf-w1-chat-streaming (base 3b68f2dbc2). Task 0 c8c12161cb: extension e2e shared sidepanel mock-server helper (test-only). Stage 1 52809b6571 (WP-01): unified streamingThrottle helper across all three chat paths (useMessage x4 scheduler sites, useChatActions, useCharacterChatMode); Family A map clones 2->1 with per-token clones 0 (survivor = once-per-stream final commit). Stage 2 6747b1da64 (WP-02/03/09): isStreaming narrowed to last row in both parents, highlightText memo, mount-time handler-cache guard fix. Stage 3 9d73e06724 (WP-03/04/07): ChatPane virtualization (>100-row gate) + stableMessageId + per-message retrieval-diagnostics cache, SharedWorkspaceChatPane K=200 render cap; PlaygroundChat virtualization confirmed pre-existing and pinned by window tests. Stage 4 4899049c07 (WP-05/06/08/10/11): KnowledgeQA 250ms query debounce + submit-flush, CharacterSelect derived-boolean selectors, LayoutShellContext value memo, ResultsList memoized row, PlaygroundChat O(1) prev-user lookup. Stage 5 07427bd044 (WP-13/14): research trust-panel derivation memos + Set-deduped textToStringList; WP-13 verified no-change dispositions (composite key, static-order primitive lists); WP-12 flashcards deferred per index. Headline numbers (re-run at HEAD 07427bd044 on 2026-10-15 and appended to Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md): Family A 3 store notifications / 2 message updates / 1 map clone (frozen 502/501 was stale at the W1 branch point - TASK-13511 80ms coalescing pre-landed; recorded as a binding drift note, Stage 1 own delta = clones 2->1); Family B counts identical to baseline (100/15/19/16), domMutations 77-83 -> 49-51, longTasks 0 -> 0 so Stage 3 deferred long-task criterion recorded NOT-DISCRIMINATING (0->0), not a claimed pass; virtualization pinned by unit window assertions (1000-item transcripts, <60 shells). Bundle budget gate PASS (shared _app 596.1 KB < 600 KB; heaviest route 875.8 KB, -21.4 KB vs baseline). Review record: per-stage reviews for Task 0 + Stages 1-5 (agents dfedbc73, 69a96c17, a42eca55, 5eff8631, 2cdd23b9, 97fc901a) all Approved with zero unresolved Critical/Important; deferred minors logged in the SDD ledger progress.md. Verification at HEAD: Family A bench green; Family B canned e2e green 3/3 runs; Family C1 workspace bench bit-identical to baseline (W2 scope untouched); FE tsc --noEmit 0 errors; packages/ui scoped tsc 400 pre-existing errors, 0 in W1-touched files; build:prod + bundle-budget ok. Bandit: N/A - TypeScript-only scope, documented per W0 (TASK-13520) precedent. Known follow-ups: documented gaps (a)-(e) in the baseline append (no web-e2e scroll-through DOM-bound spec; SharedWorkspaceChatPane virtualization cap-first deferral; KnowledgeQA state/actions context split deferral; WP-13 no-change dispositions flagged for whole-branch visibility; WP-12 flashcards deferral), ledger deferred-minors, and the pre-existing sidepanel smoke title-copy drift on the dev base recorded at Task 0.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
