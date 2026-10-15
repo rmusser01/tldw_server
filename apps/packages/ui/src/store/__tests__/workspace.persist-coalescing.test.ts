@@ -11,7 +11,13 @@
 //     the keystroke's critical path),
 //   - a pending write is flushed SYNCHRONOUSLY on pagehide/beforeunload so a
 //     page close cannot lose the buffered envelope (jsdom has no
-//     requestIdleCallback, so the microtask/flush fallback is what runs here),
+//     requestIdleCallback, so the microtask delivery path is what runs here,
+//     with the trailing timer as the worst-case bound),
+//   - a write for a DIFFERENT storage key arriving inside the coalescing
+//     window never displaces the buffered workspace envelope (the Research
+//     onboarding sidecar shares this adapter),
+//   - the trailing timer lands a buffered write within
+//     WORKSPACE_PERSIST_TRAILING_FLUSH_MS even when idle delivery never fires,
 //   - overlapping writes can never land out of order (an older envelope may
 //     never overwrite a newer one).
 //
@@ -28,6 +34,7 @@ import {
 import {
   createWorkspaceStorage,
   useWorkspaceStore,
+  WORKSPACE_PERSIST_TRAILING_FLUSH_MS,
   workspacePersistWriterInternals
 } from "../workspace"
 
@@ -92,6 +99,35 @@ const readStoredSnapshotNotes = (): string => {
   const parsed = raw ? JSON.parse(raw) : {}
   return typeof parsed.notes === "string" ? parsed.notes : "<missing>"
 }
+
+const buildEnvelope = (notes: string): string =>
+  JSON.stringify({
+    state: {
+      workspaceId: WORKSPACE_ID,
+      savedWorkspaces: [savedWorkspaceEntry()],
+      archivedWorkspaces: [],
+      workspaceCollections: [],
+      workspaceSnapshots: {
+        [WORKSPACE_ID]: {
+          workspaceId: WORKSPACE_ID,
+          workspaceName: "Coalescing Workspace",
+          workspaceTag: "workspace:coalescing-workspace",
+          workspaceCreatedAt: FIXTURE_DATE.toISOString(),
+          workspaceChatReferenceId: WORKSPACE_ID,
+          sources: [],
+          selectedSourceIds: [],
+          generatedArtifacts: [],
+          notes,
+          currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+          leftPaneCollapsed: false,
+          rightPaneCollapsed: false,
+          audioSettings: { provider: "openai", model: "x", voice: "alloy", speed: 1, format: "mp3" }
+        }
+      },
+      workspaceChatSessions: {}
+    },
+    version: 1
+  })
 
 describe("workspace persist coalescing writer", () => {
   beforeEach(() => {
@@ -163,34 +199,6 @@ describe("workspace persist coalescing writer", () => {
 
   it("overlapping writes coalesce to a single in-order pass (latest wins)", async () => {
     const storage = createWorkspaceStorage()
-    const buildEnvelope = (notes: string) =>
-      JSON.stringify({
-        state: {
-          workspaceId: WORKSPACE_ID,
-          savedWorkspaces: [savedWorkspaceEntry()],
-          archivedWorkspaces: [],
-          workspaceCollections: [],
-          workspaceSnapshots: {
-            [WORKSPACE_ID]: {
-              workspaceId: WORKSPACE_ID,
-              workspaceName: "Coalescing Workspace",
-              workspaceTag: "workspace:coalescing-workspace",
-              workspaceCreatedAt: FIXTURE_DATE.toISOString(),
-              workspaceChatReferenceId: WORKSPACE_ID,
-              sources: [],
-              selectedSourceIds: [],
-              generatedArtifacts: [],
-              notes,
-              currentNote: { ...DEFAULT_WORKSPACE_NOTE },
-              leftPaneCollapsed: false,
-              rightPaneCollapsed: false,
-              audioSettings: { provider: "openai", model: "x", voice: "alloy", speed: 1, format: "mp3" }
-            }
-          },
-          workspaceChatSessions: {}
-        },
-        version: 1
-      })
 
     await storage.setItem(STORAGE_KEY, buildEnvelope("first"))
     await settlePersistWrites()
@@ -208,5 +216,80 @@ describe("workspace persist coalescing writer", () => {
       ([name]) => name === snapshotKey(WORKSPACE_ID)
     )
     expect(snapshotWrites).toHaveLength(1)
+  })
+
+  it("a different-key write in the window does not displace the pending workspace write", async () => {
+    const storage = createWorkspaceStorage()
+    await settlePersistWrites()
+    expect(readStoredSnapshotNotes()).toBe("seeded")
+
+    // Exact cross-key sequence from review CRITICAL 1: a workspace mutation is
+    // buffered, then a DIFFERENT key sharing the module-level writer (the
+    // Research onboarding sidecar does exactly this via createWorkspaceStorage)
+    // is written inside the coalescing window.
+    const workspaceWrite = storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope("cross-key v1")
+    )
+    const sidecarWrite = storage.setItem(
+      "tldw:research-workspace:onboarding-dismissed:v1",
+      "1"
+    )
+    expect(workspacePersistWriterInternals.hasPendingWrite()).toBe(true)
+
+    // Lifecycle flush while both jobs are still buffered: the buffered
+    // workspace envelope must NOT have been displaced — it lands
+    // synchronously, inside the pagehide handler, with the split index.
+    window.dispatchEvent(new Event("pagehide"))
+
+    expect(readStoredSnapshotNotes()).toBe("cross-key v1")
+    expect(
+      JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").state
+        ?.workspaceSnapshots?.[WORKSPACE_ID]?.notes
+    ).toBe("cross-key v1")
+
+    // The sidecar job drains right behind it (one microtask later — jobs
+    // perform sequentially) and must land too.
+    await Promise.allSettled([workspaceWrite, sidecarWrite])
+    expect(
+      localStorage.getItem("tldw:research-workspace:onboarding-dismissed:v1")
+    ).toBe("1")
+    expect(workspacePersistWriterInternals.hasPendingWrite()).toBe(false)
+  })
+
+  it("lands a buffered write by the 300ms trailing timer when idle delivery never fires", async () => {
+    vi.useFakeTimers()
+    // Simulate a permanently-busy main thread: requestIdleCallback is
+    // available but never fires, so only the trailing timer can deliver.
+    vi.stubGlobal(
+      "requestIdleCallback",
+      (callback: () => void): number => {
+        void callback
+        return 0
+      }
+    )
+    try {
+      useWorkspaceStore.setState({ notes: "trailing edge" })
+      expect(workspacePersistWriterInternals.hasPendingWrite()).toBe(true)
+      expect(readStoredSnapshotNotes()).toBe("seeded")
+
+      // One tick before the trailing edge: still buffered.
+      await vi.advanceTimersByTimeAsync(
+        WORKSPACE_PERSIST_TRAILING_FLUSH_MS - 1
+      )
+      expect(readStoredSnapshotNotes()).toBe("seeded")
+
+      // At exactly the trailing deadline the write lands (≤300ms + ε).
+      await vi.advanceTimersByTimeAsync(1)
+      expect(readStoredSnapshotNotes()).toBe("trailing edge")
+      expect(workspacePersistWriterInternals.hasPendingWrite()).toBe(false)
+    } finally {
+      // Unstub BEFORE re-enabling real timers: useRealTimers then restores the
+      // true originals, otherwise the sinon-faked requestIdleCallback that
+      // stubGlobal captured could leak past this test.
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+      workspacePersistWriterInternals.cancelPendingWrite()
+    }
   })
 })
