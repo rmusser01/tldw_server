@@ -1,7 +1,7 @@
 ---
 id: TASK-13700
 title: Prevent chat composer remount during Media handoff readiness
-status: Done
+status: In Progress
 ---
 
 ## Description
@@ -15,6 +15,7 @@ Investigate and repair the full-to-empty-to-full composer transition captured by
 - [x] #1 A deterministic lifecycle regression reproduces the confirmed source of composer recreation before the fix
 - [x] #2 Shared migration and both shell callers preserve private composer state without weakening account or source guards
 - [x] #3 Connected tests, actual handoff replay and two independent reviews qualify the repair; exact final-head CI remains the PR landing gate
+- [x] #4 A held fresh-draft session restore cannot replace a newer accepted Media source; ordinary historical conversation/source merging remains supported
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -24,6 +25,8 @@ PR https://github.com/rmusser01/tldw_server/pull/3229; failing head 1b3d28460893
 Confirmed root in six owned original-production browser handoffs: full input initially has no MAIN ancestor; old global shell registration causes false Nested selection, then URL cleanup switches to Root, replacing input; shared migration idle-to-pending then removes it again. Minimal WebLayout context-only nesting and migration idle readiness preserve native/global override bridging. Red2fail46pass, green focused49; connected WebUI242, native101, extension101; production build dq8lbcap4xW7AMCBT0FzJ source100/969JSON/1134refs/0missing, six fixed handoffs one input/0populated removals, cockpit23pass0skip/retry/errors, original9conv28rows unchanged. Both independent source reviews clear. ADR required:no new durable rule; no persistence/security/API decision changes. Published integration evidence and remaining landing conditions are recorded in Docs/Reviews/CHAT_FINAL_RECOVERY_SETUP_HANDOFF_13673_13680_2026_10_14.md (TASK-13700 section). Full coverage and original journey still running; exact-head CI/merge pending.
 Final exact blocking CI WebUI-owned coverage passes193 files/2380 cases in101.76s with existing4file14case skips. Final native101, extension101, focused WebUI49, configured types and normal hooks pass after reviewer-requested fixture cleanup. No unresolved GitHub review threads. Remote dev still4ffb0f01fd; PRhead remains1b3d284 and queue mode is explicitly unset. The second private journey harness rejected unsupported inventory key before running tests (excluded; all services stopped). Final private adapter now maps the actual journeys directory with unchanged oracles and strict guards; actual replay is in progress.
 Local repair qualification complete: causal WebUI/native/extension tests,193file2380case owned coverage, six fresh production handoffs and23case cockpit pass; types/lint baseline/normal hooks pass. Original full source-journey private replay is EXCLUDED: after two startup/inventory failures, the third hits Media credentials before ingestion because reused static API rewrites bind19767 but the disposable backend has a different key. All owned services stopped; no source or auth assertion was changed, and no further local adapter retry is credited. The original unchanged full journey and all exact-head GitHub checks remain mandatory PR landing gates. Independent source reviewers A/B clear the two production changes; committed-head reviews follow.
+Final review lead disposition found a second important reachable ordering defect at usePlaygroundSessionPersistence.tsx fresh-handle admission: cold B composer hydrates while saved fresh A restore awaits getConfig; Media accepts into B and advances only sourceSelectionRevision; delayed A adoption can then rehydrate old/empty text. Existing source/history merging must remain. Reopened this related handoff-readiness unit before edits. Add held-config real composer/draft-persistence regression first, then narrow fresh-address adoption fence; do not globally cancel historical restore. Current public50f600 critical46 and UX20 pass, but this new reachable race blocks merge until repaired and requalified.
+Fresh-only restore ordering repair verified red2fail45pass then green47; exact B pointer publication and cold reopen retain complete source, old A bytes unchanged, historical merges untouched. Seven connected suites187/profile native/WebUI/extension; owned WebUI coverage193files2380pass14existing skips116.65s; fresh101-hash build djqgo1P99_kCc9XFkLCg9,969JSON1134refs0missing,6actual stable Media handoffs,23cockpitpass66.66s0skip/retry/errors; original9conv28rows unchanged. Types pass; zero lint errors,18 parent-identical warnings. No Python changed relative to broader parent-identical Bandit qualification. Both independent working-diff reviews clear. Remote dev advanced d7e43120e6; final topology-preserving rebase, exact committed reviews and all current-head checks remain mandatory.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

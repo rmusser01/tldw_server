@@ -675,6 +675,11 @@ export function usePlaygroundSessionPersistence() {
       setQueuedMessages(restoreQueuedRequests(savedHandle?.address.kind === "fresh" && savedHandle.address.temporary ? [] : sessionStore.queuedMessages ?? []))
     }
     if (savedHandle?.address.kind === "fresh") {
+      if (usePlaygroundSessionStore.getState().sourceSelectionRevision !== selectionBeforeRestore) {
+        initialRestoreSettledRef.current = true
+        usePlaygroundSessionStore.getState().cancelPendingRestore()
+        return "cancelled"
+      }
       const transcript =
         savedHandle.address.temporary &&
         !sessionStore.serverChatId &&

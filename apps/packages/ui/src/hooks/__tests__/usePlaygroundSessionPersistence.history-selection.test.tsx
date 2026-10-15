@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   assistantLoading: false,
   configChanged: null as (() => void) | null,
   ownerScope: vi.fn(),
-  draftRecords: new Map<string, unknown>()
+  draftRecords: new Map<string, unknown>(),
+  getConfig: vi.fn()
 }))
 vi.mock("@/utils/safe-storage", async importOriginal => ({
   ...await importOriginal<typeof import("@/utils/safe-storage")>(),
@@ -88,7 +89,7 @@ vi.mock("@/db/dexie/server-chat-mirror", () => ({
   linkServerChatMirror: (...args: any[]) => mocks.link(...args)
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: { getConfig: async () => ({}) }
+  tldwClient: { getConfig: () => mocks.getConfig() }
 }))
 vi.mock("@/services/chat-surface-scope", () => ({
   buildChatSurfaceScopeKeyFromConfig: () => mocks.currentScope
@@ -281,6 +282,7 @@ function seedBookmark(ref = reference) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getConfig.mockReset().mockResolvedValue({})
   mocks.assistantLoading = false
   mocks.configChanged = null
   mocks.ownerScope.mockReset().mockResolvedValue(verifiedScope)
@@ -392,6 +394,49 @@ it.each([false, true])("cold restores the retained unsent text through the actua
   expect(controller.getCurrent().owner).toBeNull()
   expect(mocks.capture).not.toHaveBeenCalled()
   expect(mocks.recent).not.toHaveBeenCalled()
+})
+
+it.each([false, true])("keeps an accepted source when a held fresh restore settles, including reopen (retained Temporary %s)", async temporary => {
+  const retained = { kind: "fresh" as const, id: "older-fresh", scope: { type: "global" as const }, temporary }
+  const retainedKey = `registry:draft:${conversationDraftKey("cold-composer", retained)}:owner:${ownerHash}`
+  mocks.draftRecords.set(retainedKey, { value: { content: "OLDER UNSENT SOURCE" }, updatedAt: Date.now() })
+  usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: { address: retained, ownerHash }, scopeKey: "current" })
+  const view = mount(false, true)
+  const input = screen.getByRole("textbox", { name: "Restored draft" })
+  await waitFor(() => expect(sessionReady).toBe(true))
+  await waitFor(() => expect(input).not.toBeDisabled())
+  const current = useStoreMessageOption.getState().chatDraftAddress!
+  expect(current.id).not.toBe(retained.id)
+  expect(usePlaygroundSessionStore.getState().chatDraftHandle?.address).toEqual(retained)
+  let release!: (config: object) => void
+  let pending!: Promise<string>
+  act(() => {
+    mocks.getConfig.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    pending = restoreAgain()
+  })
+  expect(release).toBeTypeOf("function")
+  const source = "Chat with this media: Rowan Observatory\n\nThe complete source includes ORBIT-742 and an explicit reservation requirement."
+  act(() => {
+    usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+    fireEvent.change(input, { target: { value: source } })
+  })
+  const currentKey = `registry:draft:${conversationDraftKey("cold-composer", current)}:owner:${ownerHash}`
+  await waitFor(() => expect(mocks.draftRecords.get(currentKey)).toMatchObject({ value: source }))
+  await act(async () => { release({}); outcome = await pending })
+  await waitFor(() => expect(input).not.toBeDisabled())
+  expect(input).toHaveValue(source)
+  expect(outcome).toBe("cancelled")
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBe(current)
+  await waitFor(() => expect(usePlaygroundSessionStore.getState().chatDraftHandle).toMatchObject({ address: current, ownerHash }))
+  view.unmount()
+  expect(usePlaygroundSessionStore.getState().chatDraftHandle).toMatchObject({ address: current, ownerHash })
+  expect(mocks.draftRecords.get(retainedKey)).toMatchObject({ value: { content: "OLDER UNSENT SOURCE" } })
+  useStoreMessageOption.setState({ chatDraftAddress: null, chatDraftTransition: null, chatDraftRevision: 0 })
+  outcome = undefined
+  mount(true, true)
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Restored draft" })).toHaveValue(source))
+  expect(outcome).toBe("restored")
+  expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(current)
 })
 
 it("cold restores a completed Temporary transcript and next draft through the real session and composer", async () => {
