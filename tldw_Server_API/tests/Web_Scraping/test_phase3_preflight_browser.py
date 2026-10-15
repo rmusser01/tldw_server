@@ -2169,3 +2169,53 @@ async def test_browser_force_cleanup_checks_native_operation_before_forcing(
         native = handle._operation_task
         if native is not None:
             await asyncio.gather(native, return_exceptions=True)
+
+
+@pytest.mark.parametrize("close_entry_advance_s", [0.0, 0.02])
+def test_cleanup_graceful_deadline_does_not_restart_on_task_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    close_entry_advance_s: float,
+) -> None:
+    # A private loop isolates the controlled clock from pytest's async runner.
+    loop = asyncio.new_event_loop()
+    now = [1000.0]
+    monkeypatch.setattr(loop, "time", lambda: now[0])
+    native_call_at = loop.call_at
+
+    async def exercise() -> None:
+        timer_registered = loop.create_future()
+        release_close = loop.create_future()
+
+        def record_timer(when, callback, *args, context=None):
+            if not timer_registered.done():
+                timer_registered.set_result(when)
+            return native_call_at(when, callback, *args, context=context)
+
+        monkeypatch.setattr(loop, "call_at", record_timer)
+
+        force_calls = []
+
+        class Handle:
+            async def close(self) -> None:
+                now[0] += close_entry_advance_s
+                await release_close
+
+            async def force_close(self) -> None:
+                force_calls.append("force")
+
+        controls = _controls()
+        started_at = now[0]
+        cleanup = loop.create_task(controls._cleanup_with_grace((Handle(),), 0.05))
+        try:
+            scheduled_deadline = await timer_registered
+            assert scheduled_deadline - started_at == pytest.approx(0.025, rel=0, abs=1e-9)
+        finally:
+            if not release_close.done():
+                release_close.set_result(None)
+            await cleanup
+            assert force_calls == []
+
+    try:
+        loop.run_until_complete(exercise())
+    finally:
+        loop.close()

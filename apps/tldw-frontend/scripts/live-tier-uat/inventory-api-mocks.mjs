@@ -244,6 +244,10 @@ function specFiles(directory) {
 
 export function inventoryProjects(frontendRoot, projects) {
   return projects.flatMap((project) => {
+    if (project === "notes-studio") {
+      const file = "e2e/workflows/notes-studio-derived-note.spec.ts"
+      return inventorySource(readFileSync(path.join(frontendRoot, file), "utf8"), { project, file })
+    }
     const relativeDirectory = projectDirectories[project]
     if (!relativeDirectory) throw new Error(`Unknown Tier project: ${project}`)
     const directory = path.join(frontendRoot, relativeDirectory)

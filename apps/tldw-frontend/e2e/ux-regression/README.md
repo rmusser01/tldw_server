@@ -16,6 +16,14 @@ backend with fresh databases, the mock OpenAI-compatible LLM and the web UI on
 reserved ports, runs the `ux-regression` Playwright project with zero retries,
 fails on skipped tests, and writes `test-results/live-tier-uat/<run-id>/`.
 
+Run the original derived-note Notes Studio caller separately with
+`bun run uat:live-tiers -- --projects=notes-studio --run-id=<fresh-id>`.
+This fixed project uses the same isolated lifecycle, Desktop Chrome and original
+60s/15s deadlines, retains a trace on the first failure, and needs no extension
+build. It is diagnostic coverage, not causal proof or certification. The spec
+remains in `chromium` too: explicitly select one project to avoid running it
+twice when collecting all projects.
+
 Before it starts any service, the runner builds the browser extension
 (`bun run build:chrome:prod` in `apps/extension`, about two minutes) for the
 side-panel specs. The build prints to the runner's output; a failed build

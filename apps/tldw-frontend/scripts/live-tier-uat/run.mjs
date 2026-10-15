@@ -1031,7 +1031,7 @@ function inspectDeferred43Ledgers(artifactRoot, retainedBodies) {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRootDefault = path.resolve(moduleDir, "../..")
 const repoRootDefault = path.resolve(frontendRootDefault, "../..")
-const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression"])
+const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression", "notes-studio"])
 
 function runIdNow() {
   return new Date().toISOString().replace(/[:.]/g, "-")
@@ -1073,7 +1073,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (!options.projects.length || options.projects.some((project) => !validProjects.has(project))) {
-    throw new Error("--projects entries must be tier-1, tier-2, tier-3, or ux-regression")
+    throw new Error("--projects entries must be tier-1, tier-2, tier-3, ux-regression, or notes-studio")
   }
   if (options.runId && !/^[A-Za-z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, numbers, dots, underscores, and hyphens")
@@ -1085,7 +1085,7 @@ export function formatUsage() {
   return [
     "Usage: bun run uat:live-tiers -- [options]",
     "",
-    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression).",
+    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression, notes-studio).",
     "  --workers=1                       Playwright worker count.",
     "  --list-only                       List and inventory without executing tests.",
     "  --grep=<pattern>                  Non-certifying bounded smoke selection.",
@@ -1200,6 +1200,7 @@ export function buildCommands({
   const listJsonPath = path.join(artifactRoot, "playwright-list.json")
   const runArgs = [
     "playwright", "test", ...projectArgs, `--workers=${workers}`, "--retries=0", "--reporter=line,json",
+    `--output=${path.join(artifactRoot, 'playwright-output')}`,
   ]
   const grepArgs = grep ? ["--grep", grep] : []
   runArgs.push(...grepArgs)

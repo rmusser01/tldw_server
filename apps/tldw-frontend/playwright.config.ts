@@ -72,6 +72,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'notes-studio',
+      testDir: 'e2e/workflows',
+      testMatch: 'notes-studio-derived-note.spec.ts',
+      use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure' },
+    },
+    {
       name: 'standalone-html-firefox',
       testDir: 'e2e/workflows',
       testMatch: 'presentation-studio-standalone-html.security.spec.ts',

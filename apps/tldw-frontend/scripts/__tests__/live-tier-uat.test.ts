@@ -16,7 +16,7 @@ import {
   buildLiveTierBackendEnv,
   buildLiveTierProfile,
 } from "../live-tier-uat/profile.mjs"
-import { inventorySource } from "../live-tier-uat/inventory-api-mocks.mjs"
+import { inventoryProjects, inventorySource } from "../live-tier-uat/inventory-api-mocks.mjs"
 import { shouldInstallTitleSettingsStub } from "../../e2e/utils/helpers"
 import { shouldInstallSmokeApiStubs } from "../../e2e/smoke/smoke.setup"
 import {
@@ -319,7 +319,7 @@ describe("live Tier UAT reporting", () => {
 })
 
 describe("live Tier UAT runner contract", () => {
-  it("accepts only Tier 1-3 projects and defaults to a serial complete run", () => {
+  it("accepts only supported projects and defaults to a serial complete run", () => {
     expect(parseArgs([])).toMatchObject({
       projects: ["tier-1", "tier-2", "tier-3"],
       workers: 1,
@@ -328,7 +328,7 @@ describe("live Tier UAT runner contract", () => {
       failOnSkip: true,
     })
     expect(parseArgs(["--allow-skips"]).failOnSkip).toBe(false)
-    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, tier-3, or ux-regression/)
+    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, tier-3, ux-regression, or notes-studio/)
     expect(parseArgs(["--projects=ux-regression"]).projects).toEqual(["ux-regression"])
   })
 
@@ -768,3 +768,134 @@ describe("interrupted execution evidence", () => {
     }
   })
 })
+
+describe('isolated Notes Studio route', () => {
+  it('admits only the fixed additional project without changing defaults', () => {
+    expect(parseArgs(['--projects=notes-studio']).projects).toEqual(['notes-studio']);
+    expect(parseArgs([]).projects).toEqual(['tier-1', 'tier-2', 'tier-3']);
+    for (const project of ['chromium', 'tier-4', 'notes-studio-other']) {
+      expect(() => parseArgs([`--projects=${project}`])).toThrow();
+    }
+    expect(isCertificationRun()).toBe(false);
+  });
+
+  it('inventories only the original derived spec and fails if it is absent', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'notes-studio-inventory-'));
+    try {
+      const workflows = path.join(root, 'e2e/workflows');
+      mkdirSync(workflows, { recursive: true });
+      const source =
+        'test("intercepted", async ({ page }) => { await page.route("**/api/v1/notes", route => route.abort()) })';
+      const target = path.join(workflows, 'notes-studio-derived-note.spec.ts');
+      writeFileSync(target, source);
+      writeFileSync(path.join(workflows, 'neighbor.spec.ts'), source);
+      expect(inventoryProjects(root, ['notes-studio'])).toEqual([
+        expect.objectContaining({
+          project: 'notes-studio',
+          file: 'e2e/workflows/notes-studio-derived-note.spec.ts',
+          test: 'intercepted',
+        }),
+      ]);
+      rmSync(target);
+      expect(() => inventoryProjects(root, ['notes-studio'])).toThrow(/ENOENT/);
+      expect(() => inventoryProjects(root, ['chromium'])).toThrow(/Unknown Tier project/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('builds isolated retry-free commands without the UX extension build', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'notes-studio-commands-'));
+    try {
+      const profile = buildLiveTierProfile({
+        repoRoot,
+        frontendRoot,
+        runId: 'notes-studio-route',
+        mockPort: 18184,
+        baseTmpDir: root,
+        pythonCommand: '/test/venv/bin/python',
+      });
+      const commands = buildCommands({
+        repoRoot,
+        frontendRoot,
+        profile,
+        projects: ['notes-studio'],
+        ports: { backend: 18180, web: 18181, mock: 18184 },
+        workers: 1,
+        runId: 'notes-studio-route',
+        baseEnv: { PATH: process.env.PATH },
+      });
+      expect(commands.playwrightList.args).toContain('--project=notes-studio');
+      expect(commands.playwrightRun.args).toEqual(
+        expect.arrayContaining(['--project=notes-studio', '--workers=1', '--retries=0'])
+      );
+      expect(commands.playwrightRun.env.TLDW_E2E_ALLOW_OFFLINE).toBe('0');
+      expect(commands.playwrightRun.env.TLDW_WEB_AUTOSTART).toBe('false');
+      expect(commands.playwrightRun.env).not.toHaveProperty(EXTENSION_DIR_ENV);
+      for (const command of [commands.authInit, commands.backend]) {
+        expect(command.cwd).toBe(profile.runDir);
+        expect(command.env.PYTHONPATH.split(path.delimiter)).toContain(repoRoot);
+      }
+      expect(
+        resolveExtensionBuild({ frontendRoot, projects: ['notes-studio'], baseEnv: {} })
+      ).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the original browser contract and chromium caller inclusion', async () => {
+    const config = (await import('../../playwright.config')).default;
+    const project = config.projects?.find((item) => item.name === 'notes-studio');
+    expect(project).toMatchObject({
+      testDir: 'e2e/workflows',
+      testMatch: 'notes-studio-derived-note.spec.ts',
+      use: { trace: 'retain-on-failure', defaultBrowserType: 'chromium' },
+    });
+    expect(project?.timeout).toBeUndefined();
+    expect(project?.expect).toBeUndefined();
+    expect(config.timeout).toBe(60_000);
+    expect(config.expect?.timeout).toBe(15_000);
+    const chromium = config.projects?.find((item) => item.name === 'chromium');
+    expect(chromium?.testIgnore).toEqual([
+      '**/workflows/tier-*/**',
+      '**/workflows/journeys/**',
+      '**/ux-regression/**',
+    ]);
+    expect(project?.use?.viewport).toEqual(chromium?.use?.viewport);
+  });
+});
+
+describe('live Tier UAT artifact retention', () => {
+  it('isolates native Playwright cleanup inside the run artifact root', () => {
+    const baseTmpDir = mkdtempSync(path.join(tmpdir(), 'tldw-live-tier-retention-'));
+    try {
+      const profile = buildLiveTierProfile({
+        repoRoot,
+        frontendRoot,
+        runId: 'artifact-retention',
+        mockPort: 18183,
+        baseTmpDir,
+        pythonCommand: '/test/venv/bin/python',
+      });
+      for (const artifactRoot of [profile.reportsDir, path.join(baseTmpDir, 'custom-artifacts')]) {
+        const commands = buildCommands({
+          repoRoot,
+          frontendRoot,
+          ports: { backend: 18180, web: 18181, mock: 18182 },
+          profile,
+          projects: ['tier-1'],
+          workers: 1,
+          runId: 'artifact-retention',
+          ...(artifactRoot === profile.reportsDir ? {} : { artifactRoot }),
+          baseEnv: { NODE_ENV: 'test', PATH: process.env.PATH },
+        });
+        expect(commands.playwrightRun.args.filter((arg) => arg.startsWith('--output='))).toEqual([
+          `--output=${path.join(artifactRoot, 'playwright-output')}`,
+        ]);
+      }
+    } finally {
+      rmSync(baseTmpDir, { recursive: true, force: true });
+    }
+  });
+});
