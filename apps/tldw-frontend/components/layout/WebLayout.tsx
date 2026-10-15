@@ -912,12 +912,8 @@ export default function OptionLayout(props: OptionLayoutProps) {
   const shell = useContext(LayoutShellContext);
   const globalShell = getGlobalShell();
   const ownerId = React.useId();
-  const externalShell =
-    Boolean(globalShell?.mounted) &&
-    (globalShell?.ownerId == null || globalShell.ownerId !== ownerId);
-
-  // Check if we're nested inside an existing shell
-  if (shell.inShell || externalShell) {
+  // A retiring route's global registration does not establish React ancestry.
+  if (shell.inShell) {
     return <NestedLayoutContent props={props} shell={shell} globalShell={globalShell} />;
   }
 

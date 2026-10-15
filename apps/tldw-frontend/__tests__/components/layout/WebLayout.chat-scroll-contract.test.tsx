@@ -507,6 +507,33 @@ describe('WebLayout /chat scroll contract', () => {
     delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
   });
 
+  it('keeps genuinely nested WebUI layouts inside one React-owned shell', () => {
+    const view = render(<OptionLayout><OptionLayout><input aria-label="Nested source" defaultValue="ORBIT-742" /></OptionLayout></OptionLayout>);
+    expect(view.container.querySelectorAll('main#main-content')).toHaveLength(1);
+    expect(view.container.querySelector('main#main-content')).toContainElement(screen.getByRole('textbox', { name: 'Nested source' }));
+  });
+
+  it('keeps the replacement root and composer stable while a departing shell retires', () => {
+    const departing = { mounted: true, ownerId: 'departing-media', setOverrides: vi.fn() };
+    (globalThis as typeof globalThis & { __tldwOptionShell?: typeof departing }).__tldwOptionShell = departing;
+    const content = <input aria-label="Imported source" defaultValue="ORBIT-742 complete source" />;
+    const view = render(<OptionLayout>{content}</OptionLayout>);
+    const input = screen.getByRole('textbox', { name: 'Imported source' });
+    expect(view.container.querySelector('main#main-content')).toContainElement(input);
+    act(() => {
+      // A retiring owner can only release its own registration.
+      if (departing.ownerId === 'departing-media') {
+        departing.mounted = false;
+      }
+    });
+    routerState.location.search = '';
+    routerState.location.key = 'clean-handoff-url';
+    view.rerender(<OptionLayout>{content}</OptionLayout>);
+    expect(screen.getByRole('textbox', { name: 'Imported source' })).toBe(input);
+    expect(input).toHaveValue('ORBIT-742 complete source');
+    expect(view.container.querySelectorAll('main#main-content')).toHaveLength(1);
+  });
+
   it.each(['/__debug__/sidepanel-chat', '/chat'])(
     'keeps one current New shortcut owner on %s',
     (pathname) => {
