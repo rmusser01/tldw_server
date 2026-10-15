@@ -19,7 +19,7 @@
  * `resetPlaygroundHarness()` in `beforeEach`.
  */
 import React from "react"
-import { expect, vi } from "vitest"
+import { afterEach, expect, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { App as AntdApp, ConfigProvider } from "antd"
@@ -28,6 +28,8 @@ import { MemoryRouter } from "react-router-dom"
 
 import { Playground } from "../../Playground"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
+import { usePageAssist } from "@/context"
+import { getChatTurnSettlement } from "@/hooks/chat/abort-turn-cleanup"
 import { DemoModeProvider } from "@/context/demo-mode"
 import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
@@ -79,6 +81,38 @@ export * from "./fake-tldw-server"
 export const HARNESS_WAIT = { timeout: 15_000 } as const
 
 export const getHarnessDb = () => harnessDb.current as MemoryDexie
+
+type FixturePage = {
+  unmount: () => void
+  getController: () => AbortController | null
+}
+const fixturePages = new Set<FixturePage>()
+
+const CapturePageController = ({ capture }: {
+  capture: (getController: () => AbortController | null) => void
+}) => {
+  const { getController } = usePageAssist()
+  React.useLayoutEffect(() => capture(getController!), [capture, getController])
+  return null
+}
+
+const destroyFixturePage = async (page: FixturePage) => {
+  page.unmount()
+  const controller = page.getController()
+  // A real reload destroys the old realm; jsdom must drain it before stores are reused.
+  controller?.abort()
+  if (controller) {
+    await waitFor(() => {
+      expect(page.getController()).toBeNull()
+      expect(getChatTurnSettlement(controller.signal)?.pending ?? false).toBe(false)
+    }, HARNESS_WAIT)
+  }
+  fixturePages.delete(page)
+}
+
+afterEach(async () => {
+  for (const page of fixturePages) await destroyFixturePage(page)
+})
 
 const installDomPolyfills = () => {
   // Declared origin-wide Web Locks I/O double, retained across simulated reloads.
@@ -174,7 +208,7 @@ const restoreStorage = (storage: Storage, entries: Record<string, string>) => {
  * `renderPlayground({ server, keepBrowserState: true })`.
  */
 export const simulatePageReload = async (view: PlaygroundView) => {
-  view.unmount()
+  await destroyFixturePage(view)
   const local = snapshotStorage(localStorage)
   const session = snapshotStorage(sessionStorage)
   resetAppStores()
@@ -216,12 +250,14 @@ export const renderPlayground = async ({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } }
   })
   const user = userEvent.setup()
+  let getController = (): AbortController | null => null
   const view = render(
     <Router initialEntries={[initialPath]}>
       <ConfigProvider>
         <AntdApp>
           <QueryClientProvider client={queryClient}>
             <PageAssistProvider>
+              <CapturePageController capture={(read) => { getController = read }} />
               <DemoModeProvider>
                 {extras}
                 <Playground />
@@ -232,6 +268,8 @@ export const renderPlayground = async ({
       </ConfigProvider>
     </Router>
   )
+  const page = { ...view, getController: () => getController() }
+  fixturePages.add(page)
   // The app shell's connection bootstrap (header/status probes) runs checkOnce;
   // the Playground itself only reads the resulting phase.
   await act(async () => {
@@ -242,7 +280,7 @@ export const renderPlayground = async ({
     expect(state.isConnected && state.phase === ConnectionPhase.CONNECTED).toBe(true)
   }, HARNESS_WAIT)
   const composer = await screen.findByPlaceholderText(/Type a message/i, {}, HARNESS_WAIT)
-  return { ...view, user, queryClient, server, composer }
+  return Object.assign(page, { user, queryClient, server, composer })
 }
 
 export type PlaygroundView = Awaited<ReturnType<typeof renderPlayground>>

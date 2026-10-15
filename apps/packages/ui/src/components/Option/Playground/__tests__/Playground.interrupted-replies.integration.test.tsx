@@ -29,6 +29,7 @@ import {
   type PlaygroundView
 } from "./harness/playground-harness"
 import { act } from "@testing-library/react"
+import { getChatTurnSettlement } from "@/hooks/chat/abort-turn-cleanup"
 import { beforeEach, describe, expect, it } from "vitest"
 import { useConnectionStore } from "@/store/connection"
 import { useStoreMessageOption } from "@/store/option"
@@ -146,6 +147,27 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         serverSaveStatus: getServerChatSaveStatus(state.serverChatId)
       })
     ).toBe("serverFailed")
+  })
+
+  it("a simulated reload drains the destroyed page before another page owns chat activity", async () => {
+    const server = createFakeTldwServer()
+    server.planCompletion({ chunks: ["Old page partial", " never arrives"], pauseAfterChunks: 1 })
+    const view = await renderPlayground({ server })
+    await startSend(view, "Question from the destroyed page")
+    await waitForStreamedText("Old page partial")
+    const response = view.getController()!
+    expect(response).not.toBeNull()
+
+    await simulatePageReload(view)
+
+    expect(response.signal.aborted).toBe(true)
+    expect(getChatTurnSettlement(response.signal)?.pending).toBe(false)
+    await renderPlayground({ server, keepBrowserState: true })
+    await waitFor(() => expect(transcript()).toEqual([
+      { role: "user", text: "Question from the destroyed page" },
+      { role: "assistant", text: "Old page partial", interrupted: true }
+    ]), HARNESS_WAIT)
+    expect(server.completionRequests()).toHaveLength(1)
   })
 
   it("CS-04: a reply cut off by a dropped connection keeps the partial answer marked Interrupted, and Retry resends the question", async () => {
