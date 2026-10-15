@@ -7,20 +7,30 @@
  * search lives in the Dexie class (`fullTextSearchChatHistories`) — the
  * `searchChatHistories` below is titles-only.
  *
- * This module remains reachable ONLY as the Firefox-private-mode fallback
- * (Dexie throws DatabaseClosedError there) and through two legacy-only
- * entry points. Methods the fallback actually uses:
- *   - `db/dexie/firefox-sync.ts` `firefoxSyncDataForPrivateMode`
- *     (Settings UI) -> `bulkAddPromptsFB`
- *   - `db/dexie/helpers.ts` DatabaseClosedError fallbacks -> `getPromptByIdFB`,
- *     `getAllPromptsFB`, `savePromptFB`, `deletePromptByIdFB`, `updatePromptFB`,
- *     `restorePromptSnapshotFB` (prompt CRUD on `chrome.storage`)
- *   - `libs/export-import.ts` `importPageAssistDataOld` (deprecated legacy
- *     export format) -> `importChatHistory`, `importPrompts`
- *   - `entries/background.ts` imports `generateID` (pure id generator, no
- *     storage access)
- * Everything else here is an untouched fallback-only surface; do not add
- * new callers.
+ * This module is reachable ONLY through the three entry points below; do
+ * not add new callers, and do not delete a listed method without checking
+ * them:
+ *
+ * 1. Startup legacy-data migration — `db/dexie/migration.ts` (run via
+ *    `hooks/useMigration.tsx`) imports `PageAssitDatabase` directly and
+ *    uses `getUserID`, `getChatHistories`, `getChatHistory`,
+ *    `deleteAllChatHistory`, `getAllPrompts`, `getAllWebshares`, and
+ *    `getSessionFilesInfo`.
+ * 2. Firefox-private-mode fallback (Dexie throws DatabaseClosedError
+ *    there):
+ *    - `db/dexie/firefox-sync.ts` `firefoxSyncDataForPrivateMode`
+ *      (Settings UI) -> `bulkAddPromptsFB`
+ *    - `db/dexie/helpers.ts` DatabaseClosedError fallbacks ->
+ *      `getPromptByIdFB`, `getAllPromptsFB`, `savePromptFB`,
+ *      `deletePromptByIdFB`, `updatePromptFB`, `restorePromptSnapshotFB`
+ *      (prompt CRUD on `chrome.storage`)
+ * 3. Legacy-only utilities:
+ *    - `libs/export-import.ts` `importPageAssistDataOld` (deprecated
+ *      legacy export format) -> `importChatHistory`, `importPrompts`
+ *    - `entries/background.ts` imports `generateID` (pure id generator,
+ *      no storage access)
+ *
+ * Everything else here is an untouched fallback-only surface.
  */
 import {
   type ChatHistory as ChatHistoryType,
