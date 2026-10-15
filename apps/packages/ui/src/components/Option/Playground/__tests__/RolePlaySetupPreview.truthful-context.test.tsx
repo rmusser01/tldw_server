@@ -34,4 +34,14 @@ describe("RolePlaySetupPreview context evidence", () => {
     expect(screen.getByText("Ari")).toBeInTheDocument()
     expect(screen.getByText("Not checked in this preview")).toBeInTheDocument()
   })
+
+  it("labels both sides of a changed value and keeps long names readable", () => {
+    const before = deriveRolePlayState({ identity: { kind: "character", id: "4", name: "A very long current character name" } })
+    const after = deriveRolePlayState({ identity: { kind: "character", id: "5", name: "A very long replacement character name" } })
+    render(<RolePlaySetupPreview before={before} after={after} />)
+
+    expect(screen.getByText("A very long current character name").parentElement).toHaveTextContent("Current")
+    expect(screen.getByText("A very long replacement character name").parentElement).toHaveTextContent("After applying")
+    expect(screen.getByText("A very long replacement character name")).toHaveClass("break-words")
+  })
 })

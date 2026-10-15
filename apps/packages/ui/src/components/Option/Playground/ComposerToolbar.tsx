@@ -225,6 +225,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     loading: casualDisclosureLoading,
     unavailable: casualDisclosureUnavailable
   } = useCasualComposerDisclosure()
+  const [advancedCustomizationOpen, setAdvancedCustomizationOpen] = React.useState(false)
   const [assistantPickerOpen, setAssistantPickerOpen] = React.useState(false)
   const [promptPickerOpen, setPromptPickerOpen] = React.useState(false)
   const isProModeRef = React.useRef(isProMode)
@@ -309,7 +310,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           ancestor.getAttribute("aria-hidden") === "true" ||
           style.display === "none" ||
           style.visibility === "hidden" ||
-          style.visibility === "collapse"
+          style.visibility === "collapse" ||
+          (ancestor.tagName === "DETAILS" && !ancestor.hasAttribute("open") &&
+            !ancestor.querySelector("summary")?.contains(element))
         )
           return false
         ancestor = ancestor.parentElement
@@ -324,6 +327,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         document.activeElement !== previous
       )
         return
+      const summary = previous.closest("details:not([open])")?.querySelector<HTMLElement>("summary") ?? null
+      if (isVisible(summary)) {
+        summary?.focus()
+        return
+      }
       if (!isProMode) {
         if (!casualDisclosureLoading && isVisible(customizeTriggerRef.current))
           customizeTriggerRef.current?.focus()
@@ -355,6 +363,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     assistantPickerOpen,
     promptPickerOpen,
     nestedDisclosureOpen,
+    advancedCustomizationOpen,
+    systemPromptsOpen,
+    generationStyleOpen,
     props.focusFallbackRef
   ])
 
@@ -1190,64 +1201,64 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       data-playground-toolbar-row="advanced"
       className={`min-w-0 gap-3 rounded-md border border-border/60 bg-surface2/60 p-2 lg:grid-cols-3 ${casualAdvancedControlsOpen ? "grid" : "hidden"}`}>
       <div role="group" aria-label={researchGroupLabel} className="min-w-0">
-        <h3 className="mb-2 text-xs font-semibold text-text">
-          {researchGroupLabel}
-        </h3>
+        <h3 className="mb-2 text-xs font-semibold text-text">{researchGroupLabel}</h3>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {modeLauncherButton}
           {searchContextButton}
           {webSearchButton}
-          {researchLaunchButton}
           {mcpControl}
-          {toolsButton}
-          <ConnectionStatus showLabel className="px-1 py-0.5" />
         </div>
       </div>
       <div role="group" aria-label={characterGroupLabel} className="min-w-0">
-        <h3 className="mb-2 text-xs font-semibold text-text">
-          {characterGroupLabel}
-        </h3>
+        <h3 className="mb-2 text-xs font-semibold text-text">{characterGroupLabel}</h3>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {characterSelectControl}
           {rolePlaySetupButton}
-          <BuddyManagementButton
-            target={
-              serverChatId
-                ? { scope_type: "conversation", scope_id: serverChatId }
-                : null
-            }
-            onConversationSettings={
-              providedRolePlayActions?.onOpenRolePlaySetup
-            }
-          />
         </div>
       </div>
       <div role="group" aria-label={responseGroupLabel} className="min-w-0">
-        <h3 className="mb-2 text-xs font-semibold text-text">
-          {responseGroupLabel}
-        </h3>
+        <h3 className="mb-2 text-xs font-semibold text-text">{responseGroupLabel}</h3>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {promptSelectControl}
           {chatSettingsButton}
-          <button
-            type="button"
-            onClick={mobileRolePlayActions.onOpenGenerationStyle}
-            className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus">
-            {t("playground:presets.generationStyle", "Generation style")}
-          </button>
-          <button
-            type="button"
-            onClick={mobileRolePlayActions.onOpenSystemPrompts}
-            className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus">
-            {t("playground:templates.button", "System prompts")}
-          </button>
-          {compareControl}
-          {openUIRequestButton}
-          {formattingGuideControl}
-          {!dictationActive ? dictationButton : null}
-          {!voiceChatEnabled ? voiceChatButton : null}
         </div>
       </div>
+      <details open={advancedCustomizationOpen}
+        className="min-w-0 border-t border-border pt-2 lg:col-span-3">
+        <summary onClick={event => {
+          event.preventDefault()
+          setAdvancedCustomizationOpen(open => !open)
+        }} className="cursor-pointer rounded px-1 py-2 text-xs font-medium text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          {t("playground:composer.advancedCustomization", "Advanced customization")}
+        </summary>
+        <div role="group" aria-label={advancedControlsGroupLabel} className="grid min-w-0 gap-3 pt-2 lg:grid-cols-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {modeLauncherButton}
+            {researchLaunchButton}
+            {toolsButton}
+            <ConnectionStatus showLabel className="px-1 py-0.5" />
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <BuddyManagementButton
+              target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
+              onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup} />
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <button type="button" onClick={mobileRolePlayActions.onOpenGenerationStyle}
+              className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus">
+              {t("playground:presets.generationStyle", "Generation style")}
+            </button>
+            <button type="button" onClick={mobileRolePlayActions.onOpenSystemPrompts}
+              className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus">
+              {t("playground:templates.button", "System prompts")}
+            </button>
+            {compareControl}
+            {openUIRequestButton}
+            {formattingGuideControl}
+            {!dictationActive ? dictationButton : null}
+            {!voiceChatEnabled ? voiceChatButton : null}
+          </div>
+        </div>
+      </details>
     </section>
   ) : null
 

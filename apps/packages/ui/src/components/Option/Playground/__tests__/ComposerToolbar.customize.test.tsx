@@ -167,10 +167,13 @@ const mount = (value = props()) => {
   }
 }
 const customize = () => screen.getByRole("button", { name: "Customize chat" })
-const openCustomize = async () => {
+const openCustomize = async (includeAdvanced = true) => {
   await waitFor(() => expect(customize()).toBeEnabled())
   fireEvent.click(customize())
-  return screen.findByRole("region", { name: "Customize chat" })
+  const region = await screen.findByRole("region", { name: "Customize chat" });
+  const disclosure = within(region).getByText("Advanced customization");
+  if (includeAdvanced && !disclosure.closest("details")?.open) fireEvent.click(disclosure);
+  return region;
 }
 beforeEach(() => {
   io.realAssistant = false
@@ -181,6 +184,30 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("Casual task-based customization", () => {
+  it("returns focus to Advanced customization if its focused controls become hidden", async () => {
+    mount();
+    const region = await openCustomize();
+    const summary = within(region).getByText("Advanced customization");
+    within(region).getByRole("button", { name: "Tools" }).focus();
+    fireEvent.click(summary);
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(within(region).getByRole("button", { name: "Tools", hidden: true })).not.toBeVisible();
+  });
+
+  it("keeps common actions visible and puts specialist actions behind Advanced customization", async () => {
+    const settings = vi.fn();
+    mount(props({ onOpenModelSettings: settings }));
+    const region = await openCustomize(false);
+    expect(within(region).getByRole("button", { name: "Search & Context" })).toBeVisible();
+    expect(within(region).getByRole("button", { name: "Role-play setup" })).toBeVisible();
+    expect(within(region).getByRole("button", { name: "Generation style", hidden: true })).not.toBeVisible();
+    const disclosure = within(region).getByText("Advanced customization");
+    fireEvent.click(disclosure);
+    expect(within(region).getByRole("button", { name: "Generation style" })).toBeVisible();
+    expect(within(region).getByRole("button", { name: "System prompts" })).toBeVisible();
+    expect(within(region).getByRole("button", { name: "Tools" })).toBeVisible();
+  });
+
   it("uses the visible message fallback when mode replacement has no visible toolbar control", async () => {
     const Harness = ({ pro }: { pro: boolean }) => {
       const fallback = React.useRef<HTMLInputElement>(null)
@@ -549,7 +576,7 @@ describe("Casual task-based customization", () => {
         within(research).getByRole("button", { name: "MCP tools" })
       ).toBeVisible()
       expect(
-        within(research).getByRole("button", { name: "Tools" })
+        within(region).getByRole("button", { name: "Tools" })
       ).toBeVisible()
       expect(
         within(character).getByRole("button", {
@@ -560,7 +587,7 @@ describe("Casual task-based customization", () => {
         within(character).getByRole("button", { name: "Role-play setup" })
       ).toBeVisible()
       expect(
-        within(response).getByRole("button", { name: "Compare models" })
+        within(region).getByRole("button", { name: "Compare models" })
       ).toBeVisible()
       expect(
         within(response).getByRole("button", { name: "Choose system prompt" })

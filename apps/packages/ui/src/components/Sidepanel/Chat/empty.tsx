@@ -144,9 +144,9 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
     return hasCompletedFirstRun
       ? t(
           "option:connectionCard.headlineMissing",
-          "Connect tldw Assistant to your server to open Companion Home",
+          "Connect to your server to start chatting",
         )
-      : t("sidepanel:firstRun.headline", "Finish setup to open Companion Home");
+      : t("sidepanel:firstRun.headline", "Finish setup to start chatting");
   })();
 
   const bannerBody = (() => {
@@ -166,7 +166,7 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
     if (!hasCompletedFirstRun) {
       return t(
         "sidepanel:firstRun.description",
-        "Before you can use Companion Home here, finish the short setup flow in Options to connect tldw Assistant to your tldw server or choose demo mode.",
+        "Finish setup in Options to connect to your tldw server, then return here to chat.",
       );
     }
     return t(
@@ -176,14 +176,10 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
   })();
 
   const insertPrompt = (text: string) => {
-    const input =
-      inputRef?.current ??
-      document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]');
-    if (input) {
-      input.value = text;
-      input.focus();
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
+    window.dispatchEvent(new CustomEvent("tldw:set-composer-message", {
+      detail: { message: text },
+    }));
+    inputRef?.current?.focus();
   };
 
   React.useEffect(() => {

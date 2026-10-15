@@ -197,11 +197,13 @@ const serverChatHistoryState = vi.hoisted(() => ({
   ],
 }));
 
+const connectionState = vi.hoisted(() => ({ isConnected: true, phase: "connected" }));
+
 vi.mock("@/hooks/useConnectionState", async (original) => {
   const actual = await original<typeof import("@/hooks/useConnectionState")>()
   return {
     ...actual,
-    useConnectionState: () => ({ isConnected: true, phase: "connected" })
+    useConnectionState: () => connectionState
   }
 })
 
@@ -561,6 +563,7 @@ afterEach(() => { cleanup(); queryClient.clear(); });
 
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
+    Object.assign(connectionState, { isConnected: true, phase: "connected" });
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     useStoreChatModelSettings.setState(useStoreChatModelSettings.getInitialState(), true);
     useActorStore.getState().reset();
@@ -1643,6 +1646,29 @@ describe("Playground cockpit controls", () => {
     expect(messageOptionState.value.regenerateLastMessage).not.toHaveBeenCalled();
   });
 
+  it("requires connection before model setup even before a health event arrives", async () => {
+    Object.assign(connectionState, { isConnected: false, phase: "unconfigured" });
+    messageOptionState.value.selectedAssistant = { kind: "character", id: "character-1", name: "Mira Vale", metadata: { selectionMode: "tracked" } };
+    messageOptionState.value.selectedModel = null;
+    messageOptionState.value.serverChatId = null;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.streaming = false;
+    const setup = vi.fn((event: Event) => event.preventDefault());
+    const modelSettings = vi.fn();
+    window.addEventListener("tldw:settings-navigation-request", setup);
+    window.addEventListener("tldw:open-model-settings", modelSettings);
+    try {
+      renderPlayground();
+      const panel = await screen.findByTestId("character-chat-readiness-panel");
+      fireEvent.click(within(panel).getByRole("button", { name: "Open server settings" }));
+      expect(setup).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ detail: { destination: "/settings/tldw" } }));
+      expect(modelSettings).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("tldw:settings-navigation-request", setup);
+      window.removeEventListener("tldw:open-model-settings", modelSettings);
+    }
+  });
+
   it("reflects degraded server readiness in the cockpit runtime rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = null;
@@ -1839,7 +1865,7 @@ describe("Playground cockpit controls", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     const rails = within(mobileRails);
     const context = rails.getByRole("button", { name: "Context" });
-    const runtime = rails.getByRole("button", { name: "Runtime" });
+    const runtime = rails.getByRole("button", { name: "Chat settings" });
     const draft = screen.getByRole("textbox", { name: "Mobile message" });
     expect(rails.getAllByRole("button")).toHaveLength(2);
     expect(context).toHaveAttribute("aria-expanded", "true");
@@ -1860,7 +1886,7 @@ describe("Playground cockpit controls", () => {
     expect(rails.queryAllByRole("region")).toHaveLength(0);
 
     fireEvent.click(runtime);
-    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+    expect(rails.getByRole("region", { name: "Chat settings" })).toBeVisible();
     expect(runtime).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(runtime);
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");

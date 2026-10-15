@@ -112,7 +112,10 @@
     "featureCompare": "Compare Mode",
     "featureCompareHint": "Send to multiple models at once",
     "secondaryCta": "Open server settings",
-    "takeTour": "Take a quick tour"
+    "takeTour": "Take a quick tour",
+    "connectTitle": "Connect to start chatting",
+    "connectDescription": "Connect to your tldw server, then choose a model and start chatting.",
+    "connectAction": "Connect server"
   },
   "section": {
     "preset": "Character preset",
@@ -737,7 +740,12 @@
     "advancedPreferenceUnavailable": "Display preference unavailable. Advanced controls still work for this visit.",
     "assistant_selection_restore_failed": "Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again.",
     "modelsDiscoveryFailed": "Could not check chat models",
-    "modelsDiscoveryFailedDetail": "Your character selection and draft are kept. Retry checking models before sending."
+    "modelsDiscoveryFailedDetail": "Your character selection and draft are kept. Retry checking models before sending.",
+    "advancedCustomization": "Advanced customization",
+    "previewChanges": "Preview changes",
+    "previewCurrent": "Current",
+    "previewAfterApplying": "After applying",
+    "sceneDetails": "Scene details"
   },
   "tour": {
     "modelTitle": "Choose a Model",
@@ -1155,7 +1163,7 @@
     "hideRuntimeRail": "Hide runtime rail",
     "showRuntimeRail": "Show runtime rail",
     "context": "Context",
-    "runtime": "Runtime",
+    "runtime": "Chat settings",
     "focus": "Focus",
     "cockpit": "Cockpit",
     "collapseRailSection": "Collapse {{title}}",
@@ -1296,7 +1304,16 @@
     "searchClosed": "Search closed",
     "mobilePanelTabs": "Mobile cockpit panels",
     "messageCount_one": "{{count}} message",
-    "messageCount": "{{count}} messages"
+    "messageCount": "{{count}} messages",
+    "collapseContextSidechannel": "Hide context",
+    "collapseRuntimeSidechannel": "Hide chat settings",
+    "restoreContextSidechannel": "Show context",
+    "restoreRuntimeSidechannel": "Show chat settings",
+    "contextRailTab": "Context",
+    "runtimeRailTab": "Chat settings",
+    "contextRailHiddenSummary": "Context hidden. Chat settings visible.",
+    "runtimeRailHiddenSummary": "Chat settings hidden. Context visible.",
+    "cockpitRailsVisibleSummary": "Context and chat settings visible."
   },
   "historySelection": {
     "retainedOutcomes": "Retained outcomes",
@@ -1565,7 +1582,28 @@
   },
   "characterRail": {
     "nativePersonaUnavailable": "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here.",
-    "selectionError": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
+    "selectionError": "The assistant could not be selected. Your current chat and draft are still here; try choosing again.",
+    "characterSessions": "Character sessions",
+    "sessionsOffline": "Connect to your server to view character sessions.",
+    "sessionsVerifying": "Verifying your server account...",
+    "sessionsAccountError": "Your server account could not be verified.",
+    "retryVerification": "Retry account verification",
+    "sessionsLoading": "Loading character sessions...",
+    "sessionsStale": "Showing character sessions from the last successful refresh.",
+    "sessionsLoadFailed": "Character sessions could not be loaded.",
+    "retrySessions": "Retry character sessions",
+    "sessionsUnverified": "Some sessions on this page could not be verified for character chat. Retry to refresh.",
+    "currentSession": "Current",
+    "pageEmpty": "No sessions on this page. Return to the previous page.",
+    "noCharacterSessions": "No character sessions yet.",
+    "sessionReference": "Session {{id}}",
+    "currentSessionAction": "Current {{title}}",
+    "resumeSessionAction": "Resume {{title}}, session {{id}}",
+    "currentSessionReferenceAction": "Current {{title}}, session {{id}}",
+    "pagesLabel": "Character sessions pages",
+    "previousPage": "Previous sessions page",
+    "nextPage": "Next sessions page",
+    "pageLabel": "Page"
   },
   "sidepanelHandoff": {
     "historyNotTransferred": "History was not transferred",

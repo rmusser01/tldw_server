@@ -552,7 +552,9 @@
       "az": "A-Z"
     },
     "createNewCharacter": "Create a New Character+",
-    "importCharacter": "Import Character"
+    "importCharacter": "Import Character",
+    "charactersLoadFailed": "Characters could not be loaded. Check your connection, then retry.",
+    "personasLoadFailed": "Personas could not be loaded. Check your connection, then retry."
   },
   "personaGarden": {
     "visuals": {
@@ -871,5 +873,9 @@
     "changed": "The character opening changed",
     "changedHelp": "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.",
     "reviewCreation": "Review the previous save in Recover drafts before saving another opening."
+  },
+  "firstRun": {
+    "headline": "Finish setup to start chatting",
+    "description": "Finish setup in Options to connect to your tldw server, then return here to chat."
   }
 }

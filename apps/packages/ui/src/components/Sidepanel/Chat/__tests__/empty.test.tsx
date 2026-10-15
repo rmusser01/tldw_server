@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConnectionPhase } from "@/types/connection";
@@ -64,7 +64,7 @@ describe("EmptySidePanel", () => {
     };
   });
 
-  it("frames setup around Companion Home instead of a chat-only launch", () => {
+  it("frames setup around the Chat destination", () => {
     renderPanel();
 
     const panel = screen.getByTestId("chat-empty-connection");
@@ -72,11 +72,11 @@ describe("EmptySidePanel", () => {
     expect(panel).toHaveAttribute("data-ds-component", "RecoveryCallout");
     expect(screen.getByText("Setup required")).toBeInTheDocument();
     expect(
-      screen.getByText("Finish setup to open Companion Home"),
+      screen.getByText("Finish setup to start chatting"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Before you can use Companion Home here, finish the short setup flow in Options to connect tldw Assistant to your tldw server or choose demo mode.",
+        "Finish setup in Options to connect to your tldw server, then return here to chat.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Setup step")).toBeInTheDocument();
@@ -157,7 +157,7 @@ describe("EmptySidePanel", () => {
 
     expect(
       screen.getByText(
-        "Connect tldw Assistant to your server to open Companion Home",
+        "Connect to your server to start chatting",
       ),
     ).toBeInTheDocument();
     expect(
@@ -191,5 +191,19 @@ describe("EmptySidePanel", () => {
     expect(screen.getByTestId("chat-suggestion-1")).toBeInTheDocument();
     expect(screen.getByTestId("chat-suggestion-2")).toBeInTheDocument();
     expect(screen.queryByTestId("chat-suggestion-3")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("starter prompt draft handoff", () => {
+  it.each([["chat-suggestion-1", "Summarize this page"], ["chat-suggestion-2", "What are the key points?"]])("updates controlled draft through the existing composer command: %s", (id, message) => {
+    connectionStateMock.state = { phase: ConnectionPhase.CONNECTED, isConnected: true, serverUrl: "http://localhost:8000" };
+    const receive = vi.fn();
+    window.addEventListener("tldw:set-composer-message", receive);
+    try {
+      render(<EmptySidePanel />);
+      fireEvent.click(screen.getByTestId(id));
+      expect(receive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ detail: { message } }));
+    } finally { window.removeEventListener("tldw:set-composer-message", receive); }
   });
 });

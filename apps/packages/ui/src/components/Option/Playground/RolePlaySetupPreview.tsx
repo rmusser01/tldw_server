@@ -57,18 +57,25 @@ const PreviewRow = ({
   after: string
 }) => {
   const changed = before !== after
+  const { t } = useTranslation("playground")
   return (
     <div className="grid gap-1 rounded-md border border-border bg-surface2 p-2 text-xs sm:grid-cols-[120px_1fr]">
       <div className="font-medium text-text">{label}</div>
       <div className="min-w-0 text-text-muted">
         {changed ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            <span className="truncate">{before}</span>
+          <div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
+            <span className="min-w-0">
+              <span className="sr-only">{t("composer.previewCurrent", "Current")}: </span>
+              <span className="break-words">{before}</span>
+            </span>
             <span aria-hidden="true">-&gt;</span>
-            <span className="truncate font-medium text-text">{after}</span>
+            <span className="min-w-0 font-medium text-text">
+              <span className="sr-only">{t("composer.previewAfterApplying", "After applying")}: </span>
+              <span className="break-words">{after}</span>
+            </span>
           </div>
         ) : (
-          <span className="truncate font-medium text-text">{after}</span>
+          <span className="break-words font-medium text-text">{after}</span>
         )}
       </div>
     </div>

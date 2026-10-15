@@ -342,6 +342,7 @@ type Props = {
   forceWideMode?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
   onDraftPresenceChange?: (hasDraft: boolean) => void;
+  connectionSetupInTimeline?: boolean;
   composerMessageCount?: number;
   composerMessageCountLabel?: string | null;
   characterWorkflowActive?: boolean;
@@ -540,6 +541,7 @@ export const PlaygroundForm = ({
   forceWideMode = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
+  connectionSetupInTimeline = false,
   composerMessageCount = 0,
   composerMessageCountLabel = null,
   characterWorkflowActive = false,
@@ -896,6 +898,7 @@ export const PlaygroundForm = ({
     shouldEnableOptionalResource(state, "audio-health"),
   );
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
+  const needsConnectionSetup = ["unconfigured", "configuring_url", "configuring_auth"].includes(connectionUxState);
   const { capabilities, loading: capsLoading } = useServerCapabilities();
   const {
     hasMcp,
@@ -6220,7 +6223,7 @@ export const PlaygroundForm = ({
       onRender={onComposerRenderProfile}
     >
       <div className="flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0">
-        <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>
+        {!needsConnectionSetup && <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>}
         <ChatGreetingPicker selectedCharacter={selectedCharacter} selectedCharacterMode={getAssistantSelectionMode(activeAssistantSelection)}
           messages={messages} historyId={historyId} serverChatId={serverChatId}
           ready={draftReady && !assistantMeta?.isLoading && !temporaryChat && historySelection?.getCurrent().status === "idle" && !historySelection.getCurrent().owner}
@@ -7293,6 +7296,7 @@ export const PlaygroundForm = ({
                               currentChatModelSettings.jsonMode,
                             )}
                             isConnectionReady={isConnectionReady}
+                            showDisconnectedNotice={!(needsConnectionSetup && connectionSetupInTimeline)}
                             connectionUxState={connectionUxState}
                             isProMode={isProMode}
                             selectedModel={selectedModel}

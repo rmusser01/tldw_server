@@ -2811,7 +2811,7 @@
     "message": "Context"
   },
   "cockpit_runtime": {
-    "message": "Runtime"
+    "message": "Chat settings"
   },
   "cockpit_focus": {
     "message": "Focus"
@@ -4471,5 +4471,119 @@
   },
   "composer_persistence_serverUnconfirmed": {
     "message": "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again."
+  },
+  "empty_connectTitle": {
+    "message": "Connect to start chatting"
+  },
+  "empty_connectDescription": {
+    "message": "Connect to your tldw server, then choose a model and start chatting."
+  },
+  "empty_connectAction": {
+    "message": "Connect server"
+  },
+  "composer_advancedCustomization": {
+    "message": "Advanced customization"
+  },
+  "composer_previewChanges": {
+    "message": "Preview changes"
+  },
+  "composer_previewCurrent": {
+    "message": "Current"
+  },
+  "composer_previewAfterApplying": {
+    "message": "After applying"
+  },
+  "composer_sceneDetails": {
+    "message": "Scene details"
+  },
+  "cockpit_collapseContextSidechannel": {
+    "message": "Hide context"
+  },
+  "cockpit_collapseRuntimeSidechannel": {
+    "message": "Hide chat settings"
+  },
+  "cockpit_restoreContextSidechannel": {
+    "message": "Show context"
+  },
+  "cockpit_restoreRuntimeSidechannel": {
+    "message": "Show chat settings"
+  },
+  "cockpit_contextRailTab": {
+    "message": "Context"
+  },
+  "cockpit_runtimeRailTab": {
+    "message": "Chat settings"
+  },
+  "cockpit_contextRailHiddenSummary": {
+    "message": "Context hidden. Chat settings visible."
+  },
+  "cockpit_runtimeRailHiddenSummary": {
+    "message": "Chat settings hidden. Context visible."
+  },
+  "cockpit_cockpitRailsVisibleSummary": {
+    "message": "Context and chat settings visible."
+  },
+  "characterRail_characterSessions": {
+    "message": "Character sessions"
+  },
+  "characterRail_sessionsOffline": {
+    "message": "Connect to your server to view character sessions."
+  },
+  "characterRail_sessionsVerifying": {
+    "message": "Verifying your server account..."
+  },
+  "characterRail_sessionsAccountError": {
+    "message": "Your server account could not be verified."
+  },
+  "characterRail_retryVerification": {
+    "message": "Retry account verification"
+  },
+  "characterRail_sessionsLoading": {
+    "message": "Loading character sessions..."
+  },
+  "characterRail_sessionsStale": {
+    "message": "Showing character sessions from the last successful refresh."
+  },
+  "characterRail_sessionsLoadFailed": {
+    "message": "Character sessions could not be loaded."
+  },
+  "characterRail_retrySessions": {
+    "message": "Retry character sessions"
+  },
+  "characterRail_sessionsUnverified": {
+    "message": "Some sessions on this page could not be verified for character chat. Retry to refresh."
+  },
+  "characterRail_currentSession": {
+    "message": "Current"
+  },
+  "characterRail_pageEmpty": {
+    "message": "No sessions on this page. Return to the previous page."
+  },
+  "characterRail_noCharacterSessions": {
+    "message": "No character sessions yet."
+  },
+  "characterRail_sessionReference": {
+    "message": "Session {{id}}"
+  },
+  "characterRail_currentSessionAction": {
+    "message": "Current {{title}}"
+  },
+  "characterRail_resumeSessionAction": {
+    "message": "Resume {{title}}, session {{id}}"
+  },
+  "characterRail_currentSessionReferenceAction": {
+    "message": "Current {{title}}, session {{id}}"
+  },
+  "characterRail_pagesLabel": {
+    "message": "Character sessions pages"
+  },
+  "characterRail_previousPage": {
+    "message": "Previous sessions page"
+  },
+  "characterRail_nextPage": {
+    "message": "Next sessions page"
+  },
+  "characterRail_pageLabel": {
+    "message": "Page"
   }
 }

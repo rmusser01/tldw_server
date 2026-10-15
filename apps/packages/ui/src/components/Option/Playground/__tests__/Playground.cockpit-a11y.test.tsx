@@ -124,7 +124,7 @@ describe("Playground cockpit accessibility", () => {
     expect(rails.queryByRole("tablist")).not.toBeInTheDocument();
     expect(rails.queryAllByRole("tab")).toHaveLength(0);
     expect(rails.getAllByRole("region", { hidden: true })).toHaveLength(2);
-    for (const name of ["Context", "Runtime"]) {
+    for (const name of ["Context", "Chat settings"]) {
       const button = rails.getByRole("button", { name });
       const panel = document.getElementById(
         button.getAttribute("aria-controls") ?? "",
@@ -148,7 +148,7 @@ describe("Playground cockpit accessibility", () => {
       "aria-expanded",
       "false",
     );
-    expect(rails.getByRole("button", { name: "Runtime" })).toHaveAttribute(
+    expect(rails.getByRole("button", { name: "Chat settings" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -178,7 +178,7 @@ describe("Playground cockpit accessibility", () => {
       const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
       const rails = within(mobileRails);
       const context = rails.getByRole("button", { name: "Context" });
-      const runtime = rails.getByRole("button", { name: "Runtime" });
+      const runtime = rails.getByRole("button", { name: "Chat settings" });
       const draft = screen.getByRole("textbox", { name: "Composer draft" });
 
       context.focus();
@@ -195,7 +195,7 @@ describe("Playground cockpit accessibility", () => {
       expect(
         rails.queryByRole("region", { name: "Context" }),
       ).not.toBeInTheDocument();
-      expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+      expect(rails.getByRole("region", { name: "Chat settings" })).toBeVisible();
       expect(context).toHaveAttribute("aria-expanded", "false");
       expect(runtime).toHaveAttribute("aria-expanded", "true");
 
@@ -229,7 +229,7 @@ describe("Playground cockpit accessibility", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     const rails = within(mobileRails);
     const context = rails.getByRole("button", { name: "Context" });
-    const runtime = rails.getByRole("button", { name: "Runtime" });
+    const runtime = rails.getByRole("button", { name: "Chat settings" });
 
     context.focus();
     await user.keyboard("{Enter}");
@@ -245,7 +245,7 @@ describe("Playground cockpit accessibility", () => {
 
     runtime.focus();
     await user.keyboard("{Enter}");
-    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+    expect(rails.getByRole("region", { name: "Chat settings" })).toBeVisible();
     expect(onRightRailVisibleChange).toHaveBeenCalledExactlyOnceWith(true);
     expect(onLeftRailVisibleChange).toHaveBeenCalledExactlyOnceWith(true);
   });
@@ -266,11 +266,11 @@ describe("Playground cockpit accessibility", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     const rails = within(mobileRails);
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "runtime");
-    expect(rails.getByRole("button", { name: "Runtime" })).toHaveAttribute(
+    expect(rails.getByRole("button", { name: "Chat settings" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
-    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+    expect(rails.getByRole("region", { name: "Chat settings" })).toBeVisible();
 
     rerender(
       <PlaygroundCockpitShell
@@ -306,9 +306,9 @@ describe("Playground cockpit accessibility", () => {
 
     await user.click(context);
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
-    await user.click(rails.getByRole("button", { name: "Runtime" }));
+    await user.click(rails.getByRole("button", { name: "Chat settings" }));
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "runtime");
-    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+    expect(rails.getByRole("region", { name: "Chat settings" })).toBeVisible();
   });
 
   it("labels cockpit landmarks without adding a top layout rail", () => {
@@ -337,7 +337,7 @@ describe("Playground cockpit accessibility", () => {
     ).toHaveTextContent("Context");
     expect(
       screen.getByTestId("playground-cockpit-mobile-rails"),
-    ).toHaveTextContent("Runtime");
+    ).toHaveTextContent("Chat settings");
 
     expect(
       screen.queryByRole("button", { name: "Enter focus chat" }),
@@ -394,12 +394,12 @@ describe("Playground cockpit accessibility", () => {
     );
 
     const contextToggle = screen.getByRole("button", {
-      name: "Restore context sidechannel",
+      name: "Show context",
     });
     const runtimeToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
     ).getByRole("button", {
-      name: "Collapse runtime sidechannel",
+      name: "Hide chat settings",
     });
 
     expect(contextToggle).toHaveAttribute(
@@ -438,13 +438,13 @@ describe("Playground cockpit accessibility", () => {
       name: "Chat cockpit context",
     });
     const contextCollapse = within(contextRail).getByRole("button", {
-      name: "Collapse context sidechannel",
+      name: "Hide context",
     });
     fireEvent.click(contextCollapse);
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false);
 
     const runtimeRestore = screen.getByRole("button", {
-      name: "Restore runtime sidechannel",
+      name: "Show chat settings",
     });
     expect(runtimeRestore).toHaveAttribute(
       "aria-controls",
@@ -478,14 +478,14 @@ describe("Playground cockpit accessibility", () => {
 
     const contextToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit context" }),
-    ).getByRole("button", { name: "Collapse context sidechannel" });
+    ).getByRole("button", { name: "Hide context" });
     contextToggle.focus();
     await user.keyboard("{Enter}");
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false);
 
     const runtimeToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
-    ).getByRole("button", { name: "Collapse runtime sidechannel" });
+    ).getByRole("button", { name: "Hide chat settings" });
     runtimeToggle.focus();
     await user.keyboard("{Enter}");
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(false);
@@ -493,7 +493,7 @@ describe("Playground cockpit accessibility", () => {
     const mobileRails = within(
       screen.getByTestId("playground-cockpit-mobile-rails"),
     );
-    const runtimeButton = mobileRails.getByRole("button", { name: "Runtime" });
+    const runtimeButton = mobileRails.getByRole("button", { name: "Chat settings" });
     const contextButton = mobileRails.getByRole("button", { name: "Context" });
     for (const button of [contextButton, runtimeButton]) {
       const controlledPanel = document.getElementById(
