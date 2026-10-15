@@ -39,3 +39,9 @@ Physical VoiceOver/NVDA, actual browser permission-grant UI, and separate Firefo
 The PR must pass current required CI and the repository's human-written Change summary merge gate before landing. Merge-queue variable was unset at publication, so latest-dev rebase and exact-head checks apply.
 
 PR: https://github.com/rmusser01/tldw_server/pull/3248. Independent final source review cleared commit `98eda36cfa19705c9ff8308c0c45905e6e3ac5ea`. Explicit pre-commit checks passed on all 41 implementation/review/task files; local fast CI passed under project Python 3.12 (compileall, syntax and repository guards; Python tests/lint skipped because no Python changed).
+
+## CI qualification follow-up
+
+GitHub CI exposed stale fixture prerequisites and assertions: two tour fixtures omitted connected state/the connection selector, a research query mock omitted the required query-client export, Buddy integration still expected an advanced control to be immediately visible, and four responsive smoke cases queried the old Runtime label. The production behavior and CI ratchet/pinned policy were unchanged. Fixtures now seed and restore the correct state, reuse the adjacent partial React Query mock pattern, and preserve primary controls plus hidden-before/visible-after Advanced assertions.
+
+After observed red runs, all **257 native UI + 47 WebUI cases (304 total)** pass with fresh frozen dependencies and the exact deterministic CI config. All **four** previously failing responsive cockpit smoke cases pass against the unchanged production artifact. Independent scoped review reports no weakened assertion or actionable boundary/cleanup issue. Final lint covers 36 PR TS/TSX files: 0 errors and 198 warnings matching the base after line-shift normalization. Production source/artifact provenance remains unchanged. The requester supplied the Change summary verbatim in PR3248; the human ownership gate is satisfied. Fresh final-head GitHub CI must pass before merge.

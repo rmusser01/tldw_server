@@ -5379,9 +5379,13 @@ describe("PlaygroundForm role-play starter", () => {
     expect(screen.getByRole("button", { name: /Select model|deepseek-chat/i })).toBeVisible()
     expect(screen.getByTestId("composer-inline-send-control")).toBeVisible()
     await user.click(trigger)
-    expect(screen.getByRole("region", { name: "Customize chat" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Buddy & Persona" })).toBeVisible()
+    const customization = screen.getByRole("region", { name: "Customize chat" })
+    expect(customization).toBeVisible()
+    const buddy = within(customization).getByRole("button", { name: "Buddy & Persona", hidden: true })
+    expect(buddy).not.toBeVisible()
     expect(within(screen.getByRole("group", { name: "Character & your role" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
+    await user.click(within(customization).getByText("Advanced customization", { selector: "summary" }))
+    expect(buddy).toBeVisible()
   })
 
   it("allows Customize Escape while the real embedded Search & Context section remains open", async () => {

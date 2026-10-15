@@ -445,6 +445,7 @@ vi.mock('@/components/Timeline', () => ({
 }));
 
 vi.mock('@/hooks/useConnectionState', () => ({
+  useIsConnected: () => connectionState.value.isConnected,
   useConnectionActions: () => ({ checkOnce: connectionState.value.checkOnce }),
   useConnectionState: () => ({
     phase: connectionState.value.phase,
@@ -1409,6 +1410,8 @@ it('the actual outer shell capture cannot republish old messages after synchrono
 
 describe('WebLayout chat tour rendered outcome', () => {
   beforeEach(() => {
+    connectionState.value.phase = 'connected';
+    connectionState.value.isConnected = true;
     delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
     routerState.location = { pathname: '/chat', search: '', hash: '' };
     featureFlagState.showChatSidebar = false;

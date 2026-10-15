@@ -24,8 +24,8 @@ Approved design: TASK-13709 review and the user's acceptance of character-first 
 **Goal**: Independent review, relevant tests/lint/types/builds and bounded desktop/mobile browser validation; new PR and latest-dev merge when qualified.
 **Success Criteria**: Review findings resolved; no new touched-scope security findings; source and protected-data evidence recorded; required checks pass; merge policy/human summary satisfied.
 **Tests**: Appropriate unit/integration/E2E, production builds, original nine-chat/28-row preservation, normal precommit hooks, exact-head CI.
-**Status**: Not Started
+**Status**: In Progress
 
 Execution note: setup/controlled-starter regression group passes47 cases. Character history passes21 with independent pagination review and exact-multiple boundary repair. Customization test reassessment: the remaining four failures all asserted Compare inside the former primary Response group; the new approved Advanced section relocates it. All assertions remain and now scope the visible advanced control. No production fallback, deadlines or assertions were disabled.
 
-Qualification update: PR https://github.com/rmusser01/tldw_server/pull/3248 is open against dev. Implementation and independent exact-source review are complete; all local production/type/test gates pass. Required GitHub CI and the requester-written Change summary remain before merge.
+Qualification update: PR https://github.com/rmusser01/tldw_server/pull/3248 is open against dev. Implementation and independent exact-source review are complete; all local production/type/test gates pass. Requester-written Change summary is included verbatim in PR3248. Required GitHub CI remains before merge.
