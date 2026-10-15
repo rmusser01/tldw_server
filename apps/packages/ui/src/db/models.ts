@@ -299,6 +299,33 @@ export class ModelDb {
     this.indexIds = nextIndexIds
   }
 
+  /**
+   * Batched replace: supersede `removeIds` with `records` using ONE set()
+   * (new records + index without the removed ids) followed by ONE remove()
+   * of the superseded record keys. Write-before-remove keeps a crash between
+   * the two calls harmless: orphaned keys are ignored because reads go via
+   * the index. Ids being (re-)written are never removed, so replacing a
+   * record with the same id keeps it.
+   */
+  replaceAll = async (records: Model[], removeIds: string[] = []) => {
+    if (records.length === 0 && removeIds.length === 0) return
+    const writtenIds = new Set(records.map((record) => record.id))
+    const supersededIds = removeIds.filter((id) => !writtenIds.has(id))
+    await this.persistRecords(records, { removeIds: supersededIds })
+    if (supersededIds.length === 0) return
+    await new Promise<void>((resolve, reject) => {
+      // Also drop legacy unprefixed keys if any somehow remain.
+      const keys = supersededIds.flatMap((id) => [toStorageKey(id), id])
+      this.db.remove(keys, () => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError)
+        } else {
+          resolve()
+        }
+      })
+    })
+  }
+
   deleteAll = async (): Promise<void> => {
     const ids = await this.ensureIndex()
     const keys = [...ids.map(toStorageKey), ...ids, MODEL_INDEX_KEY]
@@ -471,13 +498,16 @@ export const deleteAllModelsByProviderId = async (provider_id: string) => {
 
 export const bulkAddModelsFB = async (models: Model[]) => {
   const db = new ModelDb()
-  // delete all exist models
-  const modelsToDelete = (await db.getAll()).filter(
+  // Supersede the existing catalog in one batched set + one batched remove
+  // (was: a deleteMany per pass with its own index write, then a create set).
+  const existing = await db.getAll()
+  const modelsToDelete = existing.filter(
     (model) => model?.db_type === "openai_model"
   )
-  await db.deleteMany(modelsToDelete.map((model) => model.id))
-  // add new models
-  await db.createMany(models)
+  await db.replaceAll(
+    models,
+    modelsToDelete.map((model) => model.id)
+  )
 }
 
 export const isLookupExist = async (lookup: string) => {
