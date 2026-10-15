@@ -2,8 +2,8 @@ import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
 import { ConfigProvider, Modal } from "antd"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
@@ -160,7 +160,7 @@ vi.mock("@/hooks/chat-modes/chatModePipeline", () => ({
   },
 }))
 
-// Scope role queries to the actual form actions; global AntD style checks dominated the deadline.
+// Scope role queries to actual form actions and fields; inactive AntD panels dominated the deadline.
 const getMainSaveButton = () => {
   const submits = document.querySelectorAll('form button[type="submit"]')
   if (submits.length !== 1 || !submits[0].parentElement) throw new Error("expected one model settings submit action")
@@ -180,12 +180,33 @@ const getSettingsButton = (name: string) => {
   return within(candidates[0].parentElement).getByRole("button", { name, exact: true })
 }
 
+const getSettingsTab = (name: string) => {
+  const tabs = Array.from(document.querySelectorAll('form [role="tab"]'))
+    .filter(tab => tab.textContent?.trim() === name)
+  if (tabs.length !== 1 || !tabs[0].parentElement) throw new Error(`expected one settings tab: ${name}`)
+  return within(tabs[0].parentElement).getByRole("tab", { name, exact: true })
+}
+
+const getModelCombobox = () => {
+  const activeTabs = document.querySelectorAll('form [role="tab"][aria-selected="true"]')
+  if (activeTabs.length !== 1 || activeTabs[0].textContent?.trim() !== "Model") throw new Error("expected the active Model tab")
+  const panel = document.getElementById(activeTabs[0].getAttribute("aria-controls") ?? "")
+  if (!(panel instanceof HTMLElement) || panel.getAttribute("role") !== "tabpanel") throw new Error("expected the Model tab panel")
+  const label = within(panel).getByText("API / model", { selector: "label", exact: true })
+  const field = label.closest(".ant-form-item")
+  if (!(field instanceof HTMLElement)) throw new Error("expected the API / model field")
+  return within(field).getByRole("combobox")
+}
+
+const settingsClients = new Set<QueryClient>()
+
 const instruction =
   "UAT363 RETRY ORBIT742. Describe visible image contents accurately in one short sentence."
-const mountSettings = async (
+const renderSettings = (
   settingsScope?: string,
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
 ) => {
+  settingsClients.add(client)
   const close = vi.fn()
   const view = render(
     <QueryClientProvider client={client}>
@@ -199,13 +220,23 @@ const mountSettings = async (
       </ConfigProvider>
     </QueryClientProvider>,
   )
-  fireEvent.click(await screen.findByRole("tab", { name: "Conversation" }))
+  return { ...view, close }
+}
+
+const mountSettings = async (settingsScope?: string, client?: QueryClient) => {
+  const view = renderSettings(settingsScope, client)
+  fireEvent.click(await waitFor(() => getSettingsTab("Conversation")))
   const editor = await screen.findByPlaceholderText("Enter System Prompt")
-  return { ...view, close, editor }
+  return { ...view, editor }
 }
 
 describe("Conversation prompt editor through real model settings Save", () => {
-  afterEach(() => Modal.destroyAll())
+  afterEach(() => {
+    cleanup()
+    Modal.destroyAll()
+    for (const client of settingsClients) client.clear()
+    settingsClients.clear()
+  })
   beforeEach(() => {
     inputs.selectedSystemPrompt = null
     inputs.character = null
@@ -249,7 +280,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     const mounted = render(<QueryClientProvider client={client}><ConfigProvider theme={{ token: { motion: false } }}><Owner /></ConfigProvider></QueryClientProvider>)
     try {
       fireEvent.click(getSettingsButton("Open model editor"))
-      fireEvent.click(await screen.findByRole("tab", { name: "Conversation" }))
+      fireEvent.click(await waitFor(() => getSettingsTab("Conversation")))
       await screen.findByPlaceholderText("Enter System Prompt")
       expect(completed).not.toHaveBeenCalled()
       fireEvent.click(getSettingsButton("Cancel"))
@@ -394,7 +425,12 @@ describe("Conversation prompt editor through real model settings Save", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { editor, close } = await mountSettings(undefined, client)
     for (const models of [[], [{ model: inputs.selectedModel, provider: "openai" }, { model: inputs.selectedModel, provider: "llama.cpp" }], [{ model: inputs.selectedModel, provider: "llama.cpp" }]]) {
-      act(() => client.setQueryData(["playground:chatModels"], models))
+      await act(async () => {
+        client.setQueriesData({ queryKey: ["playground:chatModels"], type: "active" }, models)
+        await new Promise<void>(resolve => notifyManager.schedule(resolve))
+        expect(client.getQueryCache().findAll({ queryKey: ["playground:chatModels"], type: "active" })
+          .map(query => query.state.data)).toEqual([models])
+      })
       expect(editor).toHaveValue(instruction)
       expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(inputs.selectedModel)
       expect(useStoreChatModelSettings.getState().systemPrompt).toBe(instruction)
@@ -411,11 +447,16 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreChatModelSettings.getState().reset()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     await mountSettings(undefined, client)
-    act(() => client.setQueryData(["playground:chatModels"], []))
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    await act(async () => {
+      client.setQueriesData({ queryKey: ["playground:chatModels"], type: "active" }, [])
+      await new Promise<void>(resolve => notifyManager.schedule(resolve))
+      expect(client.getQueryCache().findAll({ queryKey: ["playground:chatModels"], type: "active" })
+        .map(query => query.state.data)).toEqual([[]])
+    })
+    fireEvent.click(getSettingsTab("Model"))
     await waitFor(() => expect(screen.getByText("Choose provider - /models/gemma.gguf")).toBeVisible())
     expect(screen.queryByText("Custom - tldw:/models/gemma.gguf")).toBeNull()
-    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.mouseDown(getModelCombobox())
     const labels = await screen.findAllByText("Choose provider - /models/gemma.gguf")
     fireEvent.click(labels.at(-1)!)
     expect(useStoreMessageOption.getState().selectedModel).toBe(inputs.selectedModel)
@@ -430,16 +471,17 @@ describe("Conversation prompt editor through real model settings Save", () => {
     state.setActiveSettingsScope("llamacpp:/models/gemma.gguf")
     state.updateSettings({ systemPrompt: "KEEP A", temperature: 0.2 })
     state.updateScopedSetting("openai:/models/gemma.gguf", "temperature", 0.6)
-    const { close } = await mountSettings(explicitScope)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    fireEvent.mouseDown(screen.getByRole("combobox"))
+    const { close } = renderSettings(explicitScope)
+    expect(await waitFor(() => getSettingsTab("Model"))).toHaveAttribute("aria-selected", "true")
+    await waitFor(() => expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.2"))
+    fireEvent.mouseDown(getModelCombobox())
     fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
     expect(useStoreMessageOption.getState().selectedModel).toBe("openai:/models/gemma.gguf")
     expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe("openai:/models/gemma.gguf")
     expect(useStoreChatModelSettings.getState().getEffectiveSettings("llamacpp:/models/gemma.gguf")).toMatchObject({ systemPrompt: "KEEP A", temperature: 0.2 })
     expect(await screen.findByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.6")
     expect(validateNativeCharacterConfiguration({ temporary: false, clientToolCount: 0, settings: {}, model: useStoreMessageOption.getState().selectedModel! })).toMatchObject({ provider: "openai", model: "/models/gemma.gguf" })
-    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
+    fireEvent.click(getSettingsTab("Conversation"))
     fireEvent.change(await screen.findByPlaceholderText("Enter System Prompt"), { target: { value: instruction } })
     fireEvent.click(getMainSaveButton())
     await waitFor(() => expect(close).toHaveBeenCalledWith(false))
@@ -459,8 +501,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
       if (state.activeSettingsScope === "openai:/models/gemma.gguf") inputs.accountCurrent.mockReturnValue(false)
     })
     try {
-      fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-      fireEvent.mouseDown(screen.getByRole("combobox"))
+      fireEvent.click(getSettingsTab("Model"))
+      fireEvent.mouseDown(getModelCombobox())
       fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
       expect(useStoreMessageOption.getState().selectedModel).toBe("llamacpp:/models/gemma.gguf")
     } finally { unsubscribe() }
@@ -474,8 +516,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
     useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
     await mountSettings()
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(getSettingsTab("Model"))
+    fireEvent.mouseDown(getModelCombobox())
     fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
     expect(await screen.findByRole("alert")).toHaveTextContent(/model choice is active.*could not be saved on this device/i)
     expect(useStoreMessageOption.getState().selectedModel).toBe("openai:/models/gemma.gguf")
@@ -493,13 +535,13 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
     useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
     await mountSettings()
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(getSettingsTab("Model"))
+    fireEvent.mouseDown(getModelCombobox())
     fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
     await screen.findByRole("alert")
     const temperature = await screen.findByLabelText("modelSettings.form.temperature.label")
     fireEvent.change(temperature, { target: { value: "0.31" } })
-    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
+    fireEvent.click(getSettingsTab("Conversation"))
     const prompt = await screen.findByPlaceholderText("Enter System Prompt")
     fireEvent.change(prompt, { target: { value: "Newer staged instructions" } })
     const revision = useStoreMessageOption.getState().selectedModelRevision
@@ -508,7 +550,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     expect({ revision: useStoreMessageOption.getState().selectedModelRevision, prompt: (prompt as HTMLInputElement).value })
       .toEqual({ revision, prompt: "Newer staged instructions" })
     expect(screen.queryByRole("button", { name: "Discard and switch" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.click(getSettingsTab("Model"))
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.31")
   }, 15_000)
 
@@ -519,8 +561,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
     useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
     await mountSettings()
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    const select = screen.getByRole("combobox").closest(".ant-select")!
+    fireEvent.click(getSettingsTab("Model"))
+    const select = getModelCombobox().closest(".ant-select")!
     fireEvent.mouseDown(select.querySelector(".ant-select-clear")!)
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not be saved on this device/i)
     expect(useStoreMessageOption.getState().selectedModel).toBeNull()
@@ -540,8 +582,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreMessageOption.getState().setSelectedModel("llamacpp:/models/gemma.gguf")
     useStoreChatModelSettings.getState().setActiveSettingsScope("llamacpp:/models/gemma.gguf")
     await mountSettings()
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
-    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(getSettingsTab("Model"))
+    fireEvent.mouseDown(getModelCombobox())
     fireEvent.click(await screen.findByText("OpenAI - tldw:/models/gemma.gguf"))
     await screen.findByLabelText("modelSettings.form.temperature.label")
     await act(async () => {
@@ -591,7 +633,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       defaultOptions: { queries: { retry: false } },
     })
     const first = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.click(getSettingsTab("Model"))
     fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
       target: { value: "48" },
     })
@@ -604,7 +646,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     first.unmount()
 
     const reopened = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.click(getSettingsTab("Model"))
     expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("48")
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
     fireEvent.click(getMainSaveButton())
@@ -626,7 +668,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     })
     useStoreChatModelSettings.getState().setTemperature(0.25)
     const clearing = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.click(getSettingsTab("Model"))
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
     fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
       target: { value: "" },
@@ -637,7 +679,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     )
     clearing.unmount()
     const reopened = await mountSettings(undefined, client)
-    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.click(getSettingsTab("Model"))
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("")
     fireEvent.click(getMainSaveButton())
     await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
