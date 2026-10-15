@@ -221,6 +221,28 @@ def provide_content_jobs_worker_specs(
             ),
         ),
         stop_event_worker_spec(
+            name="calendar_sync_jobs_task",
+            worker_service=_run_calendar_sync_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "CALENDAR_SYNC_JOBS_WORKER_ENABLED",
+                "calendar",
+                default_stable=False,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="calendar_sync_scheduler_task",
+            worker_service=_run_calendar_sync_scheduler_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "CALENDAR_SYNC_SCHEDULER_ENABLED",
+                "calendar",
+                default_stable=False,
+            ),
+        ),
+        stop_event_worker_spec(
             name="chat_macros_jobs_task",
             worker_service=_run_chat_macros_jobs_worker_service,
             category="jobs",
@@ -1154,6 +1176,22 @@ def _run_reading_digest_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_reading_digest_jobs_worker(stop_event)
+
+
+def _run_calendar_sync_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
+        run_calendar_sync_worker as _run_calendar_sync_worker,
+    )
+
+    return _run_calendar_sync_worker(stop_event)
+
+
+def _run_calendar_sync_scheduler_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.calendar_sync_scheduler import (
+        run_calendar_sync_scheduler as _run_calendar_sync_scheduler,
+    )
+
+    return _run_calendar_sync_scheduler(stop_event)
 
 
 def _run_chat_macros_jobs_worker_service(stop_event: Any) -> Any:

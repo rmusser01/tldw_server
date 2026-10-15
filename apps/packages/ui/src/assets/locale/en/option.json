@@ -237,6 +237,9 @@
     "documentWorkspace": "Document Workspace",
     "modeRepo2txt": "Repo2Txt"
   },
+  "calendar": {
+    "nav": "Calendar"
+  },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",
     "activeModelFilter": "Model: {{value}}",
