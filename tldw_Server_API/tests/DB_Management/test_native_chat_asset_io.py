@@ -44,6 +44,12 @@ def native_fork_db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[C
         kwargs["backend"].get_pool().close_all()
 
 
+def test_empty_managed_transaction_is_reported_before_first_statement(native_fork_db: CharactersRAGDB) -> None:
+    with native_fork_db.transaction() as connection:
+        assert connection.in_transaction
+    assert not native_fork_db.get_connection().in_transaction
+
+
 def owner() -> AuthorizedNativeOwner:
     return AuthorizedNativeOwner("1", "native:1", NativeScopeV1(kind="global"))
 
@@ -381,15 +387,17 @@ def test_reclamation_drains_publisher_and_refuses_waiting_stale_writer(
         return original(**kwargs)
 
     monkeypatch.setattr(LocalSyncBlobStore, method, staticmethod(paused))
-    original_claim = db.native_assets.claim_reclamation
+    cleanup_io = _io(db, tmp_path, monkeypatch)
+    original_guard = cleanup_io._guard
 
+    @contextmanager
     def claimed(*args: Any, **kwargs: Any) -> Any:
-        result = original_claim(*args, **kwargs)
-        if result is not None:
-            reclaiming.set()
-        return result
+        # Reclamation enters the physical guard only after its fence commits.
+        reclaiming.set()
+        with original_guard(*args, **kwargs) as guarded:
+            yield guarded
 
-    monkeypatch.setattr(db.native_assets, "claim_reclamation", claimed)
+    monkeypatch.setattr(cleanup_io, "_guard", claimed)
 
     def run(action: str) -> Any:
         try:
@@ -397,7 +405,7 @@ def test_reclamation_drains_publisher_and_refuses_waiting_stale_writer(
                 return _chunk(io, generation) if stage == "chunk" else _publish(io, generation)
             if action == "waiting":
                 return _chunk(io, generation)
-            return io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one")
+            return cleanup_io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one")
         finally:
             db.close_connection()
 
@@ -678,14 +686,16 @@ def test_cross_process_publication_drain_and_death_preserve_the_quota_fence(
         assert parent.recv()[0] == "paused"
         _expire(db)
         claimed = threading.Event()
-        original_claim = db.native_assets.claim_reclamation
+        original_guard = io._guard
 
+        @contextmanager
         def claim(*args: Any, **kwargs: Any) -> Any:
-            candidate = original_claim(*args, **kwargs)
+            # Signal after the database fence commits, before waiting on the writer.
             claimed.set()
-            return candidate
+            with original_guard(*args, **kwargs) as guarded:
+                yield guarded
 
-        monkeypatch.setattr(db.native_assets, "claim_reclamation", claim)
+        monkeypatch.setattr(io, "_guard", claim)
 
         def cleanup() -> bool:
             try:

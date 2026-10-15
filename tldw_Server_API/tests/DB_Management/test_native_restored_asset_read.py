@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 def records(db):
     """Compare all durable asset authority; this reader must never revive a key."""
     return {
-        table: [dict(row) for row in db.execute_query("SELECT * FROM " + table).fetchall()]
+        table: [dict(row) for row in db.execute_query("SELECT * FROM " + table, read_only=True).fetchall()]
         for table in (
             "native_chat_operations",
             "native_chat_asset_candidates",

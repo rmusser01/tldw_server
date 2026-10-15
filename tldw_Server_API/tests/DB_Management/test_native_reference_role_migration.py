@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import ConstraintViolationError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import _reserve
@@ -118,7 +120,9 @@ def test_fresh_and_reopened_schema_accepts_only_explicit_finite_roles(
         db = CharactersRAGDB(**kwargs)
         assert snapshot(db) == before
         for invalid in ("image", "Message_image", "message_image ", "", "unavailable_v1"):
-            with pytest.raises(Exception, match="(?i)check constraint"):
+            error = ConstraintViolationError if backend_name == "postgres" else sqlite3.IntegrityError
+            match = None if backend_name == "postgres" else "(?i)check constraint"
+            with pytest.raises(error, match=match):
                 with db.transaction() as conn:
                     conn.execute("UPDATE native_chat_asset_references SET role = ?", (invalid,))
             assert snapshot(db) == before

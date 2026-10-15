@@ -673,7 +673,15 @@ class BackendConnectionWrapper:
     def in_transaction(self) -> bool:
         if self._backend.backend_type == BackendType.SQLITE:
             return self._connection.in_transaction
-        return True
+        state = self._operation_state
+        if state is None and self._operation_owned:
+            state = self._db._connection_state()
+        status = getattr(getattr(self._connection, "info", None), "transaction_status", None)
+        return bool(
+            getattr(state, "tx_depth", 0)
+            or self._backend._tx_depth(self._connection)
+            or getattr(status, "name", None) != "IDLE"
+        )
 
     def __getattr__(self, item):
         return getattr(self._connection, item)
