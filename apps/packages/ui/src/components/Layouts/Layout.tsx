@@ -775,7 +775,7 @@ function RootLayoutShell({
 
   // Memoized context value: an inline object literal here gave every shell
   // consumer a fresh value on each shell render (C-S5).
-  const shellContextValue = React.useMemo(
+  const shellContextValue = React.useMemo<LayoutShellContextValue>(
     () => ({ inShell: true, setOverrides }),
     [setOverrides]
   )
