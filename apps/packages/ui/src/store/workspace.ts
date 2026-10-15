@@ -1024,6 +1024,67 @@ const buildIndexedDbArtifactPayload = (
   return { payload, fields }
 }
 
+// 64-bit-flavored string hash (two independent 32-bit lanes + length): used
+// to recognize unchanged artifact payloads cheaply. A collision would need to
+// match both lanes AND the length; the fallback failure mode is one redundant
+// IndexedDB put, never data loss (a changed payload with a colliding hash
+// would skip a put whose stored record already holds different bytes — the
+// length lane makes that practically impossible for real payloads).
+const hashWorkspacePersistString = (value: string): string => {
+  let laneOne = 5381
+  let laneTwo = 52711
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    laneOne = (Math.imul(laneOne, 33) ^ code) >>> 0
+    laneTwo = (Math.imul(laneTwo, 31) + code) >>> 0
+  }
+  return `${value.length}:${laneOne}:${laneTwo}`
+}
+
+const hashWorkspaceArtifactPayload = (
+  payload: WorkspaceIndexedDbArtifactPayloadRecord["payload"]
+): string => {
+  const dataJson =
+    payload.data === undefined ? "" : JSON.stringify(payload.data)
+  return `${hashWorkspacePersistString(payload.content ?? "")}|${hashWorkspacePersistString(dataJson)}`
+}
+
+// Offload dedup registry (WP-16): adapter -> (record key -> payload hash +
+// the updatedAt the stored pointer carries). Scoped PER ADAPTER INSTANCE: the
+// production adapter is a module singleton, so its stamps faithfully describe
+// its IndexedDB records, while a freshly created adapter (tests, rollout
+// toggles) starts with an empty namespace instead of inheriting stamps for
+// records it does not hold. Entries are invalidated whenever the
+// corresponding IndexedDB record is deleted, so a removed-then-re-added
+// artifact with identical content is re-put rather than pointed at a deleted
+// record.
+const workspaceArtifactOffloadStampsByAdapter = new WeakMap<
+  WorkspaceIndexedDbAdapter,
+  Map<string, { hash: string; updatedAt: number }>
+>()
+
+const getWorkspaceArtifactOffloadStamps = (
+  adapter: WorkspaceIndexedDbAdapter
+): Map<string, { hash: string; updatedAt: number }> => {
+  let stamps = workspaceArtifactOffloadStampsByAdapter.get(adapter)
+  if (!stamps) {
+    stamps = new Map()
+    workspaceArtifactOffloadStampsByAdapter.set(adapter, stamps)
+  }
+  return stamps
+}
+
+const invalidateWorkspaceArtifactOffloadStamps = (
+  adapter: WorkspaceIndexedDbAdapter,
+  keys: Iterable<string>
+): void => {
+  const stamps = workspaceArtifactOffloadStampsByAdapter.get(adapter)
+  if (!stamps) return
+  for (const key of keys) {
+    stamps.delete(key)
+  }
+}
+
 const offloadWorkspaceSnapshotArtifacts = async (
   workspaceId: string,
   snapshot: WorkspaceSnapshot,
@@ -1036,13 +1097,33 @@ const offloadWorkspaceSnapshotArtifacts = async (
     return { snapshot, offloadedArtifactIds: new Set<string>() }
   }
 
-  const persistedArtifacts: PersistedWorkspaceArtifact[] = []
-  const offloadedArtifactIds = new Set<string>()
   const updatedAt = Date.now()
 
-  for (const artifact of snapshot.generatedArtifacts || []) {
+  type ArtifactOffloadOutcome =
+    | { kind: "inline"; artifact: GeneratedArtifact }
+    | {
+        kind: "pointer"
+        artifact: GeneratedArtifact
+        key: string
+        fields: Array<"content" | "data">
+        pointerUpdatedAt: number
+      }
+
+  const outcomes: ArtifactOffloadOutcome[] = []
+  const pendingPuts: Array<{
+    index: number
+    artifact: GeneratedArtifact
+    key: string
+    payload: WorkspaceIndexedDbArtifactPayloadRecord["payload"]
+    fields: Array<"content" | "data">
+    hash: string
+  }> = []
+
+  const artifacts = snapshot.generatedArtifacts || []
+  for (let index = 0; index < artifacts.length; index += 1) {
+    const artifact = artifacts[index]
     if (!artifact || typeof artifact.id !== "string") {
-      persistedArtifacts.push({ ...artifact })
+      outcomes.push({ kind: "inline", artifact })
       continue
     }
 
@@ -1051,42 +1132,86 @@ const offloadWorkspaceSnapshotArtifacts = async (
       fields.length === 0 ||
       estimateSerializedByteLength(payload) < WORKSPACE_ARTIFACT_OFFLOAD_MIN_BYTES
     ) {
-      persistedArtifacts.push({ ...artifact })
+      outcomes.push({ kind: "inline", artifact })
       continue
     }
 
     const key = buildWorkspaceIndexedDbArtifactRecordKey(workspaceId, artifact.id)
-    const didPersist = await indexedDbAdapter.putArtifactPayloadRecord({
-      key,
-      workspaceId,
-      artifactId: artifact.id,
-      payload,
-      updatedAt
-    })
+    const hash = hashWorkspaceArtifactPayload(payload)
+    const stamp = getWorkspaceArtifactOffloadStamps(indexedDbAdapter).get(key)
+    if (stamp && stamp.hash === hash) {
+      // Already offloaded with identical bytes: keep the existing record and
+      // the original pointer timestamp so the persisted snapshot value stays
+      // byte-stable for the per-workspace diff.
+      outcomes.push({
+        kind: "pointer",
+        artifact,
+        key,
+        fields,
+        pointerUpdatedAt: stamp.updatedAt
+      })
+      continue
+    }
 
-    if (!didPersist) {
-      persistedArtifacts.push({ ...artifact })
+    pendingPuts.push({ index, artifact, key, payload, fields, hash })
+    outcomes.push({ kind: "inline", artifact })
+  }
+
+  // Parallelize the remaining puts: one IndexedDB transaction per artifact,
+  // issued together instead of sequentially.
+  await Promise.all(
+    pendingPuts.map(async (entry) => {
+      const didPersist = await indexedDbAdapter.putArtifactPayloadRecord({
+        key: entry.key,
+        workspaceId,
+        artifactId: entry.artifact.id,
+        payload: entry.payload,
+        updatedAt
+      })
+      if (!didPersist) return
+
+      getWorkspaceArtifactOffloadStamps(indexedDbAdapter).set(entry.key, {
+        hash: entry.hash,
+        updatedAt
+      })
+      outcomes[entry.index] = {
+        kind: "pointer",
+        artifact: entry.artifact,
+        key: entry.key,
+        fields: entry.fields,
+        pointerUpdatedAt: updatedAt
+      }
+    })
+  )
+
+  const persistedArtifacts: GeneratedArtifact[] = []
+  const offloadedArtifactIds = new Set<string>()
+  for (const outcome of outcomes) {
+    if (outcome.kind === "inline") {
+      persistedArtifacts.push({ ...outcome.artifact })
       continue
     }
 
     const nextArtifact: PersistedWorkspaceArtifact = {
-      ...artifact,
+      ...outcome.artifact,
       [WORKSPACE_ARTIFACT_PAYLOAD_POINTER_KEY]: {
         offloadType: WORKSPACE_ARTIFACT_POINTER_KIND,
-        key,
-        fields,
-        updatedAt
+        key: outcome.key,
+        fields: outcome.fields,
+        updatedAt: outcome.pointerUpdatedAt
       }
     }
-    if (fields.includes("content")) {
+    if (outcome.fields.includes("content")) {
       delete nextArtifact.content
     }
-    if (fields.includes("data")) {
+    if (outcome.fields.includes("data")) {
       delete nextArtifact.data
     }
 
     persistedArtifacts.push(nextArtifact)
-    offloadedArtifactIds.add(artifact.id)
+    if (typeof outcome.artifact.id === "string") {
+      offloadedArtifactIds.add(outcome.artifact.id)
+    }
   }
 
   return {
@@ -1190,6 +1315,7 @@ const cleanupWorkspaceIndexedDbRecords = async (
   await indexedDbAdapter.deleteChatRecord(
     buildWorkspaceIndexedDbChatRecordKey(workspaceId)
   )
+  invalidateWorkspaceArtifactOffloadStamps(indexedDbAdapter, artifactKeys)
   await Promise.all(
     Array.from(artifactKeys, (key) =>
       indexedDbAdapter.deleteArtifactPayloadRecord(key)
@@ -1668,8 +1794,13 @@ const invalidateWorkspacePersistIndexStamp = (): void => {
   lastWrittenWorkspaceIndexValue = null
 }
 
-const clearWorkspacePersistStamps = (): void => {
+const clearWorkspacePersistStamps = (
+  indexedDbAdapter?: WorkspaceIndexedDbAdapter
+): void => {
   workspacePersistStamps.clear()
+  if (indexedDbAdapter) {
+    workspaceArtifactOffloadStampsByAdapter.delete(indexedDbAdapter)
+  }
   lastWrittenWorkspaceIndexValue = null
 }
 
@@ -1925,6 +2056,10 @@ const writeSplitWorkspacePersistence = async (
         for (const key of retainedArtifactKeys) {
           artifactPayloadKeysToDelete.delete(key)
         }
+        invalidateWorkspaceArtifactOffloadStamps(
+          indexedDbAdapter,
+          artifactPayloadKeysToDelete
+        )
         await Promise.all(
           Array.from(artifactPayloadKeysToDelete, (key) =>
             indexedDbAdapter.deleteArtifactPayloadRecord(key)
@@ -2525,7 +2660,7 @@ export const createWorkspaceStorage = (
       // resurrect the removed key after this returns), and the per-workspace
       // diff stamps describe storage that is about to be wiped.
       flushWorkspacePersistWrites()
-      clearWorkspacePersistStamps()
+      clearWorkspacePersistStamps(indexedDbAdapter)
       if (name === WORKSPACE_STORAGE_KEY) {
         const workspaceIds = getWorkspaceIdsFromStoredValue(
           localStorage.getItem(name)
