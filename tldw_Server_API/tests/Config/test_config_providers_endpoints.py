@@ -28,7 +28,7 @@ from tldw_Server_API.app.api.v1.endpoints.config_info import (
     load_safe_config,
     validate_provider_key,
 )
-from tldw_Server_API.app.core.AuthNZ import byok_testing
+from tldw_Server_API.app.core.AuthNZ import byok_testing, llm_provider_overrides
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
@@ -551,6 +551,21 @@ class TestConfigInfoSanitizedLogs:
 
 
 class TestListConfiguredProviders:
+    @pytest.fixture(autouse=True)
+    def healthy_empty_override_cache(self):
+        """Pure static-status tests bypass app-startup override initialization."""
+        with llm_provider_overrides._OVERRIDE_LOCK:
+            original = dict(llm_provider_overrides._OVERRIDE_CACHE)
+            healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+            ttl_enabled = not llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+        try:
+            yield
+        finally:
+            llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+                original, healthy=healthy, ttl_enabled=ttl_enabled,
+            )
+
     @pytest.mark.asyncio
     async def test_returns_provider_list_structure(self, monkeypatch):
         # Clear all provider env vars to get a clean state

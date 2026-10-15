@@ -18,8 +18,13 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
     get_api_keys,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
+)
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
+    capture_provider_override_call_snapshot,
 )
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config
@@ -111,6 +116,7 @@ _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     UnicodeDecodeError,
     ValueError,
+    ByokResolutionError,
     EgressPolicyError,
     NetworkError,
     RetryExhaustedError,
@@ -1832,6 +1838,7 @@ def get_configured_providers(
             is_configured = False
             endpoint_url: Optional[str] = None
             api_key_value: Optional[str] = None
+            override_disabled = False
 
             if provider_info['type'] == 'commercial':
                 # Check for API key
@@ -1840,6 +1847,24 @@ def get_configured_providers(
                 if api_key_field and config_section_exists and config_parser.has_option(section_name, api_key_field):
                     api_key = config_parser.get(section_name, api_key_field, fallback='')
                 api_key = valid_provider_api_key(api_key) or valid_provider_api_key(api_keys_by_provider.get(provider_name))
+                # Catalogs expose server-wide readiness, never principal-scoped BYOK.
+                override_snapshot = capture_provider_override_call_snapshot(provider_name)
+                try:
+                    fallback = override_snapshot.server_fallback(
+                        ServerFallbackCredentials(
+                            api_key=api_key,
+                            credential_fields={},
+                            app_config={},
+                        )
+                    )
+                except ByokResolutionError as error:
+                    if error.code != "invalid_provider_credentials":
+                        raise
+                    api_key = None
+                else:
+                    if fallback is not None:
+                        api_key = valid_provider_api_key(fallback.api_key)
+                override_disabled = override_snapshot.policy_error(None) is not None
                 if api_key:
                     is_configured = True
                     api_key_value = api_key
@@ -1941,9 +1966,13 @@ def get_configured_providers(
                 endpoint_url=endpoint_url,
                 api_key_value=api_key_value,
                 current_availability=(
-                    provider_envelope.get("availability")
-                    if isinstance(provider_envelope, dict)
-                    else None
+                    "disabled"
+                    if override_disabled
+                    else (
+                        provider_envelope.get("availability")
+                        if isinstance(provider_envelope, dict)
+                        else None
+                    )
                 ),
                 health_entry=health_report.get(provider_name),
                 supported_chat_providers=supported_chat_providers,

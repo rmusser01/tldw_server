@@ -25,7 +25,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
 )
 from tldw_Server_API.app.core import config as config_mod
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
     is_runtime_base_url_override,
@@ -34,6 +33,8 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     load_server_config_snapshot,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
     merge_server_fallback_snapshot,
     resolve_static_server_fallback_from_snapshot,
 )
@@ -41,6 +42,10 @@ from tldw_Server_API.app.core.AuthNZ.byok_testing import (
     provider_validation_public_error,
     test_provider_credentials,
 )
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
@@ -55,6 +60,9 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
     canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    valid_provider_api_key,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
@@ -706,9 +714,9 @@ class ProviderValidateResponse(BaseModel):
 async def list_configured_providers() -> ProvidersStatusResponse:
     """List all supported LLM providers and their configuration status.
 
-    Returns which providers have API keys set (from environment variables or
-    config.txt) without exposing the actual keys. Useful for admin dashboards
-    and first-run setup wizards to show a 'no providers configured' banner.
+    Returns which providers have API keys set (from static configuration or
+    enabled server overrides) without exposing the actual keys. Useful for admin
+    dashboards and first-run setup wizards to show a 'no providers configured' banner.
     """
     try:
         from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
@@ -735,13 +743,38 @@ async def list_configured_providers() -> ProvidersStatusResponse:
     for name in cloud_providers + local_providers + custom_providers:
         requires_key = PROVIDER_REQUIRES_KEY.get(name, True)
         api_key = _resolve_provider_key(name) if requires_key else None
+        override_present = False
+        override_disabled = False
+        if name in cloud_providers:
+            # Public status is server-wide, not the caller's principal-scoped BYOK.
+            try:
+                snapshot = capture_provider_override_call_snapshot(name)
+                fallback = snapshot.server_fallback(
+                    ServerFallbackCredentials(
+                        api_key=api_key, credential_fields={}, app_config={},
+                    )
+                )
+            except ByokResolutionError as error:
+                if error.code != "invalid_provider_credentials":
+                    raise HTTPException(
+                        status_code=503, detail="Provider configuration unavailable",
+                    ) from None
+                api_key = None
+            else:
+                override_present = fallback is not None
+                if fallback is not None:
+                    api_key = valid_provider_api_key(fallback.api_key)
+                override_disabled = snapshot.policy_error(None) is not None
 
         configured = bool(api_key) if requires_key else True
-        hint = _key_hint(api_key) if api_key else None
+        if override_disabled:
+            configured = False
+        # Never derive public hints/source metadata from encrypted overrides.
+        hint = _key_hint(api_key) if api_key and not override_present and configured else None
 
         # Determine source
         key_source: Optional[str] = None
-        if api_key:
+        if api_key and not override_present and configured:
             env_var = _PROVIDER_ENV_KEY_MAP.get(name)
             custom_number = custom_openai_provider_number(name)
             has_custom_env_key = (
