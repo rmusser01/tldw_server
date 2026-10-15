@@ -530,6 +530,58 @@ describe("OptionLayout shell overrides", () => {
       expect(unmounted).not.toHaveBeenCalled()
     }
   )
+
+  it("does not re-render shell context consumers when sibling shell state changes (WP-10)", async () => {
+    delete (
+      globalThis as typeof globalThis & { __tldwOptionShell?: unknown }
+    ).__tldwOptionShell
+
+    const consumerRenders = { count: 0 }
+
+    // A LayoutShellContext consumer: re-renders when the context VALUE
+    // identity changes (a sibling-state-driven shell re-render must not
+    // produce a new value).
+    function ShellConsumerProbe() {
+      consumerRenders.count += 1
+      useOptionLayoutShellOverrides(null)
+      return <div data-testid="shell-consumer-probe">Probe</div>
+    }
+
+    const view = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <OptionLayout>
+          <ShellConsumerProbe />
+        </OptionLayout>
+      </MemoryRouter>
+    )
+
+    const probe = view.getByTestId("shell-consumer-probe")
+    await waitFor(() => expect(consumerRenders.count).toBeGreaterThanOrEqual(1))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const baseline = consumerRenders.count
+
+    const shell = (
+      globalThis as typeof globalThis & {
+        __tldwOptionShell?: { setOverrides?: (overrides: unknown) => void }
+      }
+    ).__tldwOptionShell
+    expect(shell?.setOverrides).toBeTypeOf("function")
+
+    // Sibling state change inside the shell: the overrides state updates and
+    // the whole shell subtree re-renders (observed via the header hiding).
+    act(() => {
+      shell!.setOverrides!({ hideHeader: true, hideSidebar: true, sourcePath: "/chat" })
+    })
+
+    await waitFor(() => {
+      expect(probe.parentElement?.className).toContain("items-center")
+    })
+
+    // ...but the context consumer did not re-render.
+    expect(consumerRenders.count).toBe(baseline)
+  })
 })
 
 describe("OptionLayout bypass block (#2889)", () => {
