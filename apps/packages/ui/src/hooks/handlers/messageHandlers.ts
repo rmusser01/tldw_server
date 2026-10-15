@@ -1,6 +1,6 @@
 import i18n from "i18next"
 import { getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
-import type { UploadedFile } from "@/db"
+import type { UploadedFile } from "@/db/dexie/types"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
 import {
   type ForkDispatchClaim,
