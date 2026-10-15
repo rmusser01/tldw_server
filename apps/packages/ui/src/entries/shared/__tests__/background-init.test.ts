@@ -374,6 +374,44 @@ describe("background clipper rollout guard", () => {
     await flushPromises()
   })
 
+  it("cold start warms models non-forced so fresh-cache wakes are no-ops", async () => {
+    await initBackground({
+      storage: storage as never,
+      contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+      saveToClipperMenuId: "save-to-clipper-pa",
+      saveToCompanionMenuId: "save-to-companion-pa",
+      saveToNotesMenuId: "save-to-notes-pa",
+      narrateSelectionMenuId: "narrate-selection-pa",
+      transcribeMenuId: {
+        transcribe: "transcribe-media-pa",
+        transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+      },
+      warmModels,
+      capabilities: {
+        sendToTldw: false,
+        processLocal: false,
+        transcribe: false,
+        openApiCheck: false
+      },
+      onActionIconClickChange: vi.fn(),
+      onContextMenuClickChange: vi.fn()
+    })
+
+    // WP-61: the cold-start warm must NOT force a refresh_openrouter=true
+    // round trip on every worker wake; warmModels(false) returns the
+    // 15-min TTL catalog without network traffic while fresh.
+    expect(warmModels).toHaveBeenCalledTimes(1)
+    expect(warmModels).toHaveBeenCalledWith(false)
+
+    // The periodic warm alarm stays scheduled (relaxed 6h cadence); the
+    // alarm handler's isCatalogFresh() gate plus the TTL keep idle fires
+    // no-ops.
+    expect(mocks.alarmsCreate).toHaveBeenCalledWith(
+      "tldw:model-warm",
+      expect.objectContaining({ periodInMinutes: 360 })
+    )
+  })
+
   it("removes the clipper menu after config changes to a server without clipper support", async () => {
     await initBackground({
       storage: storage as never,
