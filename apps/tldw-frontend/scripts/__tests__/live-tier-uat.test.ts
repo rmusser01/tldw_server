@@ -357,6 +357,10 @@ describe("live Tier UAT runner contract", () => {
       baseEnv: { NODE_ENV: "test", PATH: process.env.PATH },
     })
 
+    for (const command of [commands.authInit, commands.backend]) {
+      expect(command.cwd).toBe(profile.runDir)
+      expect(command.env.PYTHONPATH.split(path.delimiter)).toContain(repoRoot)
+    }
     expect(commands.playwrightList.args).toEqual(expect.arrayContaining([
       "test", "--list", "--project=tier-1", "--project=tier-2",
     ]))

@@ -10,6 +10,7 @@ import { type Locator, expect } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { expectApiCall } from "../api-assertions"
 import { waitForConnection } from "../helpers"
+import { isMenuPointerReady } from "../menu-pointer-readiness"
 
 export interface CreateNoteOptions {
   title: string
@@ -263,17 +264,19 @@ export class NotesPage extends BasePage {
     // The submenu's accessible name includes its expand icon ("Export right").
     const exportMenuItem = this.page.getByRole("menuitem", { name: /^export\b/i })
     await expect(exportMenuItem).toBeVisible({ timeout: 10_000 })
+    await expect.poll(() => exportMenuItem.evaluate(isMenuPointerReady), {
+      timeout: 10_000, message: "Export menu receives pointer input before opening the flyout"
+    }).toBe(true)
     await exportMenuItem.hover()
+    await expect(exportMenuItem).toHaveAttribute("aria-expanded", "true")
 
     await expect(this.printExportMenuItem).toBeVisible({ timeout: 10_000 })
-    // The entering flyout can move after visibility, before pointer actionability settles.
-    await expect.poll(() => this.printExportMenuItem.evaluate(async (item) => {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      for (let ancestor: Element | null = item; ancestor; ancestor = ancestor.parentElement) {
-        if (ancestor.getAnimations().some((animation) => animation.playState === "running" || animation.pending)) return false
-      }
-      return true
-    }), { timeout: 10_000, message: "Print flyout finishes entering before pointer export" }).toBe(true)
+    // A closing popup may be motionless and visible while pointer input reaches the editor.
+    await expect.poll(async () =>
+      await exportMenuItem.getAttribute("aria-expanded") === "true" &&
+      await this.printExportMenuItem.evaluate(isMenuPointerReady), {
+      timeout: 10_000, message: "Open Print flyout receives pointer input before export"
+    }).toBe(true)
     await this.printExportMenuItem.hover()
     await this.printExportMenuItem.click()
   }

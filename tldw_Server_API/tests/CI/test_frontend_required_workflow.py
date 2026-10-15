@@ -147,3 +147,17 @@ def test_frontend_coverage_reports_both_package_owned_suites() -> None:
         assert step["timeout-minutes"] == 17
         assert "timeout --kill-after=30s 15m bun run test:coverage" in step["run"]
     assert "--exclude" not in reports["apps/packages/ui"]["run"]
+
+
+@pytest.mark.unit
+def test_ux_gates_use_explicit_playwright_browser_instead_of_puppeteer_download() -> None:
+    data = yaml.safe_load(Path(".github/workflows/frontend-ux-gates.yml").read_text())
+    for name in ("onboarding-gate", "smoke-gate"):
+        steps = data["jobs"][name]["steps"]
+        install = next(step for step in steps if step.get("name") == "Install frontend dependencies")
+        assert install["env"]["PUPPETEER_SKIP_DOWNLOAD"] == "true"
+        assert install["run"] == "bun install --frozen-lockfile"
+        browser = next(step for step in steps if step.get("name") == "Install Playwright Chromium")
+        assert "playwright install --with-deps chromium" in browser["run"]
+        assert not browser.get("continue-on-error", False)
+        assert steps.index(install) < steps.index(browser)
