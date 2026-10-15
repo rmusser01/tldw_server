@@ -43,6 +43,19 @@ It complements the other doc families:
 - [evaluations.md](./evaluations.md) — unified eval service and runner, webhook delivery, recipe runs, the persona judge contract, core-only WordBench
 - [audio.md](./audio.md) — STT/TTS: normalization layer, TTS v2 adapter stack and gateway fallback, long-form jobs, OpenAI-compatible transcriptions, realtime streaming
 
+### Client surfaces and remaining cores
+
+- [admin-ui.md](./admin-ui.md) — the sysadmin console: separate stack, same-origin token-stripping proxy, edge-middleware auth, triple-gated API-key login, E2E lanes
+- [sdks.md](./sdks.md) — client packages: voice SDKs (with honest maintenance states), the ADR-065 api-types drift gate, the shared UI workspace, the personal-context contract library
+- [watchlists.md](./watchlists.md) — feed/site monitoring core: sources, checks, runs, alert rules, the chatbook sync surface
+- [claims-extraction.md](./claims-extraction.md) — claims engine: extractors, verifiers, ingestion-time claims storage, relation to RAG claims
+- [codegraph.md](./codegraph.md) — the code-structure graph
+- [image-generation.md](./image-generation.md) — providers, validation, jobs, artifacts, quotas, the VN generation tie-in
+- [buddy.md](./buddy.md) — the companion subsystem server-side: sessions, packs, effect replay
+- [mock-openai-server.md](./mock-openai-server.md) — the deterministic test double for provider-dependent tests
+- [agent-orchestration-acp.md](./agent-orchestration-acp.md) — agent run orchestration and the Agent Client Protocol surface
+- [governance-billing.md](./governance-billing.md) — governance rule resolution deep dive; billing enforcement, plan tiers, RG integration
+
 ## Cross-links into `Docs/Code_Documentation/` (freshness audit)
 
 These existing guides were spot-checked against code while writing this reference:
@@ -78,4 +91,4 @@ In-module READMEs (`app/core/*/README.md`) were consistently current and are the
 
 ## Not yet covered
 
-Areas without a doc here yet (candidates): the admin-webui frontend (`admin-ui/`), the SDKs (`sdks/`), Watchlists core (feed/site monitoring — distinct from external connectors), Claims Extraction core, CodeGraph, Image Generation, Buddy, Governance deep-dive, Billing deep-dive, agent orchestration/ACP, and the mock OpenAI server. Until a doc exists here, the ADR set, module READMEs, and `Docs/Code_Documentation/` are the reference for those areas.
+Areas without a doc here yet (candidates): the `apps/` monorepo apps in depth (WebUI beyond the port map, the browser extension), Flashcards/Audiobooks/Audio_Studio cores, Explainer, File_Artifacts, Data_Tables, Collections, Chat_Workflows deep-dives, Integrations, and the Setup UI. Until a doc exists here, the ADR set, module READMEs, and `Docs/Code_Documentation/` are the reference for those areas.
