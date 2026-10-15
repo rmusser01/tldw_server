@@ -324,7 +324,7 @@ export const SidePanelBody = ({
                   generationInfo={message?.generationInfo}
                   toolCalls={message?.toolCalls}
                   toolResults={message?.toolResults}
-                  isStreaming={streaming}
+                  isStreaming={streaming && index === messages.length - 1}
                   reasoningTimeTaken={message?.reasoning_time_taken}
                   openReasoning={openReasoning}
                   modelImage={message?.modelImage}

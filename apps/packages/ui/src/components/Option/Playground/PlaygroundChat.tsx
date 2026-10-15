@@ -506,9 +506,6 @@ export const PlaygroundChat = ({
       }
     >()
   )
-  React.useEffect(() => {
-    researchActionsCacheRef.current.clear()
-  }, [conversationInstanceId])
   const getRowResearchActions = React.useCallback(
     (
       messageId: string | undefined,
@@ -1444,7 +1441,7 @@ export const PlaygroundChat = ({
                 generationInfo={message?.generationInfo}
                 toolCalls={message?.toolCalls}
                 toolResults={message?.toolResults}
-                isStreaming={streaming}
+                isStreaming={streaming && block.index === messages.length - 1}
                 reasoningTimeTaken={message?.reasoning_time_taken}
                 openReasoning={openReasoning}
                 modelImage={message?.modelImage}
