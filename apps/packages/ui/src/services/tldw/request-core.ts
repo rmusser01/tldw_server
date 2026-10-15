@@ -53,6 +53,27 @@ export type TldwRequestPayload = {
 
 type TldwConfigLike = Record<string, any> | null | undefined;
 
+/**
+ * Credential strategy for transport Stage B (ADR-065 / TASK-13526): lets a
+ * runtime (the web shell, in Stage B2) supply its own auth headers instead
+ * of the default tldwConfig-driven resolution. Default (undefined) keeps the
+ * exact current behavior.
+ */
+export type TldwCredentialResolution =
+  | { headers: Record<string, string> }
+  | { error: { status: number; error: string } };
+
+export type TldwCredentialContext = {
+  cfg: TldwConfigLike;
+  method: string;
+  isUnsafeMethod: boolean;
+  cookieSession: boolean;
+  hostedMode: boolean;
+  shouldSkipAuth: boolean;
+  runtimeApiKey: string;
+  existingHeaders: Record<string, string>;
+};
+
 type TldwRequestRuntime = {
   getConfig: () => Promise<TldwConfigLike>;
   refreshAuth?: () => Promise<void>;
@@ -62,6 +83,15 @@ type TldwRequestRuntime = {
     snapshot: RecipeRequestTransportSnapshot,
   ) => Promise<string | number | null>;
   dispatchAuthority?: RecipeDispatchAuthority;
+  /**
+   * Optional credential strategy (Stage B). When present, the default
+   * auth-header resolution in performTldwRequest is replaced by this
+   * callback's result. The callback owns stripping/replacing the
+   * authorization / x-api-key / x-csrf-token headers it needs to.
+   */
+  resolveCredentials?: (
+    context: TldwCredentialContext,
+  ) => TldwCredentialResolution;
 };
 
 export const readBrowserCookie = (name: string): string | null => {
@@ -235,14 +265,43 @@ const readBoundedArrayBuffer = async (response: Response, maxBytes: number, sign
   }
 };
 
-const performTldwRequest = async (
+/**
+ * Stage B (ADR-065 / TASK-13526): pure pre-flight resolution shared by
+ * performTldwRequest and (in transport Stage B2) the web shell's raw-response
+ * transport. Returns the resolved URL, seed headers, transport diagnostics,
+ * and the config context the auth/recipe stages need — or the same
+ * guard-failure envelope performTldwRequest has always returned.
+ */
+export const resolveTldwRequestPlan = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime,
-  dispatch?: {
-    value: RecipePersistenceDispatch;
-    receipt?: RecipeDeliveryReceipt;
-  },
-): Promise<ApiSendResponse> => {
+): Promise<
+  | {
+      ok: true;
+      plan: {
+        method: string;
+        body: unknown;
+        abortSignal?: AbortSignal;
+        responseType?: "json" | "text" | "arrayBuffer";
+        maxResponseBytes?: number;
+        overrideTimeoutMs?: number;
+        noAuth: boolean;
+        cfg: TldwConfigLike;
+        fetchFn: typeof fetch;
+        normalizedPath: string | undefined;
+        isAbsolute: boolean;
+        sameOriginAbsoluteUrl: boolean;
+        hostedMode: boolean;
+        cookieSession: boolean;
+        url: string;
+        headers: Record<string, string>;
+        isBinaryBody: (value: any) => boolean;
+        pageOrigin: string | null;
+        shouldSkipAuth: boolean;
+      };
+    }
+  | { ok: false; status: number; error: string }
+> => {
   const {
     path,
     method = "GET",
@@ -370,6 +429,67 @@ const performTldwRequest = async (
   ) {
     h["Content-Type"] = "application/json";
   }
+  return {
+    ok: true,
+    plan: {
+      method,
+      body,
+      abortSignal,
+      responseType,
+      maxResponseBytes,
+      overrideTimeoutMs,
+      noAuth,
+      cfg,
+      fetchFn,
+      normalizedPath,
+      isAbsolute,
+      sameOriginAbsoluteUrl,
+      hostedMode,
+      cookieSession,
+      url,
+      headers: h,
+      isBinaryBody,
+      pageOrigin,
+      shouldSkipAuth,
+    },
+  };
+};
+
+const performTldwRequest = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+  dispatch?: {
+    value: RecipePersistenceDispatch;
+    receipt?: RecipeDeliveryReceipt;
+  },
+): Promise<ApiSendResponse> => {
+  const resolvedPlan = await resolveTldwRequestPlan(payload, runtime);
+  if (!resolvedPlan.ok) {
+    return { ok: false, status: resolvedPlan.status, error: resolvedPlan.error };
+  }
+  const {
+    method,
+    body,
+    abortSignal,
+    responseType,
+    maxResponseBytes,
+    overrideTimeoutMs,
+    noAuth,
+    cfg,
+    fetchFn,
+    normalizedPath,
+    isAbsolute,
+    sameOriginAbsoluteUrl,
+    hostedMode,
+    cookieSession,
+    url: resolvedUrl,
+    headers: h,
+    isBinaryBody,
+    pageOrigin,
+    shouldSkipAuth,
+  } = resolvedPlan.plan;
+  let url = resolvedUrl;
+
   const runtimeApiKey =
     runtime.useRuntimeAuthOverride === false
       ? ""
@@ -438,6 +558,32 @@ const performTldwRequest = async (
         };
       }
     }
+  } else if (runtime.resolveCredentials) {
+    // Stage B credential strategy (ADR-065): the runtime owns auth headers.
+    const resolution = runtime.resolveCredentials({
+      cfg,
+      method,
+      isUnsafeMethod: isUnsafeMethod(method),
+      cookieSession,
+      hostedMode,
+      shouldSkipAuth,
+      runtimeApiKey,
+      existingHeaders: h,
+    });
+    if ("error" in resolution) {
+      return { ok: false, status: resolution.error.status, error: resolution.error.error };
+    }
+    for (const k of Object.keys(h)) {
+      const kl = k.toLowerCase();
+      if (
+        kl === "x-api-key" ||
+        kl === "authorization" ||
+        kl === "x-csrf-token"
+      ) {
+        delete h[k];
+      }
+    }
+    Object.assign(h, resolution.headers);
   } else if (cookieSession) {
     for (const k of Object.keys(h)) {
       const kl = k.toLowerCase();
