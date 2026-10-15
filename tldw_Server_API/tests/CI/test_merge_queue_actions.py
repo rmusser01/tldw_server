@@ -1642,7 +1642,7 @@ def _old_green():
 
 
 def test_an_old_green_head_that_dev_has_moved_past_is_rebased_not_evicted_as_stuck():
-    """Spec section 6, the stuck row (TASK-34948 in tldw_chatbook): right after a merge the next PR's
+    """Spec section 6, the stuck row (TASK-35025 in tldw_chatbook): right after a merge the next PR's
     merge state can still read up to date while its green runs are hours old."""
     gh = FakeGh([_node(1, state="CLEAN")], behind_by={OLD: 2}, **_old_green())
     decision = _run(gh)[0][1]

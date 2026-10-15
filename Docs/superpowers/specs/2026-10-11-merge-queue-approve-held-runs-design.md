@@ -144,7 +144,7 @@ gate runs, delete the other held runs, cancel the old head's live runs, comment 
 PR as stuck, or waiting on a green PR for auto-merge, the queue asks `compare/dev...<head>` and rebases instead when
 `dev` has commits the head lacks; auto-merge cannot fire on a head that is behind. Right after a
 merge the next PR's merge state can still read up to date while its green runs are hours old; tldw_chatbook evicted
-#3070 twice that way on 2026-10-11 (TASK-34948, PR #3103).
+#3070 twice that way on 2026-10-11 (TASK-35025, PR #3103).
 
 **Section 7, actions.** The rules of the chatbook spec's sections 7 and 8 apply as written there, with "the required
 check" read as "each of the six gate contexts". The ones that matter most:

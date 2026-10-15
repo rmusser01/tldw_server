@@ -1581,7 +1581,7 @@ def _old_green():
 
 
 def test_an_old_green_head_that_dev_has_moved_past_is_rebased_not_evicted_as_stuck():
-    """Spec section 6, the stuck row (TASK-34948 in tldw_chatbook): right after a merge the next PR's
+    """Spec section 6, the stuck row (TASK-35025 in tldw_chatbook): right after a merge the next PR's
     merge state can still read up to date while its green runs are hours old."""
     gh = FakeGh([_node(1, state="CLEAN")], behind_by={OLD: 2}, **_old_green())
     decision = _run(gh)[0][1]
@@ -1910,7 +1910,7 @@ def _decide(gh: GhApi, pr: PrState, mode: str, now: Callable[[], datetime],
     action = decide_front(pr, now())
     if action.slug in ("stuck", "green"):
         # Right after a merge the next PR's merge state can still read up to date (tldw_chatbook
-        # #3070, TASK-34948). Auto-merge cannot fire on a head that is behind, so a green head is
+        # #3070, TASK-35025). Auto-merge cannot fire on a head that is behind, so a green head is
         # checked against dev before the queue waits on it or evicts it as stuck. One GET.
         compare = gh.rest("GET", f"repos/{REPO}/compare/{BASE}...{pr.head_sha}?per_page=1") or {}
         if compare.get("behind_by", 0) > 0:
