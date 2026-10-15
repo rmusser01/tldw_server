@@ -701,6 +701,16 @@ const PlaygroundMessageImpl = (props: Props) => {
       minute: "2-digit"
     })
   }, [props.createdAt, props.generationInfo])
+  // Search highlighting (WP-09): memoized so re-renders caused by unrelated
+  // prop changes (streaming flags, toggles, action metadata) do not re-run
+  // the regex split for unchanged message + query pairs.
+  const highlightedMessage = React.useMemo(
+    () =>
+      props.searchQuery
+        ? highlightText(props.message, props.searchQuery)
+        : props.message,
+    [props.message, props.searchQuery]
+  )
   const fallbackAudit = React.useMemo(
     () => resolveFallbackAudit(props.generationInfo),
     [props.generationInfo]
@@ -2879,9 +2889,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                     "italic text-text-muted text-body"
                   }
                   `}>
-                  {props.searchQuery
-                    ? highlightText(props.message, props.searchQuery)
-                    : props.message}
+                  {highlightedMessage}
                 </p>
               )
             ) : (
