@@ -231,7 +231,7 @@ describe("ConversationTab real AntD numeric controls", () => {
 
   it("stages all six numeric edits until Apply and restores them through owned storage after reopening", async () => {
     const view = mountConversation(false)
-    await screen.findByRole("spinbutton", { name: "Depth" })
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Depth" })).toBeEnabled())
     for (const [name, value] of [
       ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
       ["Rep pen", "1.35"], ["Threshold", "30"], ["Recent window", "8"]
@@ -259,16 +259,17 @@ describe("ConversationTab real AntD numeric controls", () => {
     expect(memory.chatHistories.rows.size).toBe(1)
     view.unmount()
     mountConversation(false)
-    await screen.findByRole("spinbutton", { name: "Depth" })
-    for (const [name, value] of [
-      ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
-      ["Rep pen", "1.35"], ["Threshold", "30"], ["Recent window", "8"]
-    ]) {
-      const input = screen.getByLabelText(name, { selector: "input" })
-      expect(input).toHaveAttribute("role", "spinbutton")
-      expect(input).toBeVisible()
-      expect(input).toHaveValue(value)
-    }
+    await waitFor(() => {
+      for (const [name, value] of [
+        ["Depth", "5"], ["Temp", "1.25"], ["Top-p", "0.65"],
+        ["Rep pen", "1.35"], ["Threshold", "30"], ["Recent window", "8"]
+      ]) {
+        const input = screen.getByLabelText(name, { selector: "input" })
+        expect(input).toHaveAttribute("role", "spinbutton")
+        expect(input).toBeVisible()
+        expect(input).toHaveValue(value)
+      }
+    })
   }, 10_000)
 
   it("recovers a lost acknowledgement after Cancel and remount without replaying the committed settings PUT", async () => {
