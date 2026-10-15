@@ -17,6 +17,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel";
 import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions";
 import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag";
@@ -296,7 +297,7 @@ describe("mounted Knowledge research import", () => {
             finish = resolve
           }),
       )
-      const view = render(<ResearchWorkspace />)
+      const view = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
       await waitFor(() =>
         expect(mocks.details).toHaveBeenCalledWith(
           101,
@@ -345,7 +346,7 @@ describe("mounted Knowledge research import", () => {
       await queueResearchWorkspacePrefill(handoff, "alice")
       mocks.upload.mockResolvedValue({ media_id: 101 })
       mocks.details.mockImplementation(() => new Promise(() => {}))
-      const first = render(<ResearchWorkspace />)
+      const first = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
       await waitFor(async () =>
         expect(await consumeResearchWorkspacePrefill("alice")).toBeNull(),
       )
@@ -363,7 +364,7 @@ describe("mounted Knowledge research import", () => {
             finish = resolve
           }),
       )
-      const second = render(<ResearchWorkspace />)
+      const second = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
       await waitFor(() => expect(finish).toBeTypeOf("function"))
       await act(async () => {
         finish({
@@ -2179,7 +2180,7 @@ it("waits for server workspace confirmation before starting a fresh canonical im
   )
   await queueResearchWorkspacePrefill(handoff, "alice")
   mocks.upload.mockResolvedValue({ media_id: 101 })
-  const view = render(<ResearchWorkspace />)
+  const view = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
   try {
     await waitFor(() => expect(client.upsertWorkspace).toHaveBeenCalled())
     await act(async () => {
