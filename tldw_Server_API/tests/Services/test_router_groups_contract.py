@@ -11715,7 +11715,7 @@ def test_iter_admin_router_specs_populates_expected_specs(monkeypatch: pytest.Mo
     assert by_first_path["/sandbox/status"].tags == ("sandbox",)
     assert by_first_path["/sandbox/status"].route_key == "sandbox"
     assert by_first_path["/sandbox/status"].default_stable is False
-    assert by_key["billing"].prefix == "/api/v1"
+    assert by_key["billing"].prefix == "/api/v1/admin"
     assert by_key["billing"].tags == ("billing",)
     assert by_key["mcp-catalogs"].prefix == "/api/v1"
     assert by_key["mcp-catalogs"].tags == ()
