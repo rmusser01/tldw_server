@@ -128,7 +128,7 @@ def _evaluate(expression: str, values: dict[str, str], cancelled: bool = False) 
 def test_gate_declares_an_optional_base_sha_dispatch_input(name):
     """Without the input a dispatch compares against HEAD^ and can no-op with nothing tested."""
     inputs = _triggers(name)["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"base_sha"}
+    assert set(inputs) == ({"base_sha", "queue_kick", "wait_run"} if name == "security-required.yml" else {"base_sha"})
     assert inputs["base_sha"]["type"] == "string"
     assert inputs["base_sha"]["required"] is False
 
@@ -246,6 +246,8 @@ class Row(NamedTuple):
             "needs.await_license.result": self.awaited,
             "needs.await_license.outputs.license_passed": self.license_passed,
             "needs.changes.result": self.changes,
+            "github.event.inputs.queue_kick": "",
+            "github.ref": "refs/pull/1/merge",
         }
 
 
@@ -372,6 +374,8 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
             "needs.await_license.result": awaited,
             "needs.await_license.outputs.license_passed": passed,
             "needs.changes.result": "skipped",
+            "github.event.inputs.queue_kick": "",
+            "github.ref": "refs/pull/1/merge",
         }
         assert _evaluate(gate["if"], values), (awaited, passed)
         assert _evaluate(refusal["if"], values), (awaited, passed)
@@ -382,6 +386,8 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
         "needs.await_license.result": "success",
         "needs.await_license.outputs.license_passed": "true",
         "needs.changes.result": "success",
+        "github.event.inputs.queue_kick": "",
+        "github.ref": "refs/pull/1/merge",
     }
     assert not _evaluate(refusal["if"], passing)
 
@@ -389,57 +395,108 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
 # --- 4.6: waking the queue after a red gate ---------------------------------------------------
 
 
-@pytest.mark.parametrize("name", GATES)
-def test_queue_tick_runs_the_queue_from_dev_with_the_queue_permissions(name):
+KICK_RUN = (
+    'gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" '
+    '-f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"'
+)
+
+
+# All six gate workflows. GATES above leaves out frontend-required.yml, which its own test file covers.
+TICK_GATES = {**GATES, "frontend-required.yml": "frontend-required"}
+
+
+@pytest.mark.parametrize("name", TICK_GATES)
+def test_queue_tick_only_sends_a_kick(name):
+    """Spec 4.6: the tick cannot re-run its own still-running run, so it asks a kick on dev to wait
+    for it and run the queue. It needs nothing but `actions: write` and no checkout."""
     jobs = _wf(name)["jobs"]
-    gate = GATES[name]
-    assert jobs[gate]["name"] == gate, "the gate job's name is the required context"
+    gate = TICK_GATES[name]
     tick = dict(jobs["queue-tick"])
-    tick.pop("if")  # covered by test_queue_tick_runs_only_after_a_failed_gate_while_the_queue_is_enabled
-    queue = _wf("merge-queue.yml")["jobs"]["queue"]  # pinned by test_merge_queue_workflow.py
+    tick.pop("if")
     assert tick == {
         "name": "Merge queue tick",
         "needs": [gate],
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 10,
-        "permissions": queue["permissions"],
-        "steps": queue["steps"],
+        "timeout-minutes": 5,
+        "permissions": {"actions": "write"},
+        "steps": [{
+            "name": "Wake the merge queue",
+            "env": {"GH_TOKEN": "${{ github.token }}", "REPOSITORY": "${{ github.repository }}",
+                    "RUN_ID": "${{ github.run_id }}"},
+            "run": KICK_RUN,
+        }],
     }
-    assert queue["steps"][0]["with"] == {"ref": "dev", "persist-credentials": False}
-    checkouts = set(re.findall(r"actions/checkout@\S+", _text(name)))
-    assert checkouts == {queue["steps"][0]["uses"]}, "one pinned checkout action per workflow"
 
 
-@pytest.mark.parametrize("name", GATES)
-def test_queue_tick_runs_only_after_a_failed_gate_while_the_queue_is_enabled(name):
+@pytest.mark.parametrize("name", TICK_GATES)
+def test_queue_tick_runs_only_after_a_failed_gate_on_a_same_repo_pull_request(name):
     condition = _wf(name)["jobs"]["queue-tick"]["if"]
-    events = [  # (event, PR head repository)
-        ("workflow_dispatch", ""),
-        ("pull_request", "owner/repo"),
-        ("pull_request", "fork/repo"),
-        ("workflow_run", ""),
-        ("push", ""),
-    ]
+    events = [("workflow_dispatch", ""), ("pull_request", "owner/repo"), ("pull_request", "fork/repo"),
+              ("workflow_run", ""), ("push", "")]
     ran = 0
     for (event, head_repo), result, mode, cancelled in product(
         events, ("failure", "success", "skipped", "cancelled"), ("", "off", "dry", "on"), (False, True)
     ):
         values = {
-            f"needs.{GATES[name]}.result": result,
+            f"needs.{TICK_GATES[name]}.result": result,
             "vars.MERGE_QUEUE": mode,
             "github.event_name": event,
             "github.event.pull_request.head.repo.full_name": head_repo,
             "github.repository": "owner/repo",
         }
-        expected = (
-            not cancelled
-            and result == "failure"
-            and mode in ("dry", "on")
-            and (event, head_repo) in (("workflow_dispatch", ""), ("pull_request", "owner/repo"))
-        )
+        expected = (not cancelled and result == "failure" and mode in ("dry", "on")
+                    and (event, head_repo) == ("pull_request", "owner/repo"))
         assert _evaluate(condition, values, cancelled) is expected, (event, head_repo, result, mode, cancelled)
         ran += expected
-    assert ran == 4  # two events x two modes: with MERGE_QUEUE unset it never runs
+    assert ran == 2  # one event x two modes: never on a dispatch, never with MERGE_QUEUE unset
+
+
+def _kick_values(event, flag, ref, mode="on"):
+    return {"github.event_name": event, "github.event.inputs.queue_kick": flag, "github.ref": ref,
+            "vars.MERGE_QUEUE": mode}
+
+
+def test_the_kick_job_runs_only_for_a_flagged_dispatch_on_dev_with_the_queue_enabled():
+    job = _wf("security-required.yml")["jobs"]["queue-kick"]
+    for event, flag, ref, mode in product(("workflow_dispatch", "pull_request"), ("true", "false", ""),
+                                          ("refs/heads/dev", "refs/heads/feat/x"), ("", "off", "dry", "on")):
+        expected = event == "workflow_dispatch" and flag == "true" and ref == "refs/heads/dev" and mode in ("dry", "on")
+        assert _evaluate(job["if"], _kick_values(event, flag, ref, mode)) is expected, (event, flag, ref, mode)
+
+
+def test_the_kick_job_is_the_queue_job_reading_wait_run():
+    job = dict(_wf("security-required.yml")["jobs"]["queue-kick"])
+    job.pop("if")
+    queue = _wf("merge-queue.yml")["jobs"]["queue"]
+    steps = [dict(step) for step in queue["steps"]]
+    steps[1] = dict(steps[1], env={**steps[1]["env"], "WAIT_RUN": "${{ github.event.inputs.wait_run }}"})
+    assert job == {"name": "Merge queue kick", "runs-on": "ubuntu-latest", "timeout-minutes": queue["timeout-minutes"],
+                   "permissions": queue["permissions"], "steps": steps}
+    assert queue["timeout-minutes"] == 15, "a kick may wait 3 minutes and then re-run up to six gates"
+
+
+def test_security_required_kick_skips_every_gate_job_only_on_dev():
+    """Spec 4.6: a flagged dispatch on dev runs only the kick; on any other ref, or without the flag,
+    the gate jobs run as today."""
+    jobs = _wf("security-required.yml")["jobs"]
+    for job_id in ("changes", "security-required"):
+        condition = jobs[job_id]["if"]
+        assert ("always() && !cancelled() && (github.event.inputs.queue_kick != 'true' || "
+                "github.ref != 'refs/heads/dev') &&") in " ".join(condition.split())
+    kick = {"github.event.inputs.queue_kick": "true", "github.ref": "refs/heads/dev"}
+    other_ref = {"github.event.inputs.queue_kick": "true", "github.ref": "refs/heads/feat/x"}
+    unflagged = {"github.event.inputs.queue_kick": "", "github.ref": "refs/heads/dev"}
+    base = {"github.event_name": "workflow_dispatch", "needs.await_license.result": "skipped",
+            "needs.await_license.outputs.license_passed": "", "needs.admission.result": "skipped",
+            "needs.admission.outputs.should_run": ""}
+    assert not _evaluate(jobs["changes"]["if"], {**base, **kick})
+    assert _evaluate(jobs["changes"]["if"], {**base, **other_ref})
+    assert _evaluate(jobs["changes"]["if"], {**base, **unflagged})
+
+
+def test_a_kick_never_cancels_a_running_kick():
+    concurrency = _wf("security-required.yml")["concurrency"]
+    assert concurrency["cancel-in-progress"] == "${{ github.event.inputs.queue_kick != 'true' }}"
 
 
 @pytest.mark.parametrize("name", GATES)

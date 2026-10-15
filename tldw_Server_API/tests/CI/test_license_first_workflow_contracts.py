@@ -76,12 +76,12 @@ QUEUE_TICK_GATES = {
 }
 DIRECT_TRIGGER_DIGESTS = {
     "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
-    "backend-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
+    "backend-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
     "ci.yml": "a2ef246f468b2b946f6fa5f9805497d9c8a1c4ca7f3ef395172a290a17a3b3a6",
     "codeql.yml": "8592a8565d97d233d6b27fb13d9a563f673550f3d8220d0b262487346a70e25f",
     "container-build-check.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
-    "coverage-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
-    "e2e-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
+    "coverage-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
+    "e2e-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
     "e2e-smoke.yml": "47fa5c3b099aeee7d744da19e5c8db6f403d82963b9d19b9f60292f0377d7180",
     "frontend-e2e-tiers.yml": "c157a675e397e879a8b394b26a99e472dfbe87f5f3f6236c63907d6d21897a79",
     "frontend-required.yml": "3b0371351439f7a458a405b3238da9cc540d34fdb377423c1a39f3978e601978",
@@ -93,7 +93,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
     "pypi-package.yml": "1faf356cfe858d94100ea61d578f0b9d132c73533277c552fd03f1e3ac141823",
     "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
-    "security-required.yml": "fb341ef464350d2452158092d89e13407ab5f67eee9425df77d3dc7a9b5ce648",
+    "security-required.yml": "17a6ff1c75afa8c8826e8378c3f73c1099375730bdd06067a2921ecaf38f58ab",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
     "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
     "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
@@ -143,7 +143,7 @@ ORIGINAL_JOB_NAMES = {
     "pre-commit.yml": ("run-pre-commit",),
     "pypi-package.yml": ("build-and-check",),
     "sbom.yml": ("build-sbom",),
-    "security-required.yml": ("changes", "security-required", "queue-tick"),
+    "security-required.yml": ("changes", "security-required", "queue-tick", "queue-kick"),
     "ui-characters-harness-tests.yml": ("characters-harness",),
     "ui-dictionaries-tests.yml": ("dictionaries-vitest",),
     "ui-playground-quality-gates.yml": ("playground-quality",),
@@ -341,16 +341,48 @@ def _assert_exact_queue_tick(name: str, data: dict[str, Any]) -> None:
         always() && !cancelled() &&
         needs.{gate}.result == 'failure' &&
         (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
-        (github.event_name == 'workflow_dispatch' ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository))
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
         """
     ), name
     assert job == {
         "name": "Merge queue tick",
         "needs": [gate],
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 10,
+        "timeout-minutes": 5,
+        "permissions": {"actions": "write"},
+        "steps": [
+            {
+                "name": "Wake the merge queue",
+                "env": {
+                    "GH_TOKEN": "${{ github.token }}",
+                    "REPOSITORY": "${{ github.repository }}",
+                    "RUN_ID": "${{ github.run_id }}",
+                },
+                "run": (
+                    'gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" '
+                    '-f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"'
+                ),
+            },
+        ],
+    }, name
+    # Nothing may wait on it: it can then never delay a required check or turn it red.
+    for other_name, other in data["jobs"].items():
+        assert "queue-tick" not in _needs(other), (name, other_name)
+
+
+def _assert_exact_queue_kick(name: str, data: dict[str, Any]) -> None:
+    """Pin the whole queue-kick job: valid only in security-required.yml, and only in this shape."""
+    assert name == "security-required.yml", name
+    job = dict(data["jobs"]["queue-kick"])
+    assert _normalized(job.pop("if")) == _normalized(
+        "github.event_name == 'workflow_dispatch' && github.event.inputs.queue_kick == 'true' && "
+        "github.ref == 'refs/heads/dev' && (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on')"
+    ), name
+    assert job == {
+        "name": "Merge queue kick",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 15,
         "permissions": {
             "contents": "write",
             "pull-requests": "write",
@@ -359,21 +391,20 @@ def _assert_exact_queue_tick(name: str, data: dict[str, Any]) -> None:
             "statuses": "read",
         },
         "steps": [
-            {
-                "name": "Checkout dev",
-                "uses": CHECKOUT_ACTION,
-                "with": {"ref": "dev", "persist-credentials": False},
-            },
+            {"name": "Checkout dev", "uses": CHECKOUT_ACTION, "with": {"ref": "dev", "persist-credentials": False}},
             {
                 "name": "Advance the queue",
-                "env": {"GH_TOKEN": "${{ github.token }}", "MERGE_QUEUE": "${{ vars.MERGE_QUEUE }}"},
+                "env": {
+                    "GH_TOKEN": "${{ github.token }}",
+                    "MERGE_QUEUE": "${{ vars.MERGE_QUEUE }}",
+                    "WAIT_RUN": "${{ github.event.inputs.wait_run }}",
+                },
                 "run": "python3 -m Helper_Scripts.ci.merge_queue",
             },
         ],
     }, name
-    # Nothing may wait on it: it can then never delay a required check or turn it red.
     for other_name, other in data["jobs"].items():
-        assert "queue-tick" not in _needs(other), (name, other_name)
+        assert "queue-kick" not in _needs(other), (name, other_name)
 
 
 def _assert_fails_when_change_detection_did_not_succeed(name: str, job: dict[str, Any]) -> None:
@@ -619,6 +650,9 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 # the pull-request checkouts: pinned whole instead.
                 _assert_exact_queue_tick(name, data)
                 continue
+            if job_name == "queue-kick":
+                _assert_exact_queue_kick(name, data)
+                continue
 
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
@@ -674,6 +708,15 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.await_license.outputs.license_passed != 'true'"
                     )
                     assert re.search(r"(?m)^\s*exit 1\s*$", refusal["run"])
+                if name == "security-required.yml" and job_name in ("changes", "security-required"):
+                    # A queue kick runs no gate job (spec 4.6 of the 2026-10-11 merge-queue redesign);
+                    # every other event takes the condition unchanged.
+                    expected_condition = expected_condition.replace(
+                        "always() && !cancelled() &&",
+                        "always() && !cancelled() && "
+                        "(github.event.inputs.queue_kick != 'true' || github.ref != 'refs/heads/dev') &&",
+                        1,
+                    )
                 assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)
@@ -759,6 +802,9 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
                     "${{ github.event_name == 'pull_request' || "
                     "github.event_name == 'workflow_run' }}"
                 )
+            if name == "security-required.yml":
+                # A kick must never cancel a running kick (spec 4.6 of the 2026-10-11 redesign).
+                expected_cancel = "${{ github.event.inputs.queue_kick != 'true' }}"
             assert data["concurrency"]["cancel-in-progress"] == expected_cancel, name
 
         assert "github.head_ref" not in text
@@ -956,6 +1002,9 @@ def test_admitted_jobs_have_no_secrets_or_write_scoped_credentials() -> None:
             if job_name == "queue-tick":
                 # The single exemption, valid only in the exact pinned shape.
                 _assert_exact_queue_tick(name, data)
+                continue
+            if job_name == "queue-kick":
+                _assert_exact_queue_kick(name, data)
                 continue
             permissions = job.get("permissions", {})
             assert "write" not in permissions.values(), (name, job_name, permissions)

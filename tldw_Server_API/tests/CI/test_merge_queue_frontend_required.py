@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from Helper_Scripts.ci import merge_queue as mq
 
 pytestmark = pytest.mark.unit
 
@@ -60,27 +59,19 @@ def _run_step(step: dict, **env: str) -> subprocess.CompletedProcess[str]:
 # --- 4.8: the manual-dispatch name guard ----------------------------------------------------
 
 
-def test_name_guard_exempts_only_the_queue_actor():
-    """A dispatch publishes the protected name only when the queue's own token made it.
-
-    Three rows: pull_request and workflow_run publish `frontend-required`; a dispatch by
-    `github-actions[bot]` (GITHUB_TOKEN, how the queue starts the gate) publishes it too; every
-    other dispatch publishes `frontend-required-diagnostic`. The rows are evaluated in
-    test_admin_ui_vitest_ratchet_workflow.py; this pins the expression to the queue's actor.
-    """
-    assert mq.QUEUE_ACTOR == "github-actions[bot]"
-    assert _jobs()[GATE]["name"] == (
-        "${{ github.event_name == 'workflow_dispatch' && "
-        f"github.actor != '{mq.QUEUE_ACTOR}' && "
-        "'frontend-required-diagnostic' || 'frontend-required' }}"
+def test_every_dispatch_publishes_the_diagnostic_name():
+    """D2: no dispatch publishes the protected name, whoever started it; a pull_request run does."""
+    name = _jobs()[GATE]["name"]
+    assert _normalized(name) == _normalized(
+        "${{ github.event_name == 'workflow_dispatch' && 'frontend-required-diagnostic' || 'frontend-required' }}"
     )
+    assert "github.actor" not in WORKFLOW.read_text(encoding="utf-8")
 
 
 def test_nothing_else_in_the_workflow_depends_on_who_dispatched_it():
-    """Apart from the job name, a queue dispatch takes the same path as any other dispatch,
-    which for the same head and `base_sha` tests what the pull_request run tests."""
+    """Nothing in the workflow depends on who dispatched it: every dispatch publishes the diagnostic name."""
     rendered = json.dumps(_wf())  # parsed values only: comments are not behaviour
-    assert rendered.count("github.actor") == 1
+    assert rendered.count("github.actor") == 0
     assert rendered.count("frontend-required-diagnostic") == 1
     assert "triggering_actor" not in rendered
 
@@ -171,57 +162,8 @@ def test_gate_ends_red_when_failed_change_detection_skipped_the_unit_shards():
 # --- 4.6: the failure-only queue-tick ---------------------------------------------------------
 
 
-def test_queue_tick_runs_only_after_a_failed_gate_with_the_queue_enabled():
-    """With MERGE_QUEUE unset every conjunct after it is moot: the job is skipped on every run."""
-    tick = _jobs()[TICK]
-    assert tick["needs"] == [GATE]
-    assert _normalized(tick["if"]) == _normalized(
-        """
-        always() && !cancelled() &&
-        needs.frontend-required.result == 'failure' &&
-        (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
-        (github.event_name == 'workflow_dispatch' ||
-         (github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository))
-        """
-    )
-
-
-def test_queue_tick_is_the_queue_job_with_a_shorter_budget():
-    """Same permissions and steps as merge-queue.yml's `queue` job: dev's script, never the PR's."""
-    tick = _jobs()[TICK]
-    queue = yaml.safe_load((WORKFLOWS / "merge-queue.yml").read_text(encoding="utf-8"))["jobs"]["queue"]
-    assert set(tick) == {"name", "needs", "if", "runs-on", "timeout-minutes", "permissions", "steps"}
-    assert tick["name"] == "Merge queue tick"
-    assert tick["runs-on"] == "ubuntu-latest"
-    assert tick["timeout-minutes"] == 10
-    assert tick["permissions"] == queue["permissions"] == {
-        "contents": "write", "pull-requests": "write", "actions": "write",
-        "checks": "read", "statuses": "read",
-    }
-    assert tick["steps"] == queue["steps"]
-    checkout, advance = tick["steps"]
-    assert checkout["uses"] == CHECKOUT_ACTION
-    assert checkout["with"] == {"ref": "dev", "persist-credentials": False}
-    assert advance["run"] == "python3 -m Helper_Scripts.ci.merge_queue"
-    assert advance["env"] == {"GH_TOKEN": "${{ github.token }}", "MERGE_QUEUE": "${{ vars.MERGE_QUEUE }}"}
-
-
-def test_queue_tick_checkout_is_pinned_like_every_other_checkout_in_the_workflow():
-    pins = {
-        step["uses"]
-        for job in _jobs().values()
-        for step in job.get("steps", [])
-        if str(step.get("uses", "")).startswith("actions/checkout@")
-    }
-    assert pins == {CHECKOUT_ACTION}
-
-
-def test_queue_tick_is_outside_every_needs_and_holds_the_only_write_scopes():
-    """Outside every `needs` the tick can never delay the required check or turn it red."""
-    wf = _wf()
-    assert wf["permissions"] == {"contents": "read"}
-    for name, job in wf["jobs"].items():
-        assert TICK not in _needs(job), name
-        if name != TICK:
-            assert "write" not in job.get("permissions", {}).values(), name
+def test_queue_tick_holds_only_actions_write_checks_nothing_out_and_nothing_waits_on_it():
+    jobs = _jobs()
+    assert jobs[TICK]["permissions"] == {"actions": "write"}
+    assert not any("uses" in step for step in jobs[TICK]["steps"])
+    assert all(TICK not in _needs(job) for job in jobs.values())
