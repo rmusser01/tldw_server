@@ -916,11 +916,17 @@ const assertCoreComposerControls = async (
     await expect(response).toBeVisible();
     await expect(character.getByTestId('character-select')).toBeVisible();
     await expect(response.getByTestId('chat-prompt-select')).toBeVisible();
-    await expect(research.getByTestId('tools-button')).toBeVisible();
     await expect(research.getByTestId('mcp-tools-toggle')).toBeVisible();
+    const advancedSummary = customize.locator('summary').filter({ hasText: 'Advanced customization' });
+    const advancedDetails = advancedSummary.locator('..');
+    if (!(await advancedDetails.evaluate(node => (node as HTMLDetailsElement).open)))
+      await advancedSummary.click();
+    await expect(advancedDetails).toHaveAttribute('open', '');
+    const advanced = customize.getByRole('group', { name: 'Advanced composer controls', exact: true });
+    await expect(advanced.getByTestId('tools-button')).toBeVisible();
     if (options.mobile)
       await expect(
-        research.getByRole('button', { name: /Health & diagnostics|Server:/i })
+        advanced.getByRole('button', { name: /Health & diagnostics|Server:/i })
       ).toBeVisible();
     return;
   }
@@ -3446,6 +3452,9 @@ for (const format of ['v2', 'png'] as const) test('imports a real '+format+' car
     await page.getByTestId('composer-role-play-setup').click();
     const scene = page.getByRole('dialog', { name: 'Role-play setup', exact: true });
     await expect(scene).toBeVisible();
+    const sceneDetails = scene.locator('summary').filter({ hasText: 'Scene details' });
+    if (!(await sceneDetails.locator('..').evaluate(node => (node as HTMLDetailsElement).open)))
+      await sceneDetails.click();
     const notes = 'Reviewed imported Scene '+format;
     const notesInput = scene.getByRole('textbox', { name: 'Scene notes', exact: true });
     await expect(notesInput).toBeEditable();
