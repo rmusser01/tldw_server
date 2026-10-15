@@ -33,6 +33,15 @@ IDENTITY = ("assistant_kind", "assistant_id", "character_id", "persona_memory_mo
 PLAIN = (None, None, None, None, None)
 
 
+@pytest.fixture(autouse=True)
+def historical_migration_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise this repair alone, including its synthetic version rewind."""
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= PREVIOUS_SQLITE_VERSION + 1
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= PREVIOUS_POSTGRES_VERSION + 1
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", PREVIOUS_SQLITE_VERSION + 1)
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", PREVIOUS_POSTGRES_VERSION + 1)
+
+
 def _previous_version(monkeypatch: pytest.MonkeyPatch, open_db: Callable[[], CharactersRAGDB]) -> CharactersRAGDB:
     """Open storage the way the release before this migration left it."""
     with monkeypatch.context() as old_code:
