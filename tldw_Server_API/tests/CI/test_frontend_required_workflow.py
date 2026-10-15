@@ -9,7 +9,8 @@ def test_frontend_required_enforces_strict_shared_security_boundaries() -> None:
     """The incremental strict project must execute as a failing merge gate."""
     data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
     step = next(
-        step for step in data["jobs"]["frontend-required"]["steps"]
+        step
+        for step in data["jobs"]["frontend-required"]["steps"]
         if step.get("name") == "Run strict shared-boundary typecheck"
     )
     assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
@@ -122,10 +123,11 @@ def test_frontend_coverage_report_cannot_starve_required_gates() -> None:
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-required"]["steps"]
 
-    coverage_step = next(step for step in steps if step.get("name") == "Frontend coverage summary (report-only)")
+    coverage_step = next(step for step in steps if step.get("name") == "Run all WebUI-owned tests with coverage")
 
-    assert coverage_step["continue-on-error"] is True
+    assert not coverage_step.get("continue-on-error", False)
     assert coverage_step["timeout-minutes"] == 17
+    assert "--maxWorkers=2" in coverage_step["run"]
     assert "timeout --kill-after=30s 15m bun run test:coverage" in coverage_step["run"]
 
 
@@ -141,7 +143,7 @@ def test_frontend_coverage_reports_both_package_owned_suites() -> None:
     assert set(reports) == {"apps/tldw-frontend", "apps/packages/ui"}
     for step in reports.values():
         assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
-        assert step["continue-on-error"] is True
+        assert bool(step.get("continue-on-error", False)) == (step["working-directory"] == "apps/packages/ui")
         assert step["timeout-minutes"] == 17
         assert "timeout --kill-after=30s 15m bun run test:coverage" in step["run"]
     assert "--exclude" not in reports["apps/packages/ui"]["run"]

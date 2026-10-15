@@ -707,16 +707,15 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bunx tsc --project tsconfig.strict.json
 
-      - name: Frontend coverage summary (report-only)
+      - name: Run all WebUI-owned tests with coverage
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
-        continue-on-error: true
         timeout-minutes: 17
         working-directory: apps/tldw-frontend
         run: |
-          echo "NOTE: report-only; thresholds land after a baseline is observed in CI (audit F4)."
+          echo "WebUI test failures block this gate; coverage percentages remain advisory (audit F4)."
           # Coreutils timeout owns the process group; GitHub's step timeout can leave Vitest workers alive.
           # Shared UI tests run under their package-owned config in the required unit shards.
-          timeout --kill-after=30s 15m bun run test:coverage --exclude '../packages/ui/**'
+          timeout --kill-after=30s 15m bun run test:coverage --maxWorkers=2 --exclude '../packages/ui/**'
 
       - name: Shared UI coverage summary (report-only)
         if: needs.changes.outputs.tldw_frontend_changed == 'true'

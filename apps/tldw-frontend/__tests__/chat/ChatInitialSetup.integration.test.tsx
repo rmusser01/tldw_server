@@ -1,6 +1,6 @@
 // WebUI cookie/session authority and storage readback require the WebUI runtime aliases.
 import React from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { App, ConfigProvider } from "antd"
 import { createMemoryRouter, RouterProvider } from "react-router-dom"
 import { Storage } from "@plasmohq/storage"
@@ -99,10 +99,10 @@ it.each([
   act(() => editor.form.setValues(values))
   const source = useStoreMessageOption.getState().chatDraftAddress
   fireEvent.click(screen.getByRole("button", { name: "Set up server" }))
-  fireEvent.change(await screen.findByRole("textbox", { name: "Server URL" }), { target: { value: "https://initial-api.example.test" } })
+  fireEvent.change(await serverUrlInput(), { target: { value: "https://initial-api.example.test" } })
   fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "synthetic-initial-key" } })
   expect(set.mock.calls.some(([key]) => key.startsWith("registry:draft:") && key.includes("unresolved"))).toBe(false)
-  fireEvent.click(screen.getByRole("button", { name: "common:save", exact: true }))
+  save()
   await waitFor(() => expect(screen.getByTestId("saving")).toHaveTextContent("false"))
   await waitFor(() => expect(editor.form.values).toEqual(values))
   expect(restoreMetadata.mock.calls.at(-1)).toEqual([values.message, { wasExpanded: true }])
@@ -118,11 +118,19 @@ async function openSetup(message = "FIRST IDEA\nSECOND LINE") {
   await act(async () => { await vi.dynamicImportSettled() })
   act(() => editor.form.setFieldValue("message", message))
   fireEvent.click(screen.getByRole("button", { name: "Set up server" }))
-  fireEvent.change(await screen.findByRole("textbox", { name: "Server URL" }), { target: { value: "https://initial-api.example.test" } })
+  fireEvent.change(await serverUrlInput(), { target: { value: "https://initial-api.example.test" } })
   fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "synthetic-initial-key" } })
   return view
 }
-const save = () => fireEvent.click(screen.getByRole("button", { name: "common:save", exact: true }))
+const serverUrlInput = async () => {
+  const input = await screen.findByLabelText("Server URL", { exact: true })
+  return within(input.closest(".ant-form-item")!).getByRole("textbox", { name: "Server URL", exact: true })
+}
+const save = () => {
+  const label = screen.getByText("common:save", { exact: true })
+  const button = label.closest("button")!
+  fireEvent.click(within(button.parentElement!).getByRole("button", { name: "common:save", exact: true }))
+}
 const finishedSave = () => waitFor(() => expect(screen.getByTestId("saving")).toHaveTextContent("false"))
 const deferred = () => {
   let resolve!: () => void
