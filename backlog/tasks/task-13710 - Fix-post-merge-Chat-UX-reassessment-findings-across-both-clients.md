@@ -1,7 +1,7 @@
 ---
 id: TASK-13710
 title: Fix post-merge Chat UX reassessment findings across both clients
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -32,6 +32,7 @@ Requester supplied the human-written Change summary for PR3248 in this chat on20
 CI frontend shard4 exposed stale fixtures: WebLayout tour tests mock useConnectionState without useIsConnected; shared Layout tour cases omit a connected setup state; research-status integration globally mocks react-query but omits useQueryClient, also failing on base. CI ratchet rejects the mixed changed-identity replay; do not alter its pins or policy. Plan: reproduce package-owned failures, set connected tour prerequisites, complete query mock using existing adjacent real-QueryClient partial-mock pattern, preserve assertions, and rerun affected package suites plus independent scoped review before repush.
 CI fixture follow-up: full WebLayout47 tests pass; native shared Layout/research43 tests pass after reproduced22 failures. Four corrected 320/390px cockpit smoke cases pass against unchanged fresh production app, preserving geometry/overflow/focus assertions. Independent CI diagnosis found shard1 has2 missed Buddy disclosure expectations (338 other cases pass); update that integration contract to verify primary Role-play visibility and hidden-then-visible Buddy through Advanced. CI ratchet/workflow pins and assertions remain intact; no production edits are needed.
 Final CI fixture repairs independently reviewed with no actionable findings and no weakened assertions. Fresh frozen-dependency deterministic CI-config run: native UI257 tests plus WebUI47 tests pass,304 total; fixture hashes unchanged during the run. Both Buddy cases reproduced red and pass green with primary Role-play visibility plus hidden-before/visible-after Advanced assertions. All4 corrected responsive cockpit smoke cases pass. Combined final PR lint36 TS/TSX files:0 errors,198 warnings identical to base after line-shift normalization. Production4318-file hash proof and1130 emitted references still match. Human Change summary is verified verbatim in PR3248. Local implementation/qualification is complete; fresh exact-head GitHub checks remain the enforced integration gate before the authorized merge.
+Implementation and local qualification are complete, following existing repository tasks that close verified repair units while whole-PR CI/merge remains enforced separately. All acceptance and local definition-of-done items are checked. Independent scoped CI-repair review is clear and all304 deterministic CI-config cases pass. The owned implementation plan is retired with its history preserved; integration continues in this chat on PR3248, which must pass all seven statuses on its final head before merge. No claim that final remote CI or merge has completed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
