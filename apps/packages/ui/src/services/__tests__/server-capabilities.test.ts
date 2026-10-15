@@ -1105,9 +1105,18 @@ describe("server capabilities docs-info merge", () => {
   })
 
   it("keeps strict client path metadata aligned with Chatterbox voice conversion", () => {
-    const source = readFileSync(resolve(process.cwd(), openApiGuardSourcePath), "utf8")
+    // Since ADR-065 / TASK-13526 Stage 1, ClientPath is DERIVED from the
+    // committed @tldw/api-types path union instead of a hand-maintained
+    // literal list, so the alignment check asserts against the generated
+    // union (and the derivation wiring) rather than openapi-guard source.
+    const guardSource = readFileSync(resolve(process.cwd(), openApiGuardSourcePath), "utf8")
+    expect(guardSource).toMatch(/export\s+type\s+ClientPath\s*=\s*ApiPath\b/)
 
-    expect(source).toContain('| "/api/v1/audio/voice-conversion"')
-    expect(source).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
+    const pathsSource = readFileSync(
+      resolve(process.cwd(), "../api-types/paths.d.ts"),
+      "utf8"
+    )
+    expect(pathsSource).toContain('"/api/v1/audio/voice-conversion"')
+    expect(pathsSource).toContain('"/api/v1/audio/tts/providers/{provider}/unload"')
   })
 })
