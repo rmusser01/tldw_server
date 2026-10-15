@@ -344,7 +344,7 @@ export const resolveTldwRequestPlan = async (
         cookieSession: boolean;
         url: string;
         headers: Record<string, string>;
-        isBinaryBody: (value: any) => boolean;
+        isBinaryBody: (value: unknown) => boolean;
         pageOrigin: string | null;
         shouldSkipAuth: boolean;
       };
@@ -531,7 +531,6 @@ const performTldwRequest = async (
     cfg,
     fetchFn,
     normalizedPath,
-    isAbsolute,
     sameOriginAbsoluteUrl,
     hostedMode,
     cookieSession,

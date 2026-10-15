@@ -886,6 +886,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chacha-content-persona",
             "db-management-a-c",
             "db-management-d-l",
+            "db-management-m-r",
+            "db-management-s-z",
             "db-privileges",
         }
         assert auth_db_shards.issubset(shard_names)
@@ -1867,13 +1869,15 @@ def test_db_management_partitions_cover_each_file_once() -> None:
     """Bound the slow database shard without dropping or duplicating any test file."""
     workflow = _load(".github/workflows/ci.yml")
     root = Path("tldw_Server_API/tests/DB_Management")
-    files = {path.as_posix() for path in root.glob("test_[a-l]*.py")}
+    files = {path.as_posix() for path in root.glob("test_[a-z]*.py")}
     patterns = {
         "db-management-a-c": (
             "test_[a-b]*.py", "test_character_*.py", "test_chat_*.py",
             "test_claims_*.py", "test_con*.py", "test_core_*.py",
         ),
         "db-management-d-l": ("test_[d-l]*.py",),
+        "db-management-m-r": ("test_[m-r]*.py",),
+        "db-management-s-z": ("test_[s-z]*.py",),
     }
     jobs = (
         "full-suite-linux-312-shards",
@@ -1900,6 +1904,9 @@ def test_db_management_partitions_cover_each_file_once() -> None:
                 filename for filename in files
                 if any(fnmatch.fnmatch(filename, pattern) for pattern in expected)
             )
+        assert not any(
+            "DB_Management/test_" in path for path in shards["db-privileges"]
+        )
         assert len(covered) == len(set(covered))
         assert set(covered) == files
 
