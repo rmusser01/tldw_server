@@ -3,6 +3,7 @@
 import ast
 import fnmatch
 import json
+import math
 import re
 from pathlib import Path
 
@@ -551,7 +552,7 @@ def test_embedding_model_cache_restore_is_non_blocking() -> None:
         if step.get("name") == "Cache embedding models"
     ]
 
-    assert len(cache_steps) == 5
+    assert len(cache_steps) == 6
     for step in cache_steps:
         assert step.get("uses") == "actions/cache@v5"
         assert step.get("continue-on-error") is True
@@ -568,7 +569,7 @@ def test_embedding_model_setup_skips_non_embedding_chunking_shard() -> None:
         if step.get("name") in {"Cache embedding models", "Pre-download embedding models"}
     ]
 
-    assert len(embedding_setup_steps) == 10
+    assert len(embedding_setup_steps) == 12
     for step in embedding_setup_steps:
         condition = str(step.get("if"))
         assert "ai-chunking-code-json-xml" not in condition
@@ -584,7 +585,7 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
         if step.get("name") == "Pre-download embedding models"
     ]
 
-    assert len(predownload_steps) == 5
+    assert len(predownload_steps) == 6
     for step in predownload_steps:
         condition = str(step.get("if"))
         run_script = str(step.get("run") or "")
@@ -681,6 +682,7 @@ def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() 
         "full-suite-macos-312-shards",
         "full-suite-windows-312-shards",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
     ]
     expected_condition = (
         "${{ startsWith(matrix.shard.name, 'media-') || "
@@ -718,7 +720,7 @@ def test_full_suite_test_result_uploads_are_non_blocking() -> None:
         if str(step.get("name", "")).startswith("Upload test results")
     ]
 
-    assert len(upload_steps) == 5
+    assert len(upload_steps) == 6
     for step in upload_steps:
         assert step.get("if") == "always()"
         assert step.get("continue-on-error") is True
@@ -776,6 +778,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         "full-suite-macos-312-shards",
         "full-suite-windows-312-shards",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
     ]
 
     for job_name in matrix_jobs:
@@ -1885,6 +1888,7 @@ def test_db_management_partitions_cover_each_file_once() -> None:
         "full-suite-macos-312-shards",
         "full-suite-windows-312-shards",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
     )
     for job in jobs:
         shards = {
@@ -1928,6 +1932,7 @@ def test_auth_core_unit_partitions_cover_each_file_once() -> None:
         "full-suite-macos-312-shards",
         "full-suite-windows-312-shards",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
     )
     for job in jobs:
         shards = {
@@ -1956,7 +1961,7 @@ def test_legacy_free_media_checks_run_on_dedicated_shard() -> None:
         if step.get("name") == "Run legacy-free media checks"
     ]
 
-    assert len(legacy_free_steps) == 5
+    assert len(legacy_free_steps) == 6
     for step in legacy_free_steps:
         assert step.get("if") == "matrix.shard.name == 'media-legacy-free'"
         assert 'mkdir -p "$RESULTS_DIR"' in step["run"]
@@ -1976,7 +1981,7 @@ def test_regular_full_suite_steps_skip_dedicated_media_legacy_free_shard() -> No
         }
     ]
 
-    assert len(regular_shard_steps) == 5
+    assert len(regular_shard_steps) == 6
     for step in regular_shard_steps:
         assert step.get("if") == "matrix.shard.name != 'media-legacy-free'"
 
@@ -1995,6 +2000,7 @@ def test_full_suite_shards_fail_a_hung_test_instead_of_the_shard() -> None:
         "full-suite-linux-313-shards",
         "full-suite-macos-312-shards",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
     ):
         scripts = [step.get("run", "") for step in jobs[job_name]["steps"] if "$TEST_PATHS" in step.get("run", "")]
         assert scripts, job_name
@@ -2083,6 +2089,7 @@ def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
             "full-suite-linux-312-shards",
             "full-suite-linux-313-shards", "full-suite-macos-312-shards",
             "full-suite-windows-312-shards", "full-suite-os-313-release-shards",
+            "full-suite-windows-313-release-shards",
             "character-chat-rate-limits",
         ),
         ".github/workflows/jobs-suite.yml": ("jobs-postgres",),
@@ -2307,3 +2314,44 @@ def test_ux_regression_job_is_scoped_and_keeps_evidence_within_its_deadline() ->
     assert upload["if"].startswith("failure()")
     assert steps.index(run) < steps.index(upload)
     assert upload["with"]["path"].rstrip("/") == "apps/tldw-frontend/test-results"
+
+
+def test_full_suite_matrices_stay_within_github_job_limit() -> None:
+    """Every platform's complete shard matrix must be executable by GitHub."""
+    workflow = _load(".github/workflows/ci.yml")
+    for name, job in workflow["jobs"].items():
+        matrix = job.get("strategy", {}).get("matrix", {})
+        if "shard" not in matrix:
+            continue
+        size = math.prod(
+            len(axis)
+            for key, axis in matrix.items()
+            if key not in {"include", "exclude"}
+        )
+        assert size <= 256, (name, size)
+
+
+def test_release_python313_platforms_keep_the_same_complete_suite() -> None:
+    """Splitting the OS axis preserves both release platforms and their gates."""
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    release = [job for name, job in jobs.items() if name.endswith("313-release-shards")]
+    assert len(release) == 2
+    reference = release[0]
+    platforms = []
+    for job in release:
+        matrix = job["strategy"]["matrix"]
+        assert len(matrix["os"]) == 1
+        platforms.extend(matrix["os"])
+        assert matrix["shard"] == reference["strategy"]["matrix"]["shard"]
+        for key in (
+            "name",
+            "runs-on",
+            "timeout-minutes",
+            "needs",
+            "if",
+            "env",
+            "steps",
+        ):
+            assert job[key] == reference[key], key
+    assert sorted(platforms) == ["macos-latest", "windows-latest"]
+    assert sum(job["strategy"]["max-parallel"] for job in release) == 20

@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import yaml
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/license-first-admission.yml"
@@ -126,6 +126,7 @@ ORIGINAL_JOB_NAMES = {
         "full-suite-windows-312-shards",
         "full-suite-windows-312-summary",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
         "character-chat-rate-limits",
     ),
     "codeql.yml": ("analyze",),
@@ -169,6 +170,7 @@ ORIGINAL_DEPENDENCIES = {
     ("ci.yml", "full-suite-windows-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-windows-312-summary"): ("full-suite-windows-312-shards", "changes"),
     ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
+    ("ci.yml", "full-suite-windows-313-release-shards"): ("lint", "syntax-check"),
     ("ci.yml", "character-chat-rate-limits"): (
         "full-suite-linux-312-summary",
         "changes",
@@ -730,7 +732,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 )
                 if name == "ci.yml" and (
                     job_name in NON_PR_FULL_SUITE_JOBS
-                    or job_name == "full-suite-os-313-release-shards"
+                    or job_name in {
+                        "full-suite-os-313-release-shards",
+                        "full-suite-windows-313-release-shards",
+                    }
                 ):
                     assert _normalized(job.get("if")) == _normalized(
                         f"{dependencies_succeeded} && {non_pr}"
@@ -773,7 +778,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 55
+    assert checkout_count == 56
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -1102,10 +1107,10 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 24
+    assert setup_helper_count == 25
     assert setup_python_cache_count == 1
-    assert cache_save_count == 6
-    assert cache_restore_count == 6
+    assert cache_save_count == 7
+    assert cache_restore_count == 7
 
 
 def test_reusable_workflow_has_exact_interface_and_read_permissions() -> None:

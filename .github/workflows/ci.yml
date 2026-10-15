@@ -6600,17 +6600,17 @@ jobs:
     name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
-    needs: [lint, syntax-check]
-    if: >-
+    needs: &release_os_needs [lint, syntax-check]
+    if: &release_os_condition >-
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 10
       matrix:
-        os: [windows-latest, macos-latest]
-        shard:
+        os: [macos-latest]
+        shard: &release_os_shards
           - name: core-server-smoke
             paths: >-
               tldw_Server_API/tests/test_*.py
@@ -7810,7 +7810,7 @@ jobs:
               tldw_Server_API/tests/WebScraping
               tldw_Server_API/tests/Web_Scraping
               tldw_Server_API/tests/integration
-    env:
+    env: &release_os_env
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: 'true'
@@ -7821,7 +7821,7 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-${{ matrix.os }}-3.13-${{ matrix.shard.name }}
-    steps:
+    steps: &release_os_steps
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -7965,6 +7965,21 @@ jobs:
         with:
           name: full-suite-${{ matrix.os }}-py3.13-${{ matrix.shard.name }}
           path: ${{ env.RESULTS_DIR }}
+
+  full-suite-windows-313-release-shards:
+    name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    needs: *release_os_needs
+    if: *release_os_condition
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        os: [windows-latest]
+        shard: *release_os_shards
+    env: *release_os_env
+    steps: *release_os_steps
 
   character-chat-rate-limits:
     name: Character Chat Rate-Limits (TEST_MODE=0)

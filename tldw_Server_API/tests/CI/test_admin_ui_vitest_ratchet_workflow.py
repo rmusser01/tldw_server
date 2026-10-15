@@ -469,6 +469,7 @@ def test_canonical_admin_webhooks_use_a_dedicated_full_suite_shard() -> None:
         "full-suite-macos-312-shards",
         "full-suite-windows-312-shards",
         "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
     )
 
     for job_name in matrix_jobs:
