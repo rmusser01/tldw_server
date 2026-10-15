@@ -166,7 +166,7 @@ def test_real_sqlite_schema_bootstrap_creates_core_objects(tmp_path) -> None:
 
     The dispatch tests above verify routing with the initializers stubbed;
     this one closes the gap flagged in
-    audits/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
+    Docs/Audit/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
     executed the actual schema DDL, so a broken bootstrap kept the suite
     green.
     """

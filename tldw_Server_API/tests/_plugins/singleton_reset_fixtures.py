@@ -1,6 +1,6 @@
 """Opt-in reset fixtures for process-global singletons that lack a per-test hook.
 
-The audit inventory (audits/2026-07-04-singleton-inventory.md) found the
+The audit inventory (Docs/Audit/2026-07-04-singleton-inventory.md) found the
 Embeddings drain singletons have only an ``atexit`` shutdown — no per-test
 reset — so a suite that drains them could hand drained state to the next
 (#2581). These fixtures let a suite guarantee a clean slate.

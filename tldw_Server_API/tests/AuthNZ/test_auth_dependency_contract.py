@@ -179,7 +179,7 @@ def _real_jwt_service() -> JWTService:
 
     Replaces the former _FakeJwtService whose decode asserted its own
     hardcoded token — real signature/expiry validation was never exercised
-    (audits/2026-07-04-test-suite-audit-round2.md, RA2).
+    (Docs/Audit/2026-07-04-test-suite-audit-round2.md, RA2).
     """
     from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
     from tldw_Server_API.app.core.AuthNZ.settings import Settings
