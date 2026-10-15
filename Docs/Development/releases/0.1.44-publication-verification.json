@@ -288,7 +288,7 @@
     "lint_comparison": "15files,zero errors,159warnings on head and dev,no new signatures",
     "syntax_diagnostic_errors": 0,
     "docs_task_format_rerun": 23,
-    "rebase_preservation": "Four commits replayed equivalently onto documentation-only PR3060; application code/tests byte-identical to verified source3576d55baa. Local627 frontend and312 backend/five capability skips evidence retained; documentation/task checks rerun for new baseline.",
+    "rebase_preservation": "Four commits replayed equivalently onto documentation-only PR3060; PR restoration code/tests byte-identical to verified source3576d55baa. Local627 frontend and312 backend/five capability skips evidence retained; documentation/task checks rerun for new baseline.",
     "rebase_followup_verification": "23 documentation/task-format tests pass exit0; full PR-diff hooks pass; fresh Bandit has two unchanged test assertions, zero errors/new signatures. Independent integration review confirms equivalent patches and preserved dev, no Critical/Important finding."
   },
   "current_dev_integration": {
@@ -297,11 +297,11 @@
     "backup_branch": "codex/pr3033-before-rebase-20261015",
     "preservation": "Retain current dev draft-source, actor-scene, reader-scope, account and guarded publication fences. Snapshot current loader inputs per invocation. Preserve temporary creation options through both compact and SDK Persona publication wrappers. Coordinator fixtures retain all newer dev cases with scoped conversation-specific captures.",
     "adr_assessment": "No new ADR required; ADR-049 ownership rules remain unchanged.",
-    "local_verification": "1120 frontend tests pass across 15 files (76 coordinator,26 Persona,212 focused,806 ownership/history);54 backend/release/task-format contracts pass; exit0,no skips. Existing 4096MB heap and15000ms test deadline. ESLint zero errors/145 warnings matching current dev;Ruff pass;Bandit two unchanged test B101 findings,zero production findings/errors. Final hooks pending.",
+    "local_verification": "1120 frontend tests pass across 15 files (76 coordinator,26 Persona,212 focused,806 ownership/history);54 backend/release/task-format contracts pass; exit0,no skips. Existing 4096MB heap and15000ms test deadline. ESLint zero errors/145 warnings matching current dev;Ruff pass;Bandit two unchanged test B101 findings,zero production findings/errors. Complete PR-diff pre-commit hooks pass.",
     "required_ci": "Fresh checks on the pushed head and current dev ancestry required before normal merge; earlier head CI is historical.",
     "release_authority": "Immutable published releases, tags, protected source authority and grants unchanged.",
     "review": "Independent review verifies preserved dev boundaries and repaired SDK temporary Persona options; no remaining actionable findings.",
-    "dev_followup": "PR3242 root cleanup advanced dev during verification; no overlap with PR restoration code/tests. Rebase onto its merge required before push."
+    "dev_followup": "PR3242 root cleanup advanced dev during verification; clean seven-commit follow-up rebase onto9076f6b7f6c8100e2bca9cb657b0a15be404cf4e preserves PR restoration code/tests byte-identically to the locally verified integration."
   },
   "october_1_rebase": {
     "base_dev": "d81c13fddd1dac1948b30401af0388932a0af8f2",
@@ -407,7 +407,7 @@
       "lint_comparison": "15files,zero errors,159warnings on head and dev,no new signatures",
       "syntax_diagnostic_errors": 0,
       "docs_task_format_rerun": 23,
-      "rebase_preservation": "Four commits replayed equivalently onto documentation-only PR3060; application code/tests byte-identical to verified source3576d55baa. Local627 frontend and312 backend/five capability skips evidence retained; documentation/task checks rerun for new baseline.",
+      "rebase_preservation": "Four commits replayed equivalently onto documentation-only PR3060; PR restoration code/tests byte-identical to verified source3576d55baa. Local627 frontend and312 backend/five capability skips evidence retained; documentation/task checks rerun for new baseline.",
       "rebase_followup_verification": "23 documentation/task-format tests pass exit0; full PR-diff hooks pass; fresh Bandit has two unchanged test assertions, zero errors/new signatures. Independent integration review confirms equivalent patches and preserved dev, no Critical/Important finding."
     }
   }
